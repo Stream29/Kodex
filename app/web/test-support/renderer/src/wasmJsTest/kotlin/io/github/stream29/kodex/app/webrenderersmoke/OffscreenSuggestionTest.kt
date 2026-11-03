@@ -1,6 +1,12 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -22,6 +28,104 @@ import kotlinx.io.files.Path
 import kotlin.test.*
 
 val offscreenSuggestionTest by testSuite {
+    test("rejection submit is compact and refuses a retained disabled action") { offscreenTest {
+        val enabled = mutableStateOf(true)
+        var calls = 0
+        val scene = OffscreenScene.create(width = 400, height = 160) {
+            rememberComposeSuggestionRenderer().Frame("compact-reject") { controls ->
+                controls.RejectSubmit(enabled.value) { calls++ }
+            }
+        }
+        fun reject(): SemanticsNode = scene.nodes().first { node ->
+            node.config.getOrNull(SemanticsProperties.Role) == Role.Button &&
+                node.suggestionInputNodes().any { child ->
+                    child.config.getOrNull(SemanticsProperties.Text)?.any { it.text == "Submit rejection" } == true
+                }
+        }
+        try {
+            scene.settle { scene.hasText("Submit rejection") }
+            assertTrue(reject().boundsInWindow.height in 32f..36f, "Reject submission should be compact.")
+            val retained = assertNotNull(reject().config.getOrNull(SemanticsActions.OnClick)?.action)
+            scene.click("Submit rejection")
+            assertEquals(1, calls)
+            enabled.value = false
+            scene.settle { SemanticsProperties.Disabled in reject().config }
+            retained()
+            assertEquals(1, calls)
+        } finally { scene.close() }
+    } }
+    test("working directory action is compact and rejects stale disabled callbacks") { offscreenTest {
+        val enabled = mutableStateOf(true)
+        val cwd = mutableStateOf(Path("/short"))
+        var calls = 0
+        val menu = RuntimeConfigurationMenu(
+            "model", listOf(RuntimeMenuEntry.Command("model", "Model", true) {}),
+            "mode", listOf(RuntimeMenuEntry.Command("mode", "Mode", true) {}),
+        )
+        val scene = OffscreenScene.create(width = 480) {
+            rememberComposeSuggestionRenderer().Frame("compact-directory") { controls ->
+                controls.Configuration(menu, cwd.value, enabled.value) { calls++ }
+            }
+        }
+        fun descendants(node: SemanticsNode): List<SemanticsNode> =
+            listOf(node) + node.children.flatMap(::descendants)
+        fun directory(): SemanticsNode = scene.nodes().first { node ->
+            node.config.getOrNull(SemanticsProperties.Role) == Role.Button &&
+                descendants(node).any { child ->
+                    child.config.getOrNull(SemanticsProperties.Text)?.any {
+                        it.text == "Working directory: ${cwd.value}"
+                    } == true
+                }
+        }
+        try {
+            scene.settle { scene.hasText("Working directory: /short") }
+            val button = directory()
+            assertTrue(button.boundsInWindow.width in 32f..<480f, "The directory action must not fill the entire row.")
+            assertTrue(button.boundsInWindow.height >= 32f)
+            val retained = assertNotNull(button.config.getOrNull(SemanticsActions.OnClick)?.action)
+            scene.click("Working directory: /short")
+            assertEquals(1, calls)
+            enabled.value = false
+            cwd.value = Path("/" + "other-long-directory-segment-".repeat(5))
+            scene.settle { scene.hasText("Working directory: ${cwd.value}") &&
+                SemanticsProperties.Disabled in directory().config }
+            assertTrue(directory().boundsInWindow.height >= 32f)
+            retained()
+            assertEquals(1, calls)
+        } finally { scene.close() }
+    } }
+    test("compact decisions retain button semantics and description while reducing height") { offscreenTest {
+        val enabled = mutableStateOf(true)
+        var calls = 0
+        val scene = OffscreenScene.create(width = 480) {
+            rememberComposeSuggestionRenderer().Frame("density") { controls ->
+                controls.Decision("Decision", "Complete description", true, enabled.value) { calls++ }
+                OutlinedButton({}, Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth()) { Text("Baseline"); Text("Complete description") }
+                }
+            }
+        }
+        fun decisionNodes(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::decisionNodes)
+        fun button(label: String): SemanticsNode = scene.nodes().first { node ->
+            node.config.getOrNull(SemanticsProperties.Role) == Role.Button &&
+                decisionNodes(node).any { it.config.getOrNull(SemanticsProperties.Text)?.any { t -> t.text == label } == true }
+        }
+        try {
+            scene.settle { scene.hasText("Decision") && scene.hasText("Baseline") }
+            assertFalse(scene.hasText("● Decision"))
+            val decision = button("Decision")
+            assertEquals(true, decision.config.getOrNull(SemanticsProperties.Selected))
+            assertTrue(decision.boundsInRoot.height < button("Baseline").boundsInRoot.height)
+            val retained = assertNotNull(decision.config.getOrNull(SemanticsActions.OnClick)?.action)
+            scene.click("Decision")
+            assertEquals(1, calls)
+            enabled.value = false
+            scene.settle { SemanticsProperties.Disabled in button("Decision").config }
+            retained()
+            assertEquals(1, calls)
+        } finally { scene.close() }
+    } }
+
     test("task order and three-level menu reuse preserve latest cwd and mode while a tier leaf edits one tuple") { suggestionScene { ports, vm, _ ->
         val browsed = mutableListOf<String>()
         val scene = OffscreenScene.create { SuggestionHost(vm, onBrowse = browsed::add) }
@@ -87,8 +191,8 @@ val offscreenSuggestionTest by testSuite {
     test("Reject only opens feedback and explicit rejection keeps raw nonblank text without creating Sessions") { suggestionScene { ports, vm, _ ->
         val scene = OffscreenScene.create { SuggestionHost(vm) }
         try {
-            scene.settle { scene.hasText("○ Reject") }
-            scene.click("○ Reject")
+            scene.settle { scene.hasText("Reject") }
+            scene.click("Reject")
             scene.settle { scene.hasDescription("Suggestion feedback (optional)") }
             assertTrue(vm.pendingSuggestion().rejecting)
             assertTrue(ports.completed.isEmpty())
@@ -161,13 +265,13 @@ val offscreenSuggestionTest by testSuite {
         val visible = mutableStateOf(true)
         val scene = OffscreenScene.create { if (visible.value) SuggestionHost(vm) else UiText("Unmounted") }
         try {
-            scene.settle { scene.hasText("○ Accept") }
+            scene.settle { scene.hasText("Accept") }
             val captured = vm.pendingSuggestion()
-            scene.click("○ Accept")
+            scene.click("Accept")
             scene.settle { ports.creations.size == 1 && vm.pendingSuggestion().submitting }
             assertFalse(vm.updateFeedback(captured.callId, "late"))
             assertFalse(vm.updateWorkingDirectory(captured.callId, Path("/late")))
-            scene.click("○ Accept")
+            scene.click("Accept")
             scene.settle { true }
             assertEquals(1, ports.creations.size)
             visible.value = false
@@ -190,14 +294,14 @@ val offscreenSuggestionTest by testSuite {
         ports.completionFailure = IllegalStateException("unknown receipt")
         val scene = OffscreenScene.create { SuggestionHost(vm) }
         try {
-            scene.settle { scene.hasText("○ Accept") }
-            scene.click("○ Accept")
+            scene.settle { scene.hasText("Accept") }
+            scene.click("Accept")
             scene.settle { ports.completed.size == 1 && !vm.pendingSuggestion().submitting }
             assertEquals(1, ports.creations.size)
             assertEquals(listOf("create", "complete"), ports.order)
             assertTrue(scene.hasText("First task"))
             ports.completionFailure = null
-            scene.click("○ Reject")
+            scene.click("Reject")
             scene.settle { scene.hasDescription("Suggestion feedback (optional)") }
             scene.showSuggestionText("Submit rejection")
             scene.click("Submit rejection")

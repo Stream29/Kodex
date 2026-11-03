@@ -46,7 +46,6 @@ private class MosaicSettingsRoot(
     override val fields = SettingsPageFields(preferences.renderer, title.renderer, defaults.renderer, session.renderer, authFields)
     override val hooks: HookDialogRenderer = MosaicHookDialogs(box)
     override val mcp: McpDialogRenderer = MosaicMcpDialogs(box)
-    override val frontendErrorHooksAvailable: Boolean = true
     override val frontendErrorHooksLabel: String = "TUI local errors"
 
     @Composable

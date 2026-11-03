@@ -17,13 +17,22 @@ public interface KodexAuthLoginAttempt {
      * Waits for authorization and credential commit, not merely browser launch.
      *
      * Completion does not select a different authentication source. The dependency
-     * owns listener/backend cleanup on success, failure and cancellation.
+     * owns local listener cleanup and pending release on success, failure and cancellation.
+     * Cancelling a local wait/releasing its view never cancels accepted backend exchange/commit.
      *
      * @throws CancellationException when the wait or this attempt is cancelled.
      * @throws Exception when authorization, callback delivery or credential commit fails.
      * Failure messages supplied to the child must not contain credentials or callback data.
      */
     public suspend fun awaitCompletion()
+
+    /**
+     * Releases local waiting/listener ownership and abandons only pending backend login state.
+     * Safe after completion; accepted exchange/persistence remains backend-owned and is not revoked.
+     * Non-suspending, idempotent request; cleanup is bounded/asynchronous, not a commit receipt.
+     * View/renderer disposal and owner cancellation use release, never implicit explicit cancel.
+     */
+    public fun release()
 
     /**
      * Requests cancellation of this exact attempt and its local callback listener.

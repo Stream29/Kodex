@@ -194,8 +194,14 @@ private class ContextRenderPorts : ContextSourceSettingsDependencies {
     override val sources = MutableStateFlow(AgentContextSourceSettings())
     override val operationFailure = MutableStateFlow(false)
     override val pathPolicy = object : ContextSourcePathPolicy {
-        override val builtInNormalizedPaths = setOf("/home/test/.agents")
-        override fun normalize(path: String): String? = when {
+        override suspend fun evaluate(candidate: String, originalPaths: List<String>): ContextPathEvaluation {
+            fun compare(path: String): ContextPathComparison {
+                val key = normalize(path)
+                return ContextPathComparison(key, key == "/home/test/.agents")
+            }
+            return ContextPathEvaluation.Evaluated(compare(candidate), originalPaths.map(::compare))
+        }
+        private fun normalize(path: String): String? = when {
             path.isBlank() || '$' in path -> null
             path == "~" -> "/home/test"
             path.startsWith("~/") -> "/home/test/" + path.substring(2)

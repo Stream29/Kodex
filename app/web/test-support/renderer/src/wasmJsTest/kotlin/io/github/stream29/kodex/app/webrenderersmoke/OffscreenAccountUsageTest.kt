@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.accountusage.*
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
@@ -14,6 +17,29 @@ import kotlin.test.*
 import kotlin.time.Instant
 
 val offscreenAccountUsageTest by testSuite {
+    test("account usage actions wrap in narrow enlarged text without losing their exact intents") { offscreenTest {
+        var refreshes = 0
+        var resets = 0
+        val state = AccountUsageState(SettingsAccountUsageState.Available(usageSnapshot(2)))
+        val scene = OffscreenScene.create(width = 180, height = 640) {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1.5f)) {
+                AccountUsageContent(state, { refreshes++ }, { resets++ }, {})
+            }
+        }
+        try {
+            scene.settle { scene.hasText("Refresh") && scene.hasText("Use reset") }
+            val refresh = scene.text("Refresh").boundsInWindow
+            val reset = scene.text("Use reset").boundsInWindow
+            assertTrue(reset.top > refresh.bottom, "The two actions wrap rather than clip at the right edge.")
+            assertTrue(refresh.left >= 0 && refresh.right <= 180 && reset.left >= 0 && reset.right <= 180)
+            scene.click("Refresh")
+            scene.click("Use reset")
+            assertEquals(1, refreshes)
+            assertEquals(1, resets)
+            scene.frame()
+        } finally { scene.close() }
+    } }
+
     val snapshot = usageSnapshot(0)
     val cases = listOf(
         SettingsAccountUsageState.Unavailable to "Sign in to view Codex usage.",

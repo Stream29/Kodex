@@ -4,6 +4,7 @@ package io.github.stream29.kodex.app.ui.compose
 
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.cli.history.HistoryListRenderer
 import io.github.stream29.kodex.cli.app.ApplicationHistoryMenuPlacement
 
@@ -14,4 +15,6 @@ public expect class ComposeHistoryViewState()
 public expect fun rememberComposeHistoryListRenderer(
     state: ComposeHistoryViewState,
     onOpenContextMenu: ((generation: Long, storageIndex: Int, item: HistoryItemViewModel, placement: ApplicationHistoryMenuPlacement) -> Unit)? = null,
+    canEditHistory: Boolean = true,
+    onOpenStreamingMenu: ((generation: Long, item: HistoryStreamingItem.Output, placement: ApplicationHistoryMenuPlacement) -> Unit)? = null,
 ): HistoryListRenderer

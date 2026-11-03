@@ -6,9 +6,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExe
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
-import io.github.stream29.kodex.app.ui.UiColumn
 import io.github.stream29.kodex.openai.PlanItemArg
-import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecDefaultMaxOutputTokens
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
@@ -16,35 +14,20 @@ import kotlin.time.Duration
 
 @Composable
 public actual fun HistoryPlanContent(event: StablePlanUpdate, renderer: HistoryContentRenderer) {
-    PlanContent("Update Plan", event.arguments.explanation, event.arguments.plan, false, renderer)
+    PlanContent(event.arguments.explanation, event.arguments.plan, false, renderer)
 }
 
 @Composable
 public actual fun HistoryPlanContent(event: PendingPlanUpdate, renderer: HistoryContentRenderer) {
-    PlanContent("Updating Plan", event.arguments.explanation, event.arguments.plan, true, renderer)
+    PlanContent(event.arguments.explanation, event.arguments.plan, true, renderer)
 }
 
 @Composable
 private fun PlanContent(
-    title: String, explanation: String?, plan: List<PlanItemArg>, pending: Boolean, renderer: HistoryContentRenderer,
+    explanation: String?, plan: List<PlanItemArg>, pending: Boolean, renderer: HistoryContentRenderer,
 ) {
     val note = explanation?.trim()?.takeIf(String::isNotEmpty)
-    UiColumn {
-        renderer.Heading("• $title", if (pending) HistoryTextStyle.Dim else HistoryTextStyle.Bold)
-        note?.let { renderer.Text("  └ $it", HistoryTextStyle.Dim) }
-        if (plan.isEmpty()) {
-            val indent = if (note == null) "  └ " else "    "
-            renderer.Text("${indent}(no steps provided)", HistoryTextStyle.Dim)
-        } else plan.forEachIndexed { index, item ->
-            val indent = if (note == null && index == 0) "  └ " else "    "
-            val marker = when (item.status) {
-                StepStatus.Pending -> "[ ]"
-                StepStatus.InProgress -> "[>]"
-                StepStatus.Completed -> "[x]"
-            }
-            renderer.Text("$indent$marker ${item.step}", if (pending) HistoryTextStyle.Dim else HistoryTextStyle.Normal)
-        }
-    }
+    renderer.Plan(HistoryPlanModel(note, plan, pending, "(no steps provided)"))
 }
 
 @Composable
@@ -68,7 +51,7 @@ public actual fun HistoryCommandContent(event: StableCommandExecutionToolEvent, 
         }
     }
     renderer.Tool(summary, null, status, event.callId, HistoryTextStyle.Normal, summary) { details ->
-        details.Text(firstLine, HistoryTextStyle.Normal)
+        details.RecordedMetadata(firstLine, HistoryTextStyle.Normal)
         if (action is StableCommandExecutionAction.WriteStdin && action.arguments.chars.isNotEmpty()) {
             details.Text("chars: ${action.arguments.chars}", HistoryTextStyle.Normal)
         }
@@ -81,8 +64,8 @@ public actual fun HistoryCommandContent(event: StableCommandExecutionToolEvent, 
                     add("wall_time=${output.wallTimeSeconds}s")
                     add("original_token_count=${output.originalTokenCount}")
                 }.joinToString("; ")
-                details.Text("output($metadata):", HistoryTextStyle.Normal)
-                details.Text(output.output, HistoryTextStyle.Normal)
+                details.RecordedMetadata("output($metadata):", HistoryTextStyle.Normal)
+                details.RecordedOutput(output.output, HistoryTextStyle.Normal)
             }
         }
     }
@@ -90,7 +73,7 @@ public actual fun HistoryCommandContent(event: StableCommandExecutionToolEvent, 
 
 public actual fun ExecCommandArguments.expandedCommandContext(): String = compactToolLine(
     "exec_command", "cwd" to workdir?.takeIf(String::isNotEmpty), "shell" to shell?.path?.toString(),
-    "tty" to tty.takeIf { it }, "yield_time_ms" to yieldTimeMillis,
+    "yield_time_ms" to yieldTimeMillis,
     "max_output_tokens" to maxOutputTokens.takeUnless { it == UnifiedExecDefaultMaxOutputTokens },
 )
 

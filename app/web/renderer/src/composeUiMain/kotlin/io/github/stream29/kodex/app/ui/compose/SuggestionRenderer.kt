@@ -1,11 +1,18 @@
 package io.github.stream29.kodex.app.ui.compose
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.app.ui.*
 import io.github.stream29.kodex.cli.agent.*
@@ -61,18 +68,40 @@ private class ComposeSuggestionScope(
     }
     @Composable override fun Configuration(menu: RuntimeConfigurationMenu, cwd: Path, enabled: Boolean, onBrowse: () -> Unit) {
         Column(Modifier.fillMaxWidth()) {
-            runtime.Fields(menu, enabled)
-            OutlinedButton(onBrowse, enabled = enabled && LocalGraphicalHostCapabilities.current.directoryBrowsing,
-                modifier = Modifier.fillMaxWidth()) { Text("Working directory: $cwd") }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                runtime.Fields(menu, enabled)
+            }
+            CompactTextButton(onBrowse, enabled = enabled && LocalGraphicalHostCapabilities.current.directoryBrowsing) {
+                Text("Working directory: $cwd")
+            }
         }
     }
     @Composable override fun Decision(
         label: String, description: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit,
     ) {
-        OutlinedButton(onClick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.fillMaxWidth()) {
-                Text("${if (selected) "●" else "○"} $label")
-                Text(description)
+        val admitted by rememberUpdatedState(enabled)
+        val invoke by rememberUpdatedState(onClick)
+        Surface(
+            color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f),
+            shape = RoundedCornerShape(4.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 32.dp)
+                    .semantics { this.selected = selected }
+                    .clickable(enabled = enabled, role = Role.Button) { if (admitted) invoke() }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.width(3.dp).height(20.dp).background(
+                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                    RoundedCornerShape(2.dp),
+                ))
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                    Text(description, style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }
@@ -82,7 +111,7 @@ private class ComposeSuggestionScope(
         }
     }
     @Composable override fun RejectSubmit(enabled: Boolean, onClick: () -> Unit) {
-        Button(onClick, enabled = enabled) { Text("Submit rejection") }
+        CompactSubmitAction("Submit rejection", enabled, onClick = onClick)
     }
     override fun focusFeedback() { focus.pending = true }
 }

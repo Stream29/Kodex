@@ -139,19 +139,23 @@ private fun measureAgentPage(inputs: AgentPageMeasureInputs, columns: Int, rows:
     val flexibleRows =
         (rows - HistoryComposerSeparatorRows - statusBarRows - composerStatusRows - notificationRows).coerceAtLeast(0)
     val minimumComposerRows = minOf(1, flexibleRows)
-    val toolRows = if (!inputs.hostInteractionPending) 0 else minOf(
-        (flexibleRows - minimumComposerRows).coerceAtLeast(0), RequestUserInputMaximumRows,
-    )
+    val toolRows = agentPendingToolRows(flexibleRows - minimumComposerRows, inputs.pendingToolPanelCount)
+    val allToolRows = toolRows * inputs.pendingToolPanelCount
     val steerLines = pendingSteerPreviewLines(
         pending = inputs.pendingSteer, columns = columns,
-        maximumRows = minOf((flexibleRows - minimumComposerRows - toolRows).coerceAtLeast(0), PendingSteerMaximumRows),
+        maximumRows = minOf((flexibleRows - minimumComposerRows - allToolRows).coerceAtLeast(0), PendingSteerMaximumRows),
     )
-    val composerAndHistoryRows = (flexibleRows - toolRows - steerLines.size).coerceAtLeast(0)
+    val composerAndHistoryRows = (flexibleRows - allToolRows - steerLines.size).coerceAtLeast(0)
     val composerRows = boundedComposerRows(availableRows = composerAndHistoryRows, desiredRows = fullComposerLayout.rowCount)
     return AgentPageLayout(
         historyRows = (composerAndHistoryRows - composerRows).coerceAtLeast(0),
         composerRows = composerRows + composerStatusRows, toolRows = toolRows, steerLines = steerLines,
     )
+}
+
+internal fun agentPendingToolRows(availableRows: Int, panelCount: Int): Int {
+    require(panelCount >= 0)
+    return if (panelCount == 0) 0 else minOf(availableRows.coerceAtLeast(0) / panelCount, RequestUserInputMaximumRows)
 }
 
 internal fun submitToSteerHint(running: Boolean, draft: String): String? =

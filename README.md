@@ -10,6 +10,16 @@ Give your coding agent this prompt:
 
 > Install and configure Kodex from https://github.com/Stream29/Kodex for this machine: inspect the latest release, choose the matching native CLI.
 
+## Command-line entry points
+
+- `kodex tui` opens the terminal interface.
+- `kodex web` opens the browser interface; `kodex app` opens the system WebView.
+- `kodex --help` shows the command tree; `kodex backend --help` shows backend controls.
+
+The next release changes the terminal entry point: update scripts and aliases from
+`kodex` to `kodex tui`, and replace `kodex help` with `kodex --help`. Running
+`kodex` without arguments now displays help instead of opening the TUI.
+
 ## Reimplementation and Abstraction
 
 ### Storage

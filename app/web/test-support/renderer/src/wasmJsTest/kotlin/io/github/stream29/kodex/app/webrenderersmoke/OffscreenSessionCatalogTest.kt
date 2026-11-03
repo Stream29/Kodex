@@ -1,9 +1,17 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.*
@@ -15,6 +23,65 @@ import kotlin.test.*
 import kotlin.time.Instant
 
 val offscreenSessionCatalogTest by testSuite {
+    test("compact short catalog keeps full names status close and keyboard actions reachable") { offscreenTest {
+        val name = "完整长会话 " + "narrow ".repeat(24)
+        val ports = CatalogPorts().apply {
+            entries = listOf(SessionCatalogEntry(7, name, running = true,
+                updatedAt = Instant.parse("2026-10-20T01:02:03Z")))
+        }
+        withCatalogFixture(ports) { vm ->
+            val scene = OffscreenScene.create(width = 320, height = 240) {
+                SessionCatalogContent(vm, rememberComposeSessionCatalogRenderer(), { throw it })
+                OutlinedButton({}, Modifier.semantics { contentDescription = "Original catalog row" }) {
+                    Column {
+                        Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Running")
+                        Text("Updated: 2026-10-20T01:02:03")
+                    }
+                }
+            }
+            try {
+                scene.settle { scene.hasDescription("Open menu for session 7") }
+                assertFalse(scene.hasDescription("Actions for session 7"))
+                val primary = scene.nodes().single {
+                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(name) == true
+                }
+                assertEquals("Running", primary.config.getOrNull(SemanticsProperties.StateDescription))
+                val original = scene.nodes().single {
+                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Original catalog row") == true
+                }
+                assertTrue(primary.boundsInRoot.height < original.boundsInRoot.height)
+                val close = scene.text("Close").boundsInWindow
+                assertTrue(close.top >= 0 && close.bottom <= 240)
+                assertTrue(assertNotNull(primary.config.getOrNull(SemanticsActions.RequestFocus)?.action).invoke())
+                scene.key(Key.Menu)
+                scene.settle { scene.hasText("Index: 7") && scene.hasText("Archive") }
+                assertTrue(scene.hasText(name))
+                scene.escape()
+                scene.settle { !scene.hasText("Index: 7") && scene.nodes().any {
+                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(name) == true &&
+                        it.config.getOrNull(SemanticsProperties.Focused) == true
+                } }
+                scene.key(Key.F10, shift = true)
+                scene.settle { scene.hasText("Archive") && scene.nodes().any {
+                    it.config.getOrNull(SemanticsProperties.Focused) == true &&
+                        it.children.any { child -> child.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == "Archive" } == true }
+                } }
+                scene.escape()
+                scene.settle { !scene.hasText("Archive") }
+                scene.openCatalogMenuAccessible(7)
+                scene.settle { scene.hasText("Archive") }
+                scene.key(Key.Tab)
+                scene.key(Key.Tab)
+                scene.key(Key.Enter)
+                scene.settle { ports.calls.contains("fork:7") }
+                assertFalse(ports.calls.contains("delete:7"))
+                assertTrue(ports.opened.isEmpty())
+                scene.frame()
+            } finally { scene.close() }
+        }
+    } }
+
     test("catalog mounts once and renders a bounded lazy viewport rather than an empty loading result") { offscreenTest {
         val ports = CatalogPorts().apply {
             entries = List(1_000) { SessionCatalogEntry(it, "row${it.toString().padStart(4, '0')}") }
@@ -36,12 +103,12 @@ val offscreenSessionCatalogTest by testSuite {
                 ports.loadGate!!.complete(Unit)
                 scene.settle { scene.hasText("row0000") }
                 assertFalse(scene.hasText("row0999"))
-                assertTrue(scene.catalogRows() in 1..12)
+                scene.assertCatalogViewportBounded()
                 val scroll = scene.nodes().mapNotNull { it.config.getOrNull(SemanticsActions.ScrollToIndex)?.action }.single()
                 assertTrue(scroll(999))
                 scene.settle { scene.hasText("row0999") }
                 assertFalse(scene.hasText("row0000"))
-                assertTrue(scene.catalogRows() in 1..12)
+                scene.assertCatalogViewportBounded()
                 scene.frame()
             } finally { scene.close() }
             ports.loadGate = null
@@ -66,7 +133,7 @@ val offscreenSessionCatalogTest by testSuite {
                 assertFalse(scene.hasText("archived"))
                 scene.clickDescription("Show archived")
                 scene.settle { scene.hasText("archived") }
-                scene.clickDescription("Actions for session 7")
+                scene.contextDescription("first")
                 scene.settle { scene.hasText("Index: 7") && scene.hasText("Archive") }
                 assertTrue(scene.nodes().any {
                     it.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text.startsWith("Created at:") } == true
@@ -78,7 +145,7 @@ val offscreenSessionCatalogTest by testSuite {
                 scene.settle { ports.calls.contains("fork:7") && scene.hasText("first") && !scene.hasText("Index: 7") }
                 assertTrue(ports.opened.isEmpty())
                 assertEquals(0, ports.dismissals)
-                scene.clickDescription("Actions for session 8")
+                scene.openCatalogMenu(8)
                 scene.settle { scene.hasText("Unarchive") }
                 scene.click("Unarchive")
                 scene.settle { ports.calls.contains("unarchive:8") && !scene.hasText("Unarchive") }
@@ -114,21 +181,27 @@ val offscreenSessionCatalogTest by testSuite {
             }
             try {
                 scene.settle { scene.hasText("first") && scene.hasText("archived") }
-                scene.clickDescription("Actions for session 7")
+                scene.openCatalogMenu(7)
                 scene.settle { scene.hasText("Index: 7") }
                 val old = assertNotNull(captured)
                 scene.escape()
                 scene.settle { !scene.hasText("Index: 7") }
-                scene.clickDescription("Actions for session 8")
+                scene.openCatalogMenu(8)
                 scene.settle { scene.hasText("Index: 8") }
                 val next = assertNotNull(captured)
                 old.dismiss(); old.fork(); old.archive(); old.delete()
-                scene.settle { scene.hasText("Index: 8") }
+                scene.settle { scene.hasText("Index: 8") && scene.nodes().any {
+                    it.config.getOrNull(SemanticsProperties.Focused) == true &&
+                        it.children.any { child -> child.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == "Archive" } == true }
+                } }
                 assertEquals(listOf("load:false"), ports.calls)
                 assertNull(vm.deleteTarget.value)
                 ports.entries = ports.entries.map { if (it.sessionIndex == 8) it.copy(threadName = "replacement") else it }
                 vm.refresh()
-                scene.settle { scene.hasText("replacement") && !scene.hasText("Index: 8") }
+                scene.settle { scene.hasText("replacement") && !scene.hasText("Index: 8") && scene.nodes().any {
+                    it.config.getOrNull(SemanticsProperties.Focused) == true &&
+                        it.children.any { child -> child.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == "Close" } == true }
+                } }
                 next.fork(); next.archive(); next.delete()
                 scene.settle { scene.hasText("replacement") }
                 assertEquals(listOf("load:false", "load:false"), ports.calls)
@@ -147,7 +220,7 @@ val offscreenSessionCatalogTest by testSuite {
                 }
                 try {
                     scene.settle { scene.hasText("first") }
-                    scene.clickDescription("Actions for session 7")
+                    scene.openCatalogMenu(7)
                     scene.settle { scene.hasText("Delete") && scene.hasText("Index: 7") }
                     scene.click("Delete")
                     scene.settle { scene.hasText("Delete first?") }
@@ -194,7 +267,7 @@ val offscreenSessionCatalogTest by testSuite {
                 try {
                     scene.settle { scene.hasText("first") }
                     if (fork) {
-                        scene.clickDescription("Actions for session 7")
+                        scene.openCatalogMenu(7)
                         scene.settle { scene.hasText("Fork") }
                         scene.click("Fork")
                     } else scene.click("first")
@@ -244,6 +317,27 @@ private suspend fun withCatalogFixture(ports: CatalogPorts, block: suspend (Sess
 private fun OffscreenScene.catalogRows(): Int = nodes().flatMap {
     it.config.getOrNull(SemanticsProperties.Text).orEmpty()
 }.count { it.text.startsWith("row") }
+
+private fun OffscreenScene.assertCatalogViewportBounded() {
+    val rowHeight = nodes().filter {
+        it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("session-catalog-row-") == true
+    }.maxOf { it.boundsInRoot.height }
+    assertTrue(rowHeight > 0)
+    assertTrue(catalogRows() in 1..((480f / rowHeight).toInt() + 2), "Only the 480dp viewport and boundary rows may be composed.")
+}
+
+private fun OffscreenScene.openCatalogMenu(index: Int) {
+    val row = nodes().single { it.config.getOrNull(SemanticsProperties.TestTag) == "session-catalog-row-$index" }
+    assertTrue(assertNotNull(row.config.getOrNull(SemanticsActions.RequestFocus)?.action).invoke())
+    key(Key.Menu)
+}
+
+private fun OffscreenScene.openCatalogMenuAccessible(index: Int) {
+    val action = nodes().single {
+        it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Open menu for session $index") == true
+    }
+    assertTrue(assertNotNull(action.config.getOrNull(SemanticsActions.OnClick)?.action).invoke())
+}
 
 private class CatalogPorts : SessionCatalogDependencies, SessionCatalogInteractions {
     var entries = listOf(

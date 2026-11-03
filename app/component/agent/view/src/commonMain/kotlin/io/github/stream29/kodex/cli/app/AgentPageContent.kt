@@ -32,6 +32,7 @@ public actual fun AgentPageContent(
         }
         val inputs = AgentPageMeasureInputs(
             composer, pendingSteer, hostInteractionPending, notice, state, running, settings, tokenCount,
+            pendingToolPanelCount = (if (pendingRequest != null) 1 else 0) + (if (pendingSuggestion != null) 1 else 0),
         )
         renderer.Frame(inputs) { slots ->
             slots.History(viewModel.history, viewModel.shellSessions, state.canEditHistory(running))

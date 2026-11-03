@@ -13,7 +13,7 @@ internal object BrowserHookSettingsLayoutRenderer : HookSettingsLayoutRenderer {
     @Composable override fun HookListFrame(content: @Composable () -> Unit) { UiColumn(content) }
 
     @Composable override fun HookListHeader(title: String, action: String, onAdd: () -> Unit) {
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             UiText(title, UiTextRole.Title)
             UiAction(action, onClick = onAdd, role = UiActionRole.Secondary)
         }

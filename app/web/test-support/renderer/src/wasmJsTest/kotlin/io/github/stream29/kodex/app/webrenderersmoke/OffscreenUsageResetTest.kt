@@ -1,18 +1,61 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.settings.contract.UsageResetOption
 import io.github.stream29.kodex.app.settings.contract.UsageResetRequest
 import io.github.stream29.kodex.app.settings.contract.UsageResetState
-import io.github.stream29.kodex.app.ui.UiColumn
-import io.github.stream29.kodex.app.ui.UiText
+import io.github.stream29.kodex.app.ui.compose.rememberComposeSettingsRootRenderer
+import io.github.stream29.kodex.cli.settings.SettingsModalFrame
 import io.github.stream29.kodex.cli.usagereset.UsageResetContent
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import kotlin.test.*
 
 val offscreenUsageResetTest by testSuite {
     val option = UsageResetOption("credit-995", "Specific credit", "Captured credit details.", null)
+    for ((width, height) in listOf(1024 to 768, 360 to 640, 320 to 240)) {
+        for (fontScale in listOf(1f, 1.5f)) {
+            test("reset Modal keeps safe Back focus and exact long option ${width}x$height font=$fontScale") { offscreenTest {
+                val expected = UsageResetState.Confirming(option.copy(
+                    title = "完整 captured credit ".repeat(20), description = "Complete credit details. ".repeat(35),
+                ))
+                val calls = ResetCalls()
+                val scene = OffscreenScene.create(width = width, height = height) {
+                    CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) { ResetContent(expected, calls) }
+                }
+                try {
+                    scene.settle { scene.hasText("Go back") && scene.text("Go back").boundsInWindow.height > 0 && scene.nodes().any {
+                        it.config.getOrNull(SemanticsProperties.Focused) == true &&
+                            it.children.any { node -> node.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == "Go back" } == true }
+                    } }
+                    val backBounds = scene.text("Go back").boundsInWindow
+                    assertTrue(backBounds.height > 0 && backBounds.bottom <= height,
+                        "Focused Go back must be visible: $backBounds in ${width}x$height; scroll=" +
+                            scene.nodes().mapNotNull { it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) }.map { it.value() to it.maxValue() })
+                    scene.key(Key.Enter)
+                    assertEquals(1, calls.backs)
+                    assertTrue(calls.confirmed.isEmpty(), "Safe Back focus must not invoke Use reset.")
+                    for (scroll in scene.nodes().mapNotNull { it.config.getOrNull(SemanticsActions.ScrollBy)?.action }) {
+                        scroll(0f, 10_000f)
+                    }
+                    scene.settle { scene.text("Use reset").boundsInWindow.height > 0 }
+                    assertTrue(scene.text("Use reset").boundsInWindow.bottom <= height,
+                        "Use reset bounds: ${scene.text("Use reset").boundsInWindow} in ${width}x$height")
+                    scene.click("Use reset")
+                    assertSame(expected, calls.confirmed.single())
+                    assertEquals(0, calls.retries + calls.refreshes)
+                    scene.frame()
+                } finally { scene.close() }
+            } }
+        }
+    }
+
     test("choosing sends a specific id and a legacy null option stays disabled") { offscreenTest {
         val state = UsageResetState.Choosing(UsageResetRequest(2, listOf(option, option.copy(
             creditId = null, title = "Unavailable credit",
@@ -110,6 +153,7 @@ val offscreenUsageResetTest by testSuite {
 
 @Composable
 private fun ResetContent(state: UsageResetState, calls: ResetCalls) {
+    val renderer = rememberComposeSettingsRootRenderer()
     UsageResetContent(
         state, onSelect = { calls.selected += it }, onConfirm = { calls.confirmed += it },
         onBack = { calls.backs++ }, onRetry = { calls.retries++ }, onRefresh = { calls.refreshes++ },
@@ -117,7 +161,7 @@ private fun ResetContent(state: UsageResetState, calls: ResetCalls) {
     ) { title, dismiss, content ->
         calls.frames++
         calls.dismiss = dismiss
-        UiColumn { UiText(title); content() }
+        renderer.Modal(SettingsModalFrame.UsageReset, title, dismiss, content)
     }
 }
 

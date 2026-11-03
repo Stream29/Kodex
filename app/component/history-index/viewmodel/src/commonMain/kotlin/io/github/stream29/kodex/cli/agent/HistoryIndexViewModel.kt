@@ -115,6 +115,7 @@ internal class HistoryIndexViewModelImpl(
                 entry.toHistoryIndexEntryKind(),
                 entry.toHistoryIndexDetail(),
                 entry as? StableRequestUserInputToolEvent,
+                entry as? StablePlanUpdate,
             )
         }
 

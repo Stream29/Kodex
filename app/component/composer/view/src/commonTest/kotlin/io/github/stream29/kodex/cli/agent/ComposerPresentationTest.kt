@@ -9,6 +9,18 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 val composerPresentationTest by testSuite {
+    test("submit uses the acknowledged revision before its renderer echo") {
+        val owner = ComposerOwnerId("fixture")
+        val current = ComposerState(owner, text = "latest", cursorOffset = 6, revision = 7)
+        assertEquals(7L, composerSubmissionRevision(owner, "latest", 6, current))
+    }
+    test("old widget buffers cannot submit a changed draft or another owner") {
+        val owner = ComposerOwnerId("fixture")
+        val current = ComposerState(owner, text = "latest", cursorOffset = 6, revision = 7)
+        assertNull(composerSubmissionRevision(owner, "older", 5, current))
+        assertNull(composerSubmissionRevision(owner, "latest", 0, current))
+        assertNull(composerSubmissionRevision(ComposerOwnerId("replaced"), "latest", 6, current))
+    }
     test("preview preserves Unicode and hard-line content before renderer truncation") {
         val pending = listOf(StableUserMessage(listOf(ContentItem.InputText("  你好\n世界  "))))
         assertEquals(listOf("Pending steer (1)", "  ↳ 你好 世界"), pendingSteerPreviewContent(pending, 4))

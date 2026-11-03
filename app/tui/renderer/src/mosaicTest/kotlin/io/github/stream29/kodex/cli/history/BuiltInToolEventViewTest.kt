@@ -58,8 +58,8 @@ val builtInToolEventViewTest by testSuite {
             WriteStdinArguments(1, yieldTimeMillis = 250).expandedCommandContext(),
         )
         assertEquals(
-            "exec_command; tty=true; yield_time_ms=0; max_output_tokens=0",
-            ExecCommandArguments("pwd", tty = true, yieldTimeMillis = 0, maxOutputTokens = 0)
+            "exec_command; yield_time_ms=0; max_output_tokens=0",
+            ExecCommandArguments("pwd", yieldTimeMillis = 0, maxOutputTokens = 0)
                 .expandedCommandContext(),
         )
     }

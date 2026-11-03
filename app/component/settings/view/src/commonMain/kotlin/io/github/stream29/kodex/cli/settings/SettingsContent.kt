@@ -48,7 +48,7 @@ public actual fun SettingsContent(
                     UiText("Backend notifications")
                     HookSettingsPage(viewModel.global.hookSettings, false)
                     UiText(renderer.frontendErrorHooksLabel)
-                    if (renderer.frontendErrorHooksAvailable) HookSettingsPage(viewModel.global.frontendErrorHooks, false)
+                    if (capabilities.frontendErrorHooks) HookSettingsPage(viewModel.global.frontendErrorHooks, false)
                     else UiText("Frontend shell hooks are unavailable in this host.")
                 }
                 SettingsPage.CurrentSession -> SessionSettingsContent(viewModel.session, fields.session, capabilities.directoryBrowsing)
@@ -88,7 +88,7 @@ public actual fun SettingsContent(
         }
         McpSettingsDialogHost(viewModel.global.mcpSettings, renderer.mcp)
         HookSettingsDialogHost(viewModel.global.hookSettings, renderer.hooks)
-        if (renderer.frontendErrorHooksAvailable) HookSettingsDialogHost(viewModel.global.frontendErrorHooks, renderer.hooks)
+        if (capabilities.frontendErrorHooks) HookSettingsDialogHost(viewModel.global.frontendErrorHooks, renderer.hooks)
     }
 }
 

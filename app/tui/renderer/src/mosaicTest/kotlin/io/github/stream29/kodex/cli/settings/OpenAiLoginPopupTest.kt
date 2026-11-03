@@ -24,6 +24,7 @@ val openAiLoginPopupTest by testSuite {
                 override val authorizationUrl: String = "https://login.example.invalid"
                 override suspend fun awaitCompletion(): Unit = kotlinx.coroutines.awaitCancellation()
                 override fun cancel(): Unit = Unit
+                override fun release(): Unit = Unit
             } },
         )
         try {

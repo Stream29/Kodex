@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.historyindex
 
 import androidx.compose.runtime.*
 import io.github.stream29.kodex.app.agent.contract.*
+import io.github.stream29.kodex.cli.history.HistoryPlanModel
 import io.github.stream29.kodex.cli.history.requestUserInputHistoryRows
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
@@ -28,7 +29,7 @@ public actual fun HistoryIndexContent(
                 }
             }
             val state = handle.state.collectAsState().value
-            historyIndexRowPresentation(state, historyIndexGraph(window.indexes.binarySearch(index), window.indexes.size))?.let { row ->
+            historyIndexRowPresentation(state, historyIndexRowPosition(window.indexes.binarySearch(index), window.indexes.size))?.let { row ->
                 renderer.Row(
                     interaction, row,
                     onHoverChanged = { hovered -> if (!hovered || target.isCurrent()) interaction.emitHover(hovered) },
@@ -76,26 +77,33 @@ public actual fun HistoryIndexMenuContent(
     if (!valid) return
     val handle = remember(current) { target.viewModel.acquireTimestamp(target.generation, target.index) }
     DisposableEffect(handle) { onDispose { handle.release() } }
+    val detailHandle = remember(current) { target.viewModel.acquireDetail(target.generation, target.index) }
+    DisposableEffect(detailHandle) { onDispose { detailHandle.release() } }
     val state = handle.state.collectAsState().value
-    LaunchedEffect(current, state) { if (state == HistoryIndexReadState.Closed) onDismiss() }
-    if (state == HistoryIndexReadState.Closed) return
-    renderer.Menu(current, (state as? HistoryIndexReadState.Ready)?.value, onDismiss) {
-        if (handle.state.value != HistoryIndexReadState.Closed && target.isCurrent()) {
+    val detailState = detailHandle.state.collectAsState().value
+    LaunchedEffect(current, state, detailState) {
+        if (state == HistoryIndexReadState.Closed || detailState == HistoryIndexReadState.Closed) onDismiss()
+    }
+    if (state == HistoryIndexReadState.Closed || detailState == HistoryIndexReadState.Closed) return
+    renderer.Menu(current, (state as? HistoryIndexReadState.Ready)?.value, historyIndexDetailPresentation(detailState), onDismiss) {
+        if (handle.state.value != HistoryIndexReadState.Closed && detailHandle.state.value != HistoryIndexReadState.Closed &&
+            origin.isPlaced && target.isCurrent()
+        ) {
             target.viewModel.checkOut(target.generation, target.index)
         }
     }
 }
 
 public actual fun historyIndexRowPresentation(
-    state: HistoryIndexReadState<HistoryIndexEntry>, graph: String,
+    state: HistoryIndexReadState<HistoryIndexEntry>, position: HistoryIndexRowPosition,
 ): HistoryIndexRowPresentation? {
-    val label = when (state) {
-        HistoryIndexReadState.Loading -> "…"
-        HistoryIndexReadState.Failed -> "[error]"
+    val value = when (state) {
+        HistoryIndexReadState.Loading -> HistoryIndexRowValue.Loading
+        HistoryIndexReadState.Failed -> HistoryIndexRowValue.Failed
         HistoryIndexReadState.Closed -> return null
-        is HistoryIndexReadState.Ready -> state.value.summary
+        is HistoryIndexReadState.Ready -> HistoryIndexRowValue.Ready(state.value.summary)
     }
-    return HistoryIndexRowPresentation("$graph $label", state == HistoryIndexReadState.Failed)
+    return HistoryIndexRowPresentation(value, position)
 }
 
 public actual fun historyIndexDetailPresentation(
@@ -107,7 +115,20 @@ public actual fun historyIndexDetailPresentation(
     )
     is HistoryIndexReadState.Ready -> {
         val questions = state.value.requestUserInput?.requestUserInputHistoryRows()
-        HistoryIndexDetailPresentation(state.value.kind.displayName, if (questions == null) state.value.content else "", questions, false)
+        val plan = state.value.plan?.let { event ->
+            val originalSteps = event.arguments.plan
+            val explanation = event.arguments.explanation?.takeIf(String::isNotBlank)?.let {
+                if (originalSteps.isEmpty()) it.trim() else it.trimStart()
+            }
+            val steps = originalSteps.mapIndexed { index, item ->
+                val step = item.step.ifBlank { "[empty]" }
+                item.copy(step = if (index == originalSteps.lastIndex) step.trimEnd() else step)
+            }
+            HistoryPlanModel(explanation, steps, pending = false, emptyLabel = if (explanation == null) "[empty]" else null)
+        }
+        HistoryIndexDetailPresentation(
+            state.value.kind.displayName, if (questions == null) state.value.content else "", questions, false, plan,
+        )
     }
 }
 
@@ -125,9 +146,9 @@ private val HistoryIndexEntryKind.displayName: String
         HistoryIndexEntryKind.PlanUpdate -> "Plan update"
     }
 
-internal fun historyIndexGraph(position: Int, size: Int): String = when {
-    size <= 1 -> "●"
-    position == 0 -> "┌●"
-    position == size - 1 -> "└●"
-    else -> "├●"
+internal fun historyIndexRowPosition(position: Int, size: Int): HistoryIndexRowPosition = when {
+    size <= 1 -> HistoryIndexRowPosition.Single
+    position == 0 -> HistoryIndexRowPosition.First
+    position == size - 1 -> HistoryIndexRowPosition.Last
+    else -> HistoryIndexRowPosition.Middle
 }

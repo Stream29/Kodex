@@ -19,9 +19,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.platform.Font
+import androidx.compose.ui.unit.sp
 import io.github.stream29.kodex.app.ui.browser.resources.Res
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.await
@@ -35,10 +37,28 @@ public actual fun BrowserTheme(content: @Composable () -> Unit) {
     val status by produceState<FontStatus>(FontStatus.Loading, resolver) {
         try {
             val bytes = Res.readBytes("font/noto_sans_sc.ttf")
-            val family = FontFamily(Font(
-                "NotoSansSC", bytes,
-                variationSettings = FontVariation.Settings(FontVariation.weight(400)),
-            ))
+            val family = FontFamily(
+                Font(
+                    "NotoSansSC", bytes,
+                    weight = FontWeight.Normal,
+                    variationSettings = FontVariation.Settings(FontVariation.weight(400)),
+                ),
+                Font(
+                    "NotoSansSC", bytes,
+                    weight = FontWeight.Medium,
+                    variationSettings = FontVariation.Settings(FontVariation.weight(500)),
+                ),
+                Font(
+                    "NotoSansSC", bytes,
+                    weight = FontWeight.SemiBold,
+                    variationSettings = FontVariation.Settings(FontVariation.weight(600)),
+                ),
+                Font(
+                    "NotoSansSC", bytes,
+                    weight = FontWeight.Bold,
+                    variationSettings = FontVariation.Settings(FontVariation.weight(700)),
+                ),
+            )
             resolver.preload(family)
             resolver.preload(FontFamily(Font("NotoSansMath", Res.readBytes("font/noto_sans_math.ttf"))))
             domFonts.await()
@@ -99,21 +119,36 @@ private val BrowserDarkColors = darkColorScheme(
 private fun browserTypography(family: FontFamily): Typography {
     val baseline = Typography()
     return baseline.copy(
-        displayLarge = baseline.displayLarge.copy(fontFamily = family),
-        displayMedium = baseline.displayMedium.copy(fontFamily = family),
-        displaySmall = baseline.displaySmall.copy(fontFamily = family),
-        headlineLarge = baseline.headlineLarge.copy(fontFamily = family),
-        headlineMedium = baseline.headlineMedium.copy(fontFamily = family),
-        headlineSmall = baseline.headlineSmall.copy(fontFamily = family),
-        titleLarge = baseline.titleLarge.copy(fontFamily = family),
-        titleMedium = baseline.titleMedium.copy(fontFamily = family),
-        titleSmall = baseline.titleSmall.copy(fontFamily = family),
-        bodyLarge = baseline.bodyLarge.copy(fontFamily = family),
-        bodyMedium = baseline.bodyMedium.copy(fontFamily = family),
-        bodySmall = baseline.bodySmall.copy(fontFamily = family),
-        labelLarge = baseline.labelLarge.copy(fontFamily = family),
-        labelMedium = baseline.labelMedium.copy(fontFamily = family),
-        labelSmall = baseline.labelSmall.copy(fontFamily = family),
+        displayLarge = baseline.displayLarge.copy(fontFamily = family, fontSize = 18.sp, lineHeight = 26.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 0.sp),
+        displayMedium = baseline.displayMedium.copy(fontFamily = family, fontSize = 17.sp, lineHeight = 24.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
+        displaySmall = baseline.displaySmall.copy(fontFamily = family, fontSize = 16.sp, lineHeight = 24.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
+        headlineLarge = baseline.headlineLarge.copy(fontFamily = family, fontSize = 18.sp, lineHeight = 26.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 0.sp),
+        headlineMedium = baseline.headlineMedium.copy(fontFamily = family, fontSize = 18.sp, lineHeight = 26.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 0.sp),
+        headlineSmall = baseline.headlineSmall.copy(fontFamily = family, fontSize = 17.sp, lineHeight = 24.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
+        titleLarge = baseline.titleLarge.copy(fontFamily = family, fontSize = 18.sp, lineHeight = 26.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 0.sp),
+        titleMedium = baseline.titleMedium.copy(fontFamily = family, fontSize = 16.sp, lineHeight = 24.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
+        titleSmall = baseline.titleSmall.copy(fontFamily = family, fontSize = 16.sp, lineHeight = 24.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
+        bodyLarge = baseline.bodyLarge.copy(fontFamily = family, fontSize = 16.sp, lineHeight = 24.sp,
+            fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+        bodyMedium = baseline.bodyMedium.copy(fontFamily = family, fontSize = 16.sp, lineHeight = 24.sp,
+            fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+        bodySmall = baseline.bodySmall.copy(fontFamily = family, fontSize = 14.sp, lineHeight = 20.sp,
+            fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+        labelLarge = baseline.labelLarge.copy(fontFamily = family, fontSize = 14.sp, lineHeight = 20.sp,
+            fontWeight = FontWeight.Medium, letterSpacing = 0.sp),
+        labelMedium = baseline.labelMedium.copy(fontFamily = family, fontSize = 14.sp, lineHeight = 20.sp,
+            fontWeight = FontWeight.Medium, letterSpacing = 0.sp),
+        labelSmall = baseline.labelSmall.copy(fontFamily = family, fontSize = 14.sp, lineHeight = 20.sp,
+            fontWeight = FontWeight.Medium, letterSpacing = 0.sp),
     )
 }
 

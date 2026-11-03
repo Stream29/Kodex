@@ -20,8 +20,8 @@ public interface DirectoryPickerDependencies {
  *
  * Implementations convert ordinary filesystem exceptions into result values.
  * Cancellation and non-recoverable [Error]s propagate rather than becoming filesystem failures.
- * Resolve relative paths and a leading `~` using the backend's current
- * directory and home, returning the resolved directory on success. The
+ * Resolve relative paths using the captured initial launch base and a leading
+ * `~` using backend Home, returning the resolved directory on success. The
  * dependency never owns picker state and must support overlapping requests.
  */
 public interface DirectoryPickerBrowser {

@@ -1,8 +1,15 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
@@ -15,8 +22,38 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import kotlinx.io.files.Path
 import kotlin.test.*
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.math.abs
 
 val offscreenAgentStatusTest by testSuite {
+    test("measured status items wrap in order with settings on the first row") { runtimeScene { _, child, _ ->
+        val agent = StatusTestAgent(child)
+        var width by mutableStateOf(1200.dp)
+        val scene = OffscreenScene.create(width = 1300) {
+            Box(Modifier.width(width)) {
+                AgentRuntimeStatusContent(
+                    agent, AgentStateValue.AssistantMessage, false,
+                    KodexAgentSettings(model = child.state.value.configuration.model, cwd = Path("/cwd")),
+                    123, rememberComposeAgentStatusRenderer(), {}, {},
+                )
+            }
+        }
+        try {
+            scene.settle { scene.hasText("Resume") && scene.hasText("Settings") }
+            val wideResume = scene.text("Resume").boundsInWindow
+            val wideSettings = scene.text("Settings").boundsInWindow
+            assertEquals(wideResume.top, wideSettings.top)
+            assertTrue(wideSettings.left > wideResume.right)
+            width = 200.dp
+            scene.settle { scene.text("Compact").boundsInWindow.top > scene.text("Resume").boundsInWindow.top }
+            val resume = scene.text("Resume").boundsInWindow
+            val compact = scene.text("Compact").boundsInWindow
+            val model = scene.text("test-model max fast").boundsInWindow
+            val settings = scene.text("Settings").boundsInWindow
+            assertTrue(settings.top <= resume.top)
+            assertTrue(resume.top < compact.top)
+            assertTrue(compact.top < model.top)
+        } finally { scene.close() }
+    } }
     test("shared toolbar branches and exact commands retain borrowed runtime child") { runtimeScene { ports, child, _ ->
         val agent = StatusTestAgent(child)
         var phase: AgentStateValue by mutableStateOf(AgentStateValue.AssistantMessage)
@@ -98,7 +135,7 @@ val offscreenAgentStatusTest by testSuite {
         } finally { scene.close() }
         assertEquals(0, first.closeCount + second.closeCount)
     } }
-    test("live separator toggles controlled Latest and rounds shared duration") { offscreenTest {
+    test("live separator toggles controlled latest action and rounds shared duration") { offscreenTest {
         var duration by mutableStateOf<kotlin.time.Duration?>(null)
         var showLatest by mutableStateOf(false)
         var latest = 0
@@ -107,18 +144,65 @@ val offscreenAgentStatusTest by testSuite {
         }
         try {
             scene.frame()
-            assertFalse(scene.hasText("Latest"))
+            assertFalse(scene.hasDescription("Scroll to latest"))
             duration = 1_500.milliseconds
             showLatest = true
-            scene.settle { scene.hasText("Worked for 2s") && scene.hasText("Latest") }
-            scene.click("Latest")
-            scene.settle { latest == 1 && !scene.hasText("Latest") }
+            scene.settle { scene.hasText("Worked for 2s") && scene.hasDescription("Scroll to latest") }
+            scene.clickDescription("Scroll to latest")
+            scene.settle { latest == 1 && !scene.hasDescription("Scroll to latest") }
             assertTrue(scene.hasText("Worked for 2s"))
             duration = null
             scene.settle { !scene.hasText("Worked for 2s") }
             scene.frame()
         } finally { scene.close() }
     } }
+    for (width in listOf(120, 360)) for (scale in listOf(1f, 1.5f)) {
+        test("latest action is centered and separates line width=$width scale=$scale") { offscreenTest {
+            var duration by mutableStateOf<kotlin.time.Duration?>(null)
+            var showLatest by mutableStateOf(false)
+            var clicks = 0
+            val scene = OffscreenScene.create(width = width) {
+                CompositionLocalProvider(LocalDensity provides Density(1f, scale)) {
+                    AgentHistorySeparatorContent(duration, showLatest, { clicks++ }, rememberComposeAgentHistorySeparatorRenderer())
+                }
+            }
+            fun tagged(tag: String) = scene.nodes().first {
+                it.config.getOrNull(SemanticsProperties.TestTag) == tag
+            }
+            fun button() = scene.nodes().first {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Scroll to latest") == true
+            }
+            try {
+                scene.frame()
+                assertFalse(scene.hasDescription("Scroll to latest"))
+                assertFalse(scene.hasText("Worked for 2s"))
+                duration = 1_500.milliseconds
+                scene.settle { scene.hasText("Worked for 2s") }
+                assertFalse(scene.hasDescription("Scroll to latest"))
+                showLatest = true
+                scene.settle { scene.hasDescription("Scroll to latest") }
+                val action = button().boundsInRoot
+                val label = scene.text("Worked for 2s").boundsInRoot
+                val left = tagged("history-separator-left").boundsInRoot
+                val right = tagged("history-separator-right").boundsInRoot
+                assertTrue(abs(action.center.x - width / 2f) <= 1f)
+                assertTrue(label.right <= action.left)
+                assertTrue(left.right <= action.left && right.left >= action.right)
+                assertTrue(left.width > 0f && right.width > 0f)
+                scene.key(Key.Tab)
+                scene.settle { button().config.getOrNull(SemanticsProperties.Focused) == true }
+                scene.key(Key.Enter)
+                scene.settle { clicks == 1 }
+                scene.clickDescription("Scroll to latest")
+                assertEquals(2, clicks)
+                duration = null
+                scene.settle { !scene.hasText("Worked for 2s") }
+                assertTrue(scene.hasDescription("Scroll to latest"))
+                showLatest = false
+                scene.settle { !scene.hasDescription("Scroll to latest") }
+            } finally { scene.close() }
+        } }
+    }
 }
 
 private class StatusTestAgent(override val runtimeConfiguration: RuntimeConfigurationViewModel) : SidebarTestAgent() {

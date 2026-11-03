@@ -33,8 +33,11 @@ tomlkt = "0.6.1"
 kotlin-logging = "8.0.4"
 kermit = "2.1.0"
 cache4k = "0.14.0"
+multiplatform-markdown = "0.45.0"
 
 [libraries]
+multiplatform-markdown-core = { module = "com.mikepenz:multiplatform-markdown-renderer", version.ref = "multiplatform-markdown" }
+multiplatform-markdown-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "multiplatform-markdown" }
 detekt-api = { module = "dev.detekt:detekt-api", version.ref = "detekt" }
 detekt-test = { module = "dev.detekt:detekt-test", version.ref = "detekt" }
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }

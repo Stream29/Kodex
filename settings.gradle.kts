@@ -378,6 +378,7 @@ moduleTree("utils") {
         module("backend-scope")
     }
     module("os-environment")
+    module("oauth-loopback")
     moduleTree("patch") {
         module("system")
     }

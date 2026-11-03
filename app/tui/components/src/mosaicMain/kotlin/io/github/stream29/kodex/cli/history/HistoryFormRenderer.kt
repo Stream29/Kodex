@@ -36,7 +36,16 @@ public actual fun RequestUserInputHistoryRow(row: RequestUserInputHistoryRowMode
         RequestUserInputHistoryRowRole.Body -> TextStyle.Unspecified
     }
     WrappedHistoryText(
-        row.value, textStyle,
+        formatHistoryFormRowForTerminal(row), textStyle,
         if (row.role == RequestUserInputHistoryRowRole.Error) TuiTheme.colorScheme.error else Color.Unspecified,
     )
+}
+
+public actual fun formatHistoryFormRowForTerminal(row: RequestUserInputHistoryRowModel): String = when (row.kind) {
+    HistoryFormValueKind.Plain -> row.value
+    HistoryFormValueKind.SelectedOption -> "[● ${row.value}]"
+    HistoryFormValueKind.OptionDescription -> "  ${row.value}"
+    HistoryFormValueKind.FreeText -> row.value.lines().mapIndexed { index, line ->
+        "${if (index == 0) "  > " else "    "}$line"
+    }.joinToString("\n")
 }

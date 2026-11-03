@@ -25,6 +25,11 @@ public interface HistoryListRenderer : HistoryContentRenderer {
     @Composable public fun StoredItem(
         item: HistoryItemViewModel, generation: Long, shellSessions: AgentShellSessionRegistry?,
     )
+    /** An optional frontend-only wrapper for one exact streaming row. */
+    @Composable public fun StreamingItem(
+        model: AgentHistoryViewModel, generation: Long, item: HistoryStreamingItem,
+        content: @Composable () -> Unit,
+    ) { content() }
     @Composable public fun Marker(value: String, failed: Boolean)
     public fun streamingContentChanged(model: AgentHistoryViewModel)
 }

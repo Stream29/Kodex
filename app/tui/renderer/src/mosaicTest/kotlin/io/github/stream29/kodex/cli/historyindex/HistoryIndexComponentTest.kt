@@ -47,6 +47,92 @@ import kotlin.time.Instant
 import kotlin.time.Duration.Companion.milliseconds
 
 val historyIndexRendererTest by testSuite {
+    test("keyboard menu Details renders redacted question rows and never their raw fallback") {
+        val secret = StableRequestUserInputToolEvent(
+            "secret",
+            arguments = RequestUserInputArgs(listOf(RequestUserInputQuestion("password", "Password", "Enter password", isSecret = true))),
+            result = StableRequestUserInputResult.Answered(RequestUserInputResponse(mapOf(
+                "password" to RequestUserInputAnswer(listOf("SECRET")),
+            ))),
+        )
+        val vm = RenderIndex(listOf(entry(7, "Question"))).apply {
+            detail = HistoryIndexEntryDetail(HistoryIndexEntryKind.RequestUserInput, "SECRET raw fallback", secret)
+        }
+        var visible by mutableStateOf(false)
+        runMosaicTest {
+            setContentAndSnapshot {
+                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    TuiPopupHost(Modifier.width(60).height(12)) {
+                        val anchor = rememberTuiPopupAnchor()
+                        Text("entry", Modifier.tuiPopupAnchor(anchor))
+                        val request = remember(anchor) {
+                            HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor), null)
+                        }
+                        HistoryIndexContextMenu(if (visible) request else null, { visible = false })
+                    }
+                }
+            }
+            visible = true
+            awaitContaining("Details")
+            sendKeyEvent(KeyboardEvent(codepoint = 9))
+            snapshotNow()
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            val snapshot = awaitContaining("[hidden]")
+            assertTrue("Password: Enter password" in snapshot, snapshot)
+            assertFalse("SECRET" in snapshot, snapshot)
+            assertTrue(vm.scrolled.isEmpty())
+            visible = false
+            awaitIndexCondition { vm.detailHandles.single().state.value == HistoryIndexReadState.Closed }
+            assertEquals(HistoryIndexReadState.Closed, vm.timestampHandles.single().state.value)
+        }
+    }
+
+    test("keyboard Details keeps one exact lease pages read-only text and invalidates with its opening") {
+        val vm = RenderIndex(listOf(entry(7, (0..80).joinToString("\n") { "detail-line-$it" })))
+        var visible by mutableStateOf(false)
+        runMosaicTest {
+            setContentAndSnapshot {
+                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    TuiPopupHost(Modifier.width(50).height(10)) {
+                        val anchor = rememberTuiPopupAnchor()
+                        Text("entry", Modifier.tuiPopupAnchor(anchor))
+                        val request = remember(anchor) {
+                            HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor), null)
+                        }
+                        HistoryIndexContextMenu(if (visible) request else null, { visible = false })
+                    }
+                }
+            }
+            assertTrue(vm.detailHandles.isEmpty())
+            visible = true
+            awaitContaining("Check out", "placed opening")
+            sendKeyEvent(KeyboardEvent(codepoint = 9))
+            snapshotNow()
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            val initial = awaitContaining("Back", "Details activation")
+            assertTrue("detail-line-0" in initial, initial)
+            assertEquals(1, vm.detailHandles.size)
+            assertEquals(1, vm.timestampHandles.size)
+            sendKeyEvent(KeyboardEvent(KeyboardEvent.PageDown))
+            val paged = snapshotNow()
+            assertFalse("detail-line-0" in paged, paged)
+            assertTrue("Back" in paged, paged)
+            sendKeyEvent(KeyboardEvent(KeyboardEvent.PageUp))
+            assertTrue("detail-line-0" in snapshotNow())
+            sendKeyEvent(KeyboardEvent(codepoint = 27))
+            awaitContaining("Check out", "Escape to menu")
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            awaitContaining("Back", "restored Details focus")
+            assertTrue(vm.scrolled.isEmpty(), "Back restores Details focus rather than invoking Check out.")
+            assertEquals(1, vm.detailHandles.size)
+            vm.replaceSameIndex()
+            awaitIndexCondition { !visible && vm.detailHandles.single().state.value == HistoryIndexReadState.Closed }
+            assertFalse("Back" in snapshotNow())
+            assertTrue(vm.scrolled.isEmpty())
+            assertEquals(HistoryIndexReadState.Closed, vm.timestampHandles.single().state.value)
+        }
+    }
+
     for ((name, state, expected) in listOf(
         Triple("loading", HistoryIndexReadState.Loading, "┌● …"),
         Triple("failed", HistoryIndexReadState.Failed, "┌● [error]"),
@@ -94,6 +180,15 @@ val historyIndexRendererTest by testSuite {
         }
         assertTrue(vm.rowHandles.all { it.state.value == HistoryIndexReadState.Closed })
         assertTrue(vm.isActive) // Unmount released borrowed handles, not the shared child.
+    }
+    test("single row preserves its literal summary and single-point graph") {
+        val vm = RenderIndex(listOf(entry(7, "┌● user text")))
+        runMosaicTest {
+            val snapshot = setContentAndSnapshot {
+                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { HistoryIndexSidebarBody(vm, 28, 2) }
+            }
+            assertEquals(listOf("● ┌● user text"), snapshot.lines().map(String::trimEnd).filter(String::isNotEmpty))
+        }
     }
     test("two sidebars acquire independent handles and unmounting one leaves the other alive") {
         val vm = RenderIndex(listOf(entry(2, "Shared")))
@@ -393,17 +488,18 @@ private class RenderIndex(entries: List<HistoryIndexEntry>) : HistoryIndexViewMo
     val detailHandles = mutableListOf<RenderHandle<HistoryIndexEntryDetail>>()
     val timestampHandles = mutableListOf<RenderHandle<Instant?>>()
     var timestampState: HistoryIndexReadState<Instant?> = HistoryIndexReadState.Ready(null)
+    var detail: HistoryIndexEntryDetail? = null
     val scrolled = mutableListOf<Int>()
     override fun contains(generation: Long, index: Int) = isActive && generation == window.value.generation && index in entries
     override suspend fun load(generation: Long, index: Int) = entries.getValue(index)
     override suspend fun loadDetail(generation: Long, index: Int) =
-        entries.getValue(index).let { HistoryIndexEntryDetail(it.kind, it.summary) }
+        detail ?: entries.getValue(index).let { HistoryIndexEntryDetail(it.kind, it.summary) }
     override suspend fun readMessageTimestamp(generation: Long, index: Int): Instant? = null
     override fun acquireRow(generation: Long, index: Int) =
         RenderHandle(generation, index, HistoryIndexReadState.Ready(entries.getValue(index))).also { rowHandles += it }
     override fun acquireDetail(generation: Long, index: Int) =
         RenderHandle(generation, index, HistoryIndexReadState.Ready(
-            entries.getValue(index).let { HistoryIndexEntryDetail(it.kind, it.summary) })).also { detailHandles += it }
+            detail ?: entries.getValue(index).let { HistoryIndexEntryDetail(it.kind, it.summary) })).also { detailHandles += it }
     override fun acquireTimestamp(generation: Long, index: Int) =
         RenderHandle(generation, index, timestampState).also { timestampHandles += it }
     override fun checkOut(generation: Long, index: Int): Boolean {
@@ -430,13 +526,13 @@ private suspend fun TestMosaic<String>.snapshotNow(): String =
         draw().render(AnsiLevel.NONE, supportsKittyUnderlines = false)
     }
 
-private suspend fun TestMosaic<String>.awaitContaining(text: String): String {
+private suspend fun TestMosaic<String>.awaitContaining(text: String, stage: String = text): String {
     var snapshot = ""
     repeat(5) {
         snapshot = snapshotNow()
         if (text in snapshot) return snapshot
     }
-    assertTrue(text in snapshot, snapshot)
+    assertTrue(text in snapshot, "$stage: expected $text\n$snapshot")
     return snapshot
 }
 

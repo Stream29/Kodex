@@ -35,9 +35,15 @@ private fun WorkGroupContent(
             }
             renderer.Frame {
                 renderer.GroupHeading(
-                    group, "${if (current is WorkGroupHistoryItemState.Expanded) "v" else ">"} Take ${group.itemCount} " +
+                    group, "Take ${group.itemCount} " +
                         if (group.itemCount == 1) "action" else "actions",
-                    elapsed, if (current is WorkGroupHistoryItemState.Collapsed) group::expand else group::collapse,
+                    elapsed,
+                    when (current) {
+                        is WorkGroupHistoryItemState.Collapsed -> HistoryDisclosureState.Collapsed
+                        is WorkGroupHistoryItemState.Expanding -> HistoryDisclosureState.Loading
+                        is WorkGroupHistoryItemState.Expanded -> HistoryDisclosureState.Expanded
+                    },
+                    if (current is WorkGroupHistoryItemState.Collapsed) group::expand else group::collapse,
                 )
                 if (current is WorkGroupHistoryItemState.Expanded) {
                     current.children.forEach { HistoryItemContent(it, renderer, shellSessions) }
@@ -59,6 +65,7 @@ private fun StoredContent(
             heading = { text, elapsed -> renderer.ItemHeading(text, elapsed, HistoryTextStyle.Bold) },
             body = { text, supporting -> renderer.Text(text, if (supporting) HistoryTextStyle.Dim else HistoryTextStyle.Normal) },
             turnMarker = { renderer.TurnMarker(it) },
+            assistantBody = { renderer.AssistantText(it) },
         )
         is RequestUserInputHistoryItemViewModel -> {
             val state by item.state.collectAsState()
@@ -89,8 +96,8 @@ private fun StoredContent(
             when (val current = state) {
                 is ToolHistoryItemState.Loading -> renderer.Loading()
                 ToolHistoryItemState.Failed -> renderer.Error()
-                is ToolHistoryItemState.Collapsed -> ToolCollapsed(current.header, item::expand, renderer)
-                is ToolHistoryItemState.Expanding -> ToolCollapsed(current.header, item::collapse, renderer)
+                is ToolHistoryItemState.Collapsed -> ToolCollapsed(current.header, HistoryDisclosureState.Collapsed, item::expand, renderer)
+                is ToolHistoryItemState.Expanding -> ToolCollapsed(current.header, HistoryDisclosureState.Loading, item::collapse, renderer)
                 is ToolHistoryItemState.Expanded -> renderer.Event(current.event, current.header.elapsed, item::collapse, shellSessions)
             }
         }
@@ -100,10 +107,12 @@ private fun StoredContent(
                 is PatchHistoryItemState.Loading -> renderer.Loading()
                 PatchHistoryItemState.Failed -> renderer.Error()
                 is PatchHistoryItemState.Collapsed -> renderer.Collapsed(
-                    current.header.summary(), current.header.status.historyStatus(), current.header.elapsed, item::expand,
+                    current.header.summary(), current.header.status.historyStatus(), current.header.elapsed,
+                    HistoryDisclosureState.Collapsed, item::expand,
                 )
                 is PatchHistoryItemState.Expanding -> renderer.Collapsed(
-                    current.header.summary(), current.header.status.historyStatus(), current.header.elapsed, item::collapse,
+                    current.header.summary(), current.header.status.historyStatus(), current.header.elapsed,
+                    HistoryDisclosureState.Loading, item::collapse,
                 )
                 is PatchHistoryItemState.Expanded -> renderer.Event(current.event, current.header.elapsed, item::collapse, shellSessions)
             }
@@ -113,10 +122,12 @@ private fun StoredContent(
 }
 
 @Composable
-private fun ToolCollapsed(header: ToolHistoryItemHeader, onClick: () -> Unit, renderer: HistoryItemRenderer) {
+private fun ToolCollapsed(
+    header: ToolHistoryItemHeader, disclosure: HistoryDisclosureState, onClick: () -> Unit, renderer: HistoryItemRenderer,
+) {
     when (header) {
-        is ToolHistoryItemHeader.Summary -> renderer.Collapsed(header.summary, header.status, header.elapsed, onClick)
-        is ToolHistoryItemHeader.CommandExecution -> renderer.Collapsed(header.summary(), header.status(), header.elapsed, onClick)
+        is ToolHistoryItemHeader.Summary -> renderer.Collapsed(header.summary, header.status, header.elapsed, disclosure, onClick)
+        is ToolHistoryItemHeader.CommandExecution -> renderer.Collapsed(header.summary(), header.status(), header.elapsed, disclosure, onClick)
     }
 }
 

@@ -53,12 +53,15 @@ val openAiLoginViewModelTest by testSuite {
                     assertIs<OpenAiLoginEffect.OpenExternalUrl>(viewModel.effects.first())
                 }
                 viewModel.onBrowserOpenFailed(first.attemptId)
+                assertEquals(first.url, viewModel.manualAuthorizationUrl(first.attemptId))
+                assertEquals(null, viewModel.manualAuthorizationUrl(first.attemptId + 1))
 
                 assertEquals(
                     OpenAiLoginState.BrowserOpenFailed(first.attemptId),
                     viewModel.state.value,
                 )
                 viewModel.retryBrowser(first.attemptId)
+                assertEquals(null, viewModel.manualAuthorizationUrl(first.attemptId))
 
                 val retry = withTimeout(1_000) {
                     assertIs<OpenAiLoginEffect.OpenExternalUrl>(viewModel.effects.first())
@@ -86,6 +89,10 @@ private class TestLoginAttempt(
     }
 
     override fun cancel() {
+        completion.cancel()
+    }
+
+    override fun release() {
         completion.cancel()
     }
 

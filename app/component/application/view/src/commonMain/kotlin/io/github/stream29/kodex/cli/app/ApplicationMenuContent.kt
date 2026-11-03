@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.*
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
@@ -74,7 +75,8 @@ public actual fun ApplicationTabMenuContent(
     if (!valid) return
     val created = rememberApplicationMenuTimestamp(current) { current.target.readCreatedAt() }
     val updated = rememberApplicationMenuTimestamp(current) { current.target.readUpdatedAt() }
-    val entries = applicationTabMenuEntries(
+    val name = current.target.name.collectAsState().value
+    val entries = listOf(ApplicationMenuEntry.Information("session-name-information", listOf(name))) + applicationTabMenuEntries(
         current.target.sessionIndex, created, updated,
         onRename = { onRename(current) }, onClose = { onClose(current) },
         onCloseAndArchive = { onCloseAndArchive(current) }, onDelete = { onDelete(current) },
@@ -97,20 +99,27 @@ public actual fun ApplicationHistoryMenuContent(
     val state = current.agent.state.collectAsState().value
     val running = current.agent.running.collectAsState().value
     val window = current.agent.history.historyItems.collectAsState().value
+    val message = current.item as? MessageHistoryItemViewModel
+    val messageState = message?.state?.collectAsState()?.value
+    val display = current.displayOption.takeIf {
+        (messageState as? MessageHistoryItemState.Ready)?.event is StableAssistantMessage
+    }
+    val canEdit = state.canEditHistory(running)
     val targetMatches = current.session === selectedSession && current.agent === selectedAgent &&
-        state.canEditHistory(running) && window.size > 0 && current.generation == window.generation &&
+        (canEdit || display != null) && window.size > 0 && current.generation == window.generation &&
         current.agent.history.contains(current.generation, current.storageIndex)
     val placed = renderer.isHistoryPlaced(current.placement)
     LaunchedEffect(current, targetMatches, placed) { if (!targetMatches || !placed) onDismiss(current) }
     if (!targetMatches || !placed) return
-    val message = current.item as? MessageHistoryItemViewModel
-    val messageState = message?.state?.collectAsState()?.value
     val text = messageState.revertAndEditText()
-    val timestamp = rememberApplicationMenuTimestamp(current) { message?.readTimestamp() }
-    val entries = applicationHistoryMenuEntries(
-        message?.index, timestamp, { onRevert(current) }, { onFork(current) },
-        text?.let { value -> { onRevertAndEdit(current, value) } },
-    )
+    val timestamp = if (canEdit) rememberApplicationMenuTimestamp(current) { message?.readTimestamp() } else null
+    val entries = buildList {
+        if (canEdit) addAll(applicationHistoryMenuEntries(
+            message?.index, timestamp, { onRevert(current) }, { onFork(current) },
+            text?.let { value -> { onRevertAndEdit(current, value) } },
+        ))
+        display?.let { add(ApplicationMenuEntry.Action("history-display-mode", it.label, it.onToggle)) }
+    }
     key(current) { renderer.History(current.placement, entries) { onDismiss(current) } }
 }
 

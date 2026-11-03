@@ -27,6 +27,8 @@ public actual fun HistoryStreamingContent(
                 body = { text, supporting ->
                     WrappedHistoryText(text, if (supporting) TextStyle.Dim else TextStyle.Normal)
                 },
+                assistantBody = { renderer.AssistantText(it) },
+                assistantEligibility = { renderer.AssistantStreamEligibility(it) },
             )
             HistoryStreamingKind.ToolCall -> StreamingToolCallTail(events, onContentChange)
             HistoryStreamingKind.Unknown -> StreamingUnknownTail(events, onContentChange)

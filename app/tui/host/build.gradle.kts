@@ -15,7 +15,6 @@ kotlin {
             implementation(libs.kermit.io)
             implementation(project(":utils-os-environment"))
             implementation(project(":app-tui-path-picker"))
-            implementation(project(":hook-notification"))
             implementation(project(":utils-kotlinx-io-coroutines-system"))
         }
         named("mosaicMain").dependencies {

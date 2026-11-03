@@ -1,6 +1,13 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -19,13 +26,95 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.*
 
 val offscreenUserInputTest by testSuite {
+    test("submit action is compact and keeps exact focus and disabled admission") { offscreenTest {
+        val enabled = mutableStateOf(true)
+        var calls = 0
+        val scene = OffscreenScene.create(width = 400, height = 160) {
+            rememberComposeUserInputRenderer().Frame("compact-submit", 0, 1) { controls ->
+                controls.Submit("Go", enabled.value) { calls++ }
+                LaunchedEffect(Unit) { controls.requestFocus(UserInputFocusTarget.Submit) }
+            }
+        }
+        fun submit(): SemanticsNode = scene.nodes().first { node ->
+            node.config.getOrNull(SemanticsProperties.Role) == Role.Button &&
+                node.inputNodes().any { child ->
+                    child.config.getOrNull(SemanticsProperties.Text)?.any { it.text == "Go" } == true
+                }
+        }
+        try {
+            scene.settle { scene.hasText("Go") && submit().config.getOrNull(SemanticsProperties.Focused) == true }
+            assertTrue(submit().boundsInWindow.height in 32f..36f, "Submit should use a compact filled target.")
+            val retained = assertNotNull(submit().config.getOrNull(SemanticsActions.OnClick)?.action)
+            scene.key(Key.Enter)
+            scene.settle { calls == 1 }
+            enabled.value = false
+            scene.settle { SemanticsProperties.Disabled in submit().config }
+            retained()
+            assertEquals(1, calls)
+        } finally { scene.close() }
+    } }
+    test("compact option has radio semantics, full description and less height than the original button") { offscreenTest {
+        val description = "Only this module"
+        val scene = OffscreenScene.create(width = 480) {
+            rememberComposeUserInputRenderer().Frame("density", 0, 1) { controls ->
+                controls.question(0, "density").Option("Compact", description, false, true, false, true) {}
+                OutlinedButton({}, Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth()) { Text("Baseline"); Text(description) }
+                }
+            }
+        }
+        try {
+            scene.settle { scene.hasText("Compact") && scene.hasText("Baseline") }
+            assertFalse(scene.hasText("○ Compact"))
+            val compact = scene.nodes().single { it.config.getOrNull(SemanticsProperties.Role) == Role.RadioButton }
+            val baseline = scene.nodes().first { node ->
+                node.config.getOrNull(SemanticsActions.OnClick) != null &&
+                    node.inputNodes().any { it.config.getOrNull(SemanticsProperties.Text)?.any { t -> t.text == "Baseline" } == true }
+            }
+            assertEquals(false, compact.config.getOrNull(SemanticsProperties.Selected))
+            assertTrue(compact.boundsInRoot.height < baseline.boundsInRoot.height)
+            assertEquals(2, scene.nodes().count { it.config.getOrNull(SemanticsProperties.Text)?.any { t -> t.text == description } == true })
+        } finally { scene.close() }
+    } }
+
+    test("compact option is keyboard actionable and a retained semantics action obeys current disabled") { offscreenTest {
+        val enabled = mutableStateOf(true)
+        val selected = mutableStateOf(false)
+        var calls = 0
+        val scene = OffscreenScene.create {
+            rememberComposeUserInputRenderer().Frame("keyboard", 0, 1) { controls ->
+                controls.question(0, "keyboard").Option("Choose", "Complete description", selected.value, enabled.value, true, true) {
+                    calls++; selected.value = true
+                }
+            }
+        }
+        try {
+            scene.settle { scene.nodes().any { it.config.getOrNull(SemanticsProperties.Focused) == true } }
+            val row = scene.nodes().single { it.config.getOrNull(SemanticsProperties.Role) == Role.RadioButton }
+            val retained = assertNotNull(row.config.getOrNull(SemanticsActions.OnClick)?.action)
+            scene.key(Key.Spacebar)
+            scene.settle { scene.nodes().any {
+                it.config.getOrNull(SemanticsProperties.Role) == Role.RadioButton &&
+                    it.config.getOrNull(SemanticsProperties.Selected) == true
+            } }
+            assertFalse(scene.hasText("● Choose"))
+            assertEquals(1, calls)
+            enabled.value = false
+            scene.settle { scene.nodes().any { SemanticsProperties.Disabled in it.config } }
+            retained()
+            scene.key(Key.Enter)
+            scene.settle { true }
+            assertEquals(1, calls)
+        } finally { scene.close() }
+    } }
+
     test("shared questions select exact answers and focus text then Submit, including same-frame Done") { userInputScene { ports, vm, _ ->
         val targets = mutableListOf<UserInputFocusTarget>()
         val scene = OffscreenScene.create { UserInputHost(vm, targets = targets) }
         try {
-            scene.settle { scene.hasText("○ Current module") && scene.hasDescription("Answer for note") }
+            scene.settle { scene.hasText("Current module") && scene.hasDescription("Answer for note") }
             assertFalse(vm.pendingInput().canSubmit)
-            scene.click("○ Current module")
+            scene.click("Current module")
             scene.settle { vm.pendingInput().answers["scope"] is RequestUserInputDraftAnswer.Option }
             assertEquals(UserInputFocusTarget.FreeForm(1), targets.last())
             scene.settle { scene.hasFocusedInput("") }
@@ -53,9 +142,9 @@ val offscreenUserInputTest by testSuite {
         val targets = mutableListOf<UserInputFocusTarget>()
         val scene = OffscreenScene.create { UserInputHost(vm, targets = targets) }
         try {
-            scene.settle { scene.hasText("○ Other") }
-            scene.click("○ Other")
-            scene.settle { scene.hasDescription("Answer for scope") && scene.hasText("● Other") }
+            scene.settle { scene.hasText("Other") }
+            scene.click("Other")
+            scene.settle { scene.hasDescription("Answer for scope") && scene.hasText("Other") }
             assertEquals(RequestUserInputDraftAnswer.FreeForm(""), vm.pendingInput().answers["scope"])
             assertEquals(UserInputFocusTarget.FreeForm(0), targets.last())
             scene.doneUserAnswer("scope")
@@ -144,8 +233,8 @@ val offscreenUserInputTest by testSuite {
             UserInputHost(vm, renderer)
         }
         try {
-            scene.settle { scene.hasText("○ Current module") }
-            scene.click("○ Current module")
+            scene.settle { scene.hasText("Current module") }
+            scene.click("Current module")
             scene.setUserAnswer("note", "first")
             scene.settle { vm.pendingInput().canSubmit && submit != null }
             val old = assertNotNull(submit)
@@ -168,8 +257,8 @@ val offscreenUserInputTest by testSuite {
             if (visible.value) UserInputHost(vm) else UiText("Unmounted")
         }
         try {
-            scene.settle { scene.hasText("○ Current module") }
-            scene.click("○ Current module")
+            scene.settle { scene.hasText("Current module") }
+            scene.click("Current module")
             scene.setUserAnswer("note", "done")
             scene.settle { vm.pendingInput().canSubmit }
             scene.click("Submit")
@@ -193,8 +282,8 @@ val offscreenUserInputTest by testSuite {
         ports.failure = IllegalStateException("receipt missing")
         val scene = OffscreenScene.create { UserInputHost(vm) }
         try {
-            scene.settle { scene.hasText("○ Current module") }
-            scene.click("○ Current module")
+            scene.settle { scene.hasText("Current module") }
+            scene.click("Current module")
             scene.setUserAnswer("note", "retained")
             scene.settle { vm.pendingInput().canSubmit }
             scene.click("Submit")

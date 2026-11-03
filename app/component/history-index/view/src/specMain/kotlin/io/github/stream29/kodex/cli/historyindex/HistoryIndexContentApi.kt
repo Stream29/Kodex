@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.historyindex
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRowModel
+import io.github.stream29.kodex.cli.history.HistoryPlanModel
 import kotlin.time.Instant
 
 /** Placement only, not Agent identity. */
@@ -29,19 +30,32 @@ public interface HistoryIndexRowInteraction : HistoryIndexInteraction {
     public fun emitMenu()
 }
 
-/** Fresh object identity owns one timestamp read, even when reopening the same row. */
+/** Fresh object identity owns its timestamp and read-only detail leases. */
 public class HistoryIndexMenuOpening(public val interaction: HistoryIndexInteraction)
 
-public data class HistoryIndexRowPresentation(public val value: String, public val failed: Boolean)
+/** Position within the current linear window, not an Agent relationship. */
+public enum class HistoryIndexRowPosition { Single, First, Middle, Last }
+
+public sealed interface HistoryIndexRowValue {
+    public data object Loading : HistoryIndexRowValue
+    public data object Failed : HistoryIndexRowValue
+    public data class Ready(public val summary: String) : HistoryIndexRowValue
+}
+
+public data class HistoryIndexRowPresentation(
+    public val value: HistoryIndexRowValue,
+    public val position: HistoryIndexRowPosition,
+)
 
 /** Question rows are already redacted; raw fallback content is empty when those rows are present. */
 public data class HistoryIndexDetailPresentation(
     public val title: String, public val content: String,
     public val questionRows: List<RequestUserInputHistoryRowModel>?, public val failed: Boolean,
+    public val plan: HistoryPlanModel? = null,
 )
 
 public expect fun historyIndexRowPresentation(
-    state: HistoryIndexReadState<HistoryIndexEntry>, graph: String,
+    state: HistoryIndexReadState<HistoryIndexEntry>, position: HistoryIndexRowPosition,
 ): HistoryIndexRowPresentation?
 
 public expect fun historyIndexDetailPresentation(
@@ -65,9 +79,10 @@ public interface HistoryIndexRenderer {
     @Composable public fun Hover(
         interaction: HistoryIndexInteraction, presentation: HistoryIndexDetailPresentation, onHoverChanged: (Boolean) -> Unit,
     )
-    /** Local formatting/geometry only; a command item dismisses before invoking onCheckOut, like Native. */
+    /** Detail is already redacted; null means loading. A command dismisses before onCheckOut. */
     @Composable public fun Menu(
-        opening: HistoryIndexMenuOpening, timestamp: Instant?, onDismiss: () -> Unit, onCheckOut: () -> Unit,
+        opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
+        onDismiss: () -> Unit, onCheckOut: () -> Unit,
     )
 }
 

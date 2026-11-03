@@ -65,8 +65,10 @@ public interface McpImportHandle {
 
 /**
  * Adapter-owned OAuth attempt, bound to an exact name and exact RPC attempt ID. Listener,
- * redirect, state/PKCE, callback, ten-minute wait and bounded cancellation cleanup remain adapter
- * responsibilities. cancel is idempotent/nonthrowing and NEVER cancels a newer name-bound attempt.
+ * redirect, state/PKCE, callback, ten-minute wait and bounded cleanup remain adapter responsibilities.
+ * release stops local waiting and abandons pending state only; accepted backend commit survives.
+ * Explicit cancel retains its existing semantics. Both are idempotent/nonthrowing and never
+ * affect a newer name-bound attempt.
  */
 public interface McpSettingsLogin {
     public val serverName: String
@@ -77,6 +79,7 @@ public interface McpSettingsLogin {
      * @throws Exception Existing protocol failed; raw detail is not rendered.
      */
     public suspend fun awaitCompletion(): Unit
+    public fun release(): Unit
     public fun cancel(): Unit
 }
 
@@ -196,22 +199,28 @@ public data class McpSettingsState(
     public val dialog: McpSettingsDialog = McpSettingsDialog.Hidden,
     public val operationFailure: Boolean = false,
     public val closed: Boolean = false,
+    /** Invalidates only transient manual authorization projections, not persistent settings. */
+    public val authorizationRevision: Long = 0,
 )
 
 /**
  * Component-local, single-consumer effect. A Settings-lifetime handler (not just the MCP page)
  * opens the URL once. The handler is retained with the exact Settings owner across a temporary
  * Login popup and return; removing a renderer composition alone does not close the operation.
- * Opening failure invokes cancel EXACTLY on this effect's captured operation;
- * a late failure cannot cancel a newer login, even with the same serverName. URL is ephemeral,
- * never logged, persisted or broadcast globally. Opening is not protocol completion.
+ * A failed launcher may display this active attempt's URL for manual opening. Cancellation
+ * releases only this effect's captured operation. URL is ephemeral, never logged, persisted
+ * or broadcast globally. Opening is not protocol completion.
  */
 public sealed interface McpSettingsEffect {
     public class OpenAuthorizationUrl(
         public val serverName: String,
         public val url: String,
         public val cancel: () -> Unit,
-    ) : McpSettingsEffect
+        public val isActive: () -> Boolean,
+        public val onLaunchFailed: () -> Unit,
+    ) : McpSettingsEffect {
+        override fun toString(): String = "OpenAuthorizationUrl(serverName=$serverName, url=<redacted>)"
+    }
 }
 
 /**
@@ -219,7 +228,9 @@ public sealed interface McpSettingsEffect {
  * tokens. Unknown port failures report once via application state, never raw remote text.
  * Synchronous cancellation propagates; asynchronous cancellation terminates work without failure.
  * Hide clears drafts/import only, NOT OAuth. Close/owner termination stops child observations and
- * short-lived login/read/command waits, but NEVER admitted application writes or shared clients.
+ * short-lived login/read/command waits; login disposal uses release, not explicit cancel.
+ * Disposal/cancellation of a local wait does not revoke admitted application writes or accepted
+ * backend exchange/persistence, and never closes shared clients. Explicit cancel remains separate.
  * No automatic read/retry/login/reconnect is performed.
  * Creation receives dependency ports and an explicit owner scope; it creates no backend or
  * service locator and does not take ownership of shared clients.
@@ -227,6 +238,8 @@ public sealed interface McpSettingsEffect {
 public interface McpSettingsViewModel : AutoCloseable {
     public val state: StateFlow<McpSettingsState>
     public val effects: Flow<McpSettingsEffect>
+    /** Current exact owner's transient manual URLs, never settings or persistent data. */
+    public fun manualAuthorizations(): List<McpManualAuthorization>
     /** Capture Add immediately, releasing only a previous unaccepted editor/import.
      * @throws kotlinx.coroutines.CancellationException Dependency capture was cancelled.
      */
@@ -294,4 +307,14 @@ public interface McpSettingsViewModel : AutoCloseable {
     public fun dismissFailure(): Unit
     /** Idempotently release local observations/interactions, never application queue/shared clients. */
     public override fun close(): Unit
+}
+
+/** A live, redacted interaction handle, not a persisted credential or a backend result. */
+public class McpManualAuthorization(
+    public val serverName: String,
+    public val url: String,
+    public val isActive: () -> Boolean,
+    public val cancel: () -> Unit,
+) {
+    override fun toString(): String = "McpManualAuthorization(serverName=$serverName, url=<redacted>)"
 }

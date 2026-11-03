@@ -40,7 +40,9 @@ public actual fun AgentHistoryContent(
     renderer.List(model, window, follows, effect, prefix, latestKey) { list ->
         streaming?.let { output ->
             list.Row(output.historyIdentity(), output.historyContentType()) {
-                HistoryStreamingContent(output, renderer) { renderer.streamingContentChanged(model) }
+                renderer.StreamingItem(model, window.generation, output) {
+                    HistoryStreamingContent(output, renderer) { renderer.streamingContentChanged(model) }
+                }
             }
         }
         pending.forEachIndexed { position, event ->
@@ -95,7 +97,7 @@ private fun UnstableCleanEvent.historyIdentity(position: Int): String = when (th
 
 private fun HistoryStreamingItem.historyIdentity(): Any = when (this) {
     HistoryStreamingItem.Started -> StreamingStartedHistoryKey
-    is HistoryStreamingItem.Output -> events
+    is HistoryStreamingItem.Output -> StreamingHistoryKey(events)
     HistoryStreamingItem.Compacting -> CompactingHistoryKey
 }
 
@@ -109,6 +111,10 @@ private fun HistoryStreamingItem.historyContentType(): HistoryContentType = when
 }
 
 private data class PendingHistoryKey(val generation: Long, val identity: String)
+private class StreamingHistoryKey(private val events: Any) {
+    override fun equals(other: Any?): Boolean = other is StreamingHistoryKey && other.events === events
+    override fun hashCode(): Int = 0
+}
 private data class HistoryMarkerKey(val generation: Long, val marker: HistoryMarker)
 private data object OlderHistoryDemandKey
 private data object OlderHistoryLoadingKey

@@ -36,18 +36,21 @@ internal class MosaicHistoryItemRenderer(
         ) { _, _, _ -> content() }
     }
     @Composable override fun GroupHeading(
-        group: WorkGroupHistoryItemViewModel, value: String, elapsed: Duration, onClick: () -> Unit,
+        group: WorkGroupHistoryItemViewModel, value: String, elapsed: Duration,
+        disclosure: HistoryDisclosureState, onClick: () -> Unit,
     ) {
         TuiPressable(
             onClick, Modifier.fillMaxWidth(), focusRequester = focusRequester.takeIf { group === rootItem },
         ) { _, hovered, pressed ->
             HistoryItemHeader(
-                value, elapsed, Modifier.fillMaxWidth(),
+                "${if (disclosure == HistoryDisclosureState.Expanded) "v" else ">"} $value", elapsed, Modifier.fillMaxWidth(),
                 textStyle = tuiInteractionTextStyle(hovered = hovered, pressed = pressed),
             )
         }
     }
-    @Composable override fun Collapsed(summary: String, status: String, elapsed: Duration, onClick: () -> Unit) {
+    @Composable override fun Collapsed(
+        summary: String, status: String, elapsed: Duration, disclosure: HistoryDisclosureState, onClick: () -> Unit,
+    ) {
         CollapsedToolHistoryRow(summary, status, elapsed, onClick)
     }
     @Composable override fun Event(

@@ -66,7 +66,13 @@ val offscreenLoginTest by testSuite {
                 assertEquals(listOf("https://example.invalid/transient"), launched)
                 assertEquals(listOf(7L to accepted), child.reports)
                 assertFalse(scene.hasText("Sign-in complete"))
-                assertFalse(scene.hasText("https://example.invalid/transient"))
+                if (accepted) assertFalse(scene.hasText("https://example.invalid/transient"))
+                else {
+                    child.state.value = OpenAiLoginState.BrowserOpenFailed(7)
+                    scene.settle { scene.hasText("https://example.invalid/transient") }
+                    child.state.value = OpenAiLoginState.Completed
+                    scene.settle { !scene.hasText("https://example.invalid/transient") }
+                }
             } finally { scene.close() }
             assertTrue(child.closed)
         } }
@@ -86,6 +92,8 @@ internal class LoginRenderChild(initial: OpenAiLoginState) : OpenAiLoginViewMode
     override fun retryBrowser(attemptId: Long) { retries += attemptId }
     override fun cancel() { cancellations++ }
     override fun isActive(attemptId: Long): Boolean = !closed && attemptId == 7L
+    override fun manualAuthorizationUrl(attemptId: Long): String? =
+        if (isActive(attemptId) && state.value is OpenAiLoginState.BrowserOpenFailed) "https://example.invalid/transient" else null
     override fun onBrowserOpened(attemptId: Long) { reports += attemptId to true }
     override fun onBrowserOpenFailed(attemptId: Long) { reports += attemptId to false }
     override fun close() { closed = true; output.close() }

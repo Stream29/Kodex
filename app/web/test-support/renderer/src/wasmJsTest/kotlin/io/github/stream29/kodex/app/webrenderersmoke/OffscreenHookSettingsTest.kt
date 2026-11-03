@@ -1,12 +1,27 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.AnnotatedString
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.hooksettings.*
 import io.github.stream29.kodex.app.ui.compose.rememberComposeHookDialogRenderer
+import io.github.stream29.kodex.app.ui.UiText
+import io.github.stream29.kodex.app.ui.UiTextRole
 import io.github.stream29.kodex.cli.settings.*
 import io.github.stream29.kodex.rpc.models.NotificationHook
 import io.github.stream29.kodex.rpc.models.NotificationHookType
@@ -15,6 +30,88 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.*
 
 val offscreenHookSettingsTest by testSuite {
+    test("Hook editor frame is strictly shorter than the original with all supported choices") { hookScene { _, child ->
+        child.add()
+        val editor = assertIs<HookSettingsDialog.Editing>(child.state.value.dialog)
+        val compact = OffscreenScene.create(width = 1024, height = 900) {
+            HookSettingsDialogHost(child, rememberComposeHookDialogRenderer())
+        }
+        val compactHeight = try {
+            compact.settle { compact.hasText("Name") }
+            compact.hookPaneHeight("Add Hook")
+        } finally { compact.close() }
+        val baseline = OffscreenScene.create(width = 1024, height = 900) {
+            HookEditorContent(editor, NotificationHookType.entries.toSet(), {}, {}, {}) { title, dismiss, body ->
+                Dialog(dismiss) {
+                    Surface(
+                        Modifier.semantics { paneTitle = "Original Hook frame" },
+                        shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Column(
+                            Modifier.widthIn(max = 720.dp).heightIn(max = 640.dp).verticalScroll(rememberScrollState()).padding(24.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                        ) { UiText(title, UiTextRole.Title); body() }
+                    }
+                }
+            }
+        }
+        try {
+            baseline.settle { baseline.hasText("Name") }
+            assertTrue(compactHeight < baseline.hookPaneHeight("Original Hook frame"))
+        } finally { baseline.close() }
+        assertSame(editor.token, assertIs<HookSettingsDialog.Editing>(child.state.value.dialog).token)
+    } }
+
+    for ((width, height) in listOf(1024 to 768, 360 to 640, 320 to 240)) {
+        for (fontScale in listOf(1f, 1.5f)) {
+            test("Hook form keeps exact rejected draft and scrollable actions ${width}x$height font=$fontScale") { hookScene { ports, child ->
+                child.add()
+                val token = assertIs<HookSettingsDialog.Editing>(child.state.value.dialog).token
+                val rejection = "Synthetic Hook queue rejection with a complete explanation. ".repeat(12)
+                ports.admission = HookWriteAdmission.Rejected(rejection)
+                val scene = OffscreenScene.create(width = width, height = height) {
+                    CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
+                        HookSettingsDialogHost(child, rememberComposeHookDialogRenderer())
+                    }
+                }
+                try {
+                    scene.settle { scene.hasText("Add Hook") && scene.hasText("Name") }
+                    assertTrue(scene.nodes().any {
+                        it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Name") == true &&
+                            it.config.getOrNull(SemanticsProperties.Focused) == true
+                    }, "The original editor focus remains on Name.")
+                    scene.editHookField(0, "synthetic-hook")
+                    scene.editHookField(1, "echo fixture-only")
+                    scene.showHookText("Save")
+                    scene.click("Save")
+                    scene.settle { scene.hasText(rejection) }
+                    val rejected = assertIs<HookSettingsDialog.Editing>(child.state.value.dialog)
+                    assertSame(token, rejected.token)
+                    assertEquals("synthetic-hook", rejected.draft.name)
+                    assertEquals("echo fixture-only", rejected.draft.command)
+                    assertTrue(ports.saved.isEmpty())
+                    scene.showHookText("Cancel")
+                    assertTrue(scene.text("Cancel").boundsInWindow.bottom <= height)
+                    scene.click("Cancel")
+                    scene.settle { child.state.value.dialog == HookSettingsDialog.Hidden }
+                    assertEquals(1, ports.releases)
+                    val longName = "完整 Hook target ".repeat(25)
+                    ports.hooks.value = listOf(NotificationHook(longName, NotificationHookType.entries.toSet(), "private-command"))
+                    scene.settle { child.state.value.hooks.single().name == longName }
+                    child.details(longName)
+                    scene.settle { scene.hasText(longName) }
+                    assertTrue(scene.hookPaneHeight(longName) <= height)
+                    assertFalse(scene.hasText("private-command"), "Details keeps the original command-disclosure boundary.")
+                    scene.showHookText("Close")
+                    assertTrue(scene.text("Close").boundsInWindow.bottom <= height)
+                    scene.click("Close")
+                    scene.settle { child.state.value.dialog == HookSettingsDialog.Hidden }
+                    scene.frame()
+                } finally { scene.close() }
+            } }
+        }
+    }
+
     test("shared Hook details hide commands and same-frame edits preserve latest draft fields") { hookScene { ports, child ->
         val scene = OffscreenScene.create {
             HookSettingsPage(child)
@@ -125,6 +222,23 @@ private fun OffscreenScene.editHookField(index: Int, text: String) {
     val edits = nodes().mapNotNull { it.config.getOrNull(SemanticsActions.SetText)?.action }
     assertEquals(2, edits.size)
     assertTrue(edits[index](AnnotatedString(text)))
+}
+
+private fun OffscreenScene.hookPaneHeight(title: String): Float = nodes().single {
+    it.config.getOrNull(SemanticsProperties.PaneTitle) == title
+}.boundsInRoot.height
+
+private suspend fun OffscreenScene.showHookText(label: String) {
+    fun visible() = hasText(label) && text(label).boundsInWindow.height > 0 && text(label).boundsInWindow.width > 0
+    if (visible()) return
+    for (scroll in nodes().mapNotNull { it.config.getOrNull(SemanticsActions.ScrollBy)?.action }) {
+        for (delta in listOf(-10_000f, 10_000f)) {
+            scroll(0f, delta)
+            settle { true }
+            if (visible()) return
+        }
+    }
+    error("Hook dialog control is not visible: $label")
 }
 
 private suspend fun hookScene(

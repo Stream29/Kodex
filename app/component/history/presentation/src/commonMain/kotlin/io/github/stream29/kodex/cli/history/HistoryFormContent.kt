@@ -89,8 +89,9 @@ private fun RequestUserInputAnswer.readOnlyRows(
                     ?.let { description ->
                         add(
                             RequestUserInputHistoryRowModel(
-                                value = "  $description",
+                                value = description,
                                 role = RequestUserInputHistoryRowRole.Supporting,
+                                kind = HistoryFormValueKind.OptionDescription,
                             ),
                         )
                     }
@@ -101,17 +102,19 @@ private fun RequestUserInputAnswer.readOnlyRows(
 
 internal fun selectedOptionRow(label: String): RequestUserInputHistoryRowModel =
     RequestUserInputHistoryRowModel(
-        value = "[● $label]",
+        value = label,
         role = RequestUserInputHistoryRowRole.Body,
+        kind = HistoryFormValueKind.SelectedOption,
     )
 
 internal fun freeFormRows(value: String): List<RequestUserInputHistoryRowModel> =
-    value.lines().mapIndexed { index, line ->
+    listOf(
         RequestUserInputHistoryRowModel(
-            value = "${if (index == 0) "  > " else "    "}$line",
+            value = value,
             role = RequestUserInputHistoryRowRole.Body,
-        )
-    }
+            kind = HistoryFormValueKind.FreeText,
+        ),
+    )
 
 internal fun Duration?.historySuffix(): String =
     this?.let { duration -> " +${duration.roundToMilliseconds()}" }.orEmpty()

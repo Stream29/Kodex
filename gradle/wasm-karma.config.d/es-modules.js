@@ -1,5 +1,18 @@
+const fs = require("fs");
 const moduleFramework = "kodex-wasm-es-modules";
 config.failOnEmptyTestSuite = true;
+if (fs.existsSync(config.basePath + "/kotlin/composeResources")) {
+    config.files.push({
+        pattern: config.basePath + "/kotlin/composeResources/**/*",
+        watched: false,
+        included: false,
+        served: true,
+    });
+    config.proxies = {
+        ...config.proxies,
+        "/composeResources/": "/base/kotlin/composeResources/",
+    };
+}
 function loadWebpackAsModules(configuration) {
     const controller = configuration.__karmaWebpackController;
     controller.webpackOptions.output.publicPath = `/absolute${controller.outputPath}/`;

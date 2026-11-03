@@ -308,7 +308,8 @@ val mcpSettingsComponentTest by testSuite {
                 opening.complete(Unit)
                 yield()
                 awaitMcpSnapshot("MCP servers [Add]")
-                assertEquals(1, deps.logins.first().cancellations)
+                assertEquals(1, deps.logins.first().releases)
+                assertEquals(0, deps.logins.first().cancellations)
                 assertEquals(0, deps.logins.last().cancellations)
             }
         }
@@ -398,8 +399,10 @@ private class McpRenderPorts : McpSettingsDependencies {
         override val authorizationUrl = "https://login/authorize"
         val completion = CompletableDeferred<Unit>()
         var cancellations = 0
+        var releases = 0
         override suspend fun awaitCompletion() { completion.await() }
         override fun cancel() { cancellations++ }
+        override fun release() { releases++ }
     }
     override suspend fun reconnect(serverName: String) = Unit
     override suspend fun logout(serverName: String) = Unit

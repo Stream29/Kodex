@@ -16,6 +16,19 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 val suggestSubagentTaskHistoryViewTest by testSuite {
+    test("terminal decoration keeps raw multiline values and original prefixes") {
+        val row = RequestUserInputHistoryRowModel(
+            " leading\n\n  tail\n", RequestUserInputHistoryRowRole.Body, HistoryFormValueKind.FreeText,
+        )
+        assertEquals("  >  leading\n    \n      tail\n    ", formatHistoryFormRowForTerminal(row))
+        assertEquals("[● [● literal]]", formatHistoryFormRowForTerminal(
+            RequestUserInputHistoryRowModel("[● literal]", RequestUserInputHistoryRowRole.Body, HistoryFormValueKind.SelectedOption),
+        ))
+        assertEquals("   detail", formatHistoryFormRowForTerminal(
+            RequestUserInputHistoryRowModel(" detail", RequestUserInputHistoryRowRole.Supporting, HistoryFormValueKind.OptionDescription),
+        ))
+    }
+
     test("acceptedShowsBoldNamesThenUrisThenFullPrompts") {
         val event = event(StableSuggestSubagentTaskResult.Completed(
             SuggestSubagentTaskResponse.Accepted(null, listOf(
@@ -26,7 +39,7 @@ val suggestSubagentTaskHistoryViewTest by testSuite {
         val rows = event.suggestSubagentTaskHistoryRows()
         assertEquals(listOf(
             "Suggested Sessions", "Worker", "file:///tmp/1", "Inspect all tests.",
-            "Worker", "file:///tmp/2", "Review the full implementation.", "[● Accept]",
+            "Worker", "file:///tmp/2", "Review the full implementation.", "Accept",
         ), rows.map { it.value })
         assertEquals(RequestUserInputHistoryRowRole.Header, rows[1].role)
         assertEquals(RequestUserInputHistoryRowRole.Body, rows[3].role)
@@ -46,9 +59,9 @@ val suggestSubagentTaskHistoryViewTest by testSuite {
             val rows = event(StableSuggestSubagentTaskResult.Completed(
                 SuggestSubagentTaskResponse.Rejected(feedback),
             )).suggestSubagentTaskHistoryRows()
-            assertEquals(if (feedback == null) "[● Reject]" else "    Use tests only", rows.last().value)
+            assertEquals(if (feedback == null) "Reject" else "Narrow scope\nUse tests only", rows.last().value)
             assertFalse(rows.any { it.value.startsWith("file:") })
-            if (feedback != null) assertTrue(rows.any { it.value == "  > Narrow scope" })
+            if (feedback != null) assertEquals(HistoryFormValueKind.FreeText, rows.last().kind)
         }
         val rows = event(StableSuggestSubagentTaskResult.Failure("Stopped by hook")).suggestSubagentTaskHistoryRows()
         assertEquals("Failed to submit: Stopped by hook", rows.last().value)

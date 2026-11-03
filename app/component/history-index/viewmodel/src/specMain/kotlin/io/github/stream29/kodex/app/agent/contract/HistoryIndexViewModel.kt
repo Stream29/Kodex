@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.agent.contract
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
 import kotlinx.coroutines.CoroutineScope
@@ -51,11 +52,13 @@ public data class HistoryIndexEntry(
  * content uses placeholders, and secret answers are hidden. Suggest-subagents remains a simple
  * label; plan detail includes explanation and every step. [requestUserInput] is the original
  * stable event for the shared pure visual projection: that renderer must also hide secret answers.
+ * [plan] carries typed plan data without requiring a renderer to parse terminal decoration.
  */
 public data class HistoryIndexEntryDetail(
     public val kind: HistoryIndexEntryKind,
     public val content: String,
     public val requestUserInput: StableRequestUserInputToolEvent? = null,
+    public val plan: StablePlanUpdate? = null,
 )
 
 /**

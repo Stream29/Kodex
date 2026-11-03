@@ -1,14 +1,20 @@
 package io.github.stream29.kodex.app.ui.compose
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.app.ui.*
 import io.github.stream29.kodex.cli.agent.*
@@ -70,7 +76,22 @@ private class ComposeUserInputScope(private val focus: ComposeUserInputFocus) : 
     override fun Failure(message: String) { UiText(message, UiTextRole.Error) }
     @Composable
     override fun Submit(label: String, enabled: Boolean, onClick: () -> Unit) {
-        Button(onClick, Modifier.focusRequester(focus.submit), enabled = enabled) { Text(label) }
+        CompactSubmitAction(label, enabled, Modifier.focusRequester(focus.submit), onClick)
+    }
+}
+
+@Composable
+internal fun CompactSubmitAction(label: String, enabled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val admitted by rememberUpdatedState(enabled)
+    val invoke by rememberUpdatedState(onClick)
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
+        Button(
+            onClick = { if (admitted) invoke() },
+            modifier = modifier.defaultMinSize(minWidth = 32.dp, minHeight = 32.dp),
+            enabled = enabled,
+            shape = RoundedCornerShape(4.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        ) { Text(label) }
     }
 }
 
@@ -84,22 +105,15 @@ private class ComposeUserInputQuestion(
         label: String, description: String, selected: Boolean, enabled: Boolean,
         autoFocus: Boolean, first: Boolean, onClick: () -> Unit,
     ) {
-        OutlinedButton(
-            onClick, Modifier.fillMaxWidth().then(if (first) Modifier.focusRequester(optionFocus) else Modifier),
-            enabled = enabled,
-        ) {
-            Column(Modifier.fillMaxWidth()) {
-                Text("${if (selected) "●" else "○"} $label")
-                Text(description)
-            }
-        }
+        UserInputChoiceRow(label, description, selected, enabled, onClick,
+            if (first) Modifier.focusRequester(optionFocus) else Modifier)
         LaunchedEffect(autoFocus, enabled) {
             if (autoFocus && enabled) { withFrameNanos { }; optionFocus.tryRequest() }
         }
     }
     @Composable
     override fun Other(selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
-        OutlinedButton(onClick, enabled = enabled) { Text("${if (selected) "●" else "○"} Other") }
+        UserInputChoiceRow("Other", "", selected, enabled, onClick)
     }
     @Composable
     override fun FreeForm(
@@ -108,6 +122,38 @@ private class ComposeUserInputQuestion(
         WithUiEditorFocus(freeFormFocus) {
             UiTextInput(text, { onChange(it) }, label = "Answer for $questionId", enabled = enabled,
                 autoFocus = autoFocus, onSubmit = onSubmitted)
+        }
+    }
+}
+
+@Composable
+private fun UserInputChoiceRow(
+    label: String, description: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val admitted by rememberUpdatedState(enabled)
+    val invoke by rememberUpdatedState(onClick)
+    Surface(
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f),
+        shape = RoundedCornerShape(4.dp),
+    ) {
+        Row(
+            modifier.fillMaxWidth().heightIn(min = 32.dp)
+                .selectable(selected, enabled = enabled, role = Role.RadioButton, onClick = { if (admitted) invoke() })
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val indicator = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f)
+            Canvas(Modifier.size(16.dp)) {
+                drawCircle(indicator, radius = (size.minDimension - 2.dp.toPx()) / 2, style = Stroke(2.dp.toPx()))
+                if (selected) drawCircle(indicator, radius = size.minDimension / 4)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(label, style = MaterialTheme.typography.bodyMedium)
+                if (description.isNotEmpty()) Text(description, style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }

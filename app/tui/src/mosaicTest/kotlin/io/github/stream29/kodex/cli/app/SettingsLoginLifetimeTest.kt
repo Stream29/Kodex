@@ -31,6 +31,7 @@ import io.github.stream29.kodex.mcp.contract.*
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
@@ -50,16 +51,37 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
             }
             runSettingsRootTest {
                 state.size.value = Terminal.Size(120, 40)
-                setContentAndSnapshot { SessionTreeCliScreen(app.viewModel, app.newLineKey, sidebar) }
-                awaitRootCondition { observedWidth.value != null }
-                assertEquals(120, observedWidth.value)
-                awaitRootText("-".repeat(120))
-                for (width in listOf(32, 120)) {
-                    observedWidth.value = null
-                    state.size.value = Terminal.Size(width, 40)
-                    awaitRootCondition { observedWidth.value != null }
+                setContentAndSnapshot {
+                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                        SessionTreeCliScreen(app.viewModel, app.newLineKey, sidebar)
+                    }
+                }
+                for ((index, width) in listOf(120, 32, 120).withIndex()) {
+                    if (index > 0) {
+                        observedWidth.value = null
+                        state.size.value = Terminal.Size(width, 40)
+                    }
+                    awaitRootCondition { observedWidth.value == width }
                     assertEquals(width, observedWidth.value)
-                    awaitRootText("-".repeat(width))
+                    val groupWidth = minOf(width, 80)
+                    val groupLeft = (width - groupWidth) / 2
+                    val settingsColumn = groupLeft + groupWidth - 1 - "[Settings]".length
+                    val snapshot = awaitRootGeometry(width, groupLeft, settingsColumn)
+                    val lines = snapshot.lines()
+                    val topBar = lines.first()
+                    assertEquals(width, topBar.terminalCellWidth(), snapshot)
+                    assertEquals(width - 3, topBar.indexOf("[+]"), snapshot)
+                    assertEquals(
+                        groupLeft,
+                        lines.first { "Start a new session" in it }.indexOf("Start a new session"),
+                        snapshot,
+                    )
+                    assertEquals(
+                        settingsColumn,
+                        lines.first { "[Settings]" in it }.indexOf("[Settings]"),
+                        snapshot,
+                    )
+                    assertTrue(lines.all { it.terminalCellWidth() <= width }, snapshot)
                 }
             }
         }
@@ -109,9 +131,18 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
                 }
                 }
                 val cwdLabel = io.github.stream29.kodex.cli.components.workingDirectoryStatusLabel(
-                    singleton.settings.value.cwd, 119,
+                    singleton.settings.value.cwd, 80,
                 )
-                clickText(awaitRootText(cwdLabel), cwdLabel)
+                val cwdButton = "[$cwdLabel]"
+                val draftSnapshot = awaitRootText(cwdButton)
+                val cwdLine = draftSnapshot.lines().single { cwdButton in it }
+                val cwdStart = cwdLine.indexOf(cwdButton)
+                assertTrue(cwdStart >= 20, draftSnapshot)
+                assertTrue(
+                    cwdLine.substring(0, cwdStart + cwdButton.length).terminalCellWidth() <= 99,
+                    draftSnapshot,
+                )
+                clickText(draftSnapshot, cwdButton)
                 val picker = assertIs<ApplicationPopupState.WorkingDirectory>(
                     app.viewModel.popup.first { it is ApplicationPopupState.WorkingDirectory },
                 )
@@ -333,14 +364,14 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
                         assertEquals(0, ports.logins.single().cancellations)
                         assertEquals(1, calls.size)
                         ports.logins.single().completion.complete(Unit)
-                        withTimeout(2_000) { ports.logins.single().cancelled.await() }
+                        withTimeout(2_000) { ports.logins.single().released.await() }
                     }
                 }
             }
         }
     }
 
-    test("real root late opener failure cancels only captured attempt after Login return") {
+    test("real root late opener failure releases only captured attempt after Login return") {
         withSettingsApplication { app ->
             runSettingsRootTest {
                 state.size.value = Terminal.Size(120, 40)
@@ -372,7 +403,7 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
                     clickText(awaitRootText("[Sign in]"), "[Sign in]")
                     awaitRootText("Sign in to OpenAI")
                     ports.logins.first().completion.complete(Unit)
-                    withTimeout(2_000) { ports.logins.first().cancelled.await() }
+                    withTimeout(2_000) { ports.logins.first().released.await() }
                     sendKeyEvent(KeyboardEvent(codepoint = 27))
                     awaitRootText("[Sign in]")
                     root.owner.viewModel.selectPage(SettingsPage.Mcp)
@@ -382,7 +413,8 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
                     opening.complete(Unit)
                     withTimeout(2_000) { secondOpened.await() }
                     assertEquals(2, calls)
-                    assertEquals(1, ports.logins.first().cancellations)
+                    assertEquals(1, ports.logins.first().releases)
+                    assertEquals(0, ports.logins.first().cancellations)
                     assertEquals(0, ports.logins.last().cancellations)
                     assertFalse(mcp.state.value.operationFailure)
                 }
@@ -390,7 +422,7 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
         }
     }
 
-    test("root renderer removal cancels its exact effect but Login transition retains Settings owner") {
+    test("root renderer removal releases its exact effect but Login transition retains Settings owner") {
         withSettingsApplication { app ->
             runSettingsRootTest {
                 state.size.value = Terminal.Size(120, 40)
@@ -414,10 +446,11 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
                     visible = false
                     awaitRootText("root renderer removed")
                     assertFalse(mcp.state.value.closed)
-                    // Whole-renderer removal keeps the baseline effect teardown contract.
+                    // Whole-renderer removal releases the effect without explicit backend cancel.
                     // It is distinct from Settings -> Login, which keeps the same root mount.
-                    withTimeout(2_000) { ports.logins.single().cancelled.await() }
-                    assertEquals(1, ports.logins.single().cancellations)
+                    withTimeout(2_000) { ports.logins.single().released.await() }
+                    assertEquals(1, ports.logins.single().releases)
+                    assertEquals(0, ports.logins.single().cancellations)
                     visible = true
                     clickText(awaitRootText("[Log in]"), "[Log in]")
                     withTimeout(2_000) { ports.secondPrepared.await() }
@@ -427,8 +460,9 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
                     assertSame(root.owner, assertIs<ApplicationPopupState.Login>(root.popup.value).returnTo)
                     assertTrue(root.closeTab(requireNotNull(root.owner.target)))
                     withTimeout(2_000) { mcp.state.first { it.closed } }
-                    withTimeout(2_000) { ports.logins.last().cancelled.await() }
-                    assertEquals(listOf(1, 1), ports.logins.map { it.cancellations })
+                    withTimeout(2_000) { ports.logins.last().released.await() }
+                    assertEquals(listOf(1, 1), ports.logins.map { it.releases })
+                    assertEquals(listOf(0, 0), ports.logins.map { it.cancellations })
                     assertEquals(ApplicationPopupState.Closed, app.viewModel.popup.value)
                 }
             }
@@ -544,9 +578,12 @@ private class RootMcpPorts : McpSettingsDependencies {
         override val authorizationUrl = "https://example.invalid/ephemeral-authorization"
         val completion = CompletableDeferred<Unit>()
         val cancelled = CompletableDeferred<Unit>()
+        val released = CompletableDeferred<Unit>()
         var cancellations = 0
+        var releases = 0
         override suspend fun awaitCompletion() { completion.await() }
         override fun cancel() { cancellations++; cancelled.complete(Unit) }
+        override fun release() { releases++; released.complete(Unit) }
     }
     override fun captureEditor(serverName: String?): McpEditHandle? = error("No editor expected")
     override fun captureServer(serverName: String): McpServerHandle? = error("No mutation expected")
@@ -588,6 +625,27 @@ private suspend fun TestMosaic<String>.awaitRootText(expected: String): String {
     }
     assertTrue(expected in snapshot, "Expected '$expected':\n$snapshot")
     return snapshot
+}
+
+private suspend fun TestMosaic<String>.awaitRootGeometry(
+    width: Int,
+    groupLeft: Int,
+    settingsColumn: Int,
+): String {
+    var snapshot = ""
+    repeat(8) {
+        snapshot = try { awaitSnapshot() } catch (_: TimeoutCancellationException) {
+            draw().render(AnsiLevel.NONE, supportsKittyUnderlines = false)
+        }
+        assertFalse("ephemeral-authorization" in snapshot, snapshot)
+        val lines = snapshot.lines()
+        if (
+            lines.firstOrNull()?.indexOf("[+]") == width - 3 &&
+            lines.any { it.indexOf("Start a new session") == groupLeft } &&
+            lines.any { it.indexOf("[Settings]") == settingsColumn }
+        ) return snapshot
+    }
+    fail("Expected root width $width, group left $groupLeft, Settings column $settingsColumn:\n$snapshot")
 }
 
 private val settingsRootDispatcher = Dispatchers.Default.limitedParallelism(1)

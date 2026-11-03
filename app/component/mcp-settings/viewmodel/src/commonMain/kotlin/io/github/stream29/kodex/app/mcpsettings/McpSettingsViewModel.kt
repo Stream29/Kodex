@@ -40,7 +40,7 @@ private class DefaultMcpSettingsViewModel(
     private var deletion: McpServerHandle? = null
     private var imported: McpImportHandle? = null
     private var importRead: Job? = null
-    private val logins = mutableMapOf<String, Job>()
+    private val logins = mutableMapOf<String, LoginWork>()
 
     init {
         scope.launch {
@@ -162,16 +162,36 @@ private class DefaultMcpSettingsViewModel(
     override fun login(token: McpDialogToken) {
         val name = detail(token)?.serverName ?: return
         if (logins[name] != null) return
-        lateinit var work: Job
-        work = scope.launch(start = CoroutineStart.LAZY) {
+        val login = LoginWork()
+        val work = scope.launch(start = CoroutineStart.LAZY) {
             var attempt: McpSettingsLogin? = null
             try {
                 attempt = dependencies.startLogin(name, scope) ?: return@launch
+                login.attempt = attempt
+                if (login.explicitlyCancelled) {
+                    attempt.cancel()
+                    return@launch
+                }
                 if (!active) return@launch
                 effectChannel.send(McpSettingsEffect.OpenAuthorizationUrl(
                     name, attempt.authorizationUrl,
-                    // Captured job, NOT lookup by name: late browser failure cancels only this work.
-                    cancel = { work.cancel() },
+                    // Host effect disposal/failure is release, not an explicit user cancel.
+                    cancel = { login.work.cancel() },
+                    isActive = { active && logins[name] === login && login.work.isActive },
+                    onLaunchFailed = {
+                        if (active && logins[name] === login && login.work.isActive) {
+                            login.manual = McpManualAuthorization(
+                                name, attempt.authorizationUrl,
+                                isActive = { active && logins[name] === login && login.work.isActive },
+                                cancel = {
+                                    if (active && logins[name] === login && login.work.isActive) {
+                                        login.cancelExplicitly()
+                                    }
+                                },
+                            )
+                            bumpAuthorizationRevision()
+                        }
+                    },
                 ))
                 attempt.awaitCompletion()
             } catch (cancelled: CancellationException) {
@@ -179,15 +199,26 @@ private class DefaultMcpSettingsViewModel(
             } catch (failure: Throwable) {
                 dependencies.reportFailure(failure)
             } finally {
-                attempt?.cancel()
+                if (login.manual != null) {
+                    login.manual = null
+                    bumpAuthorizationRevision()
+                }
+                attempt?.release()
             }
         }
-        logins[name] = work
-        work.invokeOnCompletion { if (logins[name] === work) logins.remove(name) }
+        login.work = work
+        logins[name] = login
+        work.invokeOnCompletion { if (logins[name] === login) logins.remove(name) }
         work.start()
     }
     override fun cancelLogin(token: McpDialogToken) {
-        detail(token)?.let { logins[it.serverName]?.cancel() }
+        detail(token)?.let { logins[it.serverName]?.cancelExplicitly() }
+    }
+    override fun manualAuthorizations(): List<McpManualAuthorization> =
+        if (active) logins.values.mapNotNull { it.manual } else emptyList()
+
+    private fun bumpAuthorizationRevision() {
+        mutable.value = mutable.value.copy(authorizationRevision = mutable.value.authorizationRevision + 1)
     }
     override fun importCodex() {
         if (!active) return
@@ -303,6 +334,20 @@ private class DefaultMcpSettingsViewModel(
         mutable.value = mutable.value.copy(closed = true)
         effectChannel.close()
         owner.cancel()
+    }
+}
+
+private class LoginWork {
+    lateinit var work: Job
+    var attempt: McpSettingsLogin? = null
+    var explicitlyCancelled = false
+    var manual: McpManualAuthorization? = null
+
+    fun cancelExplicitly() {
+        if (explicitlyCancelled) return
+        explicitlyCancelled = true
+        attempt?.cancel()
+        work.cancel()
     }
 }
 

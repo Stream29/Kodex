@@ -7,6 +7,8 @@ import androidx.compose.ui.text.AnnotatedString
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
+import io.github.stream29.kodex.agentcontext.contract.ContextPathComparison
+import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
 import io.github.stream29.kodex.app.contextsourcesettings.*
 import io.github.stream29.kodex.app.settings.contract.BuiltInContextSource
 import io.github.stream29.kodex.app.ui.UiText
@@ -123,8 +125,14 @@ internal class ContextPorts : ContextSourceSettingsDependencies {
     override val sources = MutableStateFlow(AgentContextSourceSettings())
     override val operationFailure = MutableStateFlow(false)
     override val pathPolicy = object : ContextSourcePathPolicy {
-        override val builtInNormalizedPaths = setOf("/fixture-home/.agents")
-        override fun normalize(path: String): String? = when {
+        override suspend fun evaluate(candidate: String, originalPaths: List<String>): ContextPathEvaluation {
+            fun compare(path: String): ContextPathComparison {
+                val key = normalize(path)
+                return ContextPathComparison(key, key == "/fixture-home/.agents")
+            }
+            return ContextPathEvaluation.Evaluated(compare(candidate), originalPaths.map(::compare))
+        }
+        private fun normalize(path: String): String? = when {
             path.isBlank() || '$' in path -> null
             path == "~" -> "/fixture-home"
             path.startsWith("~/") -> "/fixture-home/" + path.substring(2)

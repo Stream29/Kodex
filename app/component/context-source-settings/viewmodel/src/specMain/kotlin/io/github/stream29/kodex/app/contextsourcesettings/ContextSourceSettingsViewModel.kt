@@ -2,6 +2,7 @@ package io.github.stream29.kodex.app.contextsourcesettings
 
 import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
+import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
 import io.github.stream29.kodex.app.settings.contract.BuiltInContextSource
 import kotlinx.coroutines.flow.StateFlow
 
@@ -17,18 +18,22 @@ public sealed interface ContextSourceWriteAdmission {
 }
 
 /**
- * Environment boundary, not filesystem validation. normalize accepts absolute paths, ~ and ~/path,
- * rejects blank, '$' and other relative paths with null, and returns a stable comparison string.
- * No user file is opened/scanned. Both methods use the same captured frontend environment; saving
- * retains the user's trimmed spelling, not this normalized value. Backend interpretation is separate.
+ * Suspending batch environment boundary, not filesystem validation or a duplicate-merge service.
+ * Uses the actual backend Context environment and captured launch base; never the browser OS.
+ * Accept absolute paths, ~ and ~/path; invalid syntax (blank, '$', other relative paths) has a null
+ * lexical key. No user file is opened/scanned. Static built-in matches use the actual backend roots.
+ * Saving retains trimmed user spelling, never the comparison key. The shared VM, not this port,
+ * chooses whether to append or enable the first equivalent original entry.
  */
-public interface ContextSourcePathPolicy {
-    /** Normalized Agents/Kodex/Codex home roots; Git root and cwd are not static exclusions.
-     * @throws Exception Unexpected environment lookup failure; reported by save, not invalid input.
+public fun interface ContextSourcePathPolicy {
+    /**
+     * Evaluate one candidate and all original paths in the same captured environment snapshot.
+     * Evaluated.originalPaths must retain input order/cardinality, including invalid old entries.
+     * Returned keys do not impose case/symlink identity or require existing/readable directories.
+     * @throws kotlinx.coroutines.CancellationException when evaluation or its owner is cancelled.
+     * @throws Exception Unexpected environment/transport failure, not ordinary invalid input.
      */
-    public val builtInNormalizedPaths: Set<String>
-    /** @throws Exception Unexpected environment/policy failure, not ordinary invalid input. */
-    public fun normalize(path: String): String?
+    public suspend fun evaluate(candidate: String, originalPaths: List<String>): ContextPathEvaluation
 }
 
 /**
@@ -99,7 +104,8 @@ public data class ContextSourceSettingsState(
 )
 
 /**
- * Complete source list/add owner. Commands are dispatcher-confined and synchronous. Unexpected
+ * Complete source list/add owner. Commands are dispatcher-confined; save starts owner-scoped
+ * suspending evaluation and returns without waiting for its result. Unexpected
  * dependency errors are reported once without exposing exception text; rejection retains Add's
  * draft/error and list-command rejection reports the shared generic failure. Cancellation propagates
  * unchanged, never reports failure or automatically retries. No optimistic sources publication.
@@ -115,11 +121,15 @@ public interface ContextSourceSettingsViewModel : AutoCloseable {
     /** Update matching dialog only; clears validation. */
     public fun updateDraft(token: ContextSourceDialogToken, path: String): Unit
     /**
-     * Trim input, normalize/validate, exclude static built-ins, then freeze current custom list and
-     * append trimmed text or enable its first equivalent entry without rewriting its text/order.
+     * Freeze trimmed input, exact token and original custom list before batch evaluation.
+     * Exclude invalid input/static built-ins, append trimmed text or enable the first equivalent
+     * entry without rewriting text/order. After await recheck exact token, draft, owner and baseline;
+     * a changed baseline retains the draft for explicit retry, never silently rebases a stale result.
      * Accepted consumes token exactly once; double/reentrant/stale callbacks cannot re-admit it.
      * Invalid/rejected admission keeps the matching draft; never closes a replacement dialog.
-     * @throws kotlinx.coroutines.CancellationException Policy or queue admission was cancelled.
+     * Hide/dismiss/close cancel only unaccepted evaluation; admitted application writes survive.
+     * Evaluation cancellation is not a reported failure and never retries automatically.
+     * @throws kotlinx.coroutines.CancellationException Synchronous queue admission was cancelled.
      */
     public fun save(token: ContextSourceDialogToken): Unit
     /** @throws kotlinx.coroutines.CancellationException Queue admission was cancelled. */

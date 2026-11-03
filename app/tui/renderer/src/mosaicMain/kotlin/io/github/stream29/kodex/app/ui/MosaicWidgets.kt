@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import com.jakewharton.mosaic.LocalTerminalState
 import com.jakewharton.mosaic.focus.FocusRequester
+import com.jakewharton.mosaic.focus.onFocusChanged
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.layout.heightIn
 import com.jakewharton.mosaic.modifier.Modifier
@@ -116,6 +117,8 @@ internal object MosaicUiRenderer : UiRenderer {
         val terminalColumns = LocalTerminalState.current.size.columns.coerceAtLeast(1)
         val ownFocusRequester = remember { FocusRequester() }
         val focusRequester = LocalTextInputFocusRequester.current ?: ownFocusRequester
+        val focusHistory = remember(focusRequester) { UiEditorFocusHistory() }
+        val initialFocusRevision = remember(autoFocus, enabled, focusRequester) { focusHistory.lossRevision }
         val canFocus by rememberUpdatedState(enabled)
         BindUiEditorFocus {
             if (!canFocus) false else try { focusRequester.requestFocus() } catch (_: IllegalStateException) { false }
@@ -153,7 +156,7 @@ internal object MosaicUiRenderer : UiRenderer {
                         if (autoFocus && enabled) {
                             // Let the departing tab release focus after this subcomposed editor attaches.
                             withFrameNanos { }
-                            focusRequester.requestFocus()
+                            if (focusHistory.lossRevision == initialFocusRevision) focusRequester.requestFocus()
                         }
                     }
                 }
@@ -161,7 +164,10 @@ internal object MosaicUiRenderer : UiRenderer {
         }
         Column {
             if (label.isNotEmpty()) UiText(label, UiTextRole.Supporting)
-            SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
+            SubcomposeLayout(modifier = Modifier.fillMaxWidth().onFocusChanged { state ->
+                if (focusHistory.hasFocus && !state.hasFocus) focusHistory.lossRevision++
+                focusHistory.hasFocus = state.hasFocus
+            }) { constraints ->
                 val width = minOf(constraints.maxWidth, terminalColumns).coerceAtLeast(1)
                 val nodes = subcompose(
                     Unit,
@@ -173,6 +179,12 @@ internal object MosaicUiRenderer : UiRenderer {
             }
         }
     }
+}
+
+// Mount-time autofocus must not override a focus handoff which has already happened.
+private class UiEditorFocusHistory {
+    var hasFocus = false
+    var lossRevision = 0L
 }
 
 // Keep one immutable constraint capture: a fresh measure-time lambda recomposes the input,

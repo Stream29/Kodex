@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.FocusInteraction
 import androidx.compose.foundation.focusable
@@ -22,6 +23,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -70,6 +73,45 @@ internal fun BrowserUiEditor(
     val backAction by rememberUpdatedState(rememberBrowserEditorBackAction())
     val colors = MaterialTheme.colorScheme
     val rows = if (multiline) maximumLines else 1
+    val adaptive = LocalAdaptiveEditor.current && multiline
+    val density = LocalDensity.current.density
+    var editorHeight by remember { mutableFloatStateOf(24f) }
+    var editorWidth by remember { mutableIntStateOf(0) }
+    var nativeInput by remember { mutableStateOf<HTMLTextAreaElement?>(null) }
+    val measurement = remember { EditorMeasurementFrame() }
+    val currentMeasure by rememberUpdatedState {
+        val input = nativeInput
+        if (adaptive && input != null && input.isConnected && editorWidth > 0) {
+            val cssWidth = editorCssWidth(input)
+            if (cssWidth > 0.0) {
+                val cssHeight = measureEditorHeight(input).coerceIn(24.0, 24.0 * rows)
+                val heightDp = (cssHeight * editorWidth / cssWidth / density).toFloat()
+                if (kotlin.math.abs(editorHeight - heightDp) > 0.1f) editorHeight = heightDp
+            }
+        }
+    }
+    fun scheduleMeasure() {
+        if (adaptive && measurement.id == null) {
+            measurement.id = window.requestAnimationFrame {
+                measurement.id = null
+                currentMeasure()
+            }
+        }
+    }
+    DisposableEffect(adaptive) {
+        val resize: (org.w3c.dom.events.Event) -> Unit = { scheduleMeasure() }
+        val fonts = browserEditorFontEvents()
+        window.addEventListener("resize", resize)
+        fonts.addEventListener("loadingdone", resize)
+        fonts.addEventListener("loadingerror", resize)
+        onDispose {
+            window.removeEventListener("resize", resize)
+            fonts.removeEventListener("loadingdone", resize)
+            fonts.removeEventListener("loadingerror", resize)
+            measurement.id?.let(window::cancelAnimationFrame)
+            measurement.id = null
+        }
+    }
     val interactions = remember { MutableInteractionSource() }
     var focusInteraction by remember { mutableStateOf<FocusInteraction.Focus?>(null) }
     Box(
@@ -88,12 +130,15 @@ internal fun BrowserUiEditor(
         OutlinedTextFieldDefaults.DecorationBox(
             value = text, enabled = enabled, singleLine = !multiline,
             visualTransformation = VisualTransformation.None, interactionSource = interactions,
+            contentPadding = browserEditorContentPadding(adaptive = adaptive, multiline = multiline),
             label = if (label.isEmpty()) null else { { Text(label) } },
             innerTextField = {
                 HtmlElementView(
-                    modifier = Modifier.fillMaxWidth().height((24f * rows).dp),
+                    modifier = Modifier.fillMaxWidth().height(if (adaptive) editorHeight.dp else (24f * rows).dp)
+                        .onSizeChanged { if (editorWidth != it.width) { editorWidth = it.width; scheduleMeasure() } },
                     factory = {
                         (document.createElement("textarea") as HTMLTextAreaElement).apply {
+                            nativeInput = this
                             style.cssText = "box-sizing:border-box;width:100%;height:100%;resize:none;" +
                                 "font-size:16px;line-height:24px;font-weight:400;padding:0;" +
                                 "border:0;outline:none;overflow:auto;background:transparent;"
@@ -109,7 +154,7 @@ internal fun BrowserUiEditor(
                                 bridge.rememberCanvasForRelease(this)
                                 if (!bridge.composeFocused) focus.requestFocus()
                             }
-                            oninput = { bridge.publish(this, change) }
+                            oninput = { bridge.publish(this, change); scheduleMeasure() }
                             onkeyup = { bridge.publish(this, change) }
                             onselect = { bridge.publish(this, change) }
                             addEventListener("selectionchange", { bridge.publish(this, change) })
@@ -117,6 +162,7 @@ internal fun BrowserUiEditor(
                             addEventListener("compositionend", {
                                 bridge.composing = false
                                 bridge.publish(this, change)
+                                scheduleMeasure()
                             })
                             onkeydown = keyDown@{ event ->
                                 val current = policy
@@ -157,10 +203,12 @@ internal fun BrowserUiEditor(
                         input.style.color = (if (enabled) colors.onSurface else colors.onSurface.copy(alpha = 0.38f)).css()
                         input.style.setProperty("caret-color", colors.primary.css())
                         bridge.project(input, text, cursorOffset, revision, disabled = !enabled)
+                        scheduleMeasure()
                         bridge.focus(input, autoFocus && interactive)
                     },
                     onRelease = { input ->
                         bridge.release()
+                        nativeInput = null
                         input.oninput = null
                         input.onfocus = null
                         input.onkeyup = null
@@ -172,6 +220,14 @@ internal fun BrowserUiEditor(
         )
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+internal fun browserEditorContentPadding(adaptive: Boolean, multiline: Boolean): PaddingValues =
+    when {
+        adaptive -> PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+        !multiline -> PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+        else -> OutlinedTextFieldDefaults.contentPadding()
+    }
 
 @Composable
 private fun rememberBrowserEditorBackAction(): (() -> Unit)? {
@@ -199,6 +255,10 @@ internal fun configureBrowserEditorInteraction(input: HTMLTextAreaElement, enabl
 private data class EditorPolicy(
     val enabled: Boolean, val readOnly: Boolean, val multiline: Boolean, val submitKey: UiSubmitKey,
 )
+private class EditorMeasurementFrame {
+    // Scheduling is not UI state: observing this token would schedule another measure on every echo.
+    var id: Int? = null
+}
 private data class EditorProjection(val text: String, val cursor: Int, val revision: Long?)
 
 /** The DOM owns editing; this bridge only tracks projection/acknowledgment and mount lifetime. */
@@ -295,6 +355,30 @@ internal class BrowserEditorBridge {
 
 private fun HTMLTextAreaElement.activeCursor(): Int =
     (if (selectionDirection == "backward") selectionStart else selectionEnd) ?: value.length
+
+internal fun editorCssWidth(input: HTMLTextAreaElement): Double =
+    js("input.getBoundingClientRect().width")
+
+private fun browserEditorFontEvents(): org.w3c.dom.events.EventTarget = js("document.fonts")
+
+internal fun measureEditorHeight(input: HTMLTextAreaElement): Double = js("""{
+    const mirror = input.cloneNode(false);
+    const width = input.getBoundingClientRect().width;
+    mirror.value = input.value;
+    mirror.style.cssText = input.style.cssText;
+    mirror.style.setProperty("position", "fixed");
+    mirror.style.setProperty("visibility", "hidden");
+    mirror.style.setProperty("pointer-events", "none");
+    mirror.style.setProperty("width", width + "px");
+    mirror.style.setProperty("height", "0px");
+    mirror.style.setProperty("overflow", "hidden");
+    mirror.setAttribute("tabindex", "-1");
+    mirror.setAttribute("aria-hidden", "true");
+    input.parentElement.appendChild(mirror);
+    const height = mirror.scrollHeight;
+    mirror.remove();
+    return height;
+}""")
 
 private fun HTMLTextAreaElement.nativeFocused(): Boolean = nativeInputFocused(this)
 

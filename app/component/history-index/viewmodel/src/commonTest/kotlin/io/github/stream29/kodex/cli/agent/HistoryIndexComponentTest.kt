@@ -383,7 +383,9 @@ val historyIndexComponentTest by testSuite(compartment = { TestCompartment.RealT
             val secret = vm.loadDetail(generation, 3).content
             assertTrue("[hidden]" in secret)
             assertFalse("never-display-secret" in secret)
-            assertEquals("Updated\n\n[x] done\n[>] current\n[ ] later", vm.loadDetail(generation, 4).content)
+            val plan = vm.loadDetail(generation, 4)
+            assertEquals("Updated\n\n[x] done\n[>] current\n[ ] later", plan.content)
+            assertEquals(listOf("done", "current", "later"), assertNotNull(plan.plan).arguments.plan.map { it.step })
             assertEquals("[empty]", vm.load(generation, 5).summary)
         }
     }

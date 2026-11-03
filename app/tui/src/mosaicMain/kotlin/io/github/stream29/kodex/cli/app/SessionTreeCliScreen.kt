@@ -332,11 +332,11 @@ public actual fun SessionTreeCliScreen(
                                         columns = contentColumns,
                                         rows = contentRows,
                                         newLineKey = currentNewLineKey,
-                                        statusBarRows = newSessionStatusBarRows(contentColumns, draftSettings),
+                                        statusBarRows = { width -> newSessionStatusBarRows(width, draftSettings) },
                                         onSubmit = submit,
-                                        statusBar = {
+                                        statusBar = { width ->
                                             NewSessionStatusBar(
-                                                columns = contentColumns,
+                                                columns = width,
                                                 settings = draftSettings,
                                                 runtimeConfiguration = draft.runtimeConfiguration,
                                                 dropdowns = runtimeDropdowns,

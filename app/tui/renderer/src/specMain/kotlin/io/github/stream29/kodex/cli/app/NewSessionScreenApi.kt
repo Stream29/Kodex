@@ -18,9 +18,9 @@ public expect fun NewSessionScreen(
     columns: Int,
     rows: Int,
     newLineKey: NewLineKey,
-    statusBarRows: Int,
+    statusBarRows: (Int) -> Int,
     onSubmit: (expectedRevision: Long) -> Unit,
-    statusBar: @Composable () -> Unit,
+    statusBar: @Composable (Int) -> Unit,
 ): Unit
 
 /**

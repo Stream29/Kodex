@@ -68,12 +68,18 @@ public actual fun McpDetailsContent(
     server: McpServerSettingsState, onDismiss: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit,
     onSetEnabled: () -> Unit, onLogin: () -> Unit, onCancelLogin: () -> Unit, onLogout: () -> Unit, onReconnect: () -> Unit,
     loginAvailable: Boolean,
+    manualAuthorization: McpManualAuthorization?,
     frame: McpDialogFrameSlot,
 ) {
     frame(server.serverName, onDismiss) {
         Detail("Transport", server.transport.settingsLabel())
         Detail("Status", server.status.settingsLabel())
         Detail("Authentication", server.authentication.settingsLabel())
+        manualAuthorization?.takeIf { it.isActive() }?.let {
+            UiText("Open this address in your browser:", UiTextRole.Supporting)
+            UiProse(it.url, UiTextRole.Supporting)
+            McpAction("Cancel manual authorization", onClick = it.cancel)
+        }
         server.streamableHttpUrl?.let { Detail("URL", it) }
         server.stdioCommand?.let { Detail("Command", it) }
         if (server.stdioArguments.isNotEmpty()) Detail("Arguments", server.stdioArguments.joinToString(" "))

@@ -30,7 +30,7 @@ internal fun BuiltInToolEvent(
         expansionKey = expansionKey,
         expandedSummary = expandedSummary,
     ) {
-        WrappedHistoryText(firstLine)
+        LocalHistoryRenderer.current.RecordedMetadata(firstLine, HistoryTextStyle.Normal)
         content()
     }
 }
@@ -39,6 +39,11 @@ internal fun BuiltInToolEvent(
 internal fun RecordedField(label: String, value: String) {
     // Empty output and whitespace input are meaningful. Do not trim either.
     WrappedHistoryText("$label: $value")
+}
+
+@Composable
+internal fun RecordedErrorField(label: String, value: String) {
+    LocalHistoryRenderer.current.RecordedError("$label: $value", HistoryTextStyle.Normal)
 }
 
 /** Every actual operation is represented, in model order, without lossy previews. */
@@ -129,7 +134,10 @@ internal fun String.readableHostedImageReference(): String? =
     takeIf { matches(Regex("(?:https?://|file:///)[^\\s]+")) }
 
 @Composable
-internal fun HistoryContentDetailsScope.DiscoveredTools(tools: List<LoadableToolSpec>) {
+internal fun HistoryContentDetailsScope.DiscoveredTools(
+    tools: List<LoadableToolSpec>,
+    renderDefinition: @Composable (String) -> Unit = { WrappedHistoryText(it) },
+) {
     tools.forEachIndexed { index, tool ->
         key(index, tool) {
             // Serialize only after the user opens this definition, preserving namespace wrappers.
@@ -147,7 +155,7 @@ internal fun HistoryContentDetailsScope.DiscoveredTools(tools: List<LoadableTool
                         val definition = remember(tool) {
                             ToolDefinitionJson.encodeToString(LoadableToolSpec.serializer(), tool)
                         }
-                        WrappedHistoryText(definition)
+                        renderDefinition(definition)
                     }
                 }
             }

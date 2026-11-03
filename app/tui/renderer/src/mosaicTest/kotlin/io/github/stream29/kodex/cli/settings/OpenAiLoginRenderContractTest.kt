@@ -129,6 +129,7 @@ private class RenderLoginViewModel(initial: OpenAiLoginState) : OpenAiLoginViewM
         reported.complete(attemptId)
     }
     override fun isActive(attemptId: Long) = !closed && attemptId == activeId
+    override fun manualAuthorizationUrl(attemptId: Long): String? = null
     override fun close() {
         closed = true
         output.close()

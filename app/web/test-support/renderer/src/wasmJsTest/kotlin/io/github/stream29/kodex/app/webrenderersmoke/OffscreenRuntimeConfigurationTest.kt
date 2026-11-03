@@ -1,8 +1,15 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.input.key.Key
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.runtimeconfiguration.*
 import io.github.stream29.kodex.app.ui.compose.rememberComposeRuntimeConfigurationRenderer
@@ -13,6 +20,173 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.*
 
 val offscreenRuntimeConfigurationTest by testSuite {
+    for ((width, height) in listOf(240 to 120, 320 to 160)) {
+        for (fontScale in listOf(1f, 1.5f)) {
+            test("short narrow cascade scrolls focused rows and commits one exact leaf ${width}x$height font=$fontScale") { offscreenTest {
+                val commands = mutableListOf<Int>()
+                val models = List(20) { index ->
+                    RuntimeMenuEntry.Branch(
+                        "model-$index", "Model ${index.toString().padStart(2, '0')}", index == 0, "effort",
+                    ) {
+                        listOf(RuntimeMenuEntry.Branch("effort", "Effort", true, "tier") {
+                            listOf(RuntimeMenuEntry.Command("tier", "Tier", true) { commands += index })
+                        })
+                    }
+                }
+                val menu = RuntimeConfigurationMenu(
+                    "current", models, "mode", listOf(RuntimeMenuEntry.Command("mode", "Mode", true) {}),
+                )
+                val scene = OffscreenScene.create(width = width, height = height) {
+                    CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
+                        rememberComposeRuntimeConfigurationRenderer().Fields(menu, enabled = true)
+                    }
+                }
+                try {
+                    scene.settle { scene.hasDescription("Runtime model: current") }
+                    scene.clickDescription("Runtime model: current")
+                    scene.settle { scene.focusedDescription("Runtime model: Model 00") }
+                    scene.key(Key.MoveEnd)
+                    scene.settle { scene.focusedDescription("Runtime model: Model 19") }
+                    val last = scene.nodes().first {
+                        it.config.getOrNull(SemanticsProperties.Focused) == true &&
+                            it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Runtime model: Model 19") == true
+                    }.boundsInWindow
+                    assertTrue(last.top >= 0 && last.bottom <= height, "The focused row must scroll into the vertical viewport: $last")
+                    scene.key(Key.DirectionRight)
+                    scene.settle { scene.focusedDescription("Runtime model: Effort") }
+                    assertTrue(scene.hasDescription("Runtime model: Model 19"))
+                    scene.key(Key.DirectionRight)
+                    scene.settle { scene.focusedDescription("Runtime model: Tier") }
+                    assertTrue(scene.hasDescription("Runtime model: Model 19"))
+                    assertTrue(scene.hasDescription("Runtime model: Effort"))
+                    assertTrue(commands.isEmpty())
+                    scene.key(Key.Enter)
+                    scene.settle { commands.size == 1 }
+                    assertEquals(listOf(19), commands)
+                } finally { scene.close() }
+            } }
+        }
+    }
+    for (dark in listOf(false, true)) {
+        for (fontScale in listOf(1f, 1.5f)) {
+            test("cascade focus is visible and submits the focused command dark=$dark font=$fontScale") { offscreenTest {
+                val commands = mutableListOf<String>()
+                val menu = RuntimeConfigurationMenu(
+                    "current", listOf(
+                        RuntimeMenuEntry.Command("alpha", "Alpha", true) { commands += "alpha" },
+                        RuntimeMenuEntry.Command("beta", "Beta", false) { commands += "beta" },
+                    ),
+                    "mode", listOf(RuntimeMenuEntry.Command("mode", "Mode", true) { commands += "mode" }),
+                )
+                val scene = OffscreenScene.create(width = 480, height = 240) {
+                    CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
+                        MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+                            rememberComposeRuntimeConfigurationRenderer().Fields(menu, enabled = true)
+                        }
+                    }
+                }
+                try {
+                    scene.settle { scene.hasDescription("Runtime model: current") }
+                    scene.clickDescription("Runtime model: current")
+                    scene.settle { scene.focusedDescription("Runtime model: Alpha") }
+                    repeat(30) { scene.advance() }
+                    val first = scene.frame()
+                    assertTrue(first.contentEquals(scene.frame()), "The first focused raster must be stable.")
+                    scene.key(Key.DirectionDown)
+                    scene.settle { scene.focusedDescription("Runtime model: Beta") }
+                    repeat(30) { scene.advance() }
+                    val second = scene.frame()
+                    assertTrue(second.contentEquals(scene.frame()), "The second focused raster must be stable.")
+                    assertFalse(first.contentEquals(second), "Moving focus must change the visible cascade raster.")
+                    assertTrue(commands.isEmpty())
+                    scene.key(Key.Enter)
+                    scene.settle { commands.size == 1 }
+                    assertEquals(listOf("beta"), commands)
+                } finally { scene.close() }
+            } }
+        }
+    }
+    test("runtime cascade uses compact rows and preserves readable long labels") { runtimeScene { ports, child, _ ->
+        val longLabel = "a-very-long-provider-model-name-with-many-segments-".repeat(3)
+        ports.models.value = listOf(ModelInfo(
+            OpenAiModelId(longLabel), "Long model",
+            supportedReasoningLevels = listOf(ReasoningEffortPreset(ReasoningEffort.Low, "Low")),
+        ))
+        val scene = OffscreenScene.create(width = 800, height = 240) {
+            RuntimeConfigurationContent(child, rememberComposeRuntimeConfigurationRenderer())
+        }
+        try {
+            val trigger = "Runtime model: test-model max fast"
+            scene.settle { scene.hasDescription(trigger) }
+            scene.clickDescription(trigger)
+            scene.settle { scene.hasDescription("Runtime model: first-model") || scene.hasDescription("Runtime model: $longLabel") }
+            val menu = scene.nodes().first {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Runtime model menu") == true
+            }.boundsInWindow
+            val row = scene.nodes().first {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Runtime model: $longLabel") == true
+            }.boundsInWindow
+            assertTrue(menu.width in 120f..220f, "Compact column must not stay at the original 240dp.")
+            assertTrue(menu.width >= 200f, "A long label should use the available bounded column width.")
+            assertTrue(row.height >= 32f, "A long wrapped label must remain an accessible target.")
+            assertTrue(row.height > 32f, "Long labels must wrap instead of being clipped to one compact row.")
+            scene.frame()
+        } finally { scene.close() }
+    } }
+    test("runtime cascade keeps short rows compact with exact semantics") { offscreenTest {
+        var calls = 0
+        val menu = RuntimeConfigurationMenu(
+            "short", listOf(RuntimeMenuEntry.Command("short", "Short", true) { calls++ }),
+            "mode", listOf(RuntimeMenuEntry.Command("mode", "Mode", true) { calls++ }),
+        )
+        val scene = OffscreenScene.create(width = 500, height = 240) {
+            rememberComposeRuntimeConfigurationRenderer().Fields(menu, enabled = true)
+        }
+        try {
+            scene.settle { scene.hasDescription("Runtime model: short") }
+            scene.clickDescription("Runtime model: short")
+            scene.settle { scene.hasDescription("Runtime model: Short") }
+            val row = scene.nodes().first {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Runtime model: Short") == true
+            }
+            val column = scene.nodes().first {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Runtime model menu") == true
+            }
+            assertTrue(column.boundsInWindow.width in 120f..150f, "Short labels should not reserve the maximum column width.")
+            assertTrue(row.boundsInWindow.height in 32f..40f)
+            assertEquals(true, row.config.getOrNull(SemanticsProperties.Selected))
+            assertEquals(0, calls)
+            scene.clickDescription("Runtime model: Short")
+            scene.settle { calls == 1 }
+        } finally { scene.close() }
+    } }
+    test("both runtime triggers preserve measured focus and keyboard menu return") { runtimeScene { ports, child, _ ->
+        val scene = OffscreenScene.create(width = 500, height = 240) {
+            RuntimeConfigurationContent(child, rememberComposeRuntimeConfigurationRenderer())
+        }
+        try {
+            val model = "Runtime model: test-model max fast"
+            val questions = "Questions: ask user"
+            scene.settle { scene.hasDescription(model) && scene.hasDescription(questions) }
+            for (description in listOf(model, questions)) {
+                val trigger = scene.nodes().first {
+                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(description) == true
+                }
+                assertTrue(trigger.boundsInWindow.width >= 32f)
+                assertTrue(trigger.boundsInWindow.height >= 32f)
+                scene.clickDescription(description)
+                scene.settle { scene.hasDescription(if (description == model) "Runtime model: test-model" else "Questions: no question") }
+                scene.escape()
+                scene.settle { scene.focusedDescription(description) }
+                scene.key(Key.Enter)
+                scene.settle { scene.hasDescription(if (description == model) "Runtime model: test-model" else "Questions: no question") }
+                scene.escape()
+                scene.settle { scene.focusedDescription(description) }
+            }
+            assertTrue(ports.tuples.isEmpty())
+            assertTrue(ports.modes.isEmpty())
+        } finally { scene.close() }
+    } }
     test("runtime navigation keeps selected focus and writes one tuple only at tier leaf") { runtimeScene { ports, child, owner ->
         val scene = OffscreenScene.create { RuntimeConfigurationContent(child, rememberComposeRuntimeConfigurationRenderer()) }
         try {
@@ -21,8 +195,11 @@ val offscreenRuntimeConfigurationTest by testSuite {
             scene.settle { scene.focusedDescription("Runtime model: test-model") }
             scene.clickDescription("Runtime model: test-model")
             scene.settle { scene.focusedDescription("Runtime model: max") }
+            assertTrue(scene.hasDescription("Runtime model: test-model"))
             scene.clickDescription("Runtime model: max")
             scene.settle { scene.focusedDescription("Runtime model: fast") }
+            assertTrue(scene.hasDescription("Runtime model: test-model"))
+            assertTrue(scene.hasDescription("Runtime model: max"))
             assertTrue(ports.tuples.isEmpty())
             scene.escape()
             scene.settle { scene.hasDescription("Runtime model: max") && !scene.hasDescription("Runtime model: fast") }

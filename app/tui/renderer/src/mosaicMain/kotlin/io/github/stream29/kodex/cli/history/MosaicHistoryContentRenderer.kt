@@ -8,6 +8,7 @@ import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.cli.patch.StablePatchToolEventView
 import io.github.stream29.kodex.cli.patch.PendingPatchToolEventView
+import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.utils.applypatch.Patch
 
 internal class MosaicHistoryContentRenderer : HistoryContentRenderer {
@@ -18,6 +19,27 @@ internal class MosaicHistoryContentRenderer : HistoryContentRenderer {
     }
     @Composable override fun Text(value: String, style: HistoryTextStyle) {
         WrappedHistoryText(value, style.mosaicStyle())
+    }
+    @Composable override fun Plan(value: HistoryPlanModel) {
+        Column(Modifier.fillMaxWidth()) {
+            Heading(
+                if (value.pending) "• Updating Plan" else "• Update Plan",
+                if (value.pending) HistoryTextStyle.Dim else HistoryTextStyle.Bold,
+            )
+            value.explanation?.let { Text("  └ $it", HistoryTextStyle.Dim) }
+            if (value.steps.isEmpty()) {
+                val indent = if (value.explanation == null) "  └ " else "    "
+                value.emptyLabel?.let { Text("$indent$it", HistoryTextStyle.Dim) }
+            } else value.steps.forEachIndexed { index, item ->
+                val indent = if (value.explanation == null && index == 0) "  └ " else "    "
+                val marker = when (item.status) {
+                    StepStatus.Pending -> "[ ]"
+                    StepStatus.InProgress -> "[>]"
+                    StepStatus.Completed -> "[x]"
+                }
+                Text("$indent$marker ${item.step}", if (value.pending) HistoryTextStyle.Dim else HistoryTextStyle.Normal)
+            }
+        }
     }
     @Composable override fun Tool(
         summary: String, rawName: String?, status: String, expansionKey: Any,

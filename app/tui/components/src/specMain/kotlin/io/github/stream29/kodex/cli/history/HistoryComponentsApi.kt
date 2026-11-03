@@ -28,5 +28,8 @@ public expect fun StableRequestUserInputToolEvent.renderRequestUserInput(
 @Composable
 public expect fun RequestUserInputHistoryRow(row: RequestUserInputHistoryRowModel): Unit
 
+/** TUI-only decorations, also used to measure read-only Index popups. */
+public expect fun formatHistoryFormRowForTerminal(row: RequestUserInputHistoryRowModel): String
+
 @Composable
 public expect fun StableSuggestSubagentTaskToolEvent.renderSuggestion(elapsed: Duration?): Unit

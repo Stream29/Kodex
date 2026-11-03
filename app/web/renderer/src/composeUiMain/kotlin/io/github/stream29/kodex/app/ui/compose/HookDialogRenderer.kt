@@ -3,10 +3,14 @@ package io.github.stream29.kodex.app.ui.compose
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.app.ui.compose.EditorDialog as Dialog
 import io.github.stream29.kodex.app.hooksettings.*
@@ -43,10 +47,12 @@ private class ComposeHookDialogs : HookDialogRenderer {
 @Composable
 private fun HookDialogFrame(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Surface(modifier = Modifier.semantics { paneTitle = title },
+            shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
             Column(
-                Modifier.widthIn(max = 720.dp).heightIn(max = 640.dp).verticalScroll(rememberScrollState()).padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                Modifier.widthIn(max = 720.dp).heightIn(max = 640.dp)
+                    .semantics { contentDescription = "Hook dialog content" }.verticalScroll(rememberScrollState()).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 UiText(title, UiTextRole.Title)
                 content()

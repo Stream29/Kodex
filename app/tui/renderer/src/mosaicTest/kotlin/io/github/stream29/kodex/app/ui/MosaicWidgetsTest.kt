@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.focus.FocusRequester
+import com.jakewharton.mosaic.focus.onFocusChanged
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.onPreviewKeyEvent
 import com.jakewharton.mosaic.layout.width
@@ -18,8 +19,48 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.withTimeoutOrNull
 
 val mosaicWidgetsTest by testSuite {
+    test("mount autofocus does not reclaim focus after an immediate Tab") {
+        var firstFocused by mutableStateOf(false)
+        var firstClicks by mutableStateOf(0)
+        var lastClicks by mutableStateOf(0)
+        var submits = 0
+        runMosaicTest {
+            try {
+                setContentAndSnapshot {
+                    WithMosaicComponentRenderers {
+                        Box(Modifier.width(40).height(8)) {
+                            UiColumn {
+                                UiEditor("Draft", 5, { _, _ -> null }, { _, _ -> submits++ }, autoFocus = true)
+                                TuiButton("First", modifier = Modifier.onFocusChanged {
+                                    firstFocused = it.isFocused
+                                }) { firstClicks++ }
+                                TuiButton("Last") { lastClicks++ }
+                                UiText("focused=$firstFocused first=$firstClicks last=$lastClicks")
+                            }
+                        }
+                    }
+                }
+                sendKeyEvent(KeyboardEvent(9))
+                awaitContaining("focused=true")
+                repeat(3) { withTimeoutOrNull(50) { awaitSnapshot() } }
+                assertTrue(firstFocused, "Deferred autofocus reclaimed the editor")
+                sendKeyEvent(KeyboardEvent(13))
+                awaitContaining("first=1")
+                sendKeyEvent(KeyboardEvent(9))
+                sendKeyEvent(KeyboardEvent(13))
+                awaitContaining("last=1")
+                assertEquals(1, firstClicks)
+                assertEquals(1, lastClicks)
+                assertEquals(0, submits)
+            } finally {
+                cancel()
+            }
+        }
+    }
+
     test("editor focus capability targets its exact mounted input and rebinds after unmount") {
         var text by mutableStateOf("Draft")
         var cursor by mutableStateOf(text.length)

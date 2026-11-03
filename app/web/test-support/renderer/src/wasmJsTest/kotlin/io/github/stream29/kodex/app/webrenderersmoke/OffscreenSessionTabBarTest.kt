@@ -3,7 +3,12 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
 import androidx.compose.runtime.*
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import de.infix.testBalloon.framework.core.testSuite
@@ -12,6 +17,44 @@ import io.github.stream29.kodex.app.ui.compose.rememberComposeSessionTabBarRende
 import kotlin.test.*
 
 val offscreenSessionTabBarTest by testSuite {
+    test("narrow compact tabs retain exact tail selection full names and keyboard menu activation") { offscreenTest {
+        val fullName = "完整会话名称 " + "Long name ".repeat(25)
+        val tabs = List(80) { SessionTabPresentation(SessionTabIdentity("narrow-$it"), fullName + it, running = it == 79) }
+        val state = SessionTabBarState(tabs, tabs.last().identity)
+        val commands = mutableListOf<String>()
+        val menus = mutableListOf<SessionTabMenuRequest>()
+        val scene = OffscreenScene.create(width = 160) {
+            SessionTabBarContent(state, TabCommands("narrow", commands), rememberComposeSessionTabBarRenderer(), menus::add)
+            TextButton({}) { Text("Baseline") }
+        }
+        try {
+            scene.settle { scene.hasDescription("Session tab: narrow-79") && scene.hasText("Baseline") }
+            val tail = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Session tab: narrow-79") == true
+            }
+            assertEquals(Role.Tab, tail.config.getOrNull(SemanticsProperties.Role))
+            assertEquals("Running", tail.config.getOrNull(SemanticsProperties.StateDescription))
+            assertTrue(tail.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().contains(fullName + 79))
+            assertTrue(tail.boundsInWindow.width > 0)
+            assertTrue(tail.boundsInWindow.left >= 0 && tail.boundsInWindow.right <= 160)
+            val baseline = scene.nodes().first { it.config.getOrNull(SemanticsActions.OnClick) != null &&
+                it.children.any { child -> child.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == "Baseline" } == true }
+            }
+            assertTrue(tail.boundsInRoot.height < baseline.boundsInRoot.height)
+            assertTrue(assertNotNull(tail.config.getOrNull(SemanticsActions.RequestFocus)?.action).invoke())
+            scene.key(Key.Spacebar)
+            scene.settle { commands.contains("narrow:select:narrow-79") }
+            scene.key(Key.F10, shift = true)
+            scene.settle { menus.size == 1 }
+            assertEquals(tabs.last().identity, menus.single().identity)
+            assertEquals(fullName + 79, menus.single().label)
+            scene.clickDescription("Sessions")
+            scene.clickDescription("New Session")
+            assertEquals(listOf("narrow:sessions", "narrow:new"), commands.takeLast(2))
+            scene.frame()
+        } finally { scene.close() }
+    } }
+
     test("duplicate labels and reordered tabs keep exact identity and reject removed captured callbacks") { offscreenTest {
         val first = SessionTabPresentation(SessionTabIdentity("first"), "Same")
         val second = SessionTabPresentation(SessionTabIdentity("second"), "Same", running = true)

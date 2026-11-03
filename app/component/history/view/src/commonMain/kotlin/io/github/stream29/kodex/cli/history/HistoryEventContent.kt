@@ -88,6 +88,7 @@ public actual fun HistoryEventContent(
                     this,
                     heading = { Header(it, TextStyle.Bold) },
                     body = { text, supporting -> DetailText(text, if (supporting) TextStyle.Dim else TextStyle.Normal) },
+                    assistantBody = { renderer.AssistantText(it) },
                 )
             is StableReasoning -> renderReasoning()
             is StableInvalidToolCall -> renderInvalidToolCall()
@@ -105,7 +106,7 @@ public actual fun HistoryEventContent(
             is StableImageViewToolEvent -> renderImageView()
             is StableMcpToolEvent -> renderMcpTool()
             is StablePlanUpdate -> HistoryPlanContent(this, renderer)
-            is StableRequestUserInputToolEvent -> HistoryRequestUserInputContent(this, elapsed, renderer)
+            is StableRequestUserInputToolEvent -> renderer.RequestUserInput(this, elapsed)
             is StableSuggestSubagentTaskToolEvent -> HistorySuggestionContent(this, elapsed, renderer)
             is StableToolSearchEvent -> renderToolSearch()
             is StableWebSearchToolEvent -> renderWebSearch()
@@ -168,7 +169,7 @@ public actual fun HistoryEventContent(
             status = "running",
             expansionKey = callId,
         ) {
-            section("Arguments") { JsonDetail("Arguments", arguments) }
+            section("Arguments") { McpJsonDetail("Arguments", arguments) }
         }
 
         is PendingRequestUserInputToolEvent -> ToolEvent(
@@ -247,7 +248,7 @@ private fun StableInvalidToolCall.renderInvalidToolCall() {
                 is InvalidToolInvocation.Custom -> RecordedField("input", input.input)
                 is InvalidToolInvocation.ToolSearch -> RecordedField("arguments", input.arguments.toString())
             }
-            RecordedField("error", message)
+            RecordedErrorField("error", message)
         }
         return
     }
@@ -258,7 +259,7 @@ private fun StableInvalidToolCall.renderInvalidToolCall() {
         expansionKey = callId,
     ) {
         section("Invocation") { invocation.renderDetails() }
-        section("Error") { Detail("Error", message) }
+        section("Error") { DetailRecordedError("Error", message) }
     }
 }
 
@@ -270,7 +271,9 @@ private fun StableServerToolSearch.renderServerToolSearch() {
         status = output.status,
         expansionKey = call.id?.value ?: "server_tool_search",
     ) {
-        DiscoveredTools(output.tools)
+        DiscoveredTools(output.tools) {
+            LocalHistoryRenderer.current.RecordedJson(it, TextStyle.Normal)
+        }
     }
 }
 
@@ -436,7 +439,7 @@ private fun StableMcpToolEvent.renderMcpTool() {
         status = result.completedStatus(),
         expansionKey = callId,
     ) {
-        section("Arguments") { JsonDetail("Arguments", arguments) }
+        section("Arguments") { McpJsonDetail("Arguments", arguments) }
         section("Result") { result.renderDetails() }
     }
 }
@@ -444,14 +447,17 @@ private fun StableMcpToolEvent.renderMcpTool() {
 @Composable
 private fun StableToolSearchEvent.renderToolSearch() {
     BuiltInToolEvent(
-        summary = functionToolSummary("tool_search", null, failed = result is ToolSearchResult.InvalidArguments),
+        summary = functionToolSummary("tool_search", null, failed = result !is ToolSearchResult.Success),
         firstLine = compactToolLine("tool_search", "query" to arguments.query, "limit" to arguments.limit),
         status = result.status(),
         expansionKey = callId,
     ) {
         when (val result = result) {
-            is ToolSearchResult.Success -> DiscoveredTools(result.tools)
-            is ToolSearchResult.InvalidArguments -> RecordedField("error", result.message)
+            is ToolSearchResult.Success -> DiscoveredTools(result.tools) {
+                LocalHistoryRenderer.current.RecordedJson(it, TextStyle.Normal)
+            }
+            is ToolSearchResult.InvalidArguments -> RecordedErrorField("error", result.message)
+            is ToolSearchResult.ExecutionFailure -> RecordedErrorField("error", result.message)
         }
     }
 }
@@ -467,7 +473,7 @@ private fun StableWebSearchToolEvent.renderWebSearch() {
         commands.operationTitles().forEach { WrappedHistoryText(it) }
         when (val result = result) {
             is StableWebSearchResult.Success -> RecordedField("output", result.response.output)
-            is StableWebSearchResult.Failure -> RecordedField("error", result.message)
+            is StableWebSearchResult.Failure -> RecordedErrorField("error", result.message)
         }
     }
 }
@@ -486,7 +492,7 @@ private fun PendingInvalidToolCall.renderInvalidToolCall() {
                 is PendingInvalidToolInvocation.Custom -> RecordedField("input", input.input)
                 is PendingInvalidToolInvocation.ToolSearch -> RecordedField("arguments", input.arguments.toString())
             }
-            RecordedField("error", message)
+            RecordedErrorField("error", message)
         }
         return
     }
@@ -498,7 +504,7 @@ private fun PendingInvalidToolCall.renderInvalidToolCall() {
         detailStyle = TextStyle.Dim,
     ) {
         section("Invocation") { invocation.renderDetails(TextStyle.Dim) }
-        section("Error") { Detail("Error", message, TextStyle.Dim) }
+        section("Error") { DetailRecordedError("Error", message, TextStyle.Dim) }
     }
 }
 
@@ -564,6 +570,11 @@ private fun Detail(
 }
 
 @Composable
+private fun DetailRecordedError(label: String, value: String, fallback: TextStyle = TextStyle.Normal) {
+    if (value.isNotBlank()) LocalHistoryRenderer.current.RecordedError("$label: $value", fallback)
+}
+
+@Composable
 private fun DetailText(
     value: String,
     textStyle: TextStyle = TextStyle.Normal,
@@ -578,6 +589,18 @@ private fun JsonDetail(
     textStyle: TextStyle = TextStyle.Normal,
 ) {
     Detail(label, value.historyPreview(), textStyle)
+}
+
+@Composable
+private fun McpJsonDetail(label: String, value: JsonElement) {
+    val preview = value.historyPreview()
+    if (preview.isBlank()) return
+    val contentType = (value as? JsonObject)?.stringOrNull("type")
+    if (value.containsInlineMedia() || contentType == "image") {
+        Detail(label, preview)
+    } else {
+        LocalHistoryRenderer.current.RecordedJson("$label: $preview", TextStyle.Normal)
+    }
 }
 
 @Composable
@@ -620,7 +643,6 @@ private fun ExecCommandArguments.renderDetails(
     Detail("Command", command, textStyle)
     workdir?.takeIf(String::isNotBlank)?.let { Detail("Working directory", it, textStyle) }
     shell?.let { Detail("Shell", it.path.toString(), textStyle) }
-    if (tty) Detail("TTY", "enabled", textStyle)
     Detail("Yield", "${yieldTimeMillis}ms", textStyle)
     Detail("Output limit", "$maxOutputTokens tokens", textStyle)
 }
@@ -658,7 +680,7 @@ private fun FunctionCallOutputPayload.renderDetails() {
 
 @Composable
 private fun CallToolResult.renderDetails() {
-    structuredContent?.let { JsonDetail("Structured result", it) }
+    structuredContent?.let { McpJsonDetail("Structured result", it) }
     if (content.isEmpty() && structuredContent == null) {
         Detail("Result", "no content")
     } else {
@@ -672,7 +694,7 @@ private fun JsonElement.renderMcpContent() {
     when (objectValue?.stringOrNull("type")) {
         "text" -> Detail("Content", objectValue.stringOrNull("text").orEmpty())
         "image" -> Detail("Image", objectValue.binaryReference())
-        else -> JsonDetail("Content", this)
+        else -> McpJsonDetail("Content", this)
     }
 }
 
@@ -825,6 +847,7 @@ private fun StableImageViewResult.status(): String = when (this) {
 private fun ToolSearchResult.status(): String = when (this) {
     is ToolSearchResult.Success -> "succeeded"
     is ToolSearchResult.InvalidArguments -> "failed"
+    is ToolSearchResult.ExecutionFailure -> "failed"
 }
 
 private fun StableWebSearchResult.status(): String = when (this) {

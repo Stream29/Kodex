@@ -5,9 +5,15 @@ package io.github.stream29.kodex.app.ui.compose
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.*
@@ -18,6 +24,8 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import io.github.stream29.kodex.app.ui.compose.EditorDialog as ComposeDialog
@@ -37,23 +45,27 @@ import kotlinx.datetime.toLocalDateTime
 import kotlin.math.roundToInt
 
 @Composable
-public actual fun rememberComposeSessionCatalogRenderer(): SessionCatalogRenderer = remember { ComposeCatalogRenderer() }
+public actual fun rememberComposeSessionCatalogRenderer(): SessionCatalogRenderer {
+    val scope = rememberCoroutineScope()
+    return remember(scope) { ComposeCatalogRenderer(RowMenuFocusRestoration(scope)) }
+}
 
-private class ComposeCatalogRenderer : SessionCatalogRenderer {
+private class ComposeCatalogRenderer(private val restoration: RowMenuFocusRestoration) : SessionCatalogRenderer {
     @Composable
     override fun Dialog(
         showArchived: Boolean, rows: SessionCatalogRows, onShowArchivedChange: (Boolean) -> Unit,
         onDismiss: () -> Unit, onOpen: (SessionCatalogEntry) -> Unit,
         onContextMenu: (SessionCatalogEntry, SessionCatalogMenuOrigin) -> Unit,
     ) {
+        val fallback = remember { FocusRequester() }
         ComposeDialog(onDismissRequest = onDismiss) {
-            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+            Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                 Column(
-                    Modifier.widthIn(max = 760.dp).heightIn(max = 720.dp).padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    Modifier.widthIn(max = 760.dp).heightIn(max = 720.dp).padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     UiText("Sessions", UiTextRole.Title)
-                    Row {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
                             showArchived, onShowArchivedChange,
                             modifier = Modifier.semantics { contentDescription = "Show archived" },
@@ -65,11 +77,11 @@ private class ComposeCatalogRenderer : SessionCatalogRenderer {
                             SessionCatalogRows.Loading -> item { UiText("Loading sessions…") }
                             SessionCatalogRows.Empty -> item { UiText("No persisted sessions") }
                             is SessionCatalogRows.Entries -> items(rows.entries, key = { it.sessionIndex }) { entry ->
-                                CatalogRow(entry, { onOpen(entry) }) { onContextMenu(entry, it) }
+                                CatalogRow(entry, fallback, { onOpen(entry) }) { onContextMenu(entry, it) }
                             }
                         }
                     }
-                    UiActions { UiAction("Close", onClick = onDismiss) }
+                    UiActions { Box(Modifier.focusRequester(fallback)) { UiAction("Close", onClick = onDismiss) } }
                 }
             }
         }
@@ -81,25 +93,43 @@ private class ComposeCatalogRenderer : SessionCatalogRenderer {
         onFork: () -> Unit, onArchive: () -> Unit, onUnarchive: () -> Unit, onDelete: () -> Unit,
     ) {
         val graphical = origin as ComposeCatalogOrigin
+        restoration.Track(graphical, graphical.fallback) { graphical.isPlaced && graphical.entry == entry }
         val bounds = graphical.bounds ?: return
         val placement = remember(bounds, graphical.point) { CatalogMenuPosition(bounds, graphical.point) }
+        val first = remember(origin) { FocusRequester() }
         Popup(
             popupPositionProvider = placement, onDismissRequest = onDismiss,
             properties = PopupProperties(focusable = true, dismissOnBackPress = false),
         ) {
-            Surface(shadowElevation = 8.dp) {
-                Column(Modifier.widthIn(max = 480.dp).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Surface(shape = RoundedCornerShape(4.dp), shadowElevation = 3.dp) {
+                Column(
+                    Modifier.width(IntrinsicSize.Max).widthIn(min = 160.dp, max = 480.dp)
+                        .heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    UiText(entry.threadName ?: "Session ${entry.sessionIndex}")
                     UiText("Index: ${entry.sessionIndex}")
                     val zone = TimeZone.currentSystemDefault()
                     entry.createdAt?.let { UiText("Created at: ${it.toLocalDateTime(zone)}") }
                     entry.updatedAt?.let { UiText("Updated at: ${it.toLocalDateTime(zone)}") }
-                    if (entry.archived) UiAction("Unarchive", autoFocus = true, onClick = onUnarchive)
-                    else UiAction("Archive", autoFocus = true, onClick = onArchive)
-                    UiAction("Delete", onClick = onDelete)
-                    UiAction("Fork", onClick = onFork)
+                    CompactTextButton(
+                        if (entry.archived) onUnarchive else onArchive,
+                        Modifier.fillMaxWidth().focusRequester(first),
+                    ) { Text(if (entry.archived) "Unarchive" else "Archive", Modifier.weight(1f)) }
+                    CompactTextButton(
+                        onDelete, Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) { Text("Delete", Modifier.weight(1f)) }
+                    CompactTextButton(onFork, Modifier.fillMaxWidth()) { Text("Fork", Modifier.weight(1f)) }
                 }
             }
             NavigationBackHandler(rememberNavigationEventState(NavigationEventInfo.None), onBackCompleted = onDismiss)
+        }
+        LaunchedEffect(first) {
+            repeat(3) {
+                withFrameNanos { }
+                if (try { first.requestFocus() } catch (_: IllegalStateException) { false }) return@LaunchedEffect
+            }
         }
     }
 
@@ -107,8 +137,11 @@ private class ComposeCatalogRenderer : SessionCatalogRenderer {
     override fun Delete(viewModel: SessionDeleteViewModel, onDismiss: () -> Unit) {
         SessionDeleteContent(viewModel, onDismiss, {}, frame = { content ->
             ComposeDialog(onDismissRequest = onDismiss) {
-                Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                    Column(Modifier.widthIn(max = 560.dp).padding(24.dp)) { content() }
+                Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    Column(
+                        Modifier.widthIn(max = 560.dp).heightIn(max = 560.dp)
+                            .verticalScroll(rememberScrollState()).padding(12.dp),
+                    ) { content() }
                 }
             }
         })
@@ -116,8 +149,12 @@ private class ComposeCatalogRenderer : SessionCatalogRenderer {
 }
 
 @Composable
-private fun CatalogRow(entry: SessionCatalogEntry, onOpen: () -> Unit, onMenu: (SessionCatalogMenuOrigin) -> Unit) {
-    val origin = remember(entry.sessionIndex) { ComposeCatalogOrigin() }
+private fun CatalogRow(
+    entry: SessionCatalogEntry, fallback: FocusRequester, onOpen: () -> Unit, onMenu: (SessionCatalogMenuOrigin) -> Unit,
+) {
+    val origin = remember(entry.sessionIndex, fallback) { ComposeCatalogOrigin(entry, fallback) }
+    SideEffect { origin.entry = entry }
+    val focus = remember(origin) { FocusRequester() }
     DisposableEffect(origin) { onDispose { origin.bounds = null } }
     fun showMenu(point: Offset? = null) { origin.point = point; onMenu(origin) }
     Row(
@@ -130,26 +167,46 @@ private fun CatalogRow(entry: SessionCatalogEntry, onOpen: () -> Unit, onMenu: (
                 if (it.type == KeyEventType.KeyDown && (it.key == Key.Menu || it.key == Key.F10 && it.isShiftPressed)) {
                     showMenu(); true
                 } else false
-            },
+            }, verticalAlignment = Alignment.CenterVertically,
     ) {
-        OutlinedButton(onOpen, Modifier.weight(1f)) {
+        CompactTextButton(onOpen, Modifier.weight(1f).focusRequester(focus).semantics {
+            contentDescription = entry.threadName ?: "Session ${entry.sessionIndex}"
+            testTag = "session-catalog-row-${entry.sessionIndex}"
+            stateDescription = buildList {
+                if (entry.running) add("Running")
+                if (entry.archived) add("Archived")
+            }.joinToString("; ")
+        }) {
             Column(Modifier.fillMaxWidth()) {
-                Text(entry.threadName ?: "Session ${entry.sessionIndex}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (entry.running) Text("Running")
-                entry.updatedAt?.let { Text("Updated: ${it.toLocalDateTime(TimeZone.currentSystemDefault())}") }
+                Text(entry.threadName ?: "Session ${entry.sessionIndex}", maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium)
+                if (entry.running) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RunningSpinner()
+                        Text("Running", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                entry.updatedAt?.let { Text("Updated: ${it.toLocalDateTime(TimeZone.currentSystemDefault())}",
+                    style = MaterialTheme.typography.bodySmall) }
             }
         }
-        TextButton(
-            onClick = { showMenu() },
-            modifier = Modifier.semantics { contentDescription = "Actions for session ${entry.sessionIndex}" },
-        ) { Text("Actions") }
+        SemanticRowMenuAction("Open menu for session ${entry.sessionIndex}") {
+            val focused = origin.isPlaced && try { focus.requestFocus() } catch (_: IllegalStateException) { false }
+            if (!focused) false else {
+                showMenu()
+                true
+            }
+        }
     }
 }
 
-private class ComposeCatalogOrigin : SessionCatalogMenuOrigin {
+private class ComposeCatalogOrigin(var entry: SessionCatalogEntry, val fallback: FocusRequester) : SessionCatalogMenuOrigin {
     var bounds by mutableStateOf<Rect?>(null)
     var point: Offset? = null
-    override val isPlaced: Boolean get() = bounds != null
+    override val isPlaced: Boolean get() = bounds?.let { it.width > 0 && it.height > 0 } == true
 }
 
 private class CatalogMenuPosition(private val bounds: Rect, private val point: Offset?) : PopupPositionProvider {

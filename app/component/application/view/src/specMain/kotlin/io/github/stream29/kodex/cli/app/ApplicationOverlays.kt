@@ -10,6 +10,7 @@ import io.github.stream29.kodex.cli.settings.SidebarContent
 public sealed interface ApplicationOverlayMenu {
     public class Tab(public val opening: ApplicationTabMenuTarget) : ApplicationOverlayMenu
     public class History(public val opening: ApplicationHistoryMenuOpening) : ApplicationOverlayMenu
+    public class StreamingHistory(public val opening: ApplicationStreamingHistoryMenuOpening) : ApplicationOverlayMenu
     public sealed interface Sidebar : ApplicationOverlayMenu { public val side: SessionSidebarSide }
     public class Shell(
         override val side: SessionSidebarSide, public val opening: SidebarShellMenuOpening,

@@ -238,7 +238,9 @@ private suspend fun TestMosaic<String>.awaitWindowProgress(
     }
     try {
         withContext(Dispatchers.Default) {
-            withTimeout(5.seconds) {
+            // Traversing a 192-item window includes real frame waits on every wheel input.
+            // The separate round-trip budget still bounds the complete navigation.
+            withTimeout(30.seconds) {
                 combine(
                     model.historyItems,
                     model.loadState,

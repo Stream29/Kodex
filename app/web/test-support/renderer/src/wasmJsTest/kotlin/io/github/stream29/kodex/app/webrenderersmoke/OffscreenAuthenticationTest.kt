@@ -1,15 +1,33 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.authenticationsettings.*
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperation
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperationState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.ui.UiText
+import io.github.stream29.kodex.app.ui.UiTextRole
 import io.github.stream29.kodex.app.ui.compose.rememberComposeSettingsRenderer
+import io.github.stream29.kodex.app.ui.compose.rememberComposeSettingsRootRenderer
 import io.github.stream29.kodex.cli.authenticationsettings.*
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
+import io.github.stream29.kodex.cli.settings.SettingsModalFrame
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionPlan
 import kotlinx.coroutines.*
@@ -17,6 +35,78 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.*
 
 val offscreenAuthenticationTest by testSuite {
+    test("logout Modal is strictly shorter than the original frame without changing its body") { offscreenTest {
+        val compact = OffscreenScene.create(width = 1024, height = 900) {
+            rememberComposeSettingsRootRenderer().Modal(SettingsModalFrame.Logout, "Log out of OpenAI", {}) {
+                AuthenticationLogoutContent(KodexAuthSource.Kodex, {}, {})
+            }
+        }
+        val compactHeight = try {
+            compact.settle { compact.hasText("Cancel") }
+            compact.nodes().single { it.config.getOrNull(SemanticsProperties.PaneTitle) == "Log out of OpenAI" }.boundsInRoot.height
+        } finally { compact.close() }
+        val baseline = OffscreenScene.create(width = 1024, height = 900) {
+            Dialog({}) {
+                Surface(
+                    Modifier.semantics { paneTitle = "Original logout frame" },
+                    shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) {
+                    Column(
+                        Modifier.widthIn(max = 760.dp).heightIn(max = 720.dp).verticalScroll(rememberScrollState()).padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        UiText("Log out of OpenAI", UiTextRole.Title)
+                        AuthenticationLogoutContent(KodexAuthSource.Kodex, {}, {})
+                    }
+                }
+            }
+        }
+        try {
+            baseline.settle { baseline.hasText("Cancel") }
+            val height = baseline.nodes().single { it.config.getOrNull(SemanticsProperties.PaneTitle) == "Original logout frame" }.boundsInRoot.height
+            assertTrue(compactHeight < height)
+        } finally { baseline.close() }
+    } }
+
+    for ((width, height) in listOf(1024 to 768, 360 to 640, 320 to 240)) {
+        for (fontScale in listOf(1f, 1.5f)) {
+            test("logout keeps Cancel focused and exact confirmation dismissible ${width}x$height font=$fontScale") { authScene { ports, child ->
+                child.requestLogout()
+                val expected = assertNotNull(child.state.value.confirmation)
+                val scene = OffscreenScene.create(width = width, height = height) {
+                    CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
+                        val renderer = rememberComposeSettingsRootRenderer()
+                        AuthenticationLogoutHost(child) { title, dismiss, content ->
+                            renderer.Modal(SettingsModalFrame.Logout, title, dismiss, content)
+                        }
+                    }
+                }
+                try {
+                    scene.settle { scene.hasText("Cancel") && scene.text("Cancel").boundsInWindow.height > 0 && scene.nodes().any {
+                        it.config.getOrNull(SemanticsProperties.Focused) == true &&
+                            it.children.any { node -> node.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == "Cancel" } == true }
+                    } }
+                    assertSame(expected, child.state.value.confirmation)
+                    val cancelBounds = scene.text("Cancel").boundsInWindow
+                    assertTrue(cancelBounds.height > 0 && cancelBounds.bottom <= height,
+                        "Focused Cancel must be visible: $cancelBounds in ${width}x$height; scroll=" +
+                            scene.nodes().mapNotNull { it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) }.map { it.value() to it.maxValue() })
+                    scene.key(Key.Enter)
+                    scene.settle { child.state.value.confirmation == null && !scene.hasText("Log out of OpenAI") }
+                    assertTrue(ports.removed.isEmpty())
+                    child.requestLogout()
+                    scene.settle { scene.hasText("Log out of OpenAI") }
+                    assertNotSame(expected, child.state.value.confirmation)
+                    scene.escape()
+                    scene.settle { child.state.value.confirmation == null }
+                    assertTrue(ports.removed.isEmpty())
+                    assertFalse(child.state.value.closed)
+                    scene.frame()
+                } finally { scene.close() }
+            } }
+        }
+    }
+
     val reasons = listOf(
         OpenAiAuthState.Unavailable.NotLoaded to "Authentication credentials have not been loaded yet.",
         OpenAiAuthState.Unavailable.CredentialsNotFound to "No credentials were found in the selected authentication source.",
@@ -123,10 +213,10 @@ val offscreenAuthenticationTest by testSuite {
         val expected = assertNotNull(child.state.value.confirmation)
         var staleDismiss: (() -> Unit)? = null
         val scene = OffscreenScene.create {
+            val renderer = rememberComposeSettingsRootRenderer()
             AuthenticationLogoutHost(child) { title, dismiss, content ->
                 staleDismiss = dismiss
-                UiText(title)
-                content()
+                renderer.Modal(SettingsModalFrame.Logout, title, dismiss, content)
             }
         }
         try {

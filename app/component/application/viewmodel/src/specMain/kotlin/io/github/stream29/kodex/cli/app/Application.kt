@@ -23,17 +23,17 @@ public expect class KodexApplication(
     public val sidebarSettings: SidebarSettingsViewModel
     /**
      * The actual frontend host outlet for unhandled non-cancellation operations.
-     * Logs the original failure and offers one observation to this Application's
-     * host diagnostics consumer (local Hooks on Native). Return is not consumer completion.
+     * Logs the original failure and offers one observation for backend Hook admission.
+     * Return is not admission or execution completion.
      * Delivery is live and best-effort, with no replay and 64 buffered messages;
      * a slow consumer drops the oldest buffered observation.
-     * Cancellation is not reported. Neither a backend Agent Stop nor a new RPC call
-     * is produced; closing the Application cancels pending local observations.
+     * Cancellation is not reported. No backend Agent Stop is fabricated. Closing the
+     * Application cancels unsent local observations, not work already admitted by the backend.
      */
     public val reportUnhandledError: (Throwable) -> Unit
     /**
-     * Reports an actual frontend warning through the same host diagnostics consumer.
-     * Native uses the same Error Hook selection and
+     * Reports an actual frontend warning through the same backend admission path.
+     * The backend uses the existing Error Hook selection and
      * `{"type":"unhandled_error","message":...}` input as [reportUnhandledError].
      * Logs at warning severity, without creating an inline notice or a backend Stop.
      * Shares the same live, best-effort buffer and single consumer.

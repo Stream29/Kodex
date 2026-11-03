@@ -7,6 +7,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.dp
@@ -18,6 +20,9 @@ import io.github.stream29.kodex.app.ui.compose.rememberComposeHistoryIndexRender
 import io.github.stream29.kodex.cli.agent.createHistoryIndexViewModel
 import io.github.stream29.kodex.cli.historyindex.*
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.PlanItemArg
+import io.github.stream29.kodex.openai.StepStatus
+import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.tool.requestuserinput.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +31,120 @@ import kotlin.test.*
 import kotlin.time.Instant
 
 val offscreenHistoryIndexTest by testSuite {
+    test("Index menu renders typed plan without terminal markers or editable controls") { offscreenTest {
+        val model = IndexRenderFixture(listOf(1))
+        val plan = StablePlanUpdate("plan", arguments = UpdatePlanArgs(
+            "Explanation", listOf(PlanItemArg("Complete step", StepStatus.Completed)),
+        ))
+        model.detail = HistoryIndexReadState.Ready(HistoryIndexEntryDetail(
+            HistoryIndexEntryKind.PlanUpdate, "[x] Complete step", plan = plan,
+        ))
+        var opening by mutableStateOf<HistoryIndexMenuOpening?>(null)
+        val scene = OffscreenScene.create(width = 320, height = 240) {
+            val renderer = rememberComposeHistoryIndexRenderer(onOpenMenu = { opening = it })
+            Box(Modifier.width(320.dp).height(120.dp)) { HistoryIndexContent(model, HistoryIndexSide.Left, renderer) }
+            val current = opening
+            HistoryIndexMenuContent(current, renderer) { if (opening === current) opening = null }
+        }
+        try {
+            scene.settle { scene.hasDescription("History index 1") }
+            scene.secondaryIndex(1)
+            scene.settle { scene.hasText("Complete step") && scene.hasText("Check out") }
+            assertTrue(scene.hasText("Explanation"))
+            assertFalse(scene.hasText("[x] Complete step"))
+            val status = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.StateDescription) == "Completed"
+            }
+            assertNull(status.config.getOrNull(SemanticsActions.OnClick))
+            scene.escape()
+            scene.settle { opening == null && model.details.all { it.state.value == HistoryIndexReadState.Closed } }
+        } finally { scene.close(); model.close() }
+    } }
+
+    test("linear Index decoration stays graphical while values and read states remain semantic") { offscreenTest {
+        val model = IndexRenderFixture(listOf(1, 2, 3))
+        val scene = OffscreenScene.create(width = 320, height = 240) {
+            val renderer = rememberComposeHistoryIndexRenderer()
+            Box(Modifier.width(320.dp).height(160.dp)) { HistoryIndexContent(model, HistoryIndexSide.Left, renderer) }
+        }
+        try {
+            scene.settle { model.rows.size == 3 && scene.hasText("Row 1") && scene.hasText("Row 2") && scene.hasText("Row 3") }
+            assertFalse(scene.indexTexts().any { it.startsWith("┌● Row") || it.startsWith("├● Row") || it.startsWith("└● Row") })
+            model.rows.single { it.index == 1 }.state.value = HistoryIndexReadState.Loading
+            model.rows.single { it.index == 2 }.state.value = HistoryIndexReadState.Failed
+            model.rows.single { it.index == 3 }.state.value = HistoryIndexReadState.Ready(
+                HistoryIndexEntry(3, HistoryIndexEntryKind.UserMessage, "┌● user text"),
+            )
+            scene.settle { scene.hasText("…") && scene.hasText("[error]") && scene.hasText("┌● user text") }
+            fun rowState(index: Int) = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("History index $index") == true
+            }.config.getOrNull(SemanticsProperties.StateDescription)
+            assertEquals("Loading", rowState(1))
+            assertEquals("Read failed", rowState(2))
+            assertEquals("Read only", rowState(3))
+            assertTrue(scene.nodes().none {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.any { name -> name.contains("┌●") } == true
+            })
+            scene.frame()
+        } finally { scene.close(); model.close() }
+    } }
+
+    test("Index row keyboard menu owns scrollable detail without a fake row click") { offscreenTest {
+        val model = IndexRenderFixture(listOf(1))
+        val content = (0..100).joinToString("\n") { "complete detail line $it" }
+        model.detail = HistoryIndexReadState.Ready(HistoryIndexEntryDetail(HistoryIndexEntryKind.UserMessage, content))
+        var opening by mutableStateOf<HistoryIndexMenuOpening?>(null)
+        val scene = OffscreenScene.create(width = 320, height = 240) {
+            val renderer = rememberComposeHistoryIndexRenderer(onOpenMenu = { opening = it })
+            Box(Modifier.width(320.dp).height(120.dp)) { HistoryIndexContent(model, HistoryIndexSide.Left, renderer) }
+            val current = opening
+            HistoryIndexMenuContent(current, renderer) { if (opening === current) opening = null }
+        }
+        try {
+            scene.settle { scene.hasDescription("Open menu for history index 1") }
+            assertFalse(scene.hasDescription("Actions for history index 1"))
+            val row = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("History index 1") == true
+            }
+            assertNull(row.config.getOrNull(SemanticsActions.OnClick))
+            assertTrue(row.boundsInRoot.height <= 32f)
+            assertTrue(model.details.isEmpty())
+            val unfocused = scene.frame()
+            assertTrue(assertNotNull(row.config.getOrNull(SemanticsActions.RequestFocus)?.action).invoke())
+            scene.settle { scene.nodes().any {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("History index 1") == true &&
+                    it.config.getOrNull(SemanticsProperties.Focused) == true
+            } }
+            assertFalse(unfocused.contentEquals(scene.frame()), "Keyboard focus must be visible on the row.")
+            scene.key(Key.F10, shift = true)
+            scene.settle { scene.hasText(content) && scene.hasText("Check out") }
+            assertEquals(1, model.details.size)
+            assertEquals(1, model.timestamps.size)
+            val scroll = scene.nodes().mapNotNull { it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) }
+                .single { it.maxValue() > 0 }
+            assertEquals(0f, scroll.value())
+            scene.key(Key.PageDown)
+            scene.settle { scroll.value() > 0 }
+            assertTrue(scene.text("Check out").boundsInWindow.bottom <= 240)
+            scene.key(Key.PageUp)
+            scene.settle { scroll.value() == 0f }
+            model.details.single().state.value = HistoryIndexReadState.Failed
+            scene.settle { scene.hasText("Unable to read or decode the history entry.") }
+            assertTrue(scene.hasText("Check out"), "A detail decode failure does not change valid scroll-only admission.")
+            scene.escape()
+            scene.settle { opening == null && model.details.single().state.value == HistoryIndexReadState.Closed &&
+                scene.nodes().any {
+                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("History index 1") == true &&
+                        it.config.getOrNull(SemanticsProperties.Focused) == true
+                } }
+            assertEquals(1, model.details.single().releaseCalls)
+            assertEquals(1, model.timestamps.single().releaseCalls)
+            assertTrue(model.scrolled.isEmpty())
+            assertIs<HistoryIndexReadState.Ready<*>>(model.rows.single().state.value)
+            scene.frame()
+        } finally { scene.close(); model.close() }
+    } }
+
     test("two product bodies use independent handles of the real Index owner") { offscreenTest {
         val stored = InMemoryKodexAgentStorage.empty()
         for (index in listOf(1, 4, 8)) stored.index[index] = StableUserMessage(listOf(ContentItem.InputText("Index row $index")))
@@ -55,9 +174,9 @@ val offscreenHistoryIndexTest by testSuite {
                 }
             }.also { output = it }
             scene.settle { handles.size == 6 && handles.all { it.state.value is HistoryIndexReadState.Ready } &&
-                scene.hasText("└● Index row 8") }
-            assertTrue(scene.hasText("┌● Index row 1"))
-            assertTrue(scene.hasText("├● Index row 4"))
+                scene.hasText("Index row 8") }
+            assertTrue(scene.hasText("Index row 1"))
+            assertTrue(scene.hasText("Index row 4"))
             left = false
             scene.settle { handles.count { it.state.value == HistoryIndexReadState.Closed } == 3 }
             assertEquals(3, handles.count { it.state.value is HistoryIndexReadState.Ready })
@@ -83,10 +202,10 @@ val offscreenHistoryIndexTest by testSuite {
             }
         }
         try {
-            scene.settle { model.rows.size == 1 && scene.hasText("● Row 1") }
+            scene.settle { model.rows.size == 1 && scene.hasText("Row 1") }
             val first = model.rows.single()
             side = HistoryIndexSide.Right
-            scene.settle { model.rows.size == 2 && first.state.value == HistoryIndexReadState.Closed && scene.hasText("● Row 1") }
+            scene.settle { model.rows.size == 2 && first.state.value == HistoryIndexReadState.Closed && scene.hasText("Row 1") }
             assertNotSame(first, model.rows.last())
             assertIs<HistoryIndexReadState.Ready<*>>(model.rows.last().state.value)
             assertEquals(1, first.releaseCalls)
@@ -109,13 +228,19 @@ val offscreenHistoryIndexTest by testSuite {
             HistoryIndexEntryKind.RequestUserInput, "SECRET raw fallback", question,
         ))
         var hovering by mutableStateOf<HistoryIndexInteraction?>(null)
+        var opening by mutableStateOf<HistoryIndexMenuOpening?>(null)
         val scene = OffscreenScene.create {
-            val renderer = rememberComposeHistoryIndexRenderer(onHoverChanged = { origin, entered ->
-                if (entered) hovering = origin else if (hovering === origin) hovering = null
-            })
+            val renderer = rememberComposeHistoryIndexRenderer(
+                onHoverChanged = { origin, entered ->
+                    if (entered) hovering = origin else if (hovering === origin) hovering = null
+                },
+                onOpenMenu = { opening = it },
+            )
             Box(Modifier.width(320.dp).height(160.dp)) { HistoryIndexContent(model, HistoryIndexSide.Left, renderer) }
             val current = hovering
             HistoryIndexHoverContent(current, renderer, {}, { if (hovering === current) hovering = null })
+            val menu = opening
+            HistoryIndexMenuContent(menu, renderer) { if (opening === menu) opening = null }
         }
         try {
             scene.settle { scene.hasDescription("History index 1") }
@@ -123,7 +248,7 @@ val offscreenHistoryIndexTest by testSuite {
             scene.scene.sendPointerEvent(PointerEventType.Move, scene.indexPosition(1))
             scene.advance()
             assertTrue(model.details.isEmpty(), "Detail acquisition must not run synchronously on enter.")
-            scene.settle { scene.hasText("  > [hidden]") }
+            scene.settle { scene.hasText("[hidden]") }
             assertEquals(1, model.details.size)
             assertFalse(scene.indexTexts().any { "SECRET" in it })
             assertTrue(scene.hasText("Request user input"))
@@ -136,6 +261,16 @@ val offscreenHistoryIndexTest by testSuite {
             assertEquals(1, model.details.single().releaseCalls)
             assertIs<HistoryIndexReadState.Ready<*>>(model.rows.single().state.value)
             assertTrue(model.isActive)
+            val action = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Open menu for history index 1") == true
+            }
+            assertTrue(assertNotNull(action.config.getOrNull(SemanticsActions.OnClick)?.action).invoke())
+            scene.settle { scene.hasText("Check out") && scene.hasText("[hidden]") }
+            assertEquals(2, model.details.size)
+            assertFalse(scene.indexTexts().any { "SECRET" in it })
+            scene.escape()
+            scene.settle { opening == null && model.details.all { it.state.value == HistoryIndexReadState.Closed } }
+            assertTrue(model.details.all { it.releaseCalls == 1 })
         } finally { scene.close(); model.close() }
     } }
 
@@ -192,11 +327,12 @@ val offscreenHistoryIndexTest by testSuite {
             val graphical = rememberComposeHistoryIndexRenderer(onOpenMenu = { opening = it })
             val renderer = object : HistoryIndexRenderer by graphical {
                 @Composable override fun Menu(
-                    opening: HistoryIndexMenuOpening, timestamp: Instant?, onDismiss: () -> Unit, onCheckOut: () -> Unit,
+                    opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
+                    onDismiss: () -> Unit, onCheckOut: () -> Unit,
                 ) {
                     capturedCheckOut = onCheckOut
                     capturedDismiss = onDismiss
-                    graphical.Menu(opening, timestamp, onDismiss, onCheckOut)
+                    graphical.Menu(opening, timestamp, detail, onDismiss, onCheckOut)
                 }
             }
             Box(Modifier.width(320.dp).height(160.dp)) { HistoryIndexContent(model, HistoryIndexSide.Left, renderer) }

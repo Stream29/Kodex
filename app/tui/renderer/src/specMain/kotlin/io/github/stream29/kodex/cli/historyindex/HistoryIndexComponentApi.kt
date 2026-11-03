@@ -13,6 +13,8 @@ import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadState
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.cli.components.LazyListState
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
+import io.github.stream29.kodex.cli.components.TuiPopupMenuState
+import io.github.stream29.kodex.cli.components.rememberTuiPopupMenuState
 
 /** Renderer-local anchor/pointer and captured child target; host owns popup arbitration/grace. */
 @Stable
@@ -94,7 +96,7 @@ public expect fun BoxScope.HistoryIndexHoverContent(
 ): Unit
 
 /**
- * Exact menu opening owns a timestamp handle. Only Ready(non-null) displays timestamp.
+ * Exact menu opening owns timestamp and detail handles. Only Ready(non-null) displays timestamp.
  * Check out calls the child's captured-Agent port; it never obtains an Agent from the host.
  * Host supplies only selected-child-matching requests and arbitrates shared Shell/index popup.
  */
@@ -104,7 +106,7 @@ public expect fun BoxScope.HistoryIndexContextMenu(
     onDismissRequest: () -> Unit,
 ): Unit
 
-/** Information + Check out only; null click uses keyboard anchor, null timestamp omits its field. */
+/** Null click uses the keyboard anchor; optional Details keeps the exact opening alive. */
 @Composable
 public expect fun BoxScope.HistoryIndexContextMenuPopup(
     anchor: TuiPopupAnchor,
@@ -113,4 +115,6 @@ public expect fun BoxScope.HistoryIndexContextMenuPopup(
     onDismissRequest: () -> Unit,
     onCheckOut: () -> Unit,
     timestamp: String? = null,
+    onDetails: (() -> Unit)? = null,
+    state: TuiPopupMenuState = rememberTuiPopupMenuState(),
 ): Unit

@@ -3,7 +3,7 @@ package io.github.stream29.kodex.cli.accountusage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -21,6 +21,8 @@ internal object BrowserAccountUsageLayoutRenderer : AccountUsageLayoutRenderer {
 
     @Composable
     override fun AccountUsageActions(refresh: @Composable () -> Unit, reset: @Composable () -> Unit) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { refresh(); reset() }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            refresh(); reset()
+        }
     }
 }

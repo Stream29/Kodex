@@ -47,6 +47,7 @@ import io.github.stream29.kodex.cli.components.TuiPopup
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.TuiPopupAnchorBounds
 import io.github.stream29.kodex.cli.components.TuiPopupMenuItem
+import io.github.stream29.kodex.cli.components.TuiPopupMenuState
 import io.github.stream29.kodex.cli.components.TuiPopupPositionProvider
 import io.github.stream29.kodex.cli.components.TuiPressable
 import io.github.stream29.kodex.cli.components.TuiTheme
@@ -57,6 +58,7 @@ import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
 import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRow
 import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRowModel
+import io.github.stream29.kodex.cli.history.formatHistoryFormRowForTerminal
 import io.github.stream29.kodex.cli.history.requestUserInputHistoryRows
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 import kotlinx.coroutines.delay
@@ -103,16 +105,29 @@ public actual fun HistoryIndexRowContent(
     hovered: Boolean,
     pressed: Boolean,
 ) {
-    val presentation = historyIndexRowPresentation(state, graph) ?: return
-    MosaicHistoryIndexRowText(presentation, hovered, pressed)
+    val presentation = historyIndexRowPresentation(state, HistoryIndexRowPosition.Single) ?: return
+    MosaicHistoryIndexRowText(presentation, hovered, pressed, graph)
 }
 
 @Composable
-internal fun MosaicHistoryIndexRowText(presentation: HistoryIndexRowPresentation, hovered: Boolean, pressed: Boolean) {
+internal fun MosaicHistoryIndexRowText(
+    presentation: HistoryIndexRowPresentation, hovered: Boolean, pressed: Boolean, graphOverride: String? = null,
+) {
+    val graph = graphOverride ?: when (presentation.position) {
+        HistoryIndexRowPosition.Single -> "●"
+        HistoryIndexRowPosition.First -> "┌●"
+        HistoryIndexRowPosition.Middle -> "├●"
+        HistoryIndexRowPosition.Last -> "└●"
+    }
+    val label = when (val value = presentation.value) {
+        HistoryIndexRowValue.Loading -> "…"
+        HistoryIndexRowValue.Failed -> "[error]"
+        is HistoryIndexRowValue.Ready -> value.summary
+    }
     EllipsizedText(
-        value = presentation.value,
+        value = "$graph $label",
         modifier = Modifier.fillMaxWidth().background(TuiTheme.colorScheme.surfaceContainer),
-        color = if (presentation.failed) TuiTheme.colorScheme.error else TuiTheme.colorScheme.onSurface,
+        color = if (presentation.value == HistoryIndexRowValue.Failed) TuiTheme.colorScheme.error else TuiTheme.colorScheme.onSurface,
         textStyle = tuiInteractionTextStyle(hovered = hovered, pressed = pressed, idleTextStyle = TextStyle.Dim),
     )
 }
@@ -166,11 +181,11 @@ internal fun BoxScope.HistoryIndexHoverSurface(
 ) {
     val popupWidth = maxOf(
         title.terminalCellWidth(),
-        questionRows?.flatMap { it.value.lineSequence().toList() }?.maxOfOrNull(String::terminalCellWidth)
+        questionRows?.flatMap { formatHistoryFormRowForTerminal(it).lineSequence().toList() }?.maxOfOrNull(String::terminalCellWidth)
             ?: content.lineSequence().maxOfOrNull(String::terminalCellWidth) ?: 0,
     ).coerceIn(1, contentColumns)
     val lines = content.wrapToTerminalWidth(popupWidth)
-    val bodyHeight = questionRows?.sumOf { it.value.wrapToTerminalWidth(popupWidth).size.coerceAtLeast(1) }
+    val bodyHeight = questionRows?.sumOf { formatHistoryFormRowForTerminal(it).wrapToTerminalWidth(popupWidth).size.coerceAtLeast(1) }
         ?: lines.size
     val popupHeight = (bodyHeight + 1).coerceIn(1, contentRows)
     val listState = remember(anchor, content, questionRows) { LazyListState() }
@@ -232,10 +247,12 @@ public actual fun BoxScope.HistoryIndexContextMenuPopup(
     onDismissRequest: () -> Unit,
     onCheckOut: () -> Unit,
     timestamp: String?,
+    onDetails: (() -> Unit)?,
+    state: TuiPopupMenuState,
 ) {
     TuiContextMenu(
         expanded = true, anchor = anchor, clickPosition = clickPosition,
-        onDismissRequest = onDismissRequest, backgroundColor = TuiTheme.colorScheme.surfaceContainer,
+        onDismissRequest = onDismissRequest, backgroundColor = TuiTheme.colorScheme.surfaceContainer, state = state,
     ) {
         TuiPopupMenuItem(key = "history-index-information", onClick = {}, enabled = false) {
             Column {
@@ -244,6 +261,9 @@ public actual fun BoxScope.HistoryIndexContextMenuPopup(
             }
         }
         TuiPopupMenuItem(key = "history-index-check-out", onClick = onCheckOut) { Text("Check out") }
+        if (onDetails != null) {
+            TuiPopupMenuItem(key = "history-index-details", onClick = onDetails, dismissOnClick = false) { Text("Details") }
+        }
     }
 }
 

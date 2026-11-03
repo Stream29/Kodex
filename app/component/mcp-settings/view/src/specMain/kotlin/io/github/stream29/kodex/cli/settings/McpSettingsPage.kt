@@ -23,6 +23,7 @@ public interface McpDialogRenderer {
     public fun Details(
         server: McpServerSettingsState, onDismiss: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit,
         onSetEnabled: () -> Unit, onLogin: () -> Unit, onCancelLogin: () -> Unit, onLogout: () -> Unit, onReconnect: () -> Unit,
+        manualAuthorization: McpManualAuthorization? = null,
     )
     @Composable
     public fun Deleting(server: McpServerSettingsState, error: String?, onDismiss: () -> Unit, onConfirm: () -> Unit)
@@ -45,8 +46,8 @@ public expect fun McpSettingsContent(
 
 /**
  * One consumer for the entire exact Settings owner, retained across temporary Login and return.
- * Failure/cancellation cancels only the captured effect; URLs are transient and launcher acceptance
- * is not authentication completion. The host injects opening, never a backend-machine launcher.
+ * A failed launcher exposes the exact still-active attempt for manual opening. Cancellation
+ * releases only the captured effect; launcher acceptance is not authentication completion.
  */
 @Composable
 public expect fun McpSettingsEffects(viewModel: McpSettingsViewModel, openUrl: suspend (String) -> Boolean): Unit
@@ -62,6 +63,7 @@ public expect fun McpDetailsContent(
     server: McpServerSettingsState, onDismiss: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit,
     onSetEnabled: () -> Unit, onLogin: () -> Unit, onCancelLogin: () -> Unit, onLogout: () -> Unit, onReconnect: () -> Unit,
     loginAvailable: Boolean = true,
+    manualAuthorization: McpManualAuthorization? = null,
     frame: McpDialogFrameSlot,
 ): Unit
 @Composable

@@ -7,6 +7,8 @@ import io.github.stream29.kodex.app.settings.contract.*
 import io.github.stream29.kodex.cli.auth.KodexAuthLoginAttempt
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
@@ -156,7 +158,7 @@ val openAiLoginDependencyTest by testSuite {
         }
     }
 
-    test("a preparation handle arriving after close is cancelled and never emitted") {
+    test("a preparation handle arriving after close is released and never emitted") {
         runTest {
             val delivered = CompletableDeferred<KodexAuthLoginAttempt>()
             val attempt = ControlledLoginAttempt()
@@ -170,7 +172,8 @@ val openAiLoginDependencyTest by testSuite {
             vm.close()
             delivered.complete(attempt)
             runCurrent()
-            assertEquals(1, attempt.cancels)
+            assertEquals(0, attempt.cancels)
+            assertEquals(1, attempt.releases)
             assertEquals(emptyList(), vm.effects.toList())
             assertTrue(coroutineContext[Job]!!.isActive)
             val before = vm.state.value
@@ -184,6 +187,55 @@ val openAiLoginDependencyTest by testSuite {
             assertFalse(vm.isActive(1))
         }
     }
+    test("close releases an active attempt once without upgrading disposal to explicit cancel") {
+        runTest {
+            val attempt = ControlledLoginAttempt()
+            val vm = createOpenAiLoginViewModel(OpenAiLoginDependencies { attempt }, this)
+            vm.start()
+            runCurrent()
+            vm.effects.first()
+            vm.close()
+            vm.close()
+            runCurrent()
+            assertEquals(1, attempt.releases)
+            assertEquals(0, attempt.cancels)
+            assertTrue(coroutineContext[Job]!!.isActive)
+        }
+    }
+    test("owner cancellation releases active login without explicit cancel") {
+        runTest {
+            val owner = CoroutineScope(coroutineContext + Job(coroutineContext[Job]))
+            val attempt = ControlledLoginAttempt()
+            val vm = createOpenAiLoginViewModel(OpenAiLoginDependencies { attempt }, owner)
+            vm.start()
+            runCurrent()
+            vm.effects.first()
+            owner.cancel()
+            runCurrent()
+            assertEquals(1, attempt.releases)
+            assertEquals(0, attempt.cancels)
+            vm.close()
+        }
+    }
+    test("explicit cancel during preparation still cancels the exact late handle then releases it") {
+        runTest {
+            val delivered = CompletableDeferred<Unit>()
+            val attempt = ControlledLoginAttempt()
+            val vm = createOpenAiLoginViewModel(OpenAiLoginDependencies {
+                withContext(NonCancellable) { delivered.await() }
+                attempt
+            }, this)
+            vm.start()
+            runCurrent()
+            vm.cancel()
+            delivered.complete(Unit)
+            runCurrent()
+            assertEquals(1, attempt.cancels)
+            assertEquals(1, attempt.releases)
+            assertEquals(OpenAiLoginState.Ready, vm.state.value)
+            vm.close()
+        }
+    }
 
     test("late completion of a replaced attempt cannot complete the new child request") {
         runTest {
@@ -194,6 +246,7 @@ val openAiLoginDependencyTest by testSuite {
                 override suspend fun awaitCompletion(): Unit =
                     withContext(NonCancellable) { oldCompletion.await() }
                 override fun cancel() { cancelled++ }
+                override fun release() = Unit
             }
             val next = ControlledLoginAttempt()
             var starts = 0
@@ -226,10 +279,15 @@ private class ControlledLoginAttempt : KodexAuthLoginAttempt {
     override val authorizationUrl = "https://login.example.invalid/authorize?state=transient-secret"
     val completion = CompletableDeferred<Unit>()
     var cancels = 0
+    var releases = 0
 
     override suspend fun awaitCompletion(): Unit = completion.await()
     override fun cancel() {
         cancels++
+        completion.cancel()
+    }
+    override fun release() {
+        releases++
         completion.cancel()
     }
 }

@@ -5,6 +5,7 @@ import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
 import io.github.stream29.kodex.app.ui.UiColumn
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
@@ -22,10 +23,19 @@ public actual fun HistoryStreamingTextContent(
     onContentChange: () -> Unit,
     heading: @Composable (String, supporting: Boolean) -> Unit,
     body: @Composable (String, supporting: Boolean) -> Unit,
+    assistantBody: @Composable (String) -> Unit,
+    assistantEligibility: @Composable (Boolean?) -> Unit,
 ) {
     require(kind == HistoryStreamingKind.Message || kind == HistoryStreamingKind.AgentMessage ||
         kind == HistoryStreamingKind.Reasoning)
     val snapshot = rememberStreamingSnapshot(events, onContentChange)
+    val eligibility = if (kind != HistoryStreamingKind.Message) false else when (val item = snapshot.item) {
+        null -> null
+        is ResponseItem.Message -> item.role == MessageRole.Assistant
+        else -> false
+    }
+    val assistantMessage = eligibility == true
+    assistantEligibility(eligibility)
     val supporting = kind == HistoryStreamingKind.Reasoning
     val header = when (kind) {
         HistoryStreamingKind.Message -> "Assistant responding"
@@ -36,7 +46,12 @@ public actual fun HistoryStreamingTextContent(
     UiColumn {
         heading(header, supporting)
         val parts = if (supporting) snapshot.reasoningSummaryParts else snapshot.messageParts
-        parts.forEach { body(it.text, supporting) }
+        parts.forEach { part ->
+            key(part.key) {
+                if (assistantMessage && part.isText) assistantBody(part.text)
+                else body(part.text, supporting)
+            }
+        }
     }
 }
 
@@ -81,9 +96,9 @@ private fun StreamingResponseSnapshot.reduce(event: ResponsesStreamEvent): Strea
         toolInputParts = event.item.initialToolInputParts(),
     )
     is ResponsesStreamEvent.ContentPartAdded -> event.part.streamingTextOrNull()
-        ?.let { copy(messageParts = messageParts.replace(event.contentIndex.toString(), it)) } ?: this
+        ?.let { copy(messageParts = messageParts.replace(event.contentIndex.toString(), it, event.part !is ContentItem.InputImage)) } ?: this
     is ResponsesStreamEvent.ContentPartDone -> event.part.streamingTextOrNull()
-        ?.let { copy(messageParts = messageParts.replace(event.contentIndex.toString(), it)) } ?: this
+        ?.let { copy(messageParts = messageParts.replace(event.contentIndex.toString(), it, event.part !is ContentItem.InputImage)) } ?: this
     is ResponsesStreamEvent.OutputTextDelta -> copy(
         messageParts = messageParts.append(event.contentIndex.toString(), event.delta),
     )
@@ -120,8 +135,8 @@ private fun StreamingResponseSnapshot.reduce(event: ResponsesStreamEvent): Strea
 private fun List<StreamingTextPart>.append(key: String, delta: String): List<StreamingTextPart> =
     replace(key, (firstOrNull { it.key == key }?.text ?: "") + delta)
 
-private fun List<StreamingTextPart>.replace(key: String, text: String): List<StreamingTextPart> {
-    val replacement = StreamingTextPart(key, text)
+private fun List<StreamingTextPart>.replace(key: String, text: String, isText: Boolean = true): List<StreamingTextPart> {
+    val replacement = StreamingTextPart(key, text, isText)
     val index = indexOfFirst { it.key == key }
     return if (index < 0) this + replacement else mapIndexed { at, part -> if (at == index) replacement else part }
 }
@@ -134,7 +149,7 @@ private fun ContentItem.streamingTextOrNull(): String? = when (this) {
 
 private fun ResponseItem?.initialMessageParts(): List<StreamingTextPart> = when (this) {
     is ResponseItem.Message -> content.mapIndexed { index, part ->
-        StreamingTextPart(index.toString(), part.streamingTextOrNull().orEmpty())
+        StreamingTextPart(index.toString(), part.streamingTextOrNull().orEmpty(), part !is ContentItem.InputImage)
     }.filter { it.text.isNotBlank() }
     is ResponseItem.AgentMessage -> content.mapIndexed { index, part ->
         StreamingTextPart(index.toString(), when (part) {

@@ -24,6 +24,7 @@ kotlin {
     wasmJs { browser { commonWebpackConfig { outputFileName = "kodex-web.js" } } }
     sourceSets {
         commonMain.dependencies {
+            implementation(libs.ktor.http)
             implementation(project(":app-component-application-viewmodel"))
             implementation(project(":app-rpc-application"))
             implementation(project(":rpc-browser-client"))

@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabMenuPlacement
 import kotlin.time.Instant
@@ -18,6 +19,19 @@ public class ApplicationHistoryMenuOpening(
     public val generation: Long,
     public val storageIndex: Int,
     public val item: HistoryItemViewModel,
+    public val placement: ApplicationHistoryMenuPlacement,
+    public val displayOption: ApplicationHistoryDisplayOption? = null,
+)
+
+/** A frontend-only display action; its callback must admit the exact current opening. */
+public class ApplicationHistoryDisplayOption(public val label: String, public val onToggle: () -> Unit)
+
+/** Exact transient stream and placement; no stored-history edit target is implied. */
+public class ApplicationStreamingHistoryMenuOpening(
+    public val session: PersistedSessionViewModel,
+    public val agent: AgentViewModel,
+    public val generation: Long,
+    public val item: HistoryStreamingItem.Output,
     public val placement: ApplicationHistoryMenuPlacement,
 )
 

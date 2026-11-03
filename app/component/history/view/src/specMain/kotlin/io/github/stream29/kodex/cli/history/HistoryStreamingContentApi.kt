@@ -19,7 +19,11 @@ public data class StreamingResponseSnapshot(
     public val unknownPayload: JsonElement? = null,
 )
 
-public data class StreamingTextPart(public val key: String, public val text: String)
+public data class StreamingTextPart(
+    public val key: String,
+    public val text: String,
+    public val isText: Boolean = true,
+)
 
 /** One replay collector per stream identity, with conflated 50ms visual updates and no event loss. */
 @Composable
@@ -40,4 +44,6 @@ public expect fun HistoryStreamingTextContent(
     body: @Composable (String, supporting: Boolean) -> Unit = { text, supporting ->
         UiProse(text, if (supporting) UiTextRole.Supporting else UiTextRole.Body)
     },
+    assistantBody: @Composable (String) -> Unit = { text -> body(text, false) },
+    assistantEligibility: @Composable (Boolean?) -> Unit = {},
 ): Unit

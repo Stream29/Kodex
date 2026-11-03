@@ -34,10 +34,13 @@ kotlin {
             api(compose.runtime)
         }
         named("composeUiMain").dependencies {
+            implementation(libs.multiplatform.markdown.core)
+            implementation(libs.multiplatform.markdown.m3)
             implementation(project(":app-web-theme"))
             implementation(project(":app-component-new-session-view"))
             implementation(project(":app-component-openai-login-view"))
             implementation(libs.navigation.event.compose)
+            implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.datetime)
             implementation(project(":app-component-session-rename-view"))
             implementation(project(":app-component-working-directory-view"))

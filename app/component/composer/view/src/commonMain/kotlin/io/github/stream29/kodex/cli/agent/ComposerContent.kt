@@ -11,6 +11,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.ComposerMode
+import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
 import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPresentation
 import io.github.stream29.kodex.app.agent.contract.ComposerState
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
@@ -66,15 +67,22 @@ public actual fun ComposerContent(
                     autoFocus = autoFocus && state.mode != ComposerMode.RequestInput,
                     enabled = enabled && state.mode != ComposerMode.RequestInput,
                     readOnly = state.submission is ComposerSubmissionState.Submitting,
-                    onSubmit = { _, _ ->
-                        val expectedRevision = state.revision
-                        scope.launch { viewModel.submit(expectedRevision) }
+                    onSubmit = { text, cursor ->
+                        composerSubmissionRevision(state.ownerId, text, cursor, viewModel.state.value)?.let { revision ->
+                            scope.launch { viewModel.submit(revision) }
+                        }
                     },
                     onChange = { text, cursor -> viewModel.update(text, cursor) },
                 )
             }
         }
     }
+}
+
+internal fun composerSubmissionRevision(
+    renderedOwner: ComposerOwnerId, text: String, cursor: Int, current: ComposerState,
+): Long? = current.revision.takeIf {
+    current.ownerId == renderedOwner && current.text == text && current.cursorOffset == cursor
 }
 
 public actual fun composerStatusLine(state: ComposerState, showFailure: Boolean): String? = when {

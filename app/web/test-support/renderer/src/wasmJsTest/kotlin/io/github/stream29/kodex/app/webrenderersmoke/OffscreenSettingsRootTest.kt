@@ -1,6 +1,19 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -16,6 +29,8 @@ import io.github.stream29.kodex.app.sessiontitlesettings.createSessionTitleSetti
 import io.github.stream29.kodex.app.settings.*
 import io.github.stream29.kodex.app.settings.contract.*
 import io.github.stream29.kodex.app.ui.UiText
+import io.github.stream29.kodex.app.ui.UiTextRole
+import io.github.stream29.kodex.app.ui.UiChoiceOption
 import io.github.stream29.kodex.app.ui.SettingsRenderer
 import io.github.stream29.kodex.app.ui.compose.rememberComposeSettingsRootRenderer
 import io.github.stream29.kodex.app.usagereset.createUsageResetViewModel
@@ -23,6 +38,7 @@ import io.github.stream29.kodex.app.usagereset.contract.UsageResetDependencies
 import io.github.stream29.kodex.cli.settings.*
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.rpc.models.NotificationHookType
+import io.github.stream29.kodex.rpc.models.NotificationHook
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,7 +46,204 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlin.test.*
 
 val offscreenSettingsRootTest by testSuite {
-    test("local browser disables unavailable capabilities without replacing shared Settings") { settingsRootScene { fixture ->
+    for (dark in listOf(false, true)) {
+        for (fontScale in listOf(1f, 1.5f)) {
+            test("compact choice focus is visible and commits once dark=$dark font=$fontScale") { offscreenTest {
+                val commands = mutableListOf<String>()
+                val scene = OffscreenScene.create(width = 480, height = 240) {
+                    CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
+                        MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+                            rememberComposeSettingsRootRenderer().fields.preferences.Choice(
+                                "density", "Density", listOf(UiChoiceOption("one", "One"), UiChoiceOption("two", "Two")),
+                                "one", { commands += it }, true, null,
+                            )
+                        }
+                    }
+                }
+                try {
+                    scene.settle { scene.hasDescription("Density: One") }
+                    scene.clickDescription("Density: One")
+                    scene.settle { scene.hasDescription("Density: Two") }
+                    fun option(name: String) = scene.nodes().first {
+                        it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Density: $name") == true &&
+                            it.config.getOrNull(SemanticsProperties.Selected) != null
+                    }
+                    assertTrue(assertNotNull(option("One").config.getOrNull(SemanticsActions.RequestFocus)?.action)())
+                    scene.settle { option("One").config.getOrNull(SemanticsProperties.Focused) == true }
+                    repeat(30) { scene.advance() }
+                    val first = scene.frame()
+                    assertTrue(first.contentEquals(scene.frame()), "The first focused raster must be stable.")
+                    assertTrue(assertNotNull(option("Two").config.getOrNull(SemanticsActions.RequestFocus)?.action)())
+                    scene.settle { option("Two").config.getOrNull(SemanticsProperties.Focused) == true }
+                    repeat(30) { scene.advance() }
+                    val second = scene.frame()
+                    assertTrue(second.contentEquals(scene.frame()), "The focused raster must be stable.")
+                    assertFalse(first.contentEquals(second), "Moving focus must change the visible menu raster.")
+                    assertTrue(option("Two").boundsInWindow.height >= 32f)
+                    assertTrue(commands.isEmpty())
+                    scene.key(Key.Enter)
+                    scene.settle { commands.size == 1 }
+                    assertEquals(listOf("two"), commands)
+                } finally { scene.close() }
+            } }
+        }
+    }
+    test("Settings choice menu rows are compact and commit only the exact selected key") { offscreenTest {
+        val selected = mutableStateOf("one")
+        val commands = mutableListOf<String>()
+        val scene = OffscreenScene.create(width = 480, height = 240) {
+            rememberComposeSettingsRootRenderer().fields.preferences.Choice(
+                "density", "Density", listOf(UiChoiceOption("one", "One"), UiChoiceOption("two", "Two")),
+                selected.value, { commands += it }, true, null,
+            )
+        }
+        try {
+            scene.settle { scene.hasDescription("Density: One") }
+            scene.clickDescription("Density: One")
+            scene.settle { scene.hasDescription("Density: Two") }
+            val option = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Density: Two") == true
+            }
+            assertTrue(option.boundsInWindow.height in 32f..40f, "Choice option must use compact row geometry.")
+            assertEquals(false, option.config.getOrNull(SemanticsProperties.Selected))
+            assertTrue(commands.isEmpty())
+            val current = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Density: One") == true &&
+                    it.config.getOrNull(SemanticsProperties.Selected) == true
+            }
+            assertTrue(assertNotNull(current.config.getOrNull(SemanticsActions.RequestFocus)?.action)())
+            scene.key(Key.DirectionDown)
+            scene.settle { scene.nodes().any {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Density: Two") == true &&
+                    it.config.getOrNull(SemanticsProperties.Focused) == true
+            } }
+            assertTrue(commands.isEmpty())
+            scene.key(Key.Enter)
+            scene.settle { commands.size == 1 && !scene.hasDescription("Density: Two") }
+            assertEquals(listOf("two"), commands)
+            assertEquals("one", selected.value)
+        } finally { scene.close() }
+    } }
+    test("settings sections use compact insets and retain controlled Toggle behavior") { offscreenTest {
+        val changes = mutableListOf<Boolean>()
+        val scene = OffscreenScene.create(width = 600) {
+            val fields = rememberComposeSettingsRootRenderer().fields.preferences
+            Box(Modifier.semantics { contentDescription = "Compact section frame" }) {
+                fields.Section("Compact section") { UiText("Field"); UiText("Value") }
+            }
+            Surface(
+                Modifier.fillMaxWidth().semantics { contentDescription = "Original section frame" },
+                shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLowest,
+            ) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    UiText("Section", UiTextRole.Title)
+                    UiText("Field"); UiText("Value")
+                }
+            }
+            fields.Toggle("Controlled target", false, changes::add, true, "Complete supporting text")
+        }
+        try {
+            scene.settle { scene.hasText("Controlled target") }
+            fun frame(name: String) = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(name) == true
+            }.boundsInRoot
+            assertTrue(frame("Compact section frame").height < frame("Original section frame").height)
+            val inset = scene.text("Compact section").boundsInRoot.left - frame("Compact section frame").left
+            assertTrue(inset in 7f..9f, "Section should use the compact 8dp horizontal inset.")
+            val toggle = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.Role) == Role.Checkbox &&
+                    it.config.getOrNull(SemanticsActions.OnClick) != null
+            }
+            assertTrue(toggle.boundsInRoot.height in 32f..40f, "Toggle should retain a compact reachable target.")
+            scene.click("Controlled target")
+            scene.click("Controlled target")
+            assertEquals(listOf(true, true), changes, "The renderer never invents an optimistic checked value.")
+            assertTrue(scene.hasText("Complete supporting text"))
+            scene.frame()
+        } finally { scene.close() }
+    } }
+
+    test("settings Toggle ignores a retained callback after it becomes disabled") { offscreenTest {
+        val enabled = mutableStateOf(true)
+        val changes = mutableListOf<Boolean>()
+        val scene = OffscreenScene.create(width = 480, height = 120) {
+            rememberComposeSettingsRootRenderer().fields.preferences.Toggle(
+                "Guarded toggle", false, changes::add, enabled.value, "Supporting text",
+            )
+        }
+        fun toggle() = scene.nodes().single {
+            it.config.getOrNull(SemanticsProperties.Role) == Role.Checkbox &&
+                it.config.getOrNull(SemanticsActions.OnClick) != null
+        }
+        try {
+            scene.settle { scene.hasText("Guarded toggle") }
+            val retained = assertNotNull(toggle().config.getOrNull(SemanticsActions.OnClick)?.action)
+            scene.click("Guarded toggle")
+            assertEquals(listOf(true), changes)
+            enabled.value = false
+            scene.settle { SemanticsProperties.Disabled in toggle().config }
+            retained()
+            assertEquals(listOf(true), changes)
+        } finally { scene.close() }
+    } }
+
+    for ((width, height) in listOf(1024 to 768, 360 to 640, 320 to 240)) {
+        for (fontScale in listOf(1f, 1.5f)) {
+            test("all Settings pages keep selected navigation errors and Close reachable ${width}x$height font=$fontScale") { settingsRootScene { fixture ->
+                fixture.global.operationFailure.value = true
+                val scene = OffscreenScene.create(width = width, height = height) {
+                    CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
+                        SettingsContent(
+                            fixture.root, rememberComposeSettingsRootRenderer(), { fixture.dismissals++ }, {},
+                            SettingsHostCapabilities(
+                                directoryBrowsing = false, contextPathEditing = false,
+                                providerLogin = false, frontendErrorHooks = false,
+                            ),
+                        )
+                    }
+                }
+                try {
+                    scene.settle { scene.hasText("Input") }
+                    for (page in SettingsPage.entries) {
+                        fixture.root.selectPage(page)
+                        scene.settle {
+                            scene.hasDescription("Settings content ${page.name}") &&
+                                scene.nodes().any {
+                                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Settings page ${page.name}") == true &&
+                                        it.config.getOrNull(SemanticsProperties.Selected) == true && it.boundsInWindow.width > 0
+                                }
+                        }
+                        val selected = scene.nodes().single {
+                            it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Settings page ${page.name}") == true
+                        }
+                        assertEquals(Role.Tab, selected.config.getOrNull(SemanticsProperties.Role))
+                        assertTrue(selected.boundsInWindow.left >= 0 && selected.boundsInWindow.right <= width)
+                        val close = scene.text("Close").boundsInWindow
+                        assertTrue(close.top >= 0 && close.bottom <= height, "$page Close at $close")
+                        assertEquals(1, scene.textCount(SettingsOperationFailureMessage))
+                        val body = scene.nodes().single {
+                            it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Settings content ${page.name}") == true
+                        }
+                        assertTrue(body.boundsInWindow.height > 0, "$page has a finite content viewport")
+                        val scroll = assertNotNull(body.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange))
+                        assertTrue(assertNotNull(selected.config.getOrNull(SemanticsActions.RequestFocus)?.action).invoke())
+                        if (scroll.maxValue() > 0) {
+                            scene.key(Key.PageDown)
+                            scene.settle { scroll.value() > 0 }
+                            scene.key(Key.PageUp)
+                            scene.settle { scroll.value() == 0f }
+                        }
+                    }
+                    scene.click("Close")
+                    assertEquals(1, fixture.dismissals)
+                    assertEquals(0, fixture.global.closes + fixture.source.closes)
+                    scene.frame()
+                } finally { scene.close() }
+            } }
+        }
+    }
+
+    test("explicit unavailable readiness disables capabilities without replacing shared Settings") { settingsRootScene { fixture ->
         var logins = 0
         val scene = OffscreenScene.create {
             val graphical = rememberComposeSettingsRootRenderer()
@@ -41,7 +254,10 @@ val offscreenSettingsRootTest by testSuite {
             }
             SettingsContent(
                 fixture.root, renderer, {}, { logins++ },
-                SettingsHostCapabilities(directoryBrowsing = false, contextPathEditing = false, providerLogin = false),
+                SettingsHostCapabilities(
+                    directoryBrowsing = false, contextPathEditing = false,
+                    providerLogin = false, frontendErrorHooks = false,
+                ),
             )
         }
         try {
@@ -56,6 +272,8 @@ val offscreenSettingsRootTest by testSuite {
             assertEquals(0, fixture.global.authPorts.logins)
             assertEquals(0, logins)
             assertTrue(scene.hasText("Provider sign-in is unavailable in this host. Sign in using the Native client."))
+            scene.selectSettingsPage(SettingsPage.Hooks)
+            scene.settle { scene.hasText("Frontend shell hooks are unavailable in this host.") }
             scene.selectSettingsPage(SettingsPage.CurrentSession)
             scene.settle { scene.hasText("Browse") }
             scene.click("Browse")
@@ -121,7 +339,7 @@ val offscreenSettingsRootTest by testSuite {
         assertFalse(fixture.global.applicationPreferences.state.value.closed)
     } }
 
-    test("leaving pages clears exact child slots while browser shell hooks stay unavailable") { settingsRootScene { fixture ->
+    test("leaving pages clears exact child slots and Ready exposes independent frontend error Hooks") { settingsRootScene { fixture ->
         var renameClicks = 0
         var renameSlot: SessionRenameViewModel? = null
         var dismissRename: (() -> Unit)? = null
@@ -179,7 +397,12 @@ val offscreenSettingsRootTest by testSuite {
             scene.settle { scene.hasText("Input") && !scene.hasText("Select directory") }
             assertEquals(1, browser.closes)
             scene.selectSettingsPage(SettingsPage.Hooks)
-            scene.settle { scene.hasText("Frontend shell hooks are unavailable in this host.") }
+            scene.settle { scene.hasText("Frontend errors") && scene.nodes().any {
+                it.config.getOrNull(SemanticsProperties.Text)?.any { text ->
+                    text.text.startsWith("frontend-error ")
+                } == true
+            } }
+            assertFalse(scene.hasText("Frontend shell hooks are unavailable in this host."))
             assertEquals(1, scene.nodes().count {
                 it.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text.startsWith("notify ") } == true
             })
@@ -292,7 +515,11 @@ internal class RootGlobalFixture(owner: CoroutineScope) : GlobalSettingsViewMode
     val authPorts = AuthPorts()
     val contextPorts = ContextPorts()
     val hookPorts = HookPorts(NotificationHookType.entries.toSet())
-    val frontendHookPorts = HookPorts(setOf(NotificationHookType.StopAssistantMessage))
+    val frontendHookPorts = HookPorts(setOf(NotificationHookType.StopUnhandledError)).apply {
+        hooks.value = listOf(NotificationHook(
+            "frontend-error", setOf(NotificationHookType.StopUnhandledError), "frontend-error-command",
+        ))
+    }
     val mcpPorts = McpPorts()
     override val applicationPreferences = createApplicationPreferencesViewModel(preferencesPorts, owner)
     override val sessionTitleSettings = createSessionTitleSettingsViewModel(titlePorts, owner)

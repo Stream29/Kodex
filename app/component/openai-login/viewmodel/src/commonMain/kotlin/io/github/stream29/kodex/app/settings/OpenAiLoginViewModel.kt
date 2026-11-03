@@ -27,6 +27,7 @@ internal class OpenAiLoginViewModelImpl(
     private val effectChannel = Channel<OpenAiLoginEffect>(Channel.BUFFERED)
     private var nextAttemptId: Long = 1L
     private var pendingAttemptId: Long? = null
+    private var pendingRequest: LoginRequest? = null
     private var activeLogin: ActiveLogin? = null
     private var loginJob: Job? = null
     private var closed: Boolean = false
@@ -37,13 +38,15 @@ internal class OpenAiLoginViewModelImpl(
     override fun start() {
         if (closed || loginJob?.isActive == true) return
         val attemptId = allocateAttemptId()
+        val request = LoginRequest().also { pendingRequest = it }
         pendingAttemptId = attemptId
         mutableState.value = OpenAiLoginState.Preparing
         loginJob = scope.launch {
+            var attempt: KodexAuthLoginAttempt? = null
             try {
-                val attempt = dependencies.startLogin()
+                attempt = dependencies.startLogin()
                 if (closed || pendingAttemptId != attemptId) {
-                    attempt.cancel()
+                    if (request.explicitlyCancelled) attempt.cancel()
                     return@launch
                 }
                 val active = ActiveLogin(
@@ -76,6 +79,9 @@ internal class OpenAiLoginViewModelImpl(
                     activeLogin = null
                     mutableState.value = OpenAiLoginState.Failed(failure.loginFailureMessage())
                 }
+            } finally {
+                attempt?.release()
+                if (pendingRequest === request) pendingRequest = null
             }
         }
     }
@@ -97,6 +103,8 @@ internal class OpenAiLoginViewModelImpl(
     }
 
     override fun cancel() {
+        if (closed) return
+        pendingRequest?.explicitlyCancelled = true
         pendingAttemptId = null
         activeLogin?.attempt?.cancel()
         activeLogin = null
@@ -126,10 +134,19 @@ internal class OpenAiLoginViewModelImpl(
     override fun isActive(attemptId: Long): Boolean =
         !closed && activeLogin?.id == attemptId
 
+    override fun manualAuthorizationUrl(attemptId: Long): String? {
+        if (closed || (mutableState.value as? OpenAiLoginState.BrowserOpenFailed)?.attemptId != attemptId) return null
+        return activeLogin?.takeIf { it.id == attemptId }?.attempt?.authorizationUrl
+    }
+
     override fun close() {
         if (closed) return
-        cancel()
         closed = true
+        pendingAttemptId = null
+        activeLogin = null
+        loginJob?.cancel()
+        loginJob = null
+        if (mutableState.value != OpenAiLoginState.Completed) mutableState.value = OpenAiLoginState.Ready
         scope.cancel()
         effectChannel.close()
     }
@@ -140,6 +157,10 @@ internal class OpenAiLoginViewModelImpl(
         }
         return nextAttemptId++
     }
+}
+
+private class LoginRequest {
+    var explicitlyCancelled = false
 }
 
 public actual fun createOpenAiLoginViewModel(

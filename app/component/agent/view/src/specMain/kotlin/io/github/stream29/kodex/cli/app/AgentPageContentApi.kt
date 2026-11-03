@@ -18,7 +18,13 @@ public data class AgentPageMeasureInputs(
     public val running: Boolean,
     public val settings: KodexAgentSettings,
     public val tokenCount: Long?,
-)
+    /** Number of pending panels mounted by this shared frame, used only for height allocation. */
+    public val pendingToolPanelCount: Int = if (hostInteractionPending) 1 else 0,
+) {
+    init {
+        require(pendingToolPanelCount >= 0 && (pendingToolPanelCount > 0) == hostInteractionPending)
+    }
+}
 
 /** Slots keep geometry, focus and native widget handles below the shared page composition. */
 public interface AgentPageRenderScope {

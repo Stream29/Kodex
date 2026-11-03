@@ -313,7 +313,7 @@ val mcpSettingsViewModelTest by testSuite {
             vm.close()
         }
     }
-    test("OAuth effect failure cancels exact old attempt not newer same name") {
+    test("OAuth effect failure releases exact old attempt not newer same name") {
         runTest {
             val deps = McpPorts()
             val vm = createMcpSettingsViewModel(deps, backgroundScope)
@@ -332,13 +332,50 @@ val mcpSettingsViewModelTest by testSuite {
             assertEquals(2, deps.logins.size)
             effects.first().cancel()
             runCurrent()
-            assertEquals(1, deps.logins.first().cancellations)
+            assertEquals(1, deps.logins.first().releases)
             assertEquals(0, deps.logins.last().cancellations)
             effects.last().cancel()
             runCurrent()
-            assertEquals(1, deps.logins.last().cancellations)
+            assertEquals(1, deps.logins.last().releases)
+            assertTrue(deps.logins.all { it.cancellations == 0 })
             assertTrue(deps.failures.isEmpty())
             vm.close()
+        }
+    }
+
+    test("failed launcher exposes only live exact attempts and clears after completion") {
+        runTest {
+            val deps = McpPorts()
+            val vm = createMcpSettingsViewModel(deps, backgroundScope)
+            val effects = mutableListOf<McpSettingsEffect.OpenAuthorizationUrl>()
+            backgroundScope.launch { vm.effects.collect { effects += it as McpSettingsEffect.OpenAuthorizationUrl } }
+            try {
+                vm.details("existing")
+                vm.login(vm.detailsToken())
+                runCurrent()
+                val first = effects.single()
+                first.onLaunchFailed()
+                assertEquals(listOf(first.url), vm.manualAuthorizations().map { it.url })
+                val oldManual = vm.manualAuthorizations().single()
+                assertFalse(oldManual.toString().contains(first.url))
+                deps.logins.single().finished.complete(Unit)
+                runCurrent()
+                assertTrue(vm.manualAuthorizations().isEmpty())
+                vm.login(vm.detailsToken())
+                runCurrent()
+                val second = effects.last()
+                first.onLaunchFailed()
+                assertTrue(vm.manualAuthorizations().isEmpty())
+                second.onLaunchFailed()
+                assertEquals(1, vm.manualAuthorizations().size)
+                oldManual.cancel()
+                assertEquals(0, deps.logins.last().cancellations)
+                vm.manualAuthorizations().single().cancel()
+                runCurrent()
+                assertTrue(vm.manualAuthorizations().isEmpty())
+                assertEquals(1, deps.logins.last().cancellations)
+                assertEquals(1, deps.logins.last().releases)
+            } finally { vm.close() }
         }
     }
     test("page hide keeps OAuth and Settings close cleans only owned exact attempt") {
@@ -354,7 +391,8 @@ val mcpSettingsViewModelTest by testSuite {
             assertEquals(0, deps.logins.single().cancellations)
             vm.close()
             runCurrent()
-            assertEquals(1, deps.logins.single().cancellations)
+            assertEquals(1, deps.logins.single().releases)
+            assertEquals(0, deps.logins.single().cancellations)
             assertTrue(deps.failures.isEmpty())
         }
     }
@@ -373,8 +411,47 @@ val mcpSettingsViewModelTest by testSuite {
             prepared.complete(Unit)
             runCurrent()
             assertEquals(0, effects)
-            assertEquals(1, deps.logins.single().cancellations)
+            assertEquals(1, deps.logins.single().releases)
+            assertEquals(0, deps.logins.single().cancellations)
             assertTrue(deps.failures.isEmpty())
+        }
+    }
+    test("explicit OAuth cancel still cancels the exact active attempt then releases local ownership") {
+        runTest {
+            val deps = McpPorts()
+            val vm = createMcpSettingsViewModel(deps, backgroundScope)
+            backgroundScope.launch { vm.effects.collect {} }
+            vm.details("existing")
+            vm.login(vm.detailsToken())
+            runCurrent()
+            vm.cancelLogin(vm.detailsToken())
+            vm.cancelLogin(vm.detailsToken())
+            runCurrent()
+            assertEquals(1, deps.logins.single().cancellations)
+            assertEquals(1, deps.logins.single().releases)
+            assertTrue(deps.failures.isEmpty())
+            vm.close()
+        }
+    }
+    test("explicit OAuth cancel during preparation cancels the exact late handle not just pending release") {
+        runTest {
+            val deps = McpPorts()
+            val prepared = CompletableDeferred<Unit>()
+            deps.loginGate = prepared
+            val vm = createMcpSettingsViewModel(deps, backgroundScope)
+            var effects = 0
+            backgroundScope.launch { vm.effects.collect { effects++ } }
+            vm.details("existing")
+            vm.login(vm.detailsToken())
+            runCurrent()
+            vm.cancelLogin(vm.detailsToken())
+            prepared.complete(Unit)
+            runCurrent()
+            assertEquals(0, effects)
+            assertEquals(1, deps.logins.single().cancellations)
+            assertEquals(1, deps.logins.single().releases)
+            assertTrue(deps.failures.isEmpty())
+            vm.close()
         }
     }
     test("OAuth preparation failure reports generically while cancellation does not") {
@@ -550,8 +627,10 @@ private class McpPorts : McpSettingsDependencies {
         override val authorizationUrl = "https://login.example/authorize"
         val finished = CompletableDeferred<Unit>()
         var cancellations = 0
+        var releases = 0
         override suspend fun awaitCompletion() { finished.await() }
         override fun cancel() { cancellations++ }
+        override fun release() { releases++ }
     }
     override suspend fun reconnect(serverName: String) { reconnections += serverName }
     override suspend fun logout(serverName: String) { logouts += serverName }

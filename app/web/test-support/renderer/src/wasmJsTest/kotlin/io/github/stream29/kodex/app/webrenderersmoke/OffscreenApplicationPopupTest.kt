@@ -50,10 +50,11 @@ val offscreenApplicationPopupTest by testSuite {
                 if (unmountDuringUrl) {
                     scene.close(); closed = true
                     withTimeout(5_000) {
-                        while (cancelled != 1 || fixture.global.mcpPorts.logins.single().cancellations != 1) delay(1)
+                        while (cancelled != 1 || fixture.global.mcpPorts.logins.single().releases != 1) delay(1)
                     }
                     assertEquals(1, cancelled)
-                    assertEquals(1, fixture.global.mcpPorts.logins.single().cancellations)
+                    assertEquals(1, fixture.global.mcpPorts.logins.single().releases)
+                    assertEquals(0, fixture.global.mcpPorts.logins.single().cancellations)
                     assertTrue(app.logins.single().closed)
                 } else {
                     scene.click("Cancel")
@@ -65,6 +66,7 @@ val offscreenApplicationPopupTest by testSuite {
                     scene.settle { true }
                     assertEquals(1, opens)
                     assertEquals(0, fixture.global.mcpPorts.logins.single().cancellations)
+                    assertEquals(0, fixture.global.mcpPorts.logins.single().releases)
                 }
                 assertTrue(failures.isEmpty())
                 assertEquals(0, fixture.global.closes)

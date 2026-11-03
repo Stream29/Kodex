@@ -48,6 +48,7 @@ public actual fun McpSettingsDialogHost(viewModel: McpSettingsViewModel, rendere
                 { viewModel.requestDelete(dialog.token) }, { viewModel.setEnabled(dialog.token, !dialog.server.enabled) },
                 { viewModel.login(dialog.token) }, { viewModel.cancelLogin(dialog.token) },
                 { viewModel.logout(dialog.token) }, { viewModel.reconnect(dialog.token) },
+                viewModel.manualAuthorizations().firstOrNull { it.serverName == dialog.server.serverName && it.isActive() },
             )
         }
         is McpSettingsDialog.Editing -> key(viewModel, dialog.token) {
@@ -80,13 +81,14 @@ public actual fun McpSettingsEffects(viewModel: McpSettingsViewModel, openUrl: s
         viewModel.effects.collect { effect ->
             when (effect) {
                 is McpSettingsEffect.OpenAuthorizationUrl -> {
+                    if (!effect.isActive()) return@collect
                     try {
-                        if (!currentOpen(effect.url)) effect.cancel()
+                        if (!currentOpen(effect.url) && effect.isActive()) effect.onLaunchFailed()
                     } catch (cancelled: CancellationException) {
                         effect.cancel()
                         throw cancelled
                     } catch (_: Throwable) {
-                        effect.cancel()
+                        if (effect.isActive()) effect.onLaunchFailed()
                     }
                 }
             }

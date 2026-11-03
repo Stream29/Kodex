@@ -5,6 +5,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExe
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
@@ -19,12 +20,43 @@ public enum class HistoryTextStyle { Normal, Dim, Bold }
 /** Disclosure/measurement only. Text preserves empty output, whitespace and line breaks. */
 public interface HistoryToolDetails {
     @Composable public fun Text(value: String, style: HistoryTextStyle)
+    /** Recorded execution context, with the host's prior text role as fallback. */
+    @Composable public fun RecordedMetadata(value: String, fallback: HistoryTextStyle) {
+        Text(value, fallback)
+    }
+    /** Recorded command output; renderers may distinguish its typography without changing content. */
+    @Composable public fun RecordedOutput(value: String, style: HistoryTextStyle) {
+        Text(value, style)
+    }
     @Composable public fun Section(label: String, content: @Composable () -> Unit)
 }
 
 public interface HistoryContentRenderer : HistoryFormRenderer {
     @Composable public fun Heading(value: String, style: HistoryTextStyle)
     @Composable public fun Text(value: String, style: HistoryTextStyle)
+    /** Assistant message text only; other roles and non-text parts keep their original rendering. */
+    @Composable public fun AssistantText(value: String) {
+        Text(value, HistoryTextStyle.Normal)
+    }
+    /** Reports the observed role of the current transient message to its frontend owner. */
+    @Composable public fun AssistantStreamEligibility(isAssistant: Boolean?) {}
+    /** A recorded error; fallback preserves the host's existing ordinary detail style. */
+    @Composable public fun RecordedError(value: String, fallback: HistoryTextStyle) {
+        Text(value, fallback)
+    }
+    /** Recorded execution context, with the host's prior text role as fallback. */
+    @Composable public fun RecordedMetadata(value: String, fallback: HistoryTextStyle) {
+        Text(value, fallback)
+    }
+    /** A recorded JSON projection, without reparsing or changing its content. */
+    @Composable public fun RecordedJson(value: String, style: HistoryTextStyle) {
+        Text(value, style)
+    }
+    @Composable public fun Plan(value: HistoryPlanModel)
+    /** Render an answered History request without changing other read-only form surfaces. */
+    @Composable public fun RequestUserInput(event: StableRequestUserInputToolEvent, elapsed: Duration?) {
+        HistoryRequestUserInputContent(event, elapsed, this)
+    }
     @Composable public fun Tool(
         summary: String, rawName: String?, status: String, expansionKey: Any,
         detailStyle: HistoryTextStyle, expandedSummary: String?,

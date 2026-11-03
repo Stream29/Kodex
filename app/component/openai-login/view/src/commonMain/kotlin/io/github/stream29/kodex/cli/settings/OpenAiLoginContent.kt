@@ -6,6 +6,7 @@ import io.github.stream29.kodex.app.settings.contract.OpenAiLoginState
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
 import io.github.stream29.kodex.app.ui.UiText
 import io.github.stream29.kodex.app.ui.UiTextRole
+import io.github.stream29.kodex.app.ui.UiProse
 
 @Composable
 public actual fun OpenAiLoginContent(
@@ -22,8 +23,16 @@ public actual fun OpenAiLoginContent(
         viewModel.effects.collect { effect ->
             when (effect) {
                 is OpenAiLoginEffect.OpenExternalUrl -> if (viewModel.isActive(effect.attemptId)) {
-                    if (currentOpenBrowser(effect.url)) viewModel.onBrowserOpened(effect.attemptId)
-                    else viewModel.onBrowserOpenFailed(effect.attemptId)
+                    val opened = try {
+                        currentOpenBrowser(effect.url)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) { false }
+                    if (opened) {
+                        viewModel.onBrowserOpened(effect.attemptId)
+                    } else {
+                        viewModel.onBrowserOpenFailed(effect.attemptId)
+                    }
                 }
             }
         }
@@ -45,6 +54,10 @@ public actual fun OpenAiLoginContent(
                 }
                 is OpenAiLoginState.BrowserOpenFailed -> {
                     UiText("Kodex could not open a browser.")
+                    viewModel.manualAuthorizationUrl(current.attemptId)?.let {
+                            UiText("Open this address in your browser:", UiTextRole.Supporting)
+                            UiProse(it, UiTextRole.Supporting)
+                        }
                     LoginActions("Retry browser", { viewModel.retryBrowser(current.attemptId) }, dismiss)
                 }
                 OpenAiLoginState.Completed -> {

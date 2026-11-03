@@ -20,6 +20,7 @@ public expect fun HistoryMessageContent(
     body: @Composable (String, supporting: Boolean) -> Unit = { text, supporting ->
         UiProse(text, if (supporting) UiTextRole.Supporting else UiTextRole.Body)
     },
+    assistantBody: @Composable (String) -> Unit = { text -> body(text, false) },
 ): Unit
 
 /** Observes the exact lazy child's Loading/Ready/Failed states; does not start or cache its read. */
@@ -33,6 +34,7 @@ public expect fun HistoryMessageRow(
         UiProse(text, if (supporting) UiTextRole.Supporting else UiTextRole.Body)
     },
     turnMarker: @Composable (Duration) -> Unit = { HistoryTurnMarker(it) },
+    assistantBody: @Composable (String) -> Unit = { text -> body(text, false) },
 ): Unit
 
 /** Complete-turn marker with the existing nearest-millisecond rounding. */

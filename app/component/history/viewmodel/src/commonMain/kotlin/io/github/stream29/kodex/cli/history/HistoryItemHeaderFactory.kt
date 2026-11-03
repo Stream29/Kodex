@@ -159,6 +159,7 @@ private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (t
     is StableToolSearchEvent -> when (result) {
         is ToolSearchResult.Success -> "completed"
         is ToolSearchResult.InvalidArguments -> "failed"
+        is ToolSearchResult.ExecutionFailure -> "failed"
     }
 
     is StableWebSearchToolEvent -> result.historyStatus()

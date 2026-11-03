@@ -82,6 +82,8 @@ public sealed interface OpenAiLoginEffect {
             require(attemptId > 0) { "An OpenAI login attempt id must be positive." }
             require(url.isNotBlank()) { "An OpenAI authorization URL must not be blank." }
         }
+
+        override fun toString(): String = "OpenExternalUrl(attemptId=$attemptId, url=<redacted>)"
     }
 }
 
@@ -94,9 +96,10 @@ public sealed interface OpenAiLoginEffect {
  * renderer or parent. Only one preparation/authorization job is active at a
  * time. Completion from a cancelled/replaced attempt cannot update the child.
  *
- * The owner closes the child on dismissal. Cancellation/closure stops local
- * work and cancels the exact attempt without changing the credential source
- * or undoing a committed sign-in. Parent-scope cancellation stops child work;
+ * The owner closes the child on dismissal. Closure/owner cancellation stops local
+ * work and releases pending state without revoking accepted backend exchange/commit.
+ * Explicit cancel remains a separate exact-attempt command; neither changes the source
+ * or rolls back a committed sign-in. Parent-scope cancellation stops child work;
  * the owner must still close the child to release its effect stream/handle.
  */
 public interface OpenAiLoginViewModel : AutoCloseable {
@@ -149,9 +152,12 @@ public interface OpenAiLoginViewModel : AutoCloseable {
     /** True only for the current delivered handle, false after cancel/completion/close. */
     public fun isActive(attemptId: Long): Boolean
 
+    /** The current failed launch's transient URL, or null for a stale/different attempt. */
+    public fun manualAuthorizationUrl(attemptId: Long): String?
+
     /**
-     * Cancels the child and its exact attempt, then closes effects.
-     * Does not cancel the parent scope or auth backend. Idempotent; subsequent
+     * Stops the child and releases its exact attempt, then closes effects.
+     * Does not explicitly cancel login, the parent scope or accepted backend work. Idempotent; subsequent
      * commands and callbacks are no-ops and no new effects are produced.
      */
     override fun close(): Unit

@@ -3,6 +3,7 @@ package io.github.stream29.kodex.app.ui.compose
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.app.ui.UiEditorFocusHandle
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.cli.app.AgentPageRenderer
 import io.github.stream29.kodex.cli.app.ApplicationHistoryMenuPlacement
 
@@ -12,4 +13,5 @@ public expect fun rememberComposeAgentPageRenderer(
     historyState: ComposeHistoryViewState,
     onOpenHistoryContextMenu: ((generation: Long, storageIndex: Int, item: HistoryItemViewModel, placement: ApplicationHistoryMenuPlacement) -> Unit)? = null,
     composerFocus: UiEditorFocusHandle? = null,
+    onOpenStreamingHistoryContextMenu: ((generation: Long, item: HistoryStreamingItem.Output, placement: ApplicationHistoryMenuPlacement) -> Unit)? = null,
 ): AgentPageRenderer

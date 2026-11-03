@@ -28,7 +28,8 @@ internal class MosaicMcpDialogs(private val box: BoxScope) : McpDialogRenderer {
     @Composable override fun Details(
         server: McpServerSettingsState, onDismiss: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit,
         onSetEnabled: () -> Unit, onLogin: () -> Unit, onCancelLogin: () -> Unit, onLogout: () -> Unit, onReconnect: () -> Unit,
-    ) { with(box) { McpServerDetailsDialog(server, onDismiss, onEdit, onDelete, onSetEnabled, onLogin, onCancelLogin, onLogout, onReconnect) } }
+        manualAuthorization: McpManualAuthorization?,
+    ) { with(box) { McpServerDetailsDialog(server, onDismiss, onEdit, onDelete, onSetEnabled, onLogin, onCancelLogin, onLogout, onReconnect, manualAuthorization) } }
     @Composable override fun Deleting(server: McpServerSettingsState, error: String?, onDismiss: () -> Unit, onConfirm: () -> Unit) {
         with(box) { McpDeleteConfirmationDialog(server, onDismiss, onConfirm, error) }
     }
@@ -54,8 +55,9 @@ internal class MosaicMcpDialogs(private val box: BoxScope) : McpDialogRenderer {
 @Composable internal fun BoxScope.McpServerDetailsDialog(
     server: McpServerSettingsState, onDismiss: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit,
     onSetEnabled: () -> Unit, onLogin: () -> Unit, onCancelLogin: () -> Unit, onLogout: () -> Unit, onReconnect: () -> Unit,
+    manualAuthorization: McpManualAuthorization? = null,
 ) {
-    McpDetailsContent(server, onDismiss, onEdit, onDelete, onSetEnabled, onLogin, onCancelLogin, onLogout, onReconnect) { title, dismiss, content ->
+    McpDetailsContent(server, onDismiss, onEdit, onDelete, onSetEnabled, onLogin, onCancelLogin, onLogout, onReconnect, manualAuthorization = manualAuthorization) { title, dismiss, content ->
         McpDialogFrame(title, 84, dismiss, content)
     }
 }

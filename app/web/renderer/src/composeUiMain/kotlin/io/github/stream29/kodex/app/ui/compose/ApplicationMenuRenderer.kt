@@ -3,9 +3,11 @@ package io.github.stream29.kodex.app.ui.compose
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -14,6 +16,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.app.ui.compose.EditorDialog as Dialog
 import io.github.stream29.kodex.app.ui.compose.EditorPopup as Popup
@@ -49,23 +52,27 @@ private class ComposeApplicationMenuRenderer : ApplicationMenuRenderer {
         title: String, paragraphs: List<String>, cancelLabel: String, confirmLabel: String,
         onCancel: () -> Unit, onConfirm: () -> Unit,
     ) {
-        val cancel = remember { FocusRequester() }
+        val cancel = rememberInitialFocusModifier(autoFocus = true, enabled = true)
         Dialog(onDismissRequest = onCancel) {
-            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                Column(Modifier.widthIn(max = 560.dp).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Surface(
+                modifier = Modifier.semantics { paneTitle = title },
+                shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Column(
+                    Modifier.widthIn(max = 560.dp).heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(title, style = MaterialTheme.typography.titleLarge)
                     paragraphs.forEach { Text(it) }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onCancel, Modifier.focusRequester(cancel)) { Text(cancelLabel) }
-                        TextButton(onConfirm, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        CompactTextButton(onCancel, cancel) { Text(cancelLabel) }
+                        CompactTextButton(onConfirm, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
                             Text(confirmLabel)
                         }
                     }
                 }
             }
-        }
-        LaunchedEffect(cancel) {
-            repeat(3) { withFrameNanos { }; if (cancel.requestApplicationMenuFocus()) return@LaunchedEffect }
         }
     }
 }
@@ -102,7 +109,8 @@ private fun ApplicationMenu(bounds: Rect, point: Offset?, entries: List<Applicat
             shadowElevation = 3.dp,
         ) {
             Column(
-                Modifier.widthIn(max = 480.dp).heightIn(max = 480.dp).verticalScroll(rememberScrollState())
+                Modifier.width(IntrinsicSize.Max).widthIn(min = 160.dp, max = 480.dp)
+                    .heightIn(max = 480.dp).verticalScroll(rememberScrollState())
                     .onPreviewKeyEvent {
                         if (it.type != KeyEventType.KeyDown || actionKeys.isEmpty()) return@onPreviewKeyEvent false
                         val current = actionKeys.indexOf(focusedKey).coerceAtLeast(0)
@@ -120,15 +128,15 @@ private fun ApplicationMenu(bounds: Rect, point: Offset?, entries: List<Applicat
                 entries.forEach { entry ->
                     key(entry.key) {
                         when (entry) {
-                            is ApplicationMenuEntry.Information -> Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            is ApplicationMenuEntry.Information -> Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
                                 entry.lines.forEach { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
                             }
-                            is ApplicationMenuEntry.Action -> DropdownMenuItem(
-                                text = { Text(entry.label) }, onClick = entry.onClick,
-                                modifier = Modifier.focusRequester(requesters.getValue(entry.key))
+                            is ApplicationMenuEntry.Action -> CompactTextButton(
+                                onClick = entry.onClick,
+                                modifier = Modifier.fillMaxWidth().focusRequester(requesters.getValue(entry.key))
                                     .onFocusChanged { if (it.isFocused) focusedKey = entry.key }
                                     .semantics { contentDescription = "Application menu action: ${entry.key}" },
-                            )
+                            ) { Text(entry.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium) }
                         }
                     }
                 }

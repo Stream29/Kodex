@@ -1,6 +1,8 @@
 package io.github.stream29.kodex.app.ui.compose
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -9,15 +11,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.app.application.contract.*
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.ui.rememberUiEditorFocusHandle
 import io.github.stream29.kodex.cli.app.*
 import io.github.stream29.kodex.cli.settings.MinimumSidebarWidthColumns
@@ -57,6 +69,7 @@ private fun GraphicalApplication(
     val configuration = sidebarSettings.state.collectAsState().value
     val actions = rememberApplicationRootActions(viewModel, onOperationFailure)
     val overlays = rememberApplicationOverlays(frame.selectedAgent, configuration.left, configuration.right, frame.popup)
+    val applicationMenuRenderer = rememberComposeApplicationMenuRenderer()
     val historyStates = remember { mutableListOf<Pair<AgentHistoryViewModel, ComposeHistoryViewState>>() }
     retainApplicationHistoryWidgetStates(historyStates, frame.tabs.tabs.mapNotNull { it.agent?.history })
     val composerFocus = key(GraphicalRootOwnerKey(frame.selectedAgent)) { rememberUiEditorFocusHandle() }
@@ -66,6 +79,8 @@ private fun GraphicalApplication(
     var rightExpanded by remember { mutableStateOf(false) }
     val leftPreview = remember { mutableStateOf<Float?>(null) }
     val rightPreview = remember { mutableStateOf<Float?>(null) }
+    val leftToggleFocus = remember { FocusRequester() }
+    val rightToggleFocus = remember { FocusRequester() }
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
     val measuredColumn = measurer.measure(AnnotatedString("0"), style = MaterialTheme.typography.bodyMedium)
@@ -84,6 +99,9 @@ private fun GraphicalApplication(
             SessionSidebarSide.Left -> { leftExpanded = false; leftPreview.value = null }
             SessionSidebarSide.Right -> { rightExpanded = false; rightPreview.value = null }
         }
+        try {
+            (if (side == SessionSidebarSide.Left) leftToggleFocus else rightToggleFocus).requestFocus()
+        } catch (_: IllegalStateException) { }
     }
     @Composable
     fun sidebarRenderer(side: SessionSidebarSide) = rememberComposeSessionSidebarRenderer(
@@ -99,33 +117,40 @@ private fun GraphicalApplication(
     val leftRenderer = sidebarRenderer(SessionSidebarSide.Left)
     val rightRenderer = sidebarRenderer(SessionSidebarSide.Right)
 
+    val popupForFocus = rememberUpdatedState(frame.popup)
     Surface(Modifier.fillMaxSize()) {
+        CompositionLocalProvider(LocalSidebarFocusRestoreAllowed provides {
+            overlays.menu == null && popupForFocus.value == ApplicationPopupState.Closed
+        }) {
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
-                Row(
-                    Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer)
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(
-                        onClick = { if (leftExpanded) collapse(SessionSidebarSide.Left) else leftExpanded = true },
-                        modifier = Modifier.semantics {
-                            contentDescription = if (leftExpanded) "Hide left sidebar" else "Expand left sidebar"
-                        },
-                    ) { Text(if (leftExpanded) "‹" else "›") }
-                    Box(Modifier.weight(1f)) {
-                        ApplicationTabBarContent(
-                            viewModel, frame.navigation, frame.tabs, rememberComposeSessionTabBarRenderer(),
-                            onOperationFailure, { overlays.openMenu(ApplicationOverlayMenu.Tab(it)) },
-                            onBeforeNewOrCatalog = { overlays.clear() },
-                        )
+                BoxWithConstraints(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer)) {
+                    val toolbarWidth = maxWidth.coerceAtLeast(240.dp)
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()).width(toolbarWidth)
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CompactTextButton(
+                            onClick = { if (leftExpanded) collapse(SessionSidebarSide.Left) else leftExpanded = true },
+                            modifier = Modifier.widthIn(min = 32.dp).focusRequester(leftToggleFocus).semantics {
+                                contentDescription = if (leftExpanded) "Hide left sidebar" else "Expand left sidebar"
+                            },
+                        ) { Text(if (leftExpanded) "‹" else "›") }
+                        Box(Modifier.weight(1f)) {
+                            ApplicationTabBarContent(
+                                viewModel, frame.navigation, frame.tabs, rememberComposeSessionTabBarRenderer(),
+                                onOperationFailure, { overlays.openMenu(ApplicationOverlayMenu.Tab(it)) },
+                                onBeforeNewOrCatalog = { overlays.clear() },
+                            )
+                        }
+                        CompactTextButton(
+                            onClick = { if (rightExpanded) collapse(SessionSidebarSide.Right) else rightExpanded = true },
+                            modifier = Modifier.widthIn(min = 32.dp).focusRequester(rightToggleFocus).semantics {
+                                contentDescription = if (rightExpanded) "Hide right sidebar" else "Expand right sidebar"
+                            },
+                        ) { Text(if (rightExpanded) "›" else "‹") }
                     }
-                    TextButton(
-                        onClick = { if (rightExpanded) collapse(SessionSidebarSide.Right) else rightExpanded = true },
-                        modifier = Modifier.semantics {
-                            contentDescription = if (rightExpanded) "Hide right sidebar" else "Expand right sidebar"
-                        },
-                    ) { Text(if (rightExpanded) "›" else "‹") }
                 }
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                     val viewportPixels = with(density) { maxWidth.toPx() }
@@ -161,10 +186,10 @@ private fun GraphicalApplication(
                                 viewModel, frame.navigation, onOperationFailure,
                                 newSession = { draft, submit ->
                                     val settings = draft.settings.collectAsState().value
-                                    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                                    Box(Modifier.fillMaxSize().padding(8.dp), contentAlignment = Alignment.Center) {
                                         Column(
                                             Modifier.widthIn(max = 800.dp).fillMaxWidth().verticalScroll(rememberScrollState()),
-                                            verticalArrangement = Arrangement.spacedBy(24.dp),
+                                            verticalArrangement = Arrangement.spacedBy(12.dp),
                                         ) {
                                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 Text("Start a new session", style = MaterialTheme.typography.headlineMedium)
@@ -174,8 +199,8 @@ private fun GraphicalApplication(
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 )
                                             }
-                                            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                                                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                            Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                                                Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                                     NewSessionDraft(draft.composer, currentNewLineKey, submit)
                                                     ApplicationDraftStatusContent(
                                                         settings, draft.runtimeConfiguration, rememberComposeAgentStatusRenderer(),
@@ -192,9 +217,33 @@ private fun GraphicalApplication(
                                         val renderer = rememberComposeAgentPageRenderer(
                                             retained, composerFocus = composerFocus,
                                             onOpenHistoryContextMenu = { generation, index, item, placement ->
+                                                val display = if (retained.canToggleStoredMarkdown(agent.history, generation, index, item)) {
+                                                    ApplicationHistoryDisplayOption(
+                                                        if (retained.markdownModes.storedIsRaw(generation, index)) "Show rendered" else "Show raw",
+                                                    ) {
+                                                        val current = overlays.menu as? ApplicationOverlayMenu.History
+                                                        val opening = current?.opening
+                                                        if (current != null && opening != null && opening.session === selected && opening.agent === agent &&
+                                                            opening.generation == generation && opening.storageIndex == index &&
+                                                            opening.item === item && opening.placement === placement &&
+                                                            viewModel.navigation.value.selectedSession === selected &&
+                                                            selected.rootAgent.value === agent &&
+                                                            applicationMenuRenderer.isHistoryPlaced(placement) &&
+                                                            retained.canToggleStoredMarkdown(agent.history, generation, index, item) &&
+                                                            overlays.dismissMenu(current)
+                                                        ) retained.markdownModes.toggleStored(generation, index)
+                                                    }
+                                                } else null
                                                 overlays.openMenu(ApplicationOverlayMenu.History(ApplicationHistoryMenuOpening(
-                                                    selected, agent, generation, index, item, placement,
+                                                    selected, agent, generation, index, item, placement, display,
                                                 )))
+                                            },
+                                            onOpenStreamingHistoryContextMenu = { generation, item, placement ->
+                                                if (retained.canToggleStreamingMarkdown(agent.history, generation, item)) {
+                                                    overlays.openMenu(ApplicationOverlayMenu.StreamingHistory(
+                                                        ApplicationStreamingHistoryMenuOpening(selected, agent, generation, item, placement),
+                                                    ))
+                                                }
                                             },
                                         )
                                         AgentPageContent(
@@ -230,7 +279,7 @@ private fun GraphicalApplication(
                 viewModel, frame.navigation, frame.selectedAgent,
                 (overlays.menu as? ApplicationOverlayMenu.Tab)?.opening,
                 (overlays.menu as? ApplicationOverlayMenu.History)?.opening,
-                rememberComposeApplicationMenuRenderer(),
+                applicationMenuRenderer,
                 admitTab = { expected ->
                     val current = overlays.menu as? ApplicationOverlayMenu.Tab
                     if (current?.opening === expected) overlays.dismissMenu(current) else false
@@ -242,10 +291,39 @@ private fun GraphicalApplication(
                 focusEditedComposer = { owner -> if (frame.selectedAgent === owner) composerFocus.requestFocus() },
                 onOperationFailure = onOperationFailure,
             )
+            val streamingMenu = overlays.menu as? ApplicationOverlayMenu.StreamingHistory
+            if (streamingMenu != null) {
+                val opening = streamingMenu.opening
+                val widget = historyStates.firstOrNull { it.first === opening.agent.history }?.second
+                val window = opening.agent.history.historyItems.collectAsState().value
+                val streaming = opening.agent.history.streamingItem.collectAsState().value
+                val valid = opening.session === frame.navigation.selectedSession && opening.agent === frame.selectedAgent &&
+                    window.generation == opening.generation && streaming is HistoryStreamingItem.Output &&
+                    streaming.events === opening.item.events && widget != null &&
+                    widget.canToggleStreamingMarkdown(opening.agent.history, opening.generation, opening.item) &&
+                    applicationMenuRenderer.isHistoryPlaced(opening.placement)
+                LaunchedEffect(streamingMenu, valid) { if (!valid) overlays.dismissMenu(streamingMenu) }
+                if (valid) {
+                    val raw = widget.markdownModes.streamIsRaw(opening.generation, opening.item.events)
+                    applicationMenuRenderer.History(
+                        opening.placement,
+                        listOf(ApplicationMenuEntry.Action("history-display-mode", if (raw) "Show rendered" else "Show raw") {
+                            if (overlays.menu === streamingMenu &&
+                                viewModel.navigation.value.selectedSession === opening.session &&
+                                opening.session.rootAgent.value === opening.agent &&
+                                applicationMenuRenderer.isHistoryPlaced(opening.placement) &&
+                                widget.canToggleStreamingMarkdown(opening.agent.history, opening.generation, opening.item) &&
+                                overlays.dismissMenu(streamingMenu)
+                            ) widget.markdownModes.toggleStream(opening.generation, opening.item.events)
+                        }),
+                    ) { overlays.dismissMenu(streamingMenu) }
+                }
+            }
             ApplicationPopupContent(
                 viewModel, frame.popup, rememberComposeApplicationPopupRenderer(openExternalUrl),
                 onOperationFailure, openExternalUrl,
             )
+        }
         }
     }
 }
@@ -259,11 +337,43 @@ private fun GraphicalSidebarSplitter(
     val maximum by rememberUpdatedState(maximumPixels)
     val unit by rememberUpdatedState(columnPixels)
     val commit by rememberUpdatedState(onCommit)
+    val admitted by rememberUpdatedState(enabled)
+    var focused by remember { mutableStateOf(false) }
+    fun resize(columns: Int): Boolean {
+        if (!admitted || unit <= 0f || maximum <= 0f) return false
+        val limit = (maximum / unit).toInt().coerceAtLeast(MinimumSidebarWidthColumns)
+        preview.value = null
+        commit(columns.coerceIn(MinimumSidebarWidthColumns, limit))
+        return true
+    }
+    val columns = (widthPixels / columnPixels).roundToInt()
+    val maximumColumns = (maximumPixels / columnPixels).toInt().coerceAtLeast(MinimumSidebarWidthColumns)
     LaunchedEffect(enabled) { if (!enabled) preview.value = null }
     DisposableEffect(preview) { onDispose { preview.value = null } }
     Box(
         Modifier.width(GraphicalSidebarSplitterWidth).fillMaxHeight()
-            .semantics { contentDescription = "Resize ${side.name.lowercase()} sidebar" }
+            .onFocusChanged { focused = it.isFocused }
+            .semantics {
+                contentDescription = "Resize ${side.name.lowercase()} sidebar"
+                stateDescription = "$columns columns"
+                progressBarRangeInfo = ProgressBarRangeInfo(
+                    columns.coerceIn(MinimumSidebarWidthColumns, maximumColumns).toFloat(),
+                    MinimumSidebarWidthColumns.toFloat()..maximumColumns.toFloat(),
+                )
+                if (!enabled) disabled()
+                setProgress { if (it.isFinite()) resize(it.roundToInt()) else false }
+            }
+            .onPreviewKeyEvent {
+                if (it.type != KeyEventType.KeyDown || !admitted) return@onPreviewKeyEvent false
+                val direction = when (it.key) {
+                    Key.DirectionLeft -> -1
+                    Key.DirectionRight -> 1
+                    else -> return@onPreviewKeyEvent false
+                }
+                val sideDirection = if (side == SessionSidebarSide.Left) direction else -direction
+                resize((width / unit).roundToInt() + sideDirection)
+            }
+            .focusable(enabled)
             .pointerInput(side, enabled) {
                 if (enabled) detectHorizontalDragGestures(
                     onDragStart = { preview.value = width },
@@ -271,7 +381,7 @@ private fun GraphicalSidebarSplitter(
                     onDragEnd = {
                         val pixels = (preview.value ?: width).coerceIn(0f, maximum)
                         preview.value = null
-                        commit((pixels / unit).roundToInt().coerceAtLeast(MinimumSidebarWidthColumns))
+                        resize((pixels / unit).roundToInt())
                     },
                 ) { change, delta ->
                     change.consume()
@@ -282,7 +392,7 @@ private fun GraphicalSidebarSplitter(
     ) {
         Box(
             Modifier.width(1.dp).fillMaxHeight().align(Alignment.Center)
-                .background(MaterialTheme.colorScheme.outlineVariant),
+                .background(if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
         )
     }
 }

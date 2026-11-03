@@ -18,15 +18,15 @@ public fun interface OpenAiLoginDependencies {
      * Return a non-blank authorization URL for the fixed destination.
      * [KodexAuthLoginAttempt.awaitCompletion] succeeds only after authorization
      * and the destination's credential commit complete; browser launch alone
-     * is not success. The dependency owns listener/backend cleanup on success,
-     * failure and cancellation. Cancelling an attempt must be safe after it
+     * is not success. The dependency owns listener cleanup/pending release on success,
+     * failure and cancellation. Explicitly cancelling an attempt must be safe after it
      * has already completed and must not delete or roll back credentials.
      *
      * Failures from preparation or completion are converted to
      * [OpenAiLoginState.Failed]. Exception messages must be safe for display,
      * without tokens, authorization URLs or callback data. Cancellation stays
-     * cancellation, not an error message. A handle delivered after the child
-     * has cancelled or replaced its request is cancelled instead of used.
+     * cancellation, not an error message. A handle delivered after an explicit user cancel
+     * is explicitly cancelled; after disposal/replacement it is released instead of used.
      *
      * @throws CancellationException when preparation is cancelled.
      */

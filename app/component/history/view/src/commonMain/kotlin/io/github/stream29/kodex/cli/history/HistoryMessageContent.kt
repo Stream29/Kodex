@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.history
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
@@ -23,13 +24,14 @@ public actual fun HistoryMessageRow(
     heading: @Composable (String, elapsed: Duration) -> Unit,
     body: @Composable (String, supporting: Boolean) -> Unit,
     turnMarker: @Composable (Duration) -> Unit,
+    assistantBody: @Composable (String) -> Unit,
 ) {
     val state by model.state.collectAsState()
     when (val current = state) {
         is MessageHistoryItemState.Loading -> UiText("")
         MessageHistoryItemState.Failed -> UiText("Error", UiTextRole.Error)
         is MessageHistoryItemState.Ready -> UiColumn {
-            HistoryMessageContent(current.event, { heading(it, current.elapsed) }, body)
+            HistoryMessageContent(current.event, { heading(it, current.elapsed) }, body, assistantBody)
             current.turnDuration?.let { turnMarker(it) }
         }
     }
@@ -49,11 +51,12 @@ public actual fun HistoryMessageContent(
     event: StableIndexEvent.Steerable,
     heading: @Composable (String) -> Unit,
     body: @Composable (String, supporting: Boolean) -> Unit,
+    assistantBody: @Composable (String) -> Unit,
 ) {
     UiColumn {
         when (event) {
             is StableUserMessage -> Message("User", event.content, false, heading, body)
-            is StableAssistantMessage -> Message("Assistant", event.content, false, heading, body)
+            is StableAssistantMessage -> Message("Assistant", event.content, false, heading, body, assistantBody)
             is StableDeveloperMessage -> Message("Developer", event.content, true, heading, body)
             is StableAgentMessage -> {
                 heading("Agent ${event.author} → ${event.recipient}")
@@ -76,15 +79,21 @@ private fun Message(
     supporting: Boolean,
     heading: @Composable (String) -> Unit,
     body: @Composable (String, Boolean) -> Unit,
+    assistantBody: (@Composable (String) -> Unit)? = null,
 ) {
     heading(label)
-    content.forEach {
-        val text = when (it) {
-            is ContentItem.InputText -> it.text
-            is ContentItem.OutputText -> it.text
-            is ContentItem.InputImage -> "Image: ${it.imageUrl.safeReference()} ${it.detail?.name?.lowercase() ?: "auto"}"
+    content.forEachIndexed { index, part ->
+        key(index) {
+            val text = when (part) {
+                is ContentItem.InputText -> part.text
+                is ContentItem.OutputText -> part.text
+                is ContentItem.InputImage -> "Image: ${part.imageUrl.safeReference()} ${part.detail?.name?.lowercase() ?: "auto"}"
+            }
+            if (text.isNotBlank()) {
+                if (assistantBody != null && part !is ContentItem.InputImage) assistantBody(text)
+                else body(text, supporting)
+            }
         }
-        if (text.isNotBlank()) body(text, supporting)
     }
 }
 

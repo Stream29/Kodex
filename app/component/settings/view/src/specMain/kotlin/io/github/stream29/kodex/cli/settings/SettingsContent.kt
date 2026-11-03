@@ -19,11 +19,12 @@ public data class SettingsNavigationEntry(public val page: SettingsPage, public 
 public enum class SettingsFieldGroup { Preferences, Title, Defaults, Session, Authentication }
 public enum class SettingsModalFrame { ContextSource, Logout, UsageReset }
 
-/** Fixed host capabilities, not mutable Settings or backend authorization. */
+/** Actual host adapter readiness, not mutable Settings or backend authorization. */
 public data class SettingsHostCapabilities(
     public val directoryBrowsing: Boolean = true,
     public val contextPathEditing: Boolean = true,
     public val providerLogin: Boolean = true,
+    public val frontendErrorHooks: Boolean = true,
 )
 
 /** Renderer state and component frames only; no Settings child ownership or page authority. */
@@ -31,7 +32,6 @@ public interface SettingsRootRenderer {
     public val fields: SettingsPageFields
     public val hooks: HookDialogRenderer
     public val mcp: McpDialogRenderer
-    public val frontendErrorHooksAvailable: Boolean
     public val frontendErrorHooksLabel: String
 
     @Composable

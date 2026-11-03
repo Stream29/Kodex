@@ -5,6 +5,7 @@ import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
+import io.github.stream29.kodex.cli.agent.canEditHistory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -26,6 +27,18 @@ public actual fun ApplicationMenusContent(
     val acceptHistory by rememberUpdatedState(admitHistory)
     val focus by rememberUpdatedState(focusEditedComposer)
     val report by rememberUpdatedState(onOperationFailure)
+    fun consumeTab(request: ApplicationTabMenuTarget): Boolean =
+        renderer.isTabPlaced(request.placement) &&
+            viewModel.navigation.value.tabs.any { it === request.target } && acceptTab(request)
+    fun consumeHistory(request: ApplicationHistoryMenuOpening): Boolean {
+        val selected = viewModel.navigation.value.selectedSession
+        val agent = request.agent
+        return renderer.isHistoryPlaced(request.placement) &&
+            selected === request.session && selected.rootAgent.value === agent &&
+            agent.state.value.canEditHistory(agent.running.value) &&
+            agent.history.historyItems.value.generation == request.generation &&
+            agent.history.contains(request.generation, request.storageIndex) && acceptHistory(request)
+    }
     fun command(block: suspend () -> Unit) {
         scope.launch {
             try { block() }
@@ -36,21 +49,21 @@ public actual fun ApplicationMenusContent(
     ApplicationTabMenuContent(
         tabOpening, navigation.tabs.any { it === tabOpening?.target }, renderer,
         onDismiss = { acceptTab(it) },
-        onClose = { request -> if (acceptTab(request)) command { viewModel.closeTab(request.target) } },
-        onCloseAndArchive = { request -> if (acceptTab(request)) command { viewModel.closeAndArchiveSession(request.target) } },
-        onRename = { request -> if (acceptTab(request)) command { viewModel.openRenameSessionPopup(request.target) } },
-        onDelete = { request -> if (acceptTab(request)) command { viewModel.openDeleteSessionPopup(request.target.sessionIndex) } },
+        onClose = { request -> if (consumeTab(request)) command { viewModel.closeTab(request.target) } },
+        onCloseAndArchive = { request -> if (consumeTab(request)) command { viewModel.closeAndArchiveSession(request.target) } },
+        onRename = { request -> if (consumeTab(request)) command { viewModel.openRenameSessionPopup(request.target) } },
+        onDelete = { request -> if (consumeTab(request)) command { viewModel.openDeleteSessionPopup(request.target.sessionIndex) } },
     )
     ApplicationHistoryMenuContent(
         historyOpening, navigation.selectedSession, selectedAgent, renderer,
         onDismiss = { acceptHistory(it) },
         onRevert = { request ->
-            if (acceptHistory(request)) command {
+            if (consumeHistory(request)) command {
                 request.agent.requestHistoryRevert(request.storageIndex + 1, request.generation)
             }
         },
         onRevertAndEdit = { request, text ->
-            if (acceptHistory(request)) command {
+            if (consumeHistory(request)) command {
                 revertAndEdit(request.agent, request.storageIndex, request.generation, text)
                 withFrameNanos { }
                 if (viewModel.navigation.value.selectedSession?.rootAgent?.value === request.agent &&
@@ -59,7 +72,7 @@ public actual fun ApplicationMenusContent(
             }
         },
         onFork = { request ->
-            if (acceptHistory(request)) command {
+            if (consumeHistory(request)) command {
                 val index = request.session.fork(request.agent, request.storageIndex + 1, request.generation)
                 viewModel.openSession(index)
             }

@@ -34,8 +34,8 @@ internal fun RpcFixture(token: String, onBack: () -> Unit) {
         try {
             withFixtureConnection(token) { cwd, connected ->
                 connection = connected
-                val host = FixtureHost(cwd) { status = "Frontend diagnostic: $it" }
-                withFrontendApplication(connected, cwd, host, host.rpcEnvironment) { app ->
+                val host = FixtureHost(cwd)
+                withFrontendApplication(connected, cwd, host) { app ->
                     try {
                         fixture = app
                         status = "Connected — real DTOs, Native temporary Home, offline model"

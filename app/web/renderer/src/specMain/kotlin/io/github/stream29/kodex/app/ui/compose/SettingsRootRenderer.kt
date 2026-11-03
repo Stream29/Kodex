@@ -3,6 +3,6 @@ package io.github.stream29.kodex.app.ui.compose
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.cli.settings.SettingsRootRenderer
 
-/** Browser-facing graphical root; frontend shell execution is not a capability. */
+/** Graphical root; capability decisions are supplied by the acquired host, not this renderer. */
 @Composable
 public expect fun rememberComposeSettingsRootRenderer(): SettingsRootRenderer

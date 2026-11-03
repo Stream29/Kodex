@@ -3,6 +3,7 @@ package io.github.stream29.kodex.app.webrenderersmoke
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerButtons
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -16,6 +17,7 @@ import io.github.stream29.kodex.app.pathpicker.contract.*
 import io.github.stream29.kodex.app.workingdirectory.createWorkingDirectoryViewModel
 import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryDependencies
 import io.github.stream29.kodex.app.ui.UiText
+import io.github.stream29.kodex.app.ui.UiTheme
 import io.github.stream29.kodex.app.ui.compose.rememberComposeDirectoryPickerRenderer
 import io.github.stream29.kodex.cli.pathpicker.*
 import io.github.stream29.kodex.cli.workingdirectory.WorkingDirectoryContent
@@ -200,6 +202,97 @@ val offscreenDirectoryPickerTest by testSuite {
             }
         } }
     }
+    test("speed search letter keys filter and focus first match, guard no-match Enter, and double-Enter opens then selects") { offscreenTest {
+        val owner = CoroutineScope(currentCoroutineContext() + Job(currentCoroutineContext()[Job]))
+        val browser = object : DirectoryPickerBrowser {
+            override suspend fun validate(directory: Path): DirectoryPickerValidationResult =
+                DirectoryPickerValidationResult.Success(directory)
+            override suspend fun load(directory: Path): DirectoryPickerLoadResult {
+                val names = when (directory) {
+                    Path("/fixture") -> listOf("app", "build", "checklist", "gradle", "kanban", "shared-context")
+                    Path("/fixture/checklist") -> listOf("architecture", "ui-compact")
+                    else -> emptyList()
+                }
+                val ready = fixtureReady(directory, names)
+                return DirectoryPickerLoadResult.Success(
+                    DirectoryPickerListing(directory, ready.children, ready.parentDirectory, ready.childNames)
+                )
+            }
+        }
+        val picker = CountingPicker(createDirectoryPickerViewModel(Path("/fixture"), object : DirectoryPickerDependencies {
+            override val browser = browser
+        }, owner))
+        val selected = mutableListOf<Path>()
+        var dismissals = 0
+        val scene = OffscreenScene.create(width = 560, height = 420) {
+            UiTheme {
+                DirectoryPickerContent(
+                    picker,
+                    rememberComposeDirectoryPickerRenderer(),
+                    onDismissRequest = { dismissals++ },
+                    onDirectorySelected = { selected += it },
+                )
+            }
+        }
+        try {
+            scene.settle { scene.hasText("checklist/") && scene.hasText("Filter: type letters") }
+            // Verify Plan B top bar layout geometry: Select sits to the right of /fixture and above ..
+            val pathBounds = scene.text("/fixture").boundsInWindow
+            val selectBounds = scene.text("Select").boundsInWindow
+            val parentRowBounds = scene.text("..").boundsInWindow
+            val cancelBounds = scene.text("Cancel").boundsInWindow
+            assertTrue(selectBounds.left > pathBounds.right, "Select button should be to the right of path box")
+            assertTrue(selectBounds.bottom <= parentRowBounds.top, "Top bar should be above directory list")
+            assertTrue(cancelBounds.top >= parentRowBounds.bottom, "Cancel button should be below directory list")
+
+            // Type 'c', 'h' -> filters to checklist/ and moves focus to first matching directory
+            scene.key(Key.C)
+            scene.key(Key.H)
+            scene.settle {
+                scene.hasText("Filter: ch") &&
+                    scene.hasText("1 match") &&
+                    scene.hasText("checklist/") &&
+                    !scene.hasText("app/")
+            }
+
+            // Type 'z' -> 0 matches, focuses No matching directories row and blocks accidental Enter confirm
+            scene.key(Key.Z)
+            scene.settle {
+                scene.hasText("Filter: chz") &&
+                    scene.hasText("0 matches") &&
+                    scene.hasText("No matching directories")
+            }
+            scene.key(Key.Enter)
+            scene.settle { scene.hasText("No matching directories") }
+            assertEquals(emptyList(), selected, "Pressing Enter on No matching directories must not confirm parent directory")
+
+            // Backspace restores 'ch' filter and focus on checklist/
+            scene.key(Key.Backspace)
+            scene.settle {
+                scene.hasText("Filter: ch") &&
+                    scene.hasText("checklist/")
+            }
+
+            // First Enter opens /fixture/checklist, clears filter, and restores focus to Select
+            scene.key(Key.Enter)
+            scene.settle {
+                scene.hasText("/fixture/checklist") &&
+                    scene.hasText("Filter: type letters") &&
+                    scene.hasText("architecture/")
+            }
+            assertEquals(emptyList(), selected, "First Enter on filtered match navigates into directory without confirming")
+
+            // Second Enter confirms /fixture/checklist via focused Select button
+            scene.key(Key.Enter)
+            scene.settle { selected.size == 1 }
+            assertEquals(listOf(Path("/fixture/checklist")), selected)
+            assertEquals(0, dismissals)
+        } finally {
+            scene.close()
+            if (picker.closeCalls == 0) picker.close()
+            owner.coroutineContext.job.cancelAndJoin()
+        }
+    } }
 }
 
 private fun OffscreenScene.editDirectoryFilter(value: String) {

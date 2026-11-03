@@ -1,6 +1,14 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
 import androidx.compose.runtime.*
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
@@ -25,6 +33,95 @@ import kotlin.test.*
 import kotlin.time.Instant
 
 val offscreenAgentPageTest by testSuite {
+    test("status action preserves keyboard focus and rejects stale disabled callback") { offscreenTest {
+        val enabled = mutableStateOf(true)
+        var calls = 0
+        val scene = OffscreenScene.create(width = 320, height = 100) {
+            rememberComposeAgentStatusRenderer().Action("Stop", enabled.value) { calls++ }
+        }
+        fun descendants(node: SemanticsNode): List<SemanticsNode> =
+            listOf(node) + node.children.flatMap(::descendants)
+        fun stop(): SemanticsNode = scene.nodes().first { node ->
+            node.config.getOrNull(SemanticsProperties.Role) == Role.Button &&
+                descendants(node).any { child ->
+                    child.config.getOrNull(SemanticsProperties.Text)?.any { it.text == "Stop" } == true
+                }
+        }
+        try {
+            scene.settle { scene.hasText("Stop") }
+            assertTrue(stop().boundsInWindow.width >= 32f && stop().boundsInWindow.height >= 32f)
+            val retained = assertNotNull(stop().config.getOrNull(SemanticsActions.OnClick)?.action)
+            val unfocused = scene.frame()
+            assertTrue(assertNotNull(stop().config.getOrNull(SemanticsActions.RequestFocus)?.action)())
+            scene.settle { stop().config.getOrNull(SemanticsProperties.Focused) == true }
+            assertFalse(unfocused.contentEquals(scene.frame()), "Keyboard focus must be visible on Stop.")
+            scene.key(Key.Enter)
+            scene.settle { calls == 1 }
+            enabled.value = false
+            scene.settle { SemanticsProperties.Disabled in stop().config }
+            retained()
+            assertEquals(1, calls)
+        } finally { scene.close() }
+    } }
+    for (height in listOf(160, 240)) {
+      for (scale in listOf(1f, 1.5f)) {
+        test("short Agent page can reveal Settings after all auxiliary content height=$height font=$scale") { runtimeScene { _, runtime, owner ->
+            val agent = pageAgent("short", runtime, owner)
+            agent.inputPorts.pending.value = inputEvent("short-input")
+            agent.suggestionPorts.pending.value = suggestionEvent("short-suggestion")
+            agent.pendingSteer.value = List(6) { StableUserMessage(listOf(ContentItem.InputText("Queued $it"))) }
+            agent.notification.value = AgentNotification(21, AgentNotificationLevel.Information, "Saved ".repeat(60))
+            val scene = OffscreenScene.create(width = 320, height = height) {
+                CompositionLocalProvider(LocalDensity provides Density(1f, scale)) {
+                    ProbedAgentPage(agent, AgentPageProbe())
+                }
+            }
+            try {
+                scene.settle { scene.hasText("Settings") }
+                val settings = scene.nodes().single { node ->
+                    node.config.getOrNull(SemanticsActions.RequestFocus) != null &&
+                        node.children.any { it.config.getOrNull(SemanticsProperties.Text)?.any {
+                            it.text == "Settings"
+                        } == true }
+                }
+                assertTrue(settings.config[SemanticsActions.RequestFocus].action!!.invoke())
+                scene.settle { scene.text("Settings").boundsInWindow.height > 0 }
+                val bounds = scene.text("Settings").boundsInWindow
+                assertTrue(bounds.top >= 0 && bounds.bottom <= height, "$bounds in height=$height")
+                assertEquals("retained short", agent.composer.state.value.text)
+                assertPageBorrowed(agent)
+            } finally {
+                try { scene.close(); assertPageBorrowed(agent) } finally { agent.closeFixture() }
+            }
+        } }
+      }
+    }
+    test("ordinary Agent page fills remaining finite history without unnecessary page scroll") { runtimeScene { _, runtime, owner ->
+        val agent = pageAgent("normal", runtime, owner)
+        val scene = OffscreenScene.create(width = 800, height = 900) { ProbedAgentPage(agent, AgentPageProbe()) }
+        try {
+            scene.settle { scene.hasText("History normal") && scene.hasDescription("Agent page history") }
+            assertTrue(scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Agent page history") == true
+            }.boundsInWindow.height > 500)
+            val historyBounds = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Agent page history") == true
+            }.boundsInWindow
+            val entryBounds = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("History entry 1") == true
+            }.boundsInWindow
+            assertEquals(historyBounds.bottom, entryBounds.bottom, 1f,
+                "Sparse History must touch the allocated history bottom, not the page top")
+            val outer = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Agent page") == true &&
+                    it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null
+            }
+            assertEquals(0f, outer.config[SemanticsProperties.VerticalScrollAxisRange].maxValue())
+            assertTrue(scene.text("Settings").boundsInWindow.bottom <= 900)
+        } finally {
+            try { scene.close(); assertPageBorrowed(agent) } finally { agent.closeFixture() }
+        }
+    } }
     test("shared page observes one information outlet and one pending preview with real product History") { runtimeScene { _, runtime, owner ->
         val agent = pageAgent("first", runtime, owner)
         val probe = AgentPageProbe()
@@ -73,12 +170,15 @@ val offscreenAgentPageTest by testSuite {
             assertSame(agent.suggestSubagentTask, probe.suggestion)
             assertSame<SuggestSubagentTaskState?>(agent.suggestSubagentTask.state.value, probe.suggestionState)
             assertEquals(listOf("history", "input", "suggestion", "composer"), probe.calls)
+            assertEquals(2, probe.pendingPanels)
             assertNotNull(probe.browseSuggestion).invoke("suggest-page")
             assertEquals(listOf("suggest-page"), browsed)
             agent.inputPorts.pending.value = null
             scene.settle { probe.input == null && probe.enabled == false }
+            assertEquals(1, probe.pendingPanels)
             agent.suggestionPorts.pending.value = null
             scene.settle { probe.suggestion == null && probe.enabled == true }
+            assertEquals(0, probe.pendingPanels)
             assertEquals("retained pending", agent.composer.state.value.text)
             scene.frame()
         } finally {
@@ -125,6 +225,7 @@ private fun ProbedAgentPage(agent: PageTestAgent, probe: AgentPageProbe, onBrows
             probe.calls.clear()
             probe.input = null
             probe.suggestion = null
+            probe.pendingPanels = inputs.pendingToolPanelCount
             graphical.Frame(inputs) { slots ->
                 content(object : AgentPageRenderScope by slots {
                     @Composable
@@ -160,6 +261,7 @@ private fun ProbedAgentPage(agent: PageTestAgent, probe: AgentPageProbe, onBrows
 }
 
 private class AgentPageProbe {
+    var pendingPanels = 0
     val calls = mutableListOf<String>()
     var history: AgentHistoryViewModel? = null
     var composer: ComposerViewModel? = null
