@@ -42,6 +42,52 @@ import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult as SdkCallToolRes
 import io.modelcontextprotocol.kotlin.sdk.types.Tool as SdkTool
 
 val mcpRouteAdmissionTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("an MCP transport execution failure becomes a matching error result") {
+        withOfflineOwners(listOf("server" to listOf("echo"))) { owners, catalogs, transports ->
+            owners.single().reconnect()
+            val tool = catalogs.getValue("server").listTools().single()
+            var attempts = 0
+            transports.getValue("server").single().beforeToolCall = {
+                attempts++
+                error("offline fixture failure")
+            }
+            val pending = PendingMcpToolEvent(
+                callId = "failed-call",
+                name = "echo",
+                namespace = "mcp__server",
+                arguments = JsonObject(emptyMap()),
+            )
+            val event = assertIs<StableMcpToolEvent>(tool.handle(pending))
+            assertEquals(pending.callId, event.callId)
+            assertEquals(true, event.result.isError)
+            assertFalse(event.result.content.toString().contains("offline fixture failure"))
+            assertEquals(1, attempts)
+        }
+    }
+
+    test("direct MCP tools reject a mismatched call as a completion") {
+        withOfflineOwners(listOf("server" to listOf("echo"))) { owners, catalogs, _ ->
+            owners.single().reconnect()
+            val tool = catalogs.getValue("server").listTools().single()
+            val wrongCall = io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent(
+                callId = "mismatch",
+                name = "echo",
+                arguments = JsonObject(emptyMap()),
+            )
+            val event = assertIs<io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent>(
+                tool.handle(wrongCall),
+            )
+            assertEquals("mismatch", event.callId)
+            assertEquals(false, event.success)
+            val blocked = McpAuthenticationBlockedClient("server", listOf(tool)).listTools().single()
+            val blockedEvent = assertIs<io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent>(
+                blocked.handle(wrongCall),
+            )
+            assertEquals("mismatch", blockedEvent.callId)
+            assertEquals(false, blockedEvent.success)
+        }
+    }
+
     test("two SDK servers a-b and a_b expose the same real route but are rejected before service acquisition") {
         withOfflineOwners(listOf("a-b" to listOf("echo"), "a_b" to listOf("echo"))) { owners, catalogs, _ ->
             owners.forEach { it.reconnect() }
@@ -167,6 +213,7 @@ internal class OfflineSdkTransport(var toolNames: List<String>) : Transport {
     var closed = false
         private set
     var beforeToolsResponse: suspend () -> Unit = {}
+    var beforeToolCall: suspend () -> Unit = {}
     private var receive: suspend (JSONRPCMessage) -> Unit = {}
     private var closedCallback: () -> Unit = {}
 
@@ -185,6 +232,7 @@ internal class OfflineSdkTransport(var toolNames: List<String>) : Transport {
                 result
             }
             "tools/call" -> {
+                beforeToolCall()
                 calledNames += requireNotNull(message.params).jsonObject.getValue("name").jsonPrimitive.content
                 SdkCallToolResult(content = emptyList(), isError = false)
             }

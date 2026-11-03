@@ -3,6 +3,7 @@
 package io.github.stream29.kodex.utils.processclient
 
 import io.github.stream29.kodex.utils.processclient.cinterop.kodex_spawn_process
+import io.github.stream29.kodex.utils.processclient.cinterop.kodex_process_create_pipe
 import io.github.stream29.kodex.utils.processclient.cinterop.kodex_process_write
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSink
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
@@ -40,15 +41,10 @@ import kotlinx.io.readByteArray
 import platform.posix.ECHILD
 import platform.posix.EINTR
 import platform.posix.ESRCH
-import platform.posix.FD_CLOEXEC
-import platform.posix.F_GETFD
-import platform.posix.F_SETFD
 import platform.posix.SIGKILL
 import platform.posix.close
 import platform.posix.errno
-import platform.posix.fcntl
 import platform.posix.kill
-import platform.posix.pipe
 import platform.posix.read
 import platform.posix.waitpid
 import kotlin.concurrent.atomics.AtomicBoolean
@@ -149,12 +145,10 @@ private data class PosixPipeTransfer<T>(
 
 private fun <T> withPosixPipe(block: (read: Int, write: Int) -> PosixPipeTransfer<T>): T = memScoped {
     val descriptors = allocArray<IntVar>(2)
-    checkPosixResult(pipe(descriptors), "create process pipe")
+    checkPosixResult(kodex_process_create_pipe(descriptors), "create process pipe")
     val read = descriptors[0]
     val write = descriptors[1]
     try {
-        read.setCloseOnExec()
-        write.setCloseOnExec()
         val transfer = block(read, write)
         if (!transfer.transferRead) close(read)
         if (!transfer.transferWrite) close(write)
@@ -347,14 +341,6 @@ private class PosixRawSink(
     override fun close() {
         descriptor.close()
     }
-}
-
-private fun Int.setCloseOnExec() {
-    val flags = fcntl(this, F_GETFD)
-    if (flags == -1) {
-        throw ProcessException("Failed to read process descriptor flags: errno $errno.")
-    }
-    checkPosixResult(fcntl(this, F_SETFD, flags or FD_CLOEXEC), "set process descriptor close-on-exec")
 }
 
 private fun checkPosixResult(result: Int, operation: String) {

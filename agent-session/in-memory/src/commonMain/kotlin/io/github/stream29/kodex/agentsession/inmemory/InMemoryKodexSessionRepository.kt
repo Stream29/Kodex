@@ -21,9 +21,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -284,6 +287,22 @@ private class SessionIndexVersioned<T>(
     MutableIndexVersioned<T>,
     CoroutineScope by parentScope.supervisorChildScope(),
     AutoCloseable {
+    override fun indexes(from: Int): Flow<Int> = owned(delegate.indexes(from))
+
+    override fun indexesDescending(from: Int): Flow<Int> = owned(delegate.indexesDescending(from))
+
+    override fun values(from: Int): Flow<Pair<Int, T>> = owned(delegate.values(from))
+
+    override fun valuesDescending(from: Int): Flow<Pair<Int, T>> = owned(delegate.valuesDescending(from))
+
+    private fun <V> owned(upstream: Flow<V>): Flow<V> = flow {
+        requireActive()
+        upstream.collect { value ->
+            requireActive()
+            emit(value)
+        }
+    }
+
     override suspend fun latestIndex(): Int {
         requireActive()
         return delegate.latestIndex()

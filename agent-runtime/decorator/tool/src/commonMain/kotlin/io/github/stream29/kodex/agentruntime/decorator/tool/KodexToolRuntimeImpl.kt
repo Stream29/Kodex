@@ -18,8 +18,12 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.ToolName
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
+import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
+import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
 import io.github.stream29.kodex.utils.logging.tool
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -31,6 +35,8 @@ public actual class KodexToolRuntimeImpl internal constructor(
     private val dynamicTools: StateFlow<List<Tool>>,
     private val toolSearch: StateFlow<ToolSearchEngine>,
     private val logger: KLogger,
+    private val searchOperation: (ToolSearchEngine, SearchToolCallParams) -> ToolSearchResult =
+        { engine, arguments -> engine.search(arguments) },
 ) : KodexToolRuntime, KodexAgentState by delegate {
     private val fixedToolsByName: Map<ToolName, Tool> = ToolRouting.index(fixedTools)
 
@@ -66,7 +72,7 @@ public actual class KodexToolRuntimeImpl internal constructor(
                     logger
                         .tool(pendingEvent.loggingToolName(), pendingEvent.callId)
                         .runToolCall {
-                            completeToolCall(toolSearch.value.handle(pendingEvent))
+                            handleToolCall(pendingEvent) { toolSearch.value.handle(pendingEvent, searchOperation) }
                         }
                     handledEvent = true
                 }
@@ -90,7 +96,7 @@ public actual class KodexToolRuntimeImpl internal constructor(
                     } else {
                         val toolLogger = logger.tool(toolName.toString(), pendingEvent.callId)
                         toolLogger.runToolCall {
-                            handleToolCall(tool, pendingEvent)
+                            handleToolCall(pendingEvent) { tool.handle(pendingEvent) }
                         }
                     }
                     handledEvent = true
@@ -100,18 +106,33 @@ public actual class KodexToolRuntimeImpl internal constructor(
         return handledEvent && state.value !is KodexAgentStateValue.ToolPending
     }
 
-    private suspend fun handleToolCall(
-        tool: Tool,
+    private suspend fun KLogger.handleToolCall(
         pending: PendingToolEvent,
+        operation: suspend () -> StableCleanEvent.CompletedTool,
     ) {
-        val completed = tool.handle(pending)
+        var executionFailure: Exception? = null
+        val completed = try {
+            operation().also { currentCoroutineContext().ensureActive() }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Exception) {
+            currentCoroutineContext().ensureActive()
+            executionFailure = failure
+            error(failure) { "Tool execution failed." }
+            pending.toFailedToolEvent("Tool execution failed.")
+        }
         // State-bound tools may atomically persist their own specialized output.
         val remainsPending = (state.value as? KodexAgentStateValue.ToolPending)
             ?.events
             ?.any { event -> event.callId == pending.callId }
             ?: false
         if (remainsPending) {
-            completeToolCall(completed)
+            try {
+                completeToolCall(completed)
+            } catch (failure: Throwable) {
+                executionFailure?.let { if (it !== failure) failure.addSuppressed(it) }
+                throw failure
+            }
         }
     }
 }
@@ -167,12 +188,13 @@ public actual fun ResumableAgentLayer.toolRuntime(
 
 private fun ToolSearchEngine.handle(
     pending: PendingToolSearchEvent,
+    search: (ToolSearchEngine, SearchToolCallParams) -> ToolSearchResult,
 ): StableToolSearchEvent =
     StableToolSearchEvent(
         callId = pending.callId,
         itemId = pending.itemId,
         arguments = pending.arguments,
-        result = search(pending.arguments),
+        result = search(this, pending.arguments),
     )
 
 private fun PendingToolEvent.failedEvent(message: String): StableCleanEvent.CompletedTool =

@@ -46,9 +46,18 @@ kotlin {
             compilations.named("main") {
                 cinterops.create("processClientSpawn") {
                     defFile(project.file("src/nativeInterop/cinterop/process_client_spawn.def"))
+                    compilerOpts("-I${rootProject.file("utils/posix-fd").absolutePath}")
                     if (konanTarget.family == Family.LINUX) {
                         compilerOpts("-D_GNU_SOURCE")
                     }
+                }
+            }
+        }
+        if (konanTarget.family == Family.MINGW) {
+            compilations.named("main") {
+                cinterops.create("processClientWindows") {
+                    defFile(project.file("src/nativeInterop/cinterop/process_client_windows.def"))
+                    compilerOpts("-D_WIN32_WINNT=0x0600")
                 }
             }
         }

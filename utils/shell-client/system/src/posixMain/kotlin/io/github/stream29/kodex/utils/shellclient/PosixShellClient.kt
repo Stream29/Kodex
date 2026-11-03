@@ -41,7 +41,10 @@ import platform.posix.EAGAIN
 import platform.posix.ECHILD
 import platform.posix.EIO
 import platform.posix.EINTR
+import platform.posix.FD_CLOEXEC
+import platform.posix.F_GETFD
 import platform.posix.F_GETFL
+import platform.posix.F_SETFD
 import platform.posix.F_SETFL
 import platform.posix.O_NONBLOCK
 import platform.posix.SIGKILL
@@ -123,6 +126,7 @@ private fun startPosixPtyProcess(
 
             val descriptor = masterFd.value
             try {
+                descriptor.setCloseOnExec()
                 descriptor.setNonBlocking()
                 PosixProcess(
                     pid = pid.value,
@@ -474,6 +478,12 @@ private class PosixProcess(
         }
     }
 
+}
+
+private fun Int.setCloseOnExec() {
+    val flags = fcntl(this, F_GETFD)
+    checkPlatformResult(flags, "read process descriptor flags")
+    checkPlatformResult(fcntl(this, F_SETFD, flags or FD_CLOEXEC), "set process descriptor close-on-exec")
 }
 
 private fun Int.setNonBlocking() {

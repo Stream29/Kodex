@@ -15,8 +15,12 @@ extern char **environ;
 #endif
 
 #include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include "kodex_close_inherited_fds.h"
 
 static inline size_t kodex_environment_name_length(const char *entry) {
     const char *separator = strchr(entry, '=');
@@ -90,6 +94,9 @@ static inline int kodex_spawn_pty_shell(
     }
 
     if (child == 0) {
+#ifdef __linux__
+        if (kodex_close_inherited_fds() != 0) _exit(127);
+#endif
         char *argv[5];
         int argument_count = 0;
         argv[0] = (char *)shell;
@@ -102,6 +109,16 @@ static inline int kodex_spawn_pty_shell(
         _exit(127);
     }
 
+    int descriptor_flags = fcntl(*master_fd, F_GETFD);
+    if (descriptor_flags == -1 || fcntl(*master_fd, F_SETFD, descriptor_flags | FD_CLOEXEC) == -1) {
+        int failure = errno;
+        close(*master_fd);
+        kill(child, SIGKILL);
+        int status;
+        while (waitpid(child, &status, 0) < 0 && errno == EINTR) { }
+        free(merged_environment);
+        return failure;
+    }
     free(merged_environment);
     *pid = child;
     return 0;

@@ -17,6 +17,26 @@ extern char **environ;
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include "kodex_close_inherited_fds.h"
+
+static inline int kodex_process_create_pipe(int descriptors[2]) {
+#ifdef __linux__
+    return pipe2(descriptors, O_CLOEXEC);
+#else
+    if (pipe(descriptors) != 0) return -1;
+    for (int index = 0; index < 2; index++) {
+        int flags = fcntl(descriptors[index], F_GETFD);
+        if (flags == -1 || fcntl(descriptors[index], F_SETFD, flags | FD_CLOEXEC) == -1) {
+            int failure = errno;
+            close(descriptors[0]);
+            close(descriptors[1]);
+            errno = failure;
+            return -1;
+        }
+    }
+    return 0;
+#endif
+}
 
 static inline size_t kodex_process_environment_name_length(const char *entry) {
     const char *separator = strchr(entry, '=');
@@ -241,6 +261,9 @@ static inline int kodex_spawn_process(
             if (output_write > STDERR_FILENO) close(output_write);
             if (error_read > STDERR_FILENO) close(error_read);
             if (error_write > STDERR_FILENO) close(error_write);
+#ifdef __linux__
+            if (kodex_close_inherited_fds() != 0) _exit(127);
+#endif
             if (chdir(working_directory) != 0 || resolved_executable == NULL) {
                 _exit(127);
             }

@@ -16,8 +16,11 @@ import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ResponseItem
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
@@ -86,6 +89,79 @@ private class CountingStorage(
 }
 
 val agentStorageContractExtTest by testSuite {
+    test("sparse traversal seeks across gaps without decoding unrelated entries") {
+        val mutable = storage()
+        mutable.index[0] = user("zero")
+        mutable.index[5] = user("five")
+        mutable.index[10_000] = user("ten thousand")
+        mutable.index[50_000] = user("fifty thousand")
+
+        val descending = CountingTimeline(mutable.index)
+        assertEquals(10_000, descending.indexesDescending(49_999).first())
+        assertTrue(descending.ranges.size <= 1, "descending index seek should not probe the gap")
+
+        val descendingValues = CountingTimeline(mutable.index)
+        assertEquals(10_000, descendingValues.valuesDescending(49_999).first().first)
+        assertTrue(descendingValues.valueRanges.size <= 1, "descending values should not probe the gap")
+        assertTrue(descendingValues.exactReads + descendingValues.valueRanges.size <= 1)
+
+        val ascending = CountingTimeline(mutable.index)
+        assertEquals(10_000, ascending.indexes(6).first())
+        assertTrue(ascending.ranges.size <= 1, "ascending index seek should not probe the gap")
+    }
+
+    test("value traversal batches by stored entries and stops after the matching batch") {
+        val mutable = storage()
+        for (index in 1..200) mutable.index[index] = user("item $index")
+        val counted = CountingTimeline(mutable.index)
+
+        assertEquals(198, counted.valuesDescending(200).first { it.first == 198 }.first)
+        assertEquals(listOf(200..200, 198..199), counted.valueRanges)
+    }
+
+    test("traversal handles empty and maximum index boundaries") {
+        val mutable = storage()
+        val counted = CountingTimeline(mutable.index)
+        assertEquals(emptyList(), counted.indexes().toList())
+        assertEquals(emptyList(), counted.indexesDescending(Int.MAX_VALUE).toList())
+        assertFailsWith<IllegalArgumentException> { counted.indexes(-1).toList() }
+        assertFailsWith<IllegalArgumentException> { counted.valuesDescending(-1).toList() }
+
+        mutable.index[Int.MAX_VALUE] = user("last")
+        assertEquals(listOf(Int.MAX_VALUE), counted.indexes(Int.MAX_VALUE).toList())
+        assertEquals(Int.MAX_VALUE, counted.valuesDescending(Int.MAX_VALUE).first().first)
+    }
+
+    test("in-memory cursor re-seeks after a revert and multiple appends") {
+        val mutable = storage()
+        for (index in listOf(0, 5, 10_000, 50_000)) mutable.index[index] = user("item $index")
+        val observed = mutableListOf<Int>()
+        mutable.index.valuesDescending(50_000).collect { (index, _) ->
+            observed += index
+            if (index == 50_000) {
+                mutable.index.revert(10_000)
+                mutable.index[12_000] = user("replacement")
+                mutable.index[15_000] = user("later replacement")
+            }
+        }
+        assertEquals(listOf(50_000, 15_000, 12_000, 5, 0), observed)
+    }
+
+    test("ascending in-memory cursor re-seeks after a revert and append") {
+        val mutable = storage()
+        for (index in listOf(0, 5, 10_000)) mutable.index[index] = user("item $index")
+        val observed = mutableListOf<Int>()
+        mutable.index.values().collect { (index, _) ->
+            observed += index
+            if (index == 0) {
+                mutable.index.revert(5)
+                mutable.index[4] = user("replacement")
+                mutable.index[8] = user("later replacement")
+            }
+        }
+        assertEquals(listOf(0, 4, 8), observed)
+    }
+
     test("index flows enumerate sparse indexes in both directions") {
         val mutable = storage()
         mutable.index[1] = user("one")
@@ -106,7 +182,6 @@ val agentStorageContractExtTest by testSuite {
             listOf(1, 3),
             counted.valuesIn(0..3).map { (index, _) -> index },
         )
-        assertTrue(counted.ranges.any { it == 1..2 })
         assertTrue(counted.valueRanges.contains(0..3))
     }
 

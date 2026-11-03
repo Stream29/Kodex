@@ -36,10 +36,11 @@ public data class StableToolSearchEvent(
             ),
             ResponseItem.ClientToolSearchOutput(
                 callId = callId,
-                status = "completed",
+                status = if (result is ToolSearchResult.ExecutionFailure) "incomplete" else "completed",
                 tools = when (result) {
                     is ToolSearchResult.Success -> result.tools
                     is ToolSearchResult.InvalidArguments -> emptyList()
+                    is ToolSearchResult.ExecutionFailure -> emptyList()
                 },
             ),
         )

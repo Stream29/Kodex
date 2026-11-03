@@ -14,6 +14,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
+import io.github.stream29.kodex.tool.contract.toolCompletionOrFailure
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpError
 import io.modelcontextprotocol.kotlin.sdk.shared.Transport
@@ -85,14 +86,15 @@ internal class McpAuthenticationBlockedClient(
 
     private val blockedTools: List<McpTool> = tools.map { tool ->
         object : McpTool by tool {
-            override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool {
-                val captured = requireNotNull(pending as? PendingMcpToolEvent)
-                return StableMcpToolEvent(
-                    callId = captured.callId, itemId = captured.itemId, name = captured.name,
-                    namespace = captured.namespace, arguments = captured.arguments,
-                    result = failureResult("MCP server $serverName requires authentication."),
-                )
-            }
+            override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
+                toolCompletionOrFailure(pending) {
+                    val captured = requireNotNull(pending as? PendingMcpToolEvent)
+                    StableMcpToolEvent(
+                        callId = captured.callId, itemId = captured.itemId, name = captured.name,
+                        namespace = captured.namespace, arguments = captured.arguments,
+                        result = failureResult("MCP server $serverName requires authentication."),
+                    )
+                }
         }
     }
     override fun listTools(): List<McpTool> = blockedTools

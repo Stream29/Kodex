@@ -864,11 +864,13 @@ private suspend fun KodexAgentStorage.stateAt(index: Int): KodexAgentStateValue 
     }
 
     val indexCandidate = latestStateCandidate(
-        indexes = this.index.indexesIn(0..index).asReversed(),
+        from = index,
+        floor = { eventIndex -> this.index.floorToIndex(eventIndex) },
         read = { eventIndex -> this.index.getExact(eventIndex) as? StableCleanEvent },
     )
     val workCandidate = latestStateCandidate(
-        indexes = work.indexesIn(0..index).asReversed(),
+        from = index,
+        floor = { eventIndex -> work.floorToIndex(eventIndex) },
         read = { eventIndex -> work.getExact(eventIndex) },
     )
     return listOfNotNull(indexCandidate, workCandidate)
@@ -893,14 +895,19 @@ private fun StableCleanEvent.toAgentStateValueOrNull(): KodexAgentStateValue? =
     }
 
 private suspend fun <T : StableCleanEvent> KodexAgentStorage.latestStateCandidate(
-    indexes: List<Int>,
+    from: Int,
+    floor: suspend (Int) -> Int?,
     read: suspend (Int) -> T?,
 ): Pair<Int, KodexAgentStateValue>? {
-    for (eventIndex in indexes) {
-        val event = read(eventIndex) ?: continue
-        event.toAgentStateValueOrNull()?.let { state ->
+    var cursor = from
+    while (cursor >= 0) {
+        val eventIndex = floor(cursor) ?: break
+        val event = read(eventIndex)
+        event?.toAgentStateValueOrNull()?.let { state ->
             return eventIndex to state
         }
+        if (eventIndex == 0) break
+        cursor = eventIndex - 1
     }
     return null
 }

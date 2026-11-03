@@ -61,6 +61,8 @@ kotlin {
             compilations.named("main") {
                 cinterops.create("shellClientSpawn") {
                     defFile(project.file("src/nativeInterop/cinterop/shell_client_spawn.def"))
+                    compilerOpts("-I${rootProject.file("utils/posix-fd").absolutePath}")
+                    if (konanTarget.family == Family.LINUX) compilerOpts("-D_GNU_SOURCE")
                 }
             }
         }

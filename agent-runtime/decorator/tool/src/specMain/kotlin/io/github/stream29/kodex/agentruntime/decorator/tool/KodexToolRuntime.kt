@@ -28,8 +28,8 @@ public interface KodexToolRuntime : ResumableAgentLayer {
      *
      * When handling advances state out of ToolPending, the inner layer resumes.
      * If calls remain unhandled, this call returns at the observable state
-     * boundary. Uncaught handler failures propagate rather than
-     * becoming completions.
+     * boundary. Non-cancellation handler failures become matching failed
+     * completions; cancellation, routing and persistence failures propagate.
      *
      * @throws IllegalArgumentException if the sampled dynamic catalog has
      * duplicate, empty, or fixed-colliding routes, or a pending local call

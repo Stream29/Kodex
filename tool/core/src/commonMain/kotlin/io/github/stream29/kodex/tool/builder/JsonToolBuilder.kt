@@ -11,6 +11,7 @@ import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.contract.Tool
+import io.github.stream29.kodex.tool.contract.toolCompletionOrFailure
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.SerializationStrategy
@@ -163,22 +164,24 @@ private class FunctionOutputTool<Input>(
     override fun close(): Unit = Unit
 
     override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
-        when (pending) {
-            is PendingFunctionToolEvent -> handleFunctionCall(pending)
+        toolCompletionOrFailure(pending) {
+            when (pending) {
+                is PendingFunctionToolEvent -> handleFunctionCall(pending)
 
-            is PendingCustomToolEvent -> {
-                StableCustomToolEvent(
-                    callId = pending.callId,
-                    itemId = pending.itemId,
-                    name = pending.name,
-                    namespace = pending.namespace,
-                    input = pending.input,
-                    result = failedOutput(),
-                    success = false,
-                )
+                is PendingCustomToolEvent -> {
+                    StableCustomToolEvent(
+                        callId = pending.callId,
+                        itemId = pending.itemId,
+                        name = pending.name,
+                        namespace = pending.namespace,
+                        input = pending.input,
+                        result = failedOutput(),
+                        success = false,
+                    )
+                }
+
+                else -> error("JSON tools require a pending function or custom tool event.")
             }
-
-            else -> error("JSON tools require a pending function or custom tool event.")
         }
 
     private suspend fun handleFunctionCall(

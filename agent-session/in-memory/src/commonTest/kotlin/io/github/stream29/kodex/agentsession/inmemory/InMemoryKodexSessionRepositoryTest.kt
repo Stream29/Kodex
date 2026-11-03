@@ -260,10 +260,12 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             val root = repository.open(repository.createInitialized(settings("root")))
 
             assertSame(root.storage, root.runtime.storage)
+            val settingsFlow = root.storage.settings.valuesDescending(0)
 
             root.cancelAndJoin()
 
             assertFalse(root.runtime.coroutineContext[Job]?.isActive ?: true)
+            assertFailsWith<IllegalStateException> { settingsFlow.toList() }
         }
 
         test("exposes a Unified Exec client for the root Agent runtime") {

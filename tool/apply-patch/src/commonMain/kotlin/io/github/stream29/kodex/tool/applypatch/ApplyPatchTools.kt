@@ -13,6 +13,7 @@ import io.github.stream29.kodex.openai.FreeformTool
 import io.github.stream29.kodex.openai.FreeformToolFormat
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.contract.Tool
+import io.github.stream29.kodex.tool.contract.toolCompletionOrFailure
 
 internal actual object ApplyPatchToolImplementation {
     public actual val spec: ToolSpec = FreeformTool(
@@ -37,23 +38,25 @@ public actual class ApplyPatchTool actual constructor(
     public actual override fun close(): Unit = Unit
 
     public actual override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
-        when (pending) {
-            is PendingFunctionToolEvent -> {
-                val message = "apply_patch received function-call JSON payload"
-                StableTextToolEvent(
-                    callId = pending.callId,
-                    itemId = pending.itemId,
-                    name = pending.name,
-                    namespace = pending.namespace,
-                    arguments = pending.arguments,
-                    result = message,
-                    success = false,
-                )
+        toolCompletionOrFailure(pending) {
+            when (pending) {
+                is PendingFunctionToolEvent -> {
+                    val message = "apply_patch received function-call JSON payload"
+                    StableTextToolEvent(
+                        callId = pending.callId,
+                        itemId = pending.itemId,
+                        name = pending.name,
+                        namespace = pending.namespace,
+                        arguments = pending.arguments,
+                        result = message,
+                        success = false,
+                    )
+                }
+
+                is PendingPatchToolEvent -> handlePatch(pending)
+
+                else -> error("apply_patch requires a parsed pending patch event.")
             }
-
-            is PendingPatchToolEvent -> handlePatch(pending)
-
-            else -> error("apply_patch requires a parsed pending patch event.")
         }
 
     private suspend fun handlePatch(

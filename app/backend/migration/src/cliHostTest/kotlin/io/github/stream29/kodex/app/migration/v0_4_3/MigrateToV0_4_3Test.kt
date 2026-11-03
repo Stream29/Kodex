@@ -99,7 +99,7 @@ public val migrateToV0_4_3Test by testSuite(
 
             assertEquals(listOf(MigrationVersion("0.3.5")), activated)
             assertEquals(PreviousKodexHomeSkill, SystemCoroutineFileSystem.readString(skillPath(home)))
-            assertEquals("\"0.4.2\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+            assertEquals("\"0.3.5\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
         }
 
         for (previousVersion in listOf(null, "0.3.2", "0.3.4", "0.3.5", "0.4.2")) {

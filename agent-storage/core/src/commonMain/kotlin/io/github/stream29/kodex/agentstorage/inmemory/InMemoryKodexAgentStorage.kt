@@ -11,6 +11,9 @@ import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
 import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.utils.ReadWriteMutex
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -117,6 +120,59 @@ private class InMemoryIndexVersioned<T>(
     private val entries: MutableList<IndexedValue<T>> = mutableListOf(),
 ) : MutableIndexVersioned<T> {
     private val mutex = ReadWriteMutex()
+    private var indexRevision = 0L
+
+    override fun indexes(from: Int): Flow<Int> = flow {
+        require(from >= 0) { "Index lower bound $from must be non-negative." }
+        val latest = latestIndex()
+        var cursor = from
+        var nextPosition = 0
+        var knownRevision: Long? = null
+        while (cursor <= latest) {
+            val step = mutex.reader.withLock {
+                val position = if (knownRevision == indexRevision) nextPosition else entries.ceilingEntryIndex(cursor)
+                val entry = entries.getOrNull(position) ?: return@withLock null
+                if (entry.index > latest) return@withLock null
+                Triple(entry.index, position, indexRevision)
+            } ?: break
+            emit(step.first)
+            if (step.first == Int.MAX_VALUE) break
+            cursor = step.first + 1
+            nextPosition = step.second + 1
+            knownRevision = step.third
+        }
+    }
+
+    override fun indexesDescending(from: Int): Flow<Int> = flow {
+        require(from >= 0) { "Index upper bound $from must be non-negative." }
+        var cursor = minOf(from, latestIndex())
+        var nextPosition = 0
+        var knownRevision: Long? = null
+        while (cursor >= 0) {
+            val step = mutex.reader.withLock {
+                val position = if (knownRevision == indexRevision) nextPosition else entries.floorEntryIndex(cursor)
+                val entry = entries.getOrNull(position) ?: return@withLock null
+                Triple(entry.index, position, indexRevision)
+            } ?: break
+            emit(step.first)
+            if (step.first == 0) break
+            cursor = step.first - 1
+            nextPosition = step.second - 1
+            knownRevision = step.third
+        }
+    }
+
+    override fun values(from: Int): Flow<Pair<Int, T>> = flow {
+        indexes(from).collect { index ->
+            valuesIn(index..index).singleOrNull()?.let { emit(it) }
+        }
+    }
+
+    override fun valuesDescending(from: Int): Flow<Pair<Int, T>> = flow {
+        indexesDescending(from).collect { index ->
+            valuesIn(index..index).singleOrNull()?.let { emit(it) }
+        }
+    }
 
     override suspend fun latestIndex(): Int = mutex.reader.withLock {
         entries.lastOrNull()?.index ?: -1
@@ -177,6 +233,7 @@ private class InMemoryIndexVersioned<T>(
                 "Sparse append-only timeline requires index greater than $latestIndex, got $index."
             }
             entries += IndexedValue(index, value)
+            indexRevision++
         }
     }
 
@@ -188,6 +245,7 @@ private class InMemoryIndexVersioned<T>(
             val suffixStart = entries.ceilingEntryIndex(untilExclusive)
             if (suffixStart >= 0) {
                 entries.subList(suffixStart, entries.size).clear()
+                indexRevision++
             }
         }
     }

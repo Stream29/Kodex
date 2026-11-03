@@ -15,13 +15,10 @@ public actual val ExecCommandParametersSchema: ObjectPropertyDefinition =
         additionalProperties = false
         property("cmd") {
             required = true
-            string { description = "Shell command to execute." }
+            string { description = "Shell command to execute in a pseudoterminal." }
         }
         property("workdir") {
             string { description = "Working directory for the command. Defaults to the turn cwd." }
-        }
-        property("tty") {
-            boolean { description = "True allocates a PTY for the command; false or omitted uses plain pipes." }
         }
         property("yield_time_ms") {
             required = true

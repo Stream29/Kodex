@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.mcp.impl
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
@@ -12,6 +13,7 @@ import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.ToolSpec
+import io.github.stream29.kodex.tool.contract.toolCompletionOrFailure
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpError
 import io.modelcontextprotocol.kotlin.sdk.shared.RequestOptions
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
@@ -28,6 +30,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import io.modelcontextprotocol.kotlin.sdk.types.Tool as SdkTool
+
+private val mcpToolLogger = KotlinLogging.logger {}
 
 internal class McpToolImpl(
     private val owner: McpClientImpl,
@@ -49,7 +53,10 @@ internal class McpToolImpl(
         ),
     )
 
-    override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool {
+    override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
+        toolCompletionOrFailure(pending) { handleMcpCall(pending) }
+
+    private suspend fun handleMcpCall(pending: PendingToolEvent): StableCleanEvent.CompletedTool {
         val mcpPending = requireNotNull(pending as? PendingMcpToolEvent) {
             "MCP tools require a pending MCP tool event."
         }
@@ -78,8 +85,11 @@ internal class McpToolImpl(
             }
         ) {
             is McpClientCallResult.Success -> call.value.toOpenAiResult()
-            is McpClientCallResult.Failure ->
+            is McpClientCallResult.Failure -> {
+                if (call.cause !is Exception) throw call.cause
+                mcpToolLogger.error(call.cause) { "MCP tool execution failed for call ${mcpPending.callId}." }
                 failureResult(call.cause.toMcpFailureMessage(owner.serverName))
+            }
 
             is McpClientCallResult.Unavailable ->
                 failureResult(call.state.toUnavailableMessage(owner.serverName))
@@ -147,9 +157,9 @@ internal fun failureResult(message: String): CallToolResult =
 
 private fun Throwable.toMcpFailureMessage(serverName: String): String =
     when (this) {
-        is StreamableHttpError -> "MCP server $serverName returned HTTP $code: ${message.orEmpty()}"
-        is McpException -> "MCP server $serverName returned error $code: ${message.orEmpty()}"
-        else -> message ?: toString()
+        is StreamableHttpError -> "MCP server $serverName returned HTTP $code."
+        is McpException -> "MCP server $serverName returned error $code."
+        else -> "MCP server $serverName tool execution failed."
     }
 
 private fun McpClientState.toUnavailableMessage(serverName: String): String =

@@ -164,7 +164,7 @@ public actual fun PendingToolEvent.toFailedToolEvent(message: String): StableCle
                 callId = callId,
                 itemId = itemId,
                 arguments = arguments,
-                result = ToolSearchResult.InvalidArguments(message),
+                result = ToolSearchResult.ExecutionFailure(message),
             )
     }
 

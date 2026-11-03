@@ -40,4 +40,11 @@ public sealed interface ToolSearchResult {
     public data class InvalidArguments(
         public val message: String,
     ) : ToolSearchResult
+
+    /** The client could not execute the search. */
+    @Serializable
+    @SerialName("execution_failure")
+    public data class ExecutionFailure(
+        public val message: String,
+    ) : ToolSearchResult
 }

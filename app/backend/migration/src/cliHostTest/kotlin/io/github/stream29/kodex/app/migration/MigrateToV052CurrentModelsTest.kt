@@ -27,6 +27,8 @@ import io.github.stream29.kodex.app.migration.v0_5_2.LegacyUnstableMultiEventArr
 import io.github.stream29.kodex.app.migration.v0_5_2.LegacyWorkExecMissingYield
 import io.github.stream29.kodex.app.migration.v0_5_2.LegacyWorkWriteEmptyCharsMissingYield
 import io.github.stream29.kodex.app.migration.v0_5_2.LegacyWorkWriteNonEmptyCharsMissingYield
+import io.github.stream29.kodex.app.migration.v0_5_2.MigratedUnstableMultiEventArray
+import io.github.stream29.kodex.app.migration.v0_5_2.MigratedWorkExecMissingYield
 import io.github.stream29.kodex.app.migration.v0_5_2.PrettyWorkExecNegativeYield
 import io.github.stream29.kodex.app.migration.v0_5_2.WorkInvalidRawExecToolCall
 import io.github.stream29.kodex.openai.ResponseItem
@@ -47,6 +49,7 @@ import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.jsonObject
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -73,7 +76,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
             withTimeout(10.seconds) { deleteRecursively(home) }
         }
     } asParameterForEach {
-        test("upgrades across all historical versions from unversioned baseline to 0.5.2 and reads work, unstable, and recovered pending events via FileSystemAgentStorage") { home ->
+        test("upgrades from the unversioned baseline through 0.5.2 and reads current work and pending events") { home ->
             SystemCoroutineFileSystem.writeString(Path(home, "settings.yml"), LegacySettingsFixture)
 
             // Active root session 0 with legacy 0.3.3 patch delta, 0.4.5 token count, and 0.5.2 work/unstable command events
@@ -104,7 +107,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
             val applied = mutableListOf<String>()
             val handle = prepareKodexHome(
                 home = home,
-                currentVersion = MigrationVersion("0.5.2"),
+                currentVersion = MigrationVersion("0.6.0"),
                 migrations = KodexHomeMigrations,
                 fileSystem = SystemCoroutineFileSystem,
                 onMigrationStarted = { _, toVersion -> applied += toVersion.toString() },
@@ -137,7 +140,6 @@ public val migrateToV052CurrentModelsTest by testSuite(
                             ExecCommandArguments(
                                 command = "echo hello",
                                 workdir = "/workspace",
-                                tty = false,
                                 yieldTimeMillis = 10_000L,
                                 maxOutputTokens = 10_000L,
                             ),
@@ -160,7 +162,6 @@ public val migrateToV052CurrentModelsTest by testSuite(
                     ExecCommandArguments(
                         command = "echo hello",
                         workdir = "/workspace",
-                        tty = false,
                         yieldTimeMillis = 10_000L,
                         maxOutputTokens = 10_000L,
                     ),
@@ -187,7 +188,6 @@ public val migrateToV052CurrentModelsTest by testSuite(
                     StableCommandExecutionAction.ExecCommand(
                         ExecCommandArguments(
                             command = "sleep 1",
-                            tty = false,
                             yieldTimeMillis = -1L,
                             maxOutputTokens = 10_000L,
                         ),
@@ -227,7 +227,6 @@ public val migrateToV052CurrentModelsTest by testSuite(
                     PendingCommandExecutionAction.ExecCommand(
                         ExecCommandArguments(
                             command = "./gradlew check",
-                            tty = true,
                             yieldTimeMillis = 10_000L,
                             maxOutputTokens = 10_000L,
                         ),
@@ -294,7 +293,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
             }
         }
 
-        test("future entry 0.5.2 does not run at 0.5.1, strict reader rejects unmigrated records, and activating 0.5.2 makes them readable") { home ->
+        test("future 0.5.2 does not run at 0.5.1 and 0.5.2 makes records readable") { home ->
             SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"0.4.15\"")
             val session = createValidSessionLayout(home, 0)
             val work = timelineDirectory(session, "work")
@@ -334,11 +333,11 @@ public val migrateToV052CurrentModelsTest by testSuite(
                 )
             }
 
-            // Activating 0.5.2 runs the migration and allows the strict current reader to open the records
+            // The older 0.5.2 migration supplies the required yield time.
             val activated = mutableListOf<MigrationVersion>()
             prepareKodexHome(
                 home = home,
-                currentVersion = MigrationVersion("0.5.2"),
+                currentVersion = MigrationVersion("0.6.0"),
                 migrations = KodexHomeMigrations,
                 fileSystem = SystemCoroutineFileSystem,
                 onMigrationStarted = { _, toVersion -> activated += toVersion },
@@ -360,6 +359,48 @@ public val migrateToV052CurrentModelsTest by testSuite(
                     assertIs<PendingCommandExecutionToolEvent>(unstableList[0]).action,
                 ).arguments.yieldTimeMillis,
             )
+        }
+
+        test("reads legacy tty in both timelines without rewriting records") { home ->
+            SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"0.5.2\"")
+            val session = createValidSessionLayout(home, 0)
+            val work = timelineDirectory(session, "work")
+            val unstable = timelineDirectory(session, "unstable")
+            SystemCoroutineFileSystem.writeString(recordPath(work, 0), MigratedWorkExecMissingYield)
+            SystemCoroutineFileSystem.writeString(Path(work, "latest.json"), "0")
+            SystemCoroutineFileSystem.writeString(recordPath(unstable, 0), MigratedUnstableMultiEventArray)
+            SystemCoroutineFileSystem.writeString(Path(unstable, "latest.json"), "0")
+            var migrated = false
+            val handle = prepareKodexHome(
+                home = home,
+                currentVersion = MigrationVersion("0.6.0"),
+                migrations = KodexHomeMigrations,
+                fileSystem = SystemCoroutineFileSystem,
+                onMigrationStarted = { _, _ -> migrated = true },
+            )
+            try {
+                val storage = FileSystemAgentStorage(session, SystemCoroutineFileSystem)
+                val stable = assertIs<StableCommandExecutionToolEvent>(storage.work[0])
+                val arguments = assertIs<StableCommandExecutionAction.ExecCommand>(stable.action).arguments
+                assertEquals("echo hello", arguments.command)
+                val pending = assertIs<PendingCommandExecutionToolEvent>(storage.unstable[0][0])
+                assertEquals("./gradlew check", assertIs<PendingCommandExecutionAction.ExecCommand>(pending.action).arguments.command)
+                assertFalse(migrated)
+                assertEquals(MigratedWorkExecMissingYield, SystemCoroutineFileSystem.readString(recordPath(work, 0)))
+                assertEquals(MigratedUnstableMultiEventArray, SystemCoroutineFileSystem.readString(recordPath(unstable, 0)))
+
+                storage.work[1] = stable
+                storage.unstable[1] = listOf(pending)
+                assertFalse(SystemCoroutineFileSystem.readString(recordPath(work, 1)).contains("\"tty\""))
+                assertFalse(SystemCoroutineFileSystem.readString(recordPath(unstable, 1)).contains("\"tty\""))
+                assertEquals(MigratedWorkExecMissingYield, SystemCoroutineFileSystem.readString(recordPath(work, 0)))
+                assertEquals(MigratedUnstableMultiEventArray, SystemCoroutineFileSystem.readString(recordPath(unstable, 0)))
+
+                val newArguments = OpenAiJsonCodec.encodeToString(ExecCommandArguments.serializer(), arguments)
+                assertFalse("tty" in OpenAiJsonCodec.parseToJsonElement(newArguments).jsonObject)
+            } finally {
+                handle.closeAndJoin()
+            }
         }
 
         test("does not scan Session data or acquire a write lease when already at 0.5.2") { home ->
@@ -438,6 +479,12 @@ public val migrateToV052CurrentModelsTest by testSuite(
 
             assertTrue(migrationStarted)
             assertEquals("\"0.5.2\"", SystemCoroutineFileSystem.readString(versionPath))
+            prepareKodexHome(
+                home = home,
+                currentVersion = MigrationVersion("0.6.1"),
+                migrations = KodexHomeMigrations,
+                fileSystem = SystemCoroutineFileSystem,
+            ).closeAndJoin()
             val storage = FileSystemAgentStorage(session, SystemCoroutineFileSystem)
             assertEquals(
                 10_000L,

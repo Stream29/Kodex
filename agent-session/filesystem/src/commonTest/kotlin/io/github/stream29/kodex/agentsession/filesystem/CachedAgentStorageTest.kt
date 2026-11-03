@@ -19,6 +19,8 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -41,6 +43,63 @@ import kotlin.time.Duration.Companion.seconds
 private const val FirstIndex: Int = 0
 
 val cachedAgentStorageTest by testSuite {
+    test("sparse cached flows read only demanded values and respect revert") {
+        withCachedTimeline(
+            initialEntries = listOf(0 to "zero", 5 to "five", 10_000 to "ten", 50_000 to "fifty"),
+        ) { fixture ->
+            val reads = fixture.fileSystem.contentReadCount
+            assertEquals(10_000 to "ten", fixture.cached.valuesDescending(49_999).first())
+            assertEquals(reads + 1, fixture.fileSystem.contentReadCount)
+            assertEquals(listOf(10_000, 5, 0), fixture.cached.indexesDescending(49_999).toList())
+            fixture.cached.revert(10_000)
+            fixture.cached[12_000] = "replacement"
+            assertEquals(
+                listOf(12_000 to "replacement", 5 to "five", 0 to "zero"),
+                fixture.cached.valuesDescending(50_000).toList(),
+            )
+            fixture.ownerJob.cancelAndJoin()
+            assertFailsWith<IllegalStateException> { fixture.cached.indexesDescending(50_000).toList() }
+        }
+    }
+
+    test("sparse cached traversal remains ordered across a revert and append") {
+        withCachedTimeline(
+            initialEntries = listOf(0 to "zero", 5 to "five", 10_000 to "ten", 50_000 to "fifty"),
+        ) { fixture ->
+            val observed = mutableListOf<Pair<Int, String>>()
+            fixture.cached.valuesDescending(50_000).collect { entry ->
+                observed += entry
+                if (entry.first == 50_000) {
+                    fixture.cached.revert(10_000)
+                    fixture.cached[12_000] = "replacement"
+                    fixture.cached[15_000] = "later replacement"
+                }
+            }
+            assertEquals(
+                listOf(
+                    50_000 to "fifty", 15_000 to "later replacement", 12_000 to "replacement",
+                    5 to "five", 0 to "zero",
+                ),
+                observed,
+            )
+        }
+    }
+
+    test("ascending cached cursor re-seeks after a revert and append") {
+        withCachedTimeline(initialEntries = listOf(0 to "zero", 5 to "five", 10_000 to "ten")) { fixture ->
+            val observed = mutableListOf<Int>()
+            fixture.cached.values().collect { (index, _) ->
+                observed += index
+                if (index == 0) {
+                    fixture.cached.revert(5)
+                    fixture.cached[4] = "replacement"
+                    fixture.cached[8] = "later replacement"
+                }
+            }
+            assertEquals(listOf(0, 4, 8), observed)
+        }
+    }
+
     for (kind in listOf("io", "cancellation")) {
         test("failed rescan after published $kind closes cached timeline admission") {
             withCachedTimeline { fixture ->

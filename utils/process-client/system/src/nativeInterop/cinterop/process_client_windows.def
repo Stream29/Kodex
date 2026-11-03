@@ -1,0 +1,72 @@
+package = io.github.stream29.kodex.utils.processclient.winspawn
+
+headers = windows.h
+
+---
+
+#include <windows.h>
+
+static inline int kodex_spawn_windows_process(
+    HANDLE *process_out,
+    HANDLE *thread_out,
+    wchar_t *command_line,
+    const wchar_t *working_directory,
+    wchar_t *environment,
+    HANDLE stdin_read,
+    HANDLE stdout_write,
+    HANDLE stderr_write
+) {
+    SIZE_T attribute_size = 0;
+    LPPROC_THREAD_ATTRIBUTE_LIST attributes = NULL;
+    STARTUPINFOEXW startup;
+    PROCESS_INFORMATION process;
+    HANDLE inherited[3] = { stdin_read, stdout_write, stderr_write };
+    DWORD error = ERROR_GEN_FAILURE;
+    BOOL initialized = FALSE;
+
+    if (process_out == NULL || thread_out == NULL || command_line == NULL ||
+        stdin_read == NULL || stdout_write == NULL || stderr_write == NULL) {
+        return ERROR_INVALID_PARAMETER;
+    }
+    *process_out = NULL;
+    *thread_out = NULL;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &attribute_size);
+    if (attribute_size == 0) {
+        error = GetLastError();
+        return (int)(error == ERROR_SUCCESS ? ERROR_GEN_FAILURE : error);
+    }
+    attributes = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, attribute_size);
+    if (attributes == NULL) return ERROR_NOT_ENOUGH_MEMORY;
+    if (!InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_size)) {
+        error = GetLastError();
+        goto finish;
+    }
+    initialized = TRUE;
+    if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+        inherited, sizeof(inherited), NULL, NULL)) {
+        error = GetLastError();
+        goto finish;
+    }
+    ZeroMemory(&startup, sizeof(startup));
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = stdin_read;
+    startup.StartupInfo.hStdOutput = stdout_write;
+    startup.StartupInfo.hStdError = stderr_write;
+    startup.lpAttributeList = attributes;
+    ZeroMemory(&process, sizeof(process));
+    if (!CreateProcessW(NULL, command_line, NULL, NULL, TRUE,
+        CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
+        environment, working_directory, &startup.StartupInfo, &process)) {
+        error = GetLastError();
+        goto finish;
+    }
+    *process_out = process.hProcess;
+    *thread_out = process.hThread;
+    error = ERROR_SUCCESS;
+finish:
+    if (initialized) DeleteProcThreadAttributeList(attributes);
+    HeapFree(GetProcessHeap(), 0, attributes);
+    if (error == ERROR_SUCCESS && (*process_out == NULL || *thread_out == NULL)) return ERROR_GEN_FAILURE;
+    return (int)error;
+}

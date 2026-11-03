@@ -4,6 +4,7 @@ package io.github.stream29.kodex.utils.processclient
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSink
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
+import io.github.stream29.kodex.utils.processclient.winspawn.kodex_spawn_windows_process
 import kotlinx.cinterop.COpaquePointerVar
 import kotlinx.cinterop.CPointed
 import kotlinx.cinterop.CPointer
@@ -41,13 +42,9 @@ import kotlinx.io.RawSource
 import kotlinx.io.files.Path
 import kotlinx.io.readByteArray
 import platform.windows.AssignProcessToJobObject
-import platform.windows.CREATE_NO_WINDOW
-import platform.windows.CREATE_SUSPENDED
-import platform.windows.CREATE_UNICODE_ENVIRONMENT
 import platform.windows.CloseHandle
 import platform.windows.CreateJobObjectW
 import platform.windows.CreatePipe
-import platform.windows.CreateProcessW
 import platform.windows.ERROR_BROKEN_PIPE
 import platform.windows.FreeEnvironmentStringsW
 import platform.windows.GetEnvironmentStringsW
@@ -55,12 +52,9 @@ import platform.windows.GetExitCodeProcess
 import platform.windows.GetLastError
 import platform.windows.HANDLE_FLAG_INHERIT
 import platform.windows.INFINITE
-import platform.windows.PROCESS_INFORMATION
 import platform.windows.ReadFile
 import platform.windows.ResumeThread
 import platform.windows.SECURITY_ATTRIBUTES
-import platform.windows.STARTF_USESTDHANDLES
-import platform.windows.STARTUPINFOW
 import platform.windows.SetHandleInformation
 import platform.windows.TerminateJobObject
 import platform.windows.TerminateProcess
@@ -113,53 +107,23 @@ private fun ProcessCommand.startWindowsProcess(ownerScope: CoroutineScope): Proc
                     "make parent stderr handle non-inheritable",
                 )
 
-                val startupInfo = alloc<STARTUPINFOW>().apply {
-                    cb = sizeOf<STARTUPINFOW>().toUInt()
-                    lpReserved = null
-                    lpDesktop = null
-                    lpTitle = null
-                    dwX = 0u
-                    dwY = 0u
-                    dwXSize = 0u
-                    dwYSize = 0u
-                    dwXCountChars = 0u
-                    dwYCountChars = 0u
-                    dwFillAttribute = 0u
-                    dwFlags = STARTF_USESTDHANDLES.toUInt()
-                    wShowWindow = 0u
-                    cbReserved2 = 0u
-                    lpReserved2 = null
-                    hStdInput = stdinRead
-                    hStdOutput = outputWrite
-                    hStdError = errorWrite
-                }
-                val processInfo = alloc<PROCESS_INFORMATION>().apply {
-                    hProcess = null
-                    hThread = null
-                    dwProcessId = 0u
-                    dwThreadId = 0u
-                }
+                val processHandle = alloc<COpaquePointerVar>()
+                val threadHandle = alloc<COpaquePointerVar>()
                 val environmentBlock = windowsEnvironmentBlock(environment)
-                checkWindowsSuccess(
-                    CreateProcessW(
-                        null,
-                        windowsStringBuffer(windowsCommandLine()),
-                        null,
-                        null,
-                        1,
-                        CREATE_NO_WINDOW.toUInt() or
-                            CREATE_SUSPENDED.toUInt() or
-                            CREATE_UNICODE_ENVIRONMENT.toUInt(),
-                        environmentBlock,
-                        workingDirectory.windowsPath(),
-                        startupInfo.ptr,
-                        processInfo.ptr,
-                    ),
-                    "start process",
+                val result = kodex_spawn_windows_process(
+                    process_out = processHandle.ptr,
+                    thread_out = threadHandle.ptr,
+                    command_line = windowsStringBuffer(windowsCommandLine()),
+                    working_directory = windowsStringBuffer(workingDirectory.windowsPath()),
+                    environment = environmentBlock,
+                    stdin_read = stdinRead,
+                    stdout_write = outputWrite,
+                    stderr_write = errorWrite,
                 )
+                if (result != 0) throw ProcessException("Failed to start process: error $result.")
 
-                val process = WindowsHandle(requireNotNull(processInfo.hProcess))
-                val thread = requireNotNull(processInfo.hThread)
+                val process = WindowsHandle(requireNotNull(processHandle.value))
+                val thread = requireNotNull(threadHandle.value)
                 val job = try {
                     createWindowsProcessJob(process.value)
                 } catch (failure: Throwable) {

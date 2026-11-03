@@ -22,9 +22,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -151,6 +154,7 @@ internal class CachedIndexVersionedImpl<T : Any>(
     // reconciliation hold the same write session, so no stale admission can
     // race the failure or clear uncertainty from a different operation.
     private var unresolvedFailure: Throwable? = null
+    private var indexRevision = 0L
     private val values = Cache.Builder<Int, T>()
         .expireAfterAccess(CachedValueTtl)
         .maximumCacheSize(valueCacheSize.toLong())
@@ -167,6 +171,66 @@ internal class CachedIndexVersionedImpl<T : Any>(
                 delay(cleanupInterval)
                 values.invalidate(CacheCleanupKey)
             }
+        }
+    }
+
+    override fun indexes(from: Int): Flow<Int> = flow {
+        require(from >= 0) { "Index lower bound $from must be non-negative." }
+        val latest = latestIndex()
+        var cursor = from
+        var nextPosition = 0
+        var knownRevision: Long? = null
+        while (cursor <= latest) {
+            val step = indexes.readSession { snapshot ->
+                requireAuthority()
+                val found = if (knownRevision == indexRevision) nextPosition else {
+                    val position = snapshot.binarySearch(cursor)
+                    if (position >= 0) position else -position - 1
+                }
+                val index = snapshot.getOrNull(found) ?: return@readSession null
+                if (index > latest) return@readSession null
+                Triple(index, found, indexRevision)
+            } ?: break
+            emit(step.first)
+            if (step.first == Int.MAX_VALUE) break
+            cursor = step.first + 1
+            nextPosition = step.second + 1
+            knownRevision = step.third
+        }
+    }
+
+    override fun indexesDescending(from: Int): Flow<Int> = flow {
+        require(from >= 0) { "Index upper bound $from must be non-negative." }
+        var cursor = minOf(from, latestIndex())
+        var nextPosition = 0
+        var knownRevision: Long? = null
+        while (cursor >= 0) {
+            val step = indexes.readSession { snapshot ->
+                requireAuthority()
+                val found = if (knownRevision == indexRevision) nextPosition else {
+                    val position = snapshot.binarySearch(cursor)
+                    if (position >= 0) position else -position - 2
+                }
+                val index = snapshot.getOrNull(found) ?: return@readSession null
+                Triple(index, found, indexRevision)
+            } ?: break
+            emit(step.first)
+            if (step.first == 0) break
+            cursor = step.first - 1
+            nextPosition = step.second - 1
+            knownRevision = step.third
+        }
+    }
+
+    override fun values(from: Int): Flow<Pair<Int, T>> = flow {
+        indexes(from).collect { index ->
+            getExact(index)?.let { emit(index to it) }
+        }
+    }
+
+    override fun valuesDescending(from: Int): Flow<Pair<Int, T>> = flow {
+        indexesDescending(from).collect { index ->
+            getExact(index)?.let { emit(index to it) }
         }
     }
 
@@ -306,6 +370,7 @@ internal class CachedIndexVersionedImpl<T : Any>(
                                     values.invalidate(index)
                                     cache.clear()
                                     cache.addAll(durable)
+                                    indexRevision++
                                     mutableLatestIndex.value = durable.lastOrNull() ?: -1
                                     unresolvedFailure = null
                                 }
@@ -326,6 +391,7 @@ internal class CachedIndexVersionedImpl<T : Any>(
                     }
                 }
                 cache += index
+                indexRevision++
                 mutableLatestIndex.value = index
             }
         }
@@ -342,6 +408,7 @@ internal class CachedIndexVersionedImpl<T : Any>(
                 if (suffixStart < cache.size) {
                     values.invalidateAll()
                     cache.subList(suffixStart, cache.size).clear()
+                    indexRevision++
                     val previousNonce = mutableCacheNonce.value
                     var nextNonce: Long
                     do {

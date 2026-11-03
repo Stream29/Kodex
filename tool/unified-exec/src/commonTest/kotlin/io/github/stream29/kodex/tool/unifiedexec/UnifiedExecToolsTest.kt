@@ -178,6 +178,7 @@ val unifiedExecToolsTest by testSuite {
         assertEquals(listOf("cmd", "yield_time_ms"), UnifiedExecTools.execCommandSpec.parameters.required)
         assertEquals(listOf("session_id", "yield_time_ms"), UnifiedExecTools.writeStdinSpec.parameters.required)
         assertFalse(UnifiedExecTools.execCommandSpec.parameters.properties?.containsKey("login") == true)
+        assertFalse(UnifiedExecTools.execCommandSpec.parameters.properties?.containsKey("tty") == true)
 
         val writeYieldProperty = assertIs<NumericPropertyDefinition>(
             requireNotNull(WriteStdinParametersSchema.properties?.get("yield_time_ms")),
@@ -479,7 +480,7 @@ val unifiedExecToolsTest by testSuite {
         }
     }
 
-    test("tty requests run in a pseudoterminal", testConfig = realIoTestConfig) {
+    test("exec commands run in a pseudoterminal", testConfig = realIoTestConfig) {
         val client = testUnifiedExecToolClient()
         try {
             val tools = UnifiedExecTools.createTools(client)
@@ -489,7 +490,6 @@ val unifiedExecToolsTest by testSuite {
                 ExecCommandArguments(
                     command = ttyProbeExecCommand,
                     shell = unifiedExecTestShell,
-                    tty = true,
                     yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
                 ),
             ).requireUnifiedExecOutput()
@@ -523,7 +523,6 @@ val unifiedExecToolsTest by testSuite {
                 ExecCommandArguments(
                     command = interactiveExecCommand,
                     shell = unifiedExecTestShell,
-                    tty = true,
                     yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
                 ),
             ).requireUnifiedExecOutput()

@@ -14,17 +14,21 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
+import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
+import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
 import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
@@ -218,6 +222,47 @@ val kodexAgentStateImplTest by testSuite {
             assertEquals(-1, storage.index.latestIndex())
             assertEquals(0, agent.latestIndex.value)
             assertEquals(KodexAgentStateValue.Empty, agent.state.value)
+        }
+
+        test("sparse state reconstruction skips non-state entries without enumerating timelines") {
+            val source = storage().apply {
+                index[2] = userEvent("Question")
+                index[1_000] = StableDeveloperMessage(listOf(ContentItem.InputText("Context")))
+                work[10_000] = StableContextCompaction(encryptedContent = "compact")
+            }
+            var indexRangeReads = 0
+            var workRangeReads = 0
+            val observed = object : MutableKodexAgentStorage by source {
+                override val index = object : MutableIndexVersioned<CleanIndexEntry> by source.index {
+                    override suspend fun indexesIn(range: IntRange): List<Int> {
+                        indexRangeReads++
+                        return source.index.indexesIn(range)
+                    }
+                }
+                override val work = object : MutableIndexVersioned<StableWorkEvent> by source.work {
+                    override suspend fun indexesIn(range: IntRange): List<Int> {
+                        workRangeReads++
+                        return source.work.indexesIn(range)
+                    }
+                }
+            }
+            val agent = KodexAgentState(client = mockOpenAiClient(), storage = observed)
+            assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
+            assertEquals(0, indexRangeReads)
+            assertEquals(0, workRangeReads)
+            agent.cancelAndJoin()
+        }
+
+        test("sparse state reconstruction compares the latest state-bearing timeline entries") {
+            val source = storage().apply {
+                index[2] = userEvent("Question")
+                work[5_000] = completedTool(functionCall("lookup", "call-1"), "done")
+                work[10_000] = StableContextCompaction(encryptedContent = "compact")
+                index[20_000] = StableDeveloperMessage(listOf(ContentItem.InputText("Context")))
+            }
+            val agent = KodexAgentState(client = mockOpenAiClient(), storage = source)
+            assertEquals(KodexAgentStateValue.ToolCompleted, agent.state.value)
+            agent.cancelAndJoin()
         }
 
         test("forked clean timelines reconstruct assistant state") {

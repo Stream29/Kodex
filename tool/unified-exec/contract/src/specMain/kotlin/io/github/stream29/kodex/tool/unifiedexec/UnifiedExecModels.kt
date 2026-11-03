@@ -8,7 +8,8 @@ import kotlinx.serialization.Serializable
 public const val UnifiedExecDefaultMaxOutputTokens: Long = 10_000L
 
 /**
- * Arguments accepted by the `exec_command` function tool.
+ * Arguments accepted by the `exec_command` function tool. Commands run in a
+ * pseudoterminal; terminal allocation is not a caller-selectable option.
  *
  * @property command Nonblank command text to execute in the selected shell.
  * @property workdir Nullable because a command normally uses the session
@@ -29,8 +30,6 @@ public data class ExecCommandArguments(
     public val command: String,
     public val workdir: String? = null,
     public val shell: Shell? = null,
-    /** Whether to allocate a terminal rather than ordinary process pipes. */
-    public val tty: Boolean = false,
     @SerialName("yield_time_ms")
     public val yieldTimeMillis: Long,
     @SerialName("max_output_tokens")

@@ -64,7 +64,9 @@ import io.github.stream29.kodex.utils.logging.session
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -79,7 +81,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlin.random.Random
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 val kodexToolRuntimeTest by testSuite {
@@ -183,6 +187,60 @@ val kodexToolRuntimeTest by testSuite {
             mcpTextResult("done"),
             assertIs<ResponseItem.McpToolCallOutput>(history[4]).output,
         )
+    }
+
+    test("failed client search produces an incomplete output and resumes") {
+        val dynamicTool = RuntimeTestTool("mcp__shared", "dynamic")
+        val mcpService = TestMcpService(listOf(dynamicTool))
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
+        var requestCount = 0
+        var searches = 0
+        val client = mockOpenAiClient {
+            createResponse {
+                requestCount++
+                if (requestCount == 1) {
+                    flowOf(
+                        ResponsesStreamEvent.OutputItemDone(
+                            0,
+                            ResponseItem.ClientToolSearchCall(
+                                callId = "search-failed",
+                                arguments = buildJsonObject { put("query", JsonPrimitive("dynamic")) },
+                            ),
+                        ),
+                        ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                    )
+                } else {
+                    flowOf(
+                        ResponsesStreamEvent.OutputItemDone(0, assistantMessage()),
+                        ResponsesStreamEvent.Completed(Response(id = "response_2", endTurn = true)),
+                    )
+                }
+            }
+        }
+        val state = KodexAgentState(
+            client = client,
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
+        )
+        state.appendUserMessage(listOf(ContentItem.InputText("Find the tool.")))
+        val runtime = KodexToolRuntimeImpl(
+            delegate = RequestOnlyRuntime(state),
+            fixedTools = emptyList(),
+            dynamicTools = MutableStateFlow(listOf(dynamicTool)),
+            toolSearch = MutableStateFlow(ToolSearchEngine(emptyList())),
+            logger = TestLogger,
+            searchOperation = { _, _ ->
+                searches++
+                error("private search failure")
+            },
+        )
+        runtime.resume()
+        val output = storage.stableHistoryItems().filterIsInstance<ResponseItem.ClientToolSearchOutput>().single()
+        assertEquals("incomplete", output.status)
+        assertTrue(output.tools.isEmpty())
+        assertEquals(1, searches)
+        assertEquals(2, requestCount)
     }
 
     test("dynamic tools refresh handlers between resumes") {
@@ -324,6 +382,183 @@ val kodexToolRuntimeTest by testSuite {
 
         val pending = assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
         assertEquals(listOf("call_host_only"), pending.events.map(PendingToolEvent::callId))
+    }
+
+    test("a throwing tool does not block another tool in the same batch") {
+        var failedCalls = 0
+        var successfulCalls = 0
+        val failing = RuntimeTestTool("mcp__shared", "failing") {
+            failedCalls++
+            error("private failure")
+        }
+        val successful = RuntimeTestTool("mcp__shared", "successful") {
+            successfulCalls++
+            mcpTextResult("done")
+        }
+        val mcpService = TestMcpService(listOf(failing, successful))
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
+        var requestCount = 0
+        val client = mockOpenAiClient {
+            createResponse {
+                requestCount++
+                if (requestCount == 1) {
+                    flowOf(
+                        ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
+                            name = "failing", namespace = "mcp__shared", arguments = "{}", callId = "failed",
+                        )),
+                        ResponsesStreamEvent.OutputItemDone(1, ResponseItem.FunctionCall(
+                            name = "successful", namespace = "mcp__shared", arguments = "{}", callId = "succeeded",
+                        )),
+                        ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                    )
+                } else {
+                    flowOf(
+                        ResponsesStreamEvent.OutputItemDone(0, assistantMessage()),
+                        ResponsesStreamEvent.Completed(Response(id = "response_2", endTurn = true)),
+                    )
+                }
+            }
+        }
+        val state = KodexAgentState(
+            client = client,
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
+        )
+        state.appendUserMessage(listOf(ContentItem.InputText("Use both tools.")))
+        RequestOnlyRuntime(state).testToolRuntime(mcpService).resume()
+
+        val outputs = storage.stableHistoryItems().filterIsInstance<ResponseItem.McpToolCallOutput>()
+        assertEquals(2, outputs.size)
+        assertEquals(true, outputs[0].output.isError)
+        assertEquals(mcpTextResult("done"), outputs[1].output)
+        assertEquals(1, failedCalls)
+        assertEquals(1, successfulCalls)
+        assertEquals(2, requestCount)
+    }
+
+    test("a tool that completes itself before throwing is not completed twice") {
+        lateinit var state: KodexAgentStateContract
+        val tool = RuntimeTestTool("mcp__shared", "self_complete") { pending ->
+            state.completeToolCall(StableMcpToolEvent(
+                callId = pending.callId,
+                itemId = pending.itemId,
+                name = pending.name,
+                namespace = pending.namespace,
+                arguments = pending.arguments,
+                result = mcpTextResult("already completed"),
+            ))
+            error("failure after completion")
+        }
+        val mcpService = TestMcpService(listOf(tool))
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
+        var requestCount = 0
+        val client = mockOpenAiClient {
+            createResponse {
+                requestCount++
+                if (requestCount == 1) {
+                    flowOf(
+                        ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
+                            name = "self_complete", namespace = "mcp__shared", arguments = "{}", callId = "self",
+                        )),
+                        ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                    )
+                } else {
+                    flowOf(
+                        ResponsesStreamEvent.OutputItemDone(0, assistantMessage()),
+                        ResponsesStreamEvent.Completed(Response(id = "response_2", endTurn = true)),
+                    )
+                }
+            }
+        }
+        state = KodexAgentState(
+            client = client,
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
+        )
+        state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
+        RequestOnlyRuntime(state).testToolRuntime(mcpService).resume()
+        val outputs = storage.stableHistoryItems().filterIsInstance<ResponseItem.McpToolCallOutput>()
+        assertEquals(1, outputs.size)
+        assertEquals(mcpTextResult("already completed"), outputs.single().output)
+        assertEquals(2, requestCount)
+    }
+
+    test("persistence failure propagates with the original execution failure") {
+        val executionFailure = IllegalStateException("tool failure")
+        val persistenceFailure = IllegalStateException("storage failure")
+        val tool = RuntimeTestTool("mcp__shared", "failing") { throw executionFailure }
+        val mcpService = TestMcpService(listOf(tool))
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
+        var requestCount = 0
+        val client = mockOpenAiClient {
+            createResponse {
+                requestCount++
+                flowOf(
+                    ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
+                        name = "failing", namespace = "mcp__shared", arguments = "{}", callId = "call",
+                    )),
+                    ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                )
+            }
+        }
+        val state = KodexAgentState(
+            client = client,
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
+        )
+        state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
+        val layer = object : ResumableAgentLayer, KodexAgentStateContract by state {
+            override suspend fun resume() = RequestOnlyRuntime(state).resume()
+
+            override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int {
+                throw persistenceFailure
+            }
+        }
+        val failure = assertFailsWith<IllegalStateException> { layer.testToolRuntime(mcpService).resume() }
+        assertSame(persistenceFailure, failure)
+        assertTrue(failure.suppressedExceptions.any { it === executionFailure })
+        assertEquals(1, requestCount)
+    }
+
+    test("tool cancellation propagates and does not run the next tool") {
+        var otherCalls = 0
+        val cancellation = CancellationException("cancel tool")
+        val failing = RuntimeTestTool("mcp__shared", "failing") { throw cancellation }
+        val successful = RuntimeTestTool("mcp__shared", "successful") {
+            otherCalls++
+            mcpTextResult("done")
+        }
+        val mcpService = TestMcpService(listOf(failing, successful))
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
+        val client = mockOpenAiClient {
+            createResponse {
+                flowOf(
+                    ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
+                        name = "failing", namespace = "mcp__shared", arguments = "{}", callId = "cancelled",
+                    )),
+                    ResponsesStreamEvent.OutputItemDone(1, ResponseItem.FunctionCall(
+                        name = "successful", namespace = "mcp__shared", arguments = "{}", callId = "untouched",
+                    )),
+                    ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                )
+            }
+        }
+        val state = KodexAgentState(
+            client = client,
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
+        )
+        state.appendUserMessage(listOf(ContentItem.InputText("Use both tools.")))
+        assertEquals(
+            cancellation,
+            assertFailsWith<CancellationException> { RequestOnlyRuntime(state).testToolRuntime(mcpService).resume() },
+        )
+        assertEquals(0, otherCalls)
+        assertTrue(storage.stableHistoryItems().filterIsInstance<ResponseItem.McpToolCallOutput>().isEmpty())
     }
 
     test("removed MCP routes complete with an explicit failure") {

@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.agentstorage.contract
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 
 /**
@@ -39,6 +40,18 @@ public interface IndexVersioned<T> {
 
     /** Returns stored values paired with their indexes within inclusive [range]. */
     public suspend fun valuesIn(range: IntRange): List<Pair<Int, T>>
+
+    /** Emits stored indexes in ascending order, starting at [from]. */
+    public fun indexes(from: Int = 0): Flow<Int> = defaultIndexes(from)
+
+    /** Emits stored indexes in descending order, starting at or below [from]. */
+    public fun indexesDescending(from: Int): Flow<Int> = defaultIndexesDescending(from)
+
+    /** Emits exact values paired with ascending stored indexes. */
+    public fun values(from: Int = 0): Flow<Pair<Int, T>> = defaultValues(from, descending = false)
+
+    /** Emits exact values paired with descending stored indexes. */
+    public fun valuesDescending(from: Int): Flow<Pair<Int, T>> = defaultValues(from, descending = true)
 }
 
 /** Returns the newest value published by this timeline. */
@@ -48,18 +61,18 @@ public suspend fun <T> IndexVersioned<T>.latestValue(): T =
 /**
  * Emits stored indexes in ascending order, starting at [from].
  *
- * The default implementation queries exponentially growing ranges. This keeps
- * sparse, filesystem-backed timelines bounded for consumers that stop
- * collecting early.
+ * Retained as a source-compatible import; implementations may override the member.
  */
-public fun <T> IndexVersioned<T>.indexes(from: Int = 0): Flow<Int> {
+@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
+public fun <T> IndexVersioned<T>.indexes(from: Int = 0): Flow<Int> = this.indexes(from)
+
+private fun <T> IndexVersioned<T>.defaultIndexes(from: Int): Flow<Int> {
     val timeline = this
     return flow {
         require(from >= 0) { "Index lower bound $from must be non-negative." }
         val latest = timeline.latestIndex()
         if (from > latest) return@flow
-
-        var lower = from
+        var lower = timeline.ceilToIndex(from) ?: return@flow
         var width = 1L
         while (lower <= latest) {
             val upper = minOf(
@@ -68,8 +81,8 @@ public fun <T> IndexVersioned<T>.indexes(from: Int = 0): Flow<Int> {
             ).toInt()
             timeline.indexesIn(lower..upper).forEach { emit(it) }
             if (upper == latest) break
-            lower = upper + 1
-            width = (width shl 1).coerceAtMost(Int.MAX_VALUE.toLong())
+            lower = timeline.ceilToIndex(upper + 1) ?: break
+            width = (width shl 1).coerceAtMost(32L)
         }
     }
 }
@@ -77,14 +90,18 @@ public fun <T> IndexVersioned<T>.indexes(from: Int = 0): Flow<Int> {
 /**
  * Emits stored indexes in descending order, starting at or below [from].
  *
- * Like [indexes], the default implementation fetches exponentially growing
- * ranges so cancellation does not require enumerating the entire timeline.
+ * Retained as a source-compatible import; implementations may override the member.
  */
-public fun <T> IndexVersioned<T>.indexesDescending(from: Int): Flow<Int> {
+@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
+public fun <T> IndexVersioned<T>.indexesDescending(from: Int): Flow<Int> = this.indexesDescending(from)
+
+private fun <T> IndexVersioned<T>.defaultIndexesDescending(from: Int): Flow<Int> {
     val timeline = this
     return flow {
         require(from >= 0) { "Index upper bound $from must be non-negative." }
-        var upper = minOf(from, timeline.latestIndex())
+        val latest = timeline.latestIndex()
+        if (latest < 0) return@flow
+        var upper = timeline.floorToIndex(minOf(from, latest)) ?: return@flow
         var width = 1L
         while (upper >= 0) {
             val lower = maxOf(
@@ -95,58 +112,52 @@ public fun <T> IndexVersioned<T>.indexesDescending(from: Int): Flow<Int> {
                 .asReversed()
                 .forEach { emit(it) }
             if (lower == 0) break
-            upper = lower - 1
-            width = (width shl 1).coerceAtMost(Int.MAX_VALUE.toLong())
+            upper = timeline.floorToIndex(lower - 1) ?: break
+            width = (width shl 1).coerceAtMost(32L)
         }
     }
 }
 
-/** Emits exact values paired with ascending stored indexes. */
+/** Retained as a source-compatible import; implementations may override the member. */
+@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
 public fun <T> IndexVersioned<T>.values(
     from: Int = 0,
-): Flow<Pair<Int, T>> {
-    val timeline = this
-    return flow {
-        require(from >= 0) { "Index lower bound $from must be non-negative." }
-        val latest = timeline.latestIndex()
-        if (from > latest) return@flow
+): Flow<Pair<Int, T>> = this.values(from)
 
-        var lower = from
-        var width = 1L
-        while (lower <= latest) {
-            val upper = minOf(
-                latest.toLong(),
-                lower.toLong() + width - 1,
-            ).toInt()
-            timeline.valuesIn(lower..upper).forEach { emit(it) }
-            if (upper == latest) break
-            lower = upper + 1
-            width = (width shl 1).coerceAtMost(Int.MAX_VALUE.toLong())
-        }
-    }
-}
-
-/** Emits exact values paired with descending stored indexes. */
+/** Retained as a source-compatible import; implementations may override the member. */
+@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
 public fun <T> IndexVersioned<T>.valuesDescending(
     from: Int,
+): Flow<Pair<Int, T>> = this.valuesDescending(from)
+
+private fun <T> IndexVersioned<T>.defaultValues(
+    from: Int,
+    descending: Boolean,
 ): Flow<Pair<Int, T>> {
     val timeline = this
     return flow {
-        require(from >= 0) { "Index upper bound $from must be non-negative." }
-        var upper = minOf(from, timeline.latestIndex())
-        var width = 1L
-        while (upper >= 0) {
-            val lower = maxOf(
-                0L,
-                upper.toLong() - width + 1,
-            ).toInt()
-            timeline.valuesIn(lower..upper)
-                .asReversed()
-                .forEach { emit(it) }
-            if (lower == 0) break
-            upper = lower - 1
-            width = (width shl 1).coerceAtMost(Int.MAX_VALUE.toLong())
+        val batch = mutableListOf<Int>()
+        var capacity = 1
+        suspend fun emitBatch() {
+            if (batch.isEmpty()) return
+            val expected = batch.toSet()
+            val range = if (descending) batch.last()..batch.first() else batch.first()..batch.last()
+            val values = timeline.valuesIn(range)
+            val ordered = if (descending) values.asReversed() else values
+            ordered.forEach { (index, value) ->
+                if (index in expected) emit(index to value)
+            }
+            batch.clear()
         }
+        val indexes = if (descending) timeline.indexesDescending(from) else timeline.indexes(from)
+        indexes.collect { index ->
+            batch += index
+            if (batch.size == capacity) {
+                emitBatch()
+                capacity = (capacity * 2).coerceAtMost(32)
+            }
+        }
+        emitBatch()
     }
 }
 

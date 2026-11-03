@@ -254,7 +254,7 @@ private fun ExecCommandArguments.toShellProcessCommand(
             ?: defaultWorkingDirectory,
         shell = shell ?: defaultShell,
         login = true,
-        tty = tty,
+        tty = true,
     )
 
 private fun Long.normalizedExecYieldTime(): Duration =
