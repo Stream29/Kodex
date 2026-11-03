@@ -42,7 +42,11 @@ private suspend fun browserGrantRequest(endpoint: BackendEndpoint, grant: LocalB
             setBody(Json.encodeToString(LocalBrowserGrant.serializer(), grant))
         }
         check(response.status.value in 200..299) { "Backend browser admission rejected (${response.status.value})." }
-        try { Json.parseToJsonElement(response.bodyAsText()).jsonObject }
+        try {
+            val body = response.bodyAsText()
+            val parser = Json {}
+            parser.parseToJsonElement(body).jsonObject
+        }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { error("Invalid browser admission response.") }
     } finally { client.close() }

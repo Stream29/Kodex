@@ -28,6 +28,9 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
         }
         commonMain.dependencies {
+            implementation(project(":hook-notification"))
+            implementation(project(":utils-oauth-loopback"))
+            implementation(project(":utils-os-environment"))
             implementation(project(":openai-account-usage-backend"))
             api(project(":utils-rpc-exception"))
             implementation(project(":utils-coroutines"))

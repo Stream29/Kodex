@@ -4,6 +4,8 @@ package io.github.stream29.kodex.cli.app
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.app.application.contract.*
+import io.github.stream29.kodex.app.pathpicker.createDirectoryPickerViewModel
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerDependencies
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
@@ -18,6 +20,7 @@ import io.github.stream29.kodex.cli.session.RpcPersistedSessionViewModel
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.models.OAuthTarget
+import io.github.stream29.kodex.rpc.models.FrontendErrorAdmission
 import io.github.stream29.kodex.rpc.local.FrontendRpcConnection
 import io.github.stream29.kodex.rpc.local.BackendConnectionState
 import kotlinx.coroutines.*
@@ -29,7 +32,6 @@ public actual suspend fun <R> withFrontendApplication(
     connection: FrontendRpcConnection,
     workingDirectory: Path,
     host: FrontendHost,
-    environment: RpcFrontendEnvironment,
     applicationWidth: Int?,
     render: suspend CoroutineScope.(KodexApplication) -> R,
 ): R = coroutineScope {
@@ -42,6 +44,12 @@ public actual suspend fun <R> withFrontendApplication(
     var failure: Throwable? = null
     try {
         val services = RpcServices(RestoringRpcClient(connection))
+        val scopedEnvironment = object : RpcFrontendEnvironment {
+            override val contextPaths = createRpcContextSourcePathPolicy(services.global, cwd.toString())
+        }
+        val pickerDependencies = object : DirectoryPickerDependencies {
+            override val browser = createRpcDirectoryPickerBrowser(services.global, cwd.toString())
+        }
         val unhandledErrors = MutableSharedFlow<String?>(
             extraBufferCapacity = 64,
             onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -75,7 +83,9 @@ public actual suspend fun <R> withFrontendApplication(
         }
         val sessions = DefaultPersistedSessionViewModelRegistry(sessionViews, settings.models, frontendScope)
         val draftFactory = DefaultNewSessionViewModelFactory(sessionViews, sessions, settings, frontendScope)
-        val directoryPicker = { path: Path -> host.createDirectoryPicker(path, frontendScope) }
+        val directoryPicker = { path: Path ->
+            createDirectoryPickerViewModel(path, pickerDependencies, frontendScope)
+        }
         root = createApplicationViewModel(
             sessions, draftFactory,
             SessionCatalogViewModelFactory { dependencies, interactions ->
@@ -89,7 +99,7 @@ public actual suspend fun <R> withFrontendApplication(
                     else -> error("Unknown frontend Session view.")
                 }
                 createSettingsViewModel(
-                    arguments.initialPage, RpcGlobalEditor(settings, services.global, frontendScope, environment),
+                    arguments.initialPage, RpcGlobalEditor(settings, services.global, frontendScope, scopedEnvironment),
                     createSessionSettingsViewModel(
                         io.github.stream29.kodex.app.settings.contract.SessionSettingsDependencies(
                             source, settings.models, directoryPicker,
@@ -103,7 +113,7 @@ public actual suspend fun <R> withFrontendApplication(
                 val target = OAuthTarget.OpenAi(settings.settings.value.authSource)
                 createOpenAiLoginViewModel(
                     dependencies = OpenAiLoginDependencies {
-                        startRpcOAuth(services.global, target, frontendScope, environment.oauthCallbacks)
+                        startRpcOAuth(services.global, target, frontendScope)
                     },
                     ownerScope = frontendScope,
                 )
@@ -115,11 +125,19 @@ public actual suspend fun <R> withFrontendApplication(
             }),
         )
         application = root
-        frontendScope.launch {
+        frontendScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
-                host.collectFrontendErrors(
-                    { settings.frontend.settings.value.hooks }, cwd, unhandledErrors,
-                )
+                unhandledErrors.collect { message ->
+                    try {
+                        if (services.global.reportFrontendError(message) == FrontendErrorAdmission.RejectedOverload) {
+                            ApplicationLogger.warn { "Frontend error observation was rejected by the backend queue." }
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        ApplicationLogger.warn { "Frontend error observation could not be admitted." }
+                    }
+                }
             }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Throwable) { ApplicationLogger.error(error) { "Notification subscription ended." } }

@@ -15,6 +15,17 @@ import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.OAuthTarget
+import io.github.stream29.kodex.rpc.models.OAuthAuthorization
+import io.github.stream29.kodex.rpc.models.FrontendErrorAdmission
+import io.github.stream29.kodex.rpc.models.DirectoryQuery
+import io.github.stream29.kodex.rpc.models.DirectoryQueryFailure
+import io.github.stream29.kodex.rpc.models.DirectoryValidationResult
+import io.github.stream29.kodex.rpc.models.DirectoryListResult
+import io.github.stream29.kodex.rpc.models.BackendChildDirectory
+import io.github.stream29.kodex.rpc.models.ContextPathQuery
+import io.github.stream29.kodex.agentcontext.contract.ContextPathComparison
+import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
+import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluationFailure
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -29,6 +40,17 @@ val rpcWireSerializersTest by testSuite {
         checkLookup<SettingsAccountUsageState>(SettingsAccountUsageState.serializer())
         checkLookup<Notification>(Notification.serializer())
         checkLookup<OAuthTarget>(OAuthTarget.serializer())
+        checkLookup<OAuthAuthorization>(OAuthAuthorization.serializer())
+        checkLookup<FrontendErrorAdmission>(FrontendErrorAdmission.serializer())
+        checkLookup<DirectoryQuery>(DirectoryQuery.serializer())
+        checkLookup<DirectoryQueryFailure>(DirectoryQueryFailure.serializer())
+        checkLookup<DirectoryValidationResult>(DirectoryValidationResult.serializer())
+        checkLookup<DirectoryListResult>(DirectoryListResult.serializer())
+        checkLookup<BackendChildDirectory>(BackendChildDirectory.serializer())
+        checkLookup<ContextPathQuery>(ContextPathQuery.serializer())
+        checkLookup<ContextPathComparison>(ContextPathComparison.serializer())
+        checkLookup<ContextPathEvaluation>(ContextPathEvaluation.serializer())
+        checkLookup<ContextPathEvaluationFailure>(ContextPathEvaluationFailure.serializer())
         checkLookup<AgentStateValue>(AgentStateValue.serializer())
         checkLookup<ContentItem>(ContentItem.serializer())
         checkLookup<ResponsesStreamEvent>(ResponsesStreamEvent.serializer())
@@ -57,6 +79,38 @@ val rpcWireSerializersTest by testSuite {
         val encoded = json.encodeToString(runtime, value)
         assertEquals(json.encodeToString(value), encoded)
         assertEquals(value, json.decodeFromString(runtime, encoded))
+    }
+
+    test("backend path strings round trip without frontend path interpretation") {
+        val json = Json { serializersModule = RpcWireSerializers }
+        val runtime = RpcWireSerializers.serializer(typeOf<DirectoryQuery>())
+        for (path in listOf("""C:\Projects\中文 space""", """\\server\share\dir""", "C:relative", "../child")) {
+            val value = DirectoryQuery(path, """C:\launch""")
+            val encoded = json.encodeToString(runtime, value)
+            assertEquals(json.encodeToString(value), encoded)
+            assertEquals(value, json.decodeFromString(runtime, encoded))
+        }
+    }
+
+    test("directory and context results preserve typed failures and ordered comparison rows") {
+        val json = Json { serializersModule = RpcWireSerializers; encodeDefaults = true }
+        val listing: DirectoryListResult = DirectoryListResult.Directories(
+            """C:\launch""", """C:\""", listOf(BackendChildDirectory("""C:\launch\child""", "child")),
+        )
+        val failed: DirectoryListResult = DirectoryListResult.Failure(DirectoryQueryFailure.FileSystem)
+        val validation: DirectoryValidationResult =
+            DirectoryValidationResult.Failure(DirectoryQueryFailure.NotDirectory, "/parent")
+        val original = listOf(ContextPathComparison(null, false), ContextPathComparison("/home/.agents", true))
+        val evaluated: ContextPathEvaluation = ContextPathEvaluation.Evaluated(
+            ContextPathComparison("/home/custom", false), original,
+        )
+        assertEquals(listing, json.decodeFromString<DirectoryListResult>(json.encodeToString(listing)))
+        assertEquals(failed, json.decodeFromString<DirectoryListResult>(json.encodeToString(failed)))
+        assertEquals(validation, json.decodeFromString<DirectoryValidationResult>(json.encodeToString(validation)))
+        val runtime = RpcWireSerializers.serializer(typeOf<ContextPathEvaluation>())
+        assertEquals(evaluated, json.decodeFromString(runtime, json.encodeToString(runtime, evaluated)))
+        val query = ContextPathQuery("~/custom", listOf("relative", "~/.agents"), "/launch")
+        assertEquals(query, json.decodeFromString<ContextPathQuery>(json.encodeToString(query)))
     }
 }
 

@@ -91,8 +91,7 @@ val backendReconnectTest by testSuite(compartment = { TestCompartment.RealTime }
                     val rpc = RpcServices(RestoringRpcClient(connection))
                     assertEquals(OpenAiModelId("fixture"), rpc.global.getSettings().newSession.model)
                     val index = rpc.global.createSession(home)
-                    withFrontendApplication(connection, home, io.github.stream29.kodex.cli.app.NativeFrontendHost,
-                        io.github.stream29.kodex.cli.rpc.LocalRpcFrontendEnvironment) { app ->
+                    withFrontendApplication(connection, home, io.github.stream29.kodex.cli.app.NativeFrontendHost) { app ->
                         val tab = app.viewModel.openSession(index)
                         val agent = requireNotNull(tab.rootAgent.value)
                         val composer = agent.composer

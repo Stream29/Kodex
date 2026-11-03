@@ -79,12 +79,28 @@ public actual class BackendOAuth internal constructor(
     }
 
     public actual suspend fun start(target: OAuthTarget, redirectUri: String): OAuthAuthorization = accepted {
+        begin(target, redirectUri) {}.authorization.await()
+    }
+
+    /**
+     * Allocates synchronously under the existing attempt lock. The callback is invoked before
+     * preparation starts so a backend-owned listener can release an attempt even if its waiter
+     * is cancelled before the authorization URL is ready.
+     */
+    internal suspend fun begin(
+        target: OAuthTarget,
+        redirectUri: String,
+        onAllocated: (Long) -> Unit,
+    ): BackendOAuthPreparation {
+        currentCoroutineContext().ensureActive()
+        owner.ensureActive()
         validateRedirect(target, redirectUri)
         val attempt = mutex.withLock {
             require(attempts.values.none { it.target == target }) { "This target is already authorizing." }
             check(nextId < Long.MAX_VALUE) { "OAuth attempt identities are exhausted." }
             Attempt(nextId++, target, redirectUri).also { entry ->
                 attempts[entry.id] = entry
+                onAllocated(entry.id)
                 // Enter the try/finally before cancellation can observe this
                 // entry; even cancellation during preparation releases its slot.
                 entry.work = owner.async(start = CoroutineStart.UNDISPATCHED) {
@@ -127,15 +143,29 @@ public actual class BackendOAuth internal constructor(
                 }
             }
         }
-        attempt.authorization.await()
+        return BackendOAuthPreparation(attempt.id, attempt.authorization)
+    }
+
+    internal suspend fun waitingState(id: Long): String = mutex.withLock {
+        val attempt = attempts[id] ?: error("Unknown OAuth attempt.")
+        check(attempt.phase == AttemptPhase.Waiting) { "OAuth attempt is not waiting." }
+        requireNotNull(attempt.state)
+    }
+
+    internal suspend fun holdPendingDeadline(id: Long): Boolean = mutex.withLock {
+        val attempt = attempts[id] ?: return@withLock false
+        if (attempt.phase != AttemptPhase.Waiting) return@withLock false
+        attempt.expiry?.cancel()
+        attempt.expiry = null
+        true
     }
 
     public actual suspend fun complete(id: Long, callbackUrl: String): Unit = accepted {
         val work = mutex.withLock {
             val attempt = attempts[id] ?: error("Unknown or completed OAuth attempt.")
-            check(attempt.pending) { "This OAuth attempt is not waiting for a callback." }
+            check(attempt.phase == AttemptPhase.Waiting) { "This OAuth attempt is not waiting for a callback." }
             val result = parseCallback(attempt.redirectUri, requireNotNull(attempt.state), callbackUrl)
-            attempt.pending = false
+            attempt.phase = AttemptPhase.Accepted
             attempt.expiry?.cancel()
             if (result == null) {
                 attempt.work.cancel()
@@ -150,7 +180,20 @@ public actual class BackendOAuth internal constructor(
     public actual suspend fun cancel(id: Long): Unit = accepted {
         mutex.withLock {
             attempts[id]?.also {
-                it.pending = false
+                it.phase = AttemptPhase.Released
+                it.expiry?.cancel()
+                it.work.cancel()
+            }
+        }
+    }
+
+    public actual suspend fun abandonPending(id: Long): Unit = accepted {
+        mutex.withLock {
+            attempts[id]?.takeIf {
+                it.phase == AttemptPhase.Preparing || it.phase == AttemptPhase.Waiting
+            }?.also {
+                // The same lock linearizes callback acceptance and pending-only release.
+                it.phase = AttemptPhase.Released
                 it.expiry?.cancel()
                 it.work.cancel()
             }
@@ -160,7 +203,7 @@ public actual class BackendOAuth internal constructor(
     public actual suspend fun removeAuthentication(source: KodexAuthSource): Unit = accepted {
         mutex.withLock {
             attempts.values.filter { it.target == OAuthTarget.OpenAi(source) }.forEach {
-                it.pending = false
+                it.phase = AttemptPhase.Released
                 it.expiry?.cancel()
                 it.work.cancel()
             }
@@ -179,14 +222,15 @@ public actual class BackendOAuth internal constructor(
         mutex.withLock {
             currentCoroutineContext().ensureActive()
             check(attempts[attempt.id] === attempt)
+            check(attempt.phase == AttemptPhase.Preparing)
             attempt.state = state
             attempt.delivery = delivery
-            attempt.pending = true
+            attempt.phase = AttemptPhase.Waiting
             attempt.expiry = owner.launch {
                 waitForCallbackDeadline(10.minutes)
                 mutex.withLock {
-                    if (attempts[attempt.id] === attempt && attempt.pending) {
-                        attempt.pending = false
+                    if (attempts[attempt.id] === attempt && attempt.phase == AttemptPhase.Waiting) {
+                        attempt.phase = AttemptPhase.Released
                         attempt.work.cancel()
                     }
                 }
@@ -204,11 +248,18 @@ public actual class BackendOAuth internal constructor(
     public actual override fun close() { owner.cancel() }
 }
 
+internal class BackendOAuthPreparation(
+    val id: Long,
+    val authorization: Deferred<OAuthAuthorization>,
+)
+
+private enum class AttemptPhase { Preparing, Waiting, Accepted, Released }
+
 private class Attempt(val id: Long, val target: OAuthTarget, val redirectUri: String) {
     val authorization = CompletableDeferred<OAuthAuthorization>()
     val code = CompletableDeferred<String>()
     lateinit var work: Deferred<Unit>
-    var pending = false
+    var phase = AttemptPhase.Preparing
     var state: String? = null
     var delivery: CompletableDeferred<String>? = null
     var expiry: Job? = null

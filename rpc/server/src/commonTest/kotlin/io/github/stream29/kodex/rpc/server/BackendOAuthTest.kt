@@ -17,8 +17,11 @@ import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellType
+import io.github.stream29.kodex.utils.oauthloopback.OAuthCallbackValuePolicy
+import io.github.stream29.kodex.utils.oauthloopback.OAuthLoopbackListener
 import io.ktor.http.URLBuilder
 import io.ktor.http.Url
 import kotlinx.coroutines.CompletableDeferred
@@ -43,6 +46,80 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 val backendOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("backend-owned callback commits both OpenAI destinations through the existing OAuth engine") {
+        for (source in KodexAuthSource.entries) {
+            withOAuth { f ->
+                val listener = OwnedIntegrationListener(OpenAiRedirect)
+                val owned = f.ownedOAuth(this, listener)
+                try {
+                    val login = owned.start(OAuthTarget.OpenAi(source))
+                    assertEquals(OAuthCallbackValuePolicy.RequireNonBlank, listener.policy)
+                    val entered = CompletableDeferred<Unit>()
+                    val release = CompletableDeferred<Unit>()
+                    f.login.exchange = {
+                        entered.complete(Unit)
+                        release.await()
+                        OpenAiResult.Success(oauthTokens())
+                    }
+                    listener.deliver(login.callback(OpenAiRedirect))
+                    entered.await()
+                    owned.abandonPending(login.attemptId)
+                    val waiter = async { owned.await(login.attemptId) }
+                    release.complete(Unit)
+                    waiter.await()
+                    owned.await(login.attemptId)
+                    assertEquals(1, f.login.exchanged.size)
+                    assertEquals(OpenAiRedirect, f.login.exchanged.single().redirectUri)
+                    assertTrue(f.authFiles.moves > 0)
+                    assertEquals(KodexAuthSource.Codex, f.selected.value)
+                } finally { owned.closeAndJoin() }
+            }
+        }
+    }
+    test("backend-owned MCP callback saves the prepared server credentials") {
+        withOAuth { f ->
+            val listener = OwnedIntegrationListener(McpRedirect)
+            val owned = f.ownedOAuth(this, listener)
+            try {
+                val login = owned.start(McpTarget)
+                listener.deliver(login.callback(McpRedirect))
+                owned.await(login.attemptId)
+                val config = f.global.settings.value.mcpServers.getValue("server") as McpServerConfiguration.StreamableHttp
+                assertIs<McpOAuthConfiguration.Initialized>(config.oauth)
+                assertEquals(1, f.mcpPreparations)
+                assertTrue(f.global.mcpService.clients.value.isEmpty())
+            } finally { owned.closeAndJoin() }
+        }
+    }
+    test("backend callback admission disarms the original pending deadline before delivery") {
+        withOAuth { f ->
+            val listener = OwnedIntegrationListener(OpenAiRedirect)
+            val owned = f.ownedOAuth(this, listener)
+            try {
+                val login = owned.start(OpenAiTarget)
+                val deadline = f.deadlines.receive()
+                val deliver = listener.claim(login.callback(OpenAiRedirect))
+                deadline.complete(Unit)
+                yield()
+                deliver()
+                owned.await(login.attemptId)
+                assertEquals(1, f.login.exchanged.size)
+            } finally { owned.closeAndJoin() }
+        }
+    }
+    test("provider URL state must equal the backend prepared state before it is exposed") {
+        withOAuth { f ->
+            f.login.stateOverride = "wrong-state"
+            val listener = OwnedIntegrationListener(OpenAiRedirect)
+            val owned = f.ownedOAuth(this, listener)
+            try {
+                val failure = assertFailsWith<IllegalStateException> { owned.start(OpenAiTarget) }
+                assertFalse(failure.toString().contains("wrong-state"))
+                assertNull(listener.policy)
+                assertTrue(f.login.exchanged.isEmpty())
+            } finally { owned.closeAndJoin() }
+        }
+    }
     test("OpenAI destination is bound and completion does not select that source") {
         withOAuth { f ->
             val login = f.oauth.start(OAuthTarget.OpenAi(KodexAuthSource.Kodex), OpenAiRedirect)
@@ -145,6 +222,106 @@ val backendOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
             f.oauth.cancel(Long.MAX_VALUE)
             f.oauth.complete(next.attemptId, next.callback(OpenAiRedirect))
             assertEquals(1, f.login.exchanged.size)
+        }
+    }
+    test("abandon pending is exact idempotent and rejects the abandoned callback without affecting its successor") {
+        withOAuth { f ->
+            val old = f.oauth.start(OpenAiTarget, OpenAiRedirect)
+            f.oauth.abandonPending(old.attemptId)
+            val next = f.startAfterCleanup(OpenAiTarget, OpenAiRedirect)
+            f.oauth.abandonPending(old.attemptId)
+            f.oauth.abandonPending(Long.MAX_VALUE)
+            assertFailsWith<IllegalStateException> { f.oauth.complete(old.attemptId, old.callback(OpenAiRedirect)) }
+            assertTrue(f.login.exchanged.isEmpty())
+            f.oauth.complete(next.attemptId, next.callback(OpenAiRedirect))
+            f.oauth.abandonPending(next.attemptId)
+            assertEquals(1, f.login.exchanged.size)
+        }
+    }
+    test("abandon during noncooperative preparation cannot publish ready or resurrect the old attempt") {
+        withOAuth { f ->
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            f.mcpPrepareGate = {
+                entered.complete(Unit)
+                withContext(NonCancellable) { release.await() }
+            }
+            val waiter = async { runCatching { f.oauth.start(McpTarget, McpRedirect) } }
+            entered.await()
+            // Isolated fixture's first id, deliberately known only by this registry test.
+            // Production never guesses an id when a start reply has been lost.
+            f.oauth.abandonPending(1L)
+            release.complete(Unit)
+            assertTrue(waiter.await().isFailure)
+            f.mcpPrepareGate = {}
+            val next = f.startAfterCleanup(McpTarget, McpRedirect)
+            assertTrue(next.attemptId > 1L)
+            f.oauth.complete(next.attemptId, next.callback(McpRedirect))
+            assertIs<McpOAuthConfiguration.Initialized>(
+                (f.global.settings.value.mcpServers.getValue("server") as McpServerConfiguration.StreamableHttp).oauth)
+        }
+    }
+    test("pending-only release preserves an accepted OpenAI exchange while explicit cancel still terminates it") {
+        withOAuth { f ->
+            val entered = CompletableDeferred<Unit>()
+            val cancelled = CompletableDeferred<Unit>()
+            f.login.exchange = {
+                try { entered.complete(Unit); awaitCancellation() }
+                finally { cancelled.complete(Unit) }
+            }
+            val login = f.oauth.start(OpenAiTarget, OpenAiRedirect)
+            val waiter = async { runCatching { f.oauth.complete(login.attemptId, login.callback(OpenAiRedirect)) } }
+            entered.await()
+            f.oauth.abandonPending(login.attemptId)
+            assertFalse(cancelled.isCompleted)
+            f.oauth.cancel(login.attemptId)
+            cancelled.await()
+            assertTrue(waiter.await().isFailure)
+            assertFalse(SystemCoroutineFileSystem.exists(Path(f.root, "codex", "auth.json")))
+        }
+    }
+    for (source in KodexAuthSource.entries) {
+        test("pending-only release cannot cancel accepted credential persistence for $source") {
+            withOAuth { f ->
+                f.selected.value = source
+                val entered = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                f.authFiles.beforeMove = { entered.complete(Unit); release.await() }
+                val login = f.oauth.start(OAuthTarget.OpenAi(source), OpenAiRedirect)
+                val waiter = async { f.oauth.complete(login.attemptId, login.callback(OpenAiRedirect)) }
+                entered.await() // Token exchange finished; atomic credential replacement is gated.
+                f.oauth.abandonPending(login.attemptId)
+                waiter.cancelAndJoin()
+                val path = if (source == KodexAuthSource.Codex) Path(f.root, "codex", "auth.json")
+                    else Path(f.root, "auth.yml")
+                assertFalse(SystemCoroutineFileSystem.exists(path))
+                release.complete(Unit)
+                f.credentials.state.first { it is OpenAiAuthState.Authenticated }
+                assertTrue(SystemCoroutineFileSystem.exists(path))
+                assertEquals(1, f.authFiles.moves)
+                assertEquals(1, f.login.exchanged.size)
+            }
+        }
+    }
+    test("pending-only release preserves accepted MCP exchange and saves once without inventing health") {
+        withOAuth { f ->
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            var exchanges = 0
+            f.mcpExchangeGate = { exchanges++; entered.complete(Unit); release.await() }
+            val login = f.oauth.start(McpTarget, McpRedirect)
+            val waiter = async { f.oauth.complete(login.attemptId, login.callback(McpRedirect)) }
+            entered.await()
+            f.oauth.abandonPending(login.attemptId)
+            waiter.cancelAndJoin()
+            release.complete(Unit)
+            f.global.settings.first {
+                (it.mcpServers.getValue("server") as McpServerConfiguration.StreamableHttp)
+                    .oauth is McpOAuthConfiguration.Initialized
+            }
+            assertEquals(1, exchanges)
+            assertTrue(f.global.mcpService.clients.value.isEmpty())
+            assertFailsWith<IllegalStateException> { f.oauth.complete(login.attemptId, login.callback(McpRedirect)) }
         }
     }
     test("remove invalidates a pending login without changing the other credential source") {
@@ -256,9 +433,10 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
     val login = OAuthTestLoginClient()
     val selected = MutableStateFlow(KodexAuthSource.Codex)
     val deadlines = Channel<CompletableDeferred<Unit>>(Channel.UNLIMITED)
+    val authFiles = OAuthTestFileSystem()
     try {
         coroutineScope {
-            val credentials = BackendFileSystemAuthStore(root, Path(root, "codex"), selected, login)
+            val credentials = BackendFileSystemAuthStore(root, Path(root, "codex"), selected, login, authFiles)
             try {
                 val unified = io.github.stream29.kodex.cli.settings.UnifiedSettingsStore.open(root, BackendSettings(
                     KodexAuthSource.Codex, Shell(ShellType.Sh, Path("/bin/sh")), AgentContextSourceSettings(),
@@ -275,7 +453,11 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
                     fixture.mcpPrepareGate()
                     val oauth = config.oauth as McpOAuthConfiguration.Uninitialized
                     val prepared = oauth.copy(client = oauth.client.copy(clientId = "registered"))
-                    PreparedMcpOAuthLogin(prepared, "mcp-state", "https://auth.example.test?state=mcp-state") {
+                    val authorizationUrl = URLBuilder("https://auth.example.test").apply {
+                        parameters.append("state", "mcp-state")
+                        parameters.append("redirect_uri", prepared.client.redirectUri)
+                    }.buildString()
+                    PreparedMcpOAuthLogin(prepared, "mcp-state", authorizationUrl) {
                         fixture.mcpExchangeGate()
                         McpOAuthConfiguration.Initialized(
                             prepared.client, resolvedAuthorizationEndpoint = "https://auth.example.test",
@@ -294,7 +476,7 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
                         deadlines.send(gate)
                         gate.await()
                     }
-                    fixture = OAuthFixture(root, oauth, credentials, global, selected, login, deadlines)
+                    fixture = OAuthFixture(root, oauth, credentials, global, selected, login, deadlines, authFiles)
                     try { block(fixture) } finally { oauth.close() }
                 }
             } finally { credentials.close() }
@@ -313,10 +495,22 @@ private class OAuthFixture(
     val selected: MutableStateFlow<KodexAuthSource>,
     val login: OAuthTestLoginClient,
     val deadlines: Channel<CompletableDeferred<Unit>>,
+    val authFiles: OAuthTestFileSystem,
 ) {
     var mcpPreparations = 0
     var mcpPrepareGate: suspend () -> Unit = {}
     var mcpExchangeGate: suspend () -> Unit = {}
+    fun ownedOAuth(scope: CoroutineScope, listener: OwnedIntegrationListener): BackendOwnedOAuth = BackendOwnedOAuth(
+        scope = scope,
+        candidates = { listOf(listener.redirectUri) },
+        begin = oauth::begin,
+        waitingState = oauth::waitingState,
+        holdPendingDeadline = oauth::holdPendingDeadline,
+        complete = oauth::complete,
+        cancelInner = oauth::cancel,
+        releaseInner = oauth::abandonPending,
+        openListener = { _, _ -> listener },
+    )
     suspend fun startAfterCleanup(target: OAuthTarget, redirect: String): OAuthAuthorization = withTimeout(5.seconds) {
         while (true) {
             try { return@withTimeout oauth.start(target, redirect) }
@@ -329,13 +523,27 @@ private class OAuthFixture(
     }
 }
 
+private class OAuthTestFileSystem : CoroutineFileSystem by SystemCoroutineFileSystem {
+    var beforeMove: suspend () -> Unit = {}
+    var moves = 0
+    override suspend fun atomicMove(source: Path, destination: Path) {
+        beforeMove()
+        SystemCoroutineFileSystem.atomicMove(source, destination)
+        moves++
+    }
+}
+
 private class OAuthTestLoginClient : OpenAiLoginClient {
     val exchanged = mutableListOf<OpenAiAuthorizationCodeExchange>()
+    var stateOverride: String? = null
     var exchange: suspend () -> OpenAiLoginResult<OpenAiSubscriptionTokens> = {
         OpenAiResult.Success(oauthTokens())
     }
     override fun authorizationUrl(request: OpenAiLoginAuthorization): String =
-        URLBuilder("https://auth.example.test/authorize").apply { parameters.append("state", request.state) }.buildString()
+        URLBuilder("https://auth.example.test/authorize").apply {
+            parameters.append("state", stateOverride ?: request.state)
+            parameters.append("redirect_uri", request.redirectUri)
+        }.buildString()
     override suspend fun exchangeAuthorizationCode(
         request: OpenAiAuthorizationCodeExchange,
     ): OpenAiLoginResult<OpenAiSubscriptionTokens> {
@@ -346,6 +554,31 @@ private class OAuthTestLoginClient : OpenAiLoginClient {
         refreshToken: String,
     ): OpenAiLoginResult<OpenAiSubscriptionTokenRefresh> =
         error("Fresh fake credentials must not refresh.")
+}
+
+private class OwnedIntegrationListener(override val redirectUri: String) : OAuthLoopbackListener {
+    val callback = CompletableDeferred<String>()
+    var policy: OAuthCallbackValuePolicy? = null
+    private var admit: suspend () -> Boolean = { true }
+
+    override suspend fun armState(state: String, valuePolicy: OAuthCallbackValuePolicy) =
+        armStateWithAdmission(state, valuePolicy) { true }
+
+    override suspend fun armStateWithAdmission(
+        state: String, valuePolicy: OAuthCallbackValuePolicy, admit: suspend () -> Boolean,
+    ) {
+        require(state.isNotBlank())
+        policy = valuePolicy
+        this.admit = admit
+    }
+
+    suspend fun claim(value: String): () -> Unit { check(admit()); return { callback.complete(value) } }
+    suspend fun deliver(value: String) { claim(value)() }
+    override suspend fun awaitCallback(): String = callback.await()
+
+    override suspend fun closeAndJoin() {
+        callback.cancel()
+    }
 }
 private class OAuthTestMcpService : McpService {
     override val clients = MutableStateFlow<Map<String, McpClient>>(emptyMap())

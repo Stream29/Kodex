@@ -4,6 +4,7 @@ import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
+import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -12,6 +13,11 @@ import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.rpc.models.CliFrontendSettings
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
+import io.github.stream29.kodex.rpc.models.ContextPathQuery
+import io.github.stream29.kodex.rpc.models.DirectoryQuery
+import io.github.stream29.kodex.rpc.models.DirectoryListResult
+import io.github.stream29.kodex.rpc.models.DirectoryValidationResult
+import io.github.stream29.kodex.rpc.models.FrontendErrorAdmission
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
@@ -34,6 +40,27 @@ import kotlinx.serialization.Serializable
  */
 @Rpc
 public interface GlobalRpc {
+    /**
+     * Resolves and validates a directory without listing children. Safe operational failures are
+     * result values; cancellation/transport failure still propagate. Does not write or retain a
+     * picker owner. A success is an observation, not a permanent filesystem permission or lease.
+     */
+    public suspend fun validateDirectory(query: DirectoryQuery): DirectoryValidationResult
+
+    /**
+     * Lists only direct child directories in the backend environment. Independent of validation
+     * for Select: a slow/failed listing must not prevent an independent validation request.
+     * Supports overlapping calls; cancellation releases only this read, not backend-owned work.
+     */
+    public suspend fun listDirectories(query: DirectoryQuery): DirectoryListResult
+
+    /**
+     * Batch lexical evaluation using the actual backend Context roots and OS syntax.
+     * Returns candidate/original keys and built-in matches only, not duplicate merge decisions.
+     * Does not scan files, mutate settings or change existing custom-root interpretation.
+     */
+    public suspend fun evaluateContextPaths(query: ContextPathQuery): ContextPathEvaluation
+
     /** Backend-managed frontend projection; consumers never read/write its file themselves. */
     public suspend fun getFrontendSettings(): CliFrontendSettings
     public fun getFrontendSettingsFlow(): Flow<CliFrontendSettings>
@@ -137,12 +164,9 @@ public interface GlobalRpc {
     public suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome
 
     /**
-     * Prepares a login or re-login for [target] and the frontend's [redirectUri].
-     *
-     * The frontend starts its loopback listener before calling, then opens the returned URL and
-     * forwards the callback through [completeOAuthLogin]. The backend does not open a browser or
-     * listen for callbacks. It validates the supported redirect URI and binds it, the target,
-     * OAuth state and its private PKCE verifier to this attempt. The URL is not persistent state.
+     * Prepares a login or re-login for [target]. The backend binds the supported loopback
+     * redirect and the target, state and private PKCE verifier before returning the transient
+     * authorization URL. The frontend opens or displays that URL; it does not receive callbacks.
      *
      * OpenAI supports both sources. Existing credentials remain until new credentials are
      * successfully obtained and committed to that source; settings changes must not redirect
@@ -156,32 +180,24 @@ public interface GlobalRpc {
      * Attempt ids are unique across both target kinds within the backend's lifetime and are not
      * reused during that lifetime. A common handle does not relax target-specific login limits.
      *
-     * Until the frontend submits a callback, there is no independent token exchange to complete.
      * A lost response does not prove that no attempt started; do not blindly replay this command.
      */
-    public suspend fun startOAuthLogin(
-        target: OAuthTarget,
-        redirectUri: String,
-    ): OAuthAuthorization
+    public suspend fun startOAuthLogin(target: OAuthTarget): OAuthAuthorization
 
     /**
-     * Submits the full callback URL received by the frontend and waits for credential commit.
-     *
-     * [callbackUrl] is parsed as data, never fetched or followed. Before accepting it, the backend
-     * checks the pending attempt, bound redirect URI and OAuth state, rejecting malformed or
-     * mismatched responses without consuming a valid pending attempt. A matching OAuth error
-     * terminates the attempt as failure, not success. Unknown or consumed attempts fail.
-     *
-     * A valid code is consumed at most once and exchanged using the bound redirect URI and
-     * backend-held verifier. After acceptance, exchange and commit are backend-owned: cancelling
-     * this call or disconnecting is not explicit login cancellation. Success means committed;
-     * a lost response leaves the outcome unknown and must not trigger blind resubmission.
-     * Callback URLs are transient authorization data and must not be logged or persisted.
-     * The destination comes from the prepared attempt, never a new target supplied at completion.
-     * MCP success means credentials saved, not a connected server; observe [getMcpServersFlow]
-     * for connection changes. OpenAI authentication summaries still follow settings.authSource.
+     * Observes an attempt until credential commit or a sanitized failure. Cancelling an observer
+     * does not cancel the attempt. Multiple observers may see the same retained terminal result;
+     * unknown or expired identities fail. A lost reply is not permission to replay a login.
+     * MCP success means credentials saved, not a connected server.
      */
-    public suspend fun completeOAuthLogin(attemptId: Long, callbackUrl: String): Unit
+    public suspend fun awaitOAuthLogin(attemptId: Long): Unit
+
+    /**
+     * Admits one frontend error observation to the bounded backend Hook queue. The result reports
+     * admission, not execution success. Messages over 8192 UTF-8 bytes fail. Accepted work may
+     * outlive the frontend but not backend shutdown; an unknown reply must not be retried.
+     */
+    public suspend fun reportFrontendError(message: String?): FrontendErrorAdmission
 
     /**
      * Explicitly cancels the exact attempt for either target, not a target's newer current login.
@@ -190,6 +206,15 @@ public interface GlobalRpc {
      * asynchronous cleanup has finished.
      */
     public suspend fun cancelOAuthLogin(attemptId: Long): Unit
+
+    /**
+     * Releases only preparing/waiting state for this exact attempt. Unknown, finished or already
+     * accepted callbacks are no-ops. In particular it never cancels accepted exchange/persistence.
+     * Used for view release, timeout and lost local ownership, not explicit user cancellation.
+     * Does not delete credentials, undo MCP preparation writes or replay an unknown outcome.
+     * Existing [cancelOAuthLogin] remains the separate explicit-cancel operation.
+     */
+    public suspend fun abandonPendingOAuthLogin(attemptId: Long): Unit
 
     /**
      * Removes local credentials belonging to [source], for either Codex or Kodex storage.

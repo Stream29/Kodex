@@ -10,15 +10,36 @@ val localBrowserProtocolTest by testSuite {
         val credential = "d".repeat(64)
         val grant = LocalBrowserGrant(LocalBrowserGrantProtocol, "http://127.0.0.1:18801", credential, "/project")
         assertFalse(grant.toString().contains(credential))
-        val bootstrap = LocalFrontendBootstrap(LocalBrowserGrantProtocol,
-            LocalBrowserEndpoint("instance", 18802, credential, BackendBusinessProtocol), "/canonical/project")
+        val bootstrap = LocalFrontendBootstrap(LocalFrontendBootstrapProtocol,
+            LocalBrowserEndpoint("instance", 18802, credential, BackendBusinessProtocol), "/canonical/project",
+            testHostDescriptor(credential))
         val decoded = Json.decodeFromString(LocalFrontendBootstrap.serializer(),
             Json.encodeToString(LocalFrontendBootstrap.serializer(), bootstrap))
         assertEquals(18802, decoded.endpoint.port)
         assertEquals(credential, decoded.endpoint.password)
         assertEquals(BackendBusinessProtocol, decoded.endpoint.businessProtocol)
         assertEquals("/canonical/project", decoded.workingDirectory)
+        assertEquals(LocalFrontendBootstrapProtocol, decoded.protocol)
+        assertEquals(LocalFrontendHostProtocol, decoded.host.protocol)
+        assertEquals("instance", decoded.host.backendInstanceId)
+        assertEquals("owner-test", decoded.host.owner.value)
         assertFalse(decoded.toString().contains(credential))
+        assertFalse(decoded.host.toString().contains(credential))
+        assertFalse(decoded.host.owner.toString().contains("owner-test"))
+        assertFailsWith<SerializationException> {
+            Json.decodeFromString<LocalFrontendBootstrap>(
+                """{"protocol":1,"endpoint":{"instanceId":"instance","port":18802,"password":"$credential","businessProtocol":"$BackendBusinessProtocol"},"workingDirectory":"/project"}""",
+            )
+        }
+    }
+    test("business bootstrap and companion checkpoints are independent of control and browser grant") {
+        assertEquals("0.5.4", BackendBusinessProtocol)
+        assertEquals(1, BackendControlProtocol)
+        assertEquals(1, LocalBrowserProtocol)
+        assertEquals(1, LocalBrowserGrantProtocol)
+        assertEquals(2, LocalFrontendBootstrapProtocol)
+        assertEquals(1, LocalFrontendHostProtocol)
+        assertEquals(1, LocalFrontendPairingProtocol)
     }
     test("origins are exact canonical loopback HTTP authorities") {
         assertEquals("http://127.0.0.1:8080", canonicalLocalBrowserOrigin("http://127.0.0.1:8080"))
@@ -57,3 +78,20 @@ val localBrowserProtocolTest by testSuite {
         assertFalse(endpoint.toString().contains(endpoint.password))
     }
 }
+
+private fun testHostDescriptor(credential: String): LocalFrontendHostDescriptor = LocalFrontendHostDescriptor(
+    protocol = LocalFrontendHostProtocol,
+    hostInstanceId = "host-test",
+    backendInstanceId = "instance",
+    origin = "http://127.0.0.1:18801",
+    baseUrl = "http://127.0.0.1:18801",
+    credential = credential,
+    owner = LocalFrontendOwner("owner-test"),
+    executionEnvironmentId = "device-test",
+    launchDirectory = "/canonical/project",
+    leaseMillis = LocalFrontendHostOwnerLeaseMillis,
+    capabilities = FrontendHostCapabilities(
+        FrontendCapabilityStatus.Negotiating, FrontendCapabilityStatus.Negotiating,
+        FrontendCapabilityStatus.Negotiating, FrontendCapabilityStatus.Negotiating,
+    ),
+)

@@ -14,12 +14,39 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlinx.rpc.withService
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.seconds
 
 val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
+    test("sparse traversal crosses generated RPC without gap probes or extra values") {
+        withTimeout(15.seconds) {
+            val backend = TokenCountTestService(
+                listOf(0, 5, 10_000, 50_000).associateWith {
+                    TokenCountSnapshot(TokenCountKind.Legacy, it.toLong())
+                },
+            )
+            withInMemoryRpc(
+                registerServices = { registerService(TokenCountTimelineRpc::class) { backend } },
+            ) { client ->
+                val rpc = RestoringRpcClient(client).withService<TokenCountTimelineRpc>()
+                val ownerJob = Job(coroutineContext[Job])
+                try {
+                    val view = CoroutineScope(coroutineContext + ownerJob).rpcCachedIndexVersioned(7, rpc)
+                    assertEquals(10_000, view.valuesDescending(49_999).first().first)
+                    assertEquals(1, backend.floorQueries)
+                    assertEquals(1, backend.indexQueries)
+                    assertEquals(1, backend.valueQueries)
+                    assertEquals(1, backend.returnedValues)
+                } finally {
+                    ownerJob.cancelAndJoin()
+                }
+            }
+        }
+    }
+
     test("original token snapshots cross the generated service and frontend exact cache") {
         withTimeout(15.seconds) {
             val backend = TokenCountTestService()
@@ -57,8 +84,8 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
 }
 
 /** Fixed test data; no production Session or storage implementation. */
-private class TokenCountTestService : TokenCountTimelineRpc {
-    val entries = mapOf(
+private class TokenCountTestService(
+    val entries: Map<Int, TokenCountSnapshot> = mapOf(
         0 to TokenCountSnapshot(TokenCountKind.Legacy, 0),
         2 to TokenCountSnapshot(TokenCountKind.Response, 0, usage = TokenUsage(0, 0, 0)),
         5 to TokenCountSnapshot(
@@ -67,10 +94,15 @@ private class TokenCountTestService : TokenCountTimelineRpc {
             usage = TokenUsage(100, 20, 120),
             diagnostics = TokenCountDiagnostics(requestId = "request", turnStateReceived = true),
         ),
-    )
+    ),
+) : TokenCountTimelineRpc {
     var exactReads = 0
+    var floorQueries = 0
+    var indexQueries = 0
+    var valueQueries = 0
+    var returnedValues = 0
     private val nonce = MutableStateFlow(17L)
-    private val latest = MutableStateFlow(5)
+    private val latest = MutableStateFlow(entries.keys.maxOrNull() ?: -1)
 
     override suspend fun getCacheNonce(sessionIndex: Int): Long = nonce.value
     override fun getCacheNonceFlow(sessionIndex: Int): Flow<Long> = nonce
@@ -85,18 +117,26 @@ private class TokenCountTestService : TokenCountTimelineRpc {
         return entries[index]
     }
 
-    override suspend fun floorToIndex(sessionIndex: Int, cacheNonce: Long, index: Int): Int? =
-        entries.keys.lastOrNull { it <= index }
+    override suspend fun floorToIndex(sessionIndex: Int, cacheNonce: Long, index: Int): Int? {
+        floorQueries++
+        return entries.keys.lastOrNull { it <= index }
+    }
 
     override suspend fun ceilToIndex(sessionIndex: Int, cacheNonce: Long, index: Int): Int? =
         entries.keys.firstOrNull { it >= index }
 
     override suspend fun indexesIn(
         sessionIndex: Int, cacheNonce: Long, fromInclusive: Int, toInclusive: Int,
-    ): List<Int> = entries.keys.filter { it in fromInclusive..toInclusive }
+    ): List<Int> {
+        indexQueries++
+        return entries.keys.filter { it in fromInclusive..toInclusive }
+    }
 
     override suspend fun valuesIn(
         sessionIndex: Int, cacheNonce: Long, fromInclusive: Int, toInclusive: Int,
-    ): List<Pair<Int, TokenCountSnapshot>> =
-        entries.filterKeys { it in fromInclusive..toInclusive }.toList()
+    ): List<Pair<Int, TokenCountSnapshot>> {
+        valueQueries++
+        return entries.filterKeys { it in fromInclusive..toInclusive }.toList()
+            .also { returnedValues += it.size }
+    }
 }

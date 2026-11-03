@@ -6,6 +6,7 @@ import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
+import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -15,6 +16,11 @@ import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.rpc.models.CliFrontendSettings
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
+import io.github.stream29.kodex.rpc.models.ContextPathQuery
+import io.github.stream29.kodex.rpc.models.DirectoryQuery
+import io.github.stream29.kodex.rpc.models.DirectoryListResult
+import io.github.stream29.kodex.rpc.models.DirectoryValidationResult
+import io.github.stream29.kodex.rpc.models.FrontendErrorAdmission
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
@@ -27,10 +33,13 @@ public expect class BackendGlobalRpc(
     host: BackendSessionHost,
     settings: BackendGlobalState,
     account: BackendAccountState,
-    oauth: BackendOAuth,
+    effects: BackendFrontendEffects,
     sessions: BackendSessionManagement,
     notifications: BackendNotifications,
 ) : GlobalRpc {
+    override suspend fun validateDirectory(query: DirectoryQuery): DirectoryValidationResult
+    override suspend fun listDirectories(query: DirectoryQuery): DirectoryListResult
+    override suspend fun evaluateContextPaths(query: ContextPathQuery): ContextPathEvaluation
     override suspend fun getSettings(): BackendSettings
     override suspend fun getFrontendSettings(): CliFrontendSettings
     override fun getFrontendSettingsFlow(): Flow<CliFrontendSettings>
@@ -49,9 +58,11 @@ public expect class BackendGlobalRpc(
     override fun getAccountUsageFlow(): Flow<SettingsAccountUsageState>
     override suspend fun refreshAccountUsage(): Unit
     override suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome
-    override suspend fun startOAuthLogin(target: OAuthTarget, redirectUri: String): OAuthAuthorization
-    override suspend fun completeOAuthLogin(attemptId: Long, callbackUrl: String): Unit
+    override suspend fun startOAuthLogin(target: OAuthTarget): OAuthAuthorization
+    override suspend fun awaitOAuthLogin(attemptId: Long): Unit
+    override suspend fun reportFrontendError(message: String?): FrontendErrorAdmission
     override suspend fun cancelOAuthLogin(attemptId: Long): Unit
+    override suspend fun abandonPendingOAuthLogin(attemptId: Long): Unit
     override suspend fun removeAuthentication(source: KodexAuthSource): Unit
     override suspend fun getMcpServers(): List<McpManagedServerState>
     override fun getMcpServersFlow(): Flow<List<McpManagedServerState>>

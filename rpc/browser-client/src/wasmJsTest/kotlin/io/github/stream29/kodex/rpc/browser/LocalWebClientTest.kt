@@ -4,7 +4,9 @@ package io.github.stream29.kodex.rpc.browser
 
 import de.infix.testBalloon.framework.core.testSuite
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.sync.withLock
 import kotlin.js.JsAny
 import kotlin.test.*
@@ -49,7 +51,56 @@ internal val localWebClientTest by testSuite {
             }
         } }
     }
+    test("bootstrap rejects an oversized streaming reply without prebuffering its remaining body") {
+        withContext(Dispatchers.Default) { fetchOwner.withLock {
+            val state = interceptStreamingBootstrap()
+            try {
+                assertFailsWith<IllegalStateException> {
+                    bootstrapLocalFrontend(
+                        "http://127.0.0.1:1", "/web/${"a".repeat(64)}/", "b".repeat(64),
+                    )
+                }
+                withTimeout(5_000) {
+                    while (!streamingBootstrapStopped(state)) delay(1)
+                }
+                assertTrue(streamingBootstrapStopped(state), "The bounded reader must cancel the unread response.")
+            } finally {
+                restoreStreamingBootstrap(state)
+            }
+        } }
+    }
 }
+
+@JsFun("""() => {
+    const original = globalThis.fetch;
+    const state = {pulls: 0, cancelled: false};
+    const replacement = async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url !== 'http://127.0.0.1:1/web/' + 'a'.repeat(64) + '/bootstrap') {
+            return original.call(globalThis, input, init);
+        }
+        return new Response(new ReadableStream({
+            pull(controller) {
+                if (++state.pulls > 1024) controller.close();
+                else controller.enqueue(new Uint8Array(8192).fill(32));
+            },
+            cancel() { state.cancelled = true; }
+        }), {status: 200});
+    };
+    state.restore = () => {
+        if (globalThis.fetch !== replacement) throw new Error('Fetch ownership changed');
+        globalThis.fetch = original;
+    };
+    globalThis.fetch = replacement;
+    return state;
+}""")
+private external fun interceptStreamingBootstrap(): JsAny
+
+@JsFun("(state) => state.cancelled && state.pulls < 1024")
+private external fun streamingBootstrapStopped(state: JsAny): Boolean
+
+@JsFun("(state) => state.restore()")
+private external fun restoreStreamingBootstrap(state: JsAny)
 
 @JsFun("""(lost) => {
     const original = globalThis.fetch;
@@ -66,8 +117,16 @@ internal val localWebClientTest by testSuite {
             state.clean &&= init.method === 'POST' && JSON.parse(body).ticket === 'b'.repeat(64);
             if (lost) return Promise.reject(new TypeError('Failed to fetch'));
             return Promise.resolve(new Response(JSON.stringify({
-                protocol: 1, workingDirectory: '/project',
-                endpoint: {instanceId: 'direct-test', port: 1234, password: 'c'.repeat(64), businessProtocol: '0.5.2'}
+                protocol: 2, workingDirectory: '/project',
+                endpoint: {instanceId: 'direct-test', port: 1234, password: 'c'.repeat(64), businessProtocol: '0.5.4'},
+                host: {
+                    protocol: 1, hostInstanceId: 'h'.repeat(64), backendInstanceId: 'direct-test',
+                    origin: 'http://127.0.0.1:1', baseUrl: 'http://127.0.0.1:1',
+                    credential: 'd'.repeat(64), owner: {value: 'o'.repeat(64)},
+                    executionEnvironmentId: 'test-device', launchDirectory: '/launch', leaseMillis: 60000,
+                    capabilities: {directoryBrowsing:'Ready', contextPathEvaluation:'Ready',
+                        oauthCallbacks:'Ready', frontendErrorObservation:'Ready'}
+                }
             }), {status: 200}));
         }
         return Promise.resolve(new Response('{}', {status: 401}));

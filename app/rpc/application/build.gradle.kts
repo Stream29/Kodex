@@ -14,6 +14,7 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
         }
         commonMain.dependencies {
+            implementation(project(":app-component-path-picker-viewmodel"))
             implementation(libs.kotlin.logging)
             implementation(project(":app-rpc-session"))
             implementation(project(":app-rpc-new-session"))

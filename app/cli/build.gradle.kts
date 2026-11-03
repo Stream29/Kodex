@@ -87,6 +87,7 @@ kotlin {
             implementation(project(":app-rpc-application"))
             implementation(project(":app-rpc-system"))
             implementation(project(":utils-kodex-home"))
+            implementation(project(":utils-logging-backend-file"))
             implementation(project(":utils-kotlinx-io-coroutines-system"))
             implementation(project(":utils-os-environment"))
             implementation(libs.kotlinx.coroutines.core)

@@ -86,6 +86,15 @@ public expect class BackendOAuth : AutoCloseable {
     public suspend fun cancel(id: Long): Unit
 
     /**
+     * Releases exact [id] only while preparing/waiting for callback. Unknown/finished ids and
+     * accepted exchange/persistence are no-ops. Uses the same attempt transition boundary as
+     * callback acceptance, never explicit-cancels accepted work or rolls back preparation writes.
+     *
+     * @throws Throwable if the backend owner cannot accept the pending-release operation.
+     */
+    public suspend fun abandonPending(id: Long): Unit
+
+    /**
      * Removes credentials only for [source] and invalidates that source's pending OpenAI login.
      * It does not change the selected source or revoke credentials remotely.
      *

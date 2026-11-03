@@ -21,6 +21,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import kotlinx.io.files.Path
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.time.Duration
@@ -221,15 +222,32 @@ public actual suspend fun runBackendHost(
     }
 }
 
+private suspend fun verifyReadyBackend(current: BackendEndpoint): BackendEndpoint {
+    check(current.businessProtocol == BackendBusinessProtocol) { "Backend protocol differs; use the management CLI." }
+    current.failureReason?.let { error(it) }
+    val status = backendControlRequest(current, "status")
+    check(status["phase"]?.jsonPrimitive?.content == "ready") { "A locked backend cannot serve this frontend." }
+    check(status["instance"]?.jsonPrimitive?.content == current.instanceId &&
+        status["port"]?.jsonPrimitive?.intOrNull == current.port &&
+        status["business_protocol"]?.jsonPrimitive?.content == BackendBusinessProtocol
+    ) { "Backend status does not match the recorded instance." }
+    return current
+}
+
+public actual suspend fun connectBackend(home: Path, port: Int): BackendEndpoint {
+    require(port in 1..65535) { "Invalid backend port: $port." }
+    val current = checkNotNull(BackendInstance.discover(home)) {
+        "No locked backend is running in the target Home."
+    }
+    check(current.port == port) {
+        "Backend URL port $port does not match the recorded backend port ${current.port}."
+    }
+    return verifyReadyBackend(current)
+}
+
 public actual suspend fun ensureBackend(home: Path): BackendEndpoint {
     val current = BackendInstance.discover(home)
-    if (current != null) {
-        check(current.businessProtocol == BackendBusinessProtocol) { "Backend protocol differs; use the management CLI." }
-        current.failureReason?.let { error(it) }
-        val status = backendControlRequest(current, "status")
-        check(status["phase"]?.jsonPrimitive?.content == "ready") { "A locked backend cannot serve this frontend." }
-        return current
-    }
+    if (current != null) return verifyReadyBackend(current)
     SystemCoroutineFileSystem.createDirectories(home)
     SystemCoroutineFileSystem.createDirectories(Path(home, "log"))
     val startupLog = Path(home, "log", "backend-startup.log")

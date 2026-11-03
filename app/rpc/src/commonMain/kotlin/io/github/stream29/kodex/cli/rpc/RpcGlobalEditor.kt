@@ -90,7 +90,7 @@ public actual class RpcGlobalEditor actual constructor(
         }, scope,
     )
     actual override val mcpSettings: McpSettingsViewModel = createMcpSettingsViewModel(
-        RpcMcpSettingsDependencies(global, rpc, mcp, ::acceptWrite, environment.oauthCallbacks), scope,
+        RpcMcpSettingsDependencies(global, rpc, mcp, ::acceptWrite), scope,
     )
     actual override val hookSettings: HookSettingsViewModel = createHookSettingsViewModel(
         RpcHookSettingsDependencies(global, global.settings.projectState { it.hooks }, backend = true, accept = ::acceptWrite), scope,
@@ -109,7 +109,7 @@ public actual class RpcGlobalEditor actual constructor(
         owner.ensureActive()
         val target = OAuthTarget.OpenAi(global.settings.value.authSource)
         return createOpenAiLoginViewModel(
-            dependencies = OpenAiLoginDependencies { startRpcOAuth(rpc, target, ownerScope, environment.oauthCallbacks) },
+            dependencies = OpenAiLoginDependencies { startRpcOAuth(rpc, target, ownerScope) },
             ownerScope = ownerScope,
         )
     }

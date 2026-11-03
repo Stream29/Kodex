@@ -51,8 +51,9 @@ public actual suspend fun <R> withKodexApplication(
             try {
                 withInMemoryRpc(registerServices = { backend.register(this) }) { client ->
                     onPhase(ApplicationStartupPhase.ServicesRegistered)
-                    withFrontendApplication(InMemoryFrontendConnection(client), cwd, NativeFrontendHost,
-                        io.github.stream29.kodex.cli.rpc.LocalRpcFrontendEnvironment, applicationWidth) { app ->
+                    withFrontendApplication(
+                        InMemoryFrontendConnection(client), cwd, NativeFrontendHost, applicationWidth,
+                    ) { app ->
                         onPhase(ApplicationStartupPhase.FrontendReady)
                         onPhase(ApplicationStartupPhase.RendererStarted)
                         render(app)

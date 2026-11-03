@@ -9,10 +9,12 @@ import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
 import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
+import io.github.stream29.kodex.cli.notification.collectNotificationHooks
 import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.settings.*
 import io.github.stream29.kodex.mcp.impl.DefaultMcpOAuthClient
+import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.openai.client.OpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
@@ -20,11 +22,14 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiClient as Client
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient as LoginClient
 import io.github.stream29.kodex.rpc.contract.*
 import io.github.stream29.kodex.rpc.models.BackendSettings
+import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.shellclient.Shell
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.io.files.Path
@@ -70,6 +75,33 @@ public actual suspend fun <R> withBackendServices(
         ) { global ->
             val account = BackendAccountState(owner, auth, api)
             val oauth = BackendOAuth(owner, auth, loginClient, global.mcpManager)
+            val owned = BackendOwnedOAuth(
+                scope = owner,
+                candidates = { target ->
+                    when (target) {
+                        is OAuthTarget.OpenAi -> listOf(
+                            "http://localhost:1455/auth/callback",
+                            "http://localhost:1457/auth/callback",
+                        )
+                        is OAuthTarget.Mcp -> {
+                            val server = store.settings.value.mcpServers[target.serverName]
+                                as? McpServerConfiguration.StreamableHttp
+                            listOf(requireNotNull(server?.oauth?.client?.redirectUri) { "MCP OAuth is not configured." })
+                        }
+                    }
+                },
+                begin = oauth::begin,
+                waitingState = oauth::waitingState,
+                holdPendingDeadline = oauth::holdPendingDeadline,
+                complete = oauth::complete,
+                cancelInner = oauth::cancel,
+                releaseInner = oauth::abandonPending,
+                reportCleanupFailure = { BackendLogger.warn { "OAuth resource cleanup failed." } },
+            )
+            val errors = FrontendErrorQueue(owner, { unified.current.frontend.hooks }) { hooks, message ->
+                collectNotificationHooks(emptyFlow(), { hooks }, home, flowOf(message))
+            }
+            val effects = BackendFrontendEffectsImpl(owned, oauth, errors)
             var operationFailure: Throwable? = null
             try {
                 val dependencies = KodexAgentDependencies(
@@ -83,14 +115,16 @@ public actual suspend fun <R> withBackendServices(
                     val management = BackendSessionManagement(host, runtime, { store.settings.value.newSession }) {
                         BackendLogger.error(it) { "Suggested Session operation failed." }
                     }
-                    val service = BackendGlobalRpc(host, global, account, oauth, management, runtime.notifications)
+                    val service = BackendGlobalRpc(host, global, account, effects, management, runtime.notifications)
                     block(BackendServices(service, runtime, host, global, runtime.notifications.flow))
                 }
             } catch (error: Throwable) {
                 operationFailure = error
                 throw error
             } finally {
-                closeBackendResources(operationFailure, { oauth.closeAndJoin() }, { account.closeAndJoin() })
+                closeBackendResources(
+                    operationFailure, { effects.closeAndJoin() }, { oauth.closeAndJoin() }, { account.closeAndJoin() },
+                )
             }
         }
     } catch (error: Throwable) {

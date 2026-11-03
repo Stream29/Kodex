@@ -7,6 +7,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 
 val oauthModelsTest by testSuite {
     val json = Json
@@ -52,6 +53,8 @@ val oauthModelsTest by testSuite {
         val encoded = json.encodeToJsonElement(OAuthAuthorization.serializer(), value)
         assertEquals(setOf("attemptId", "url"), encoded.jsonObject.keys)
         assertEquals(value, json.decodeFromJsonElement(OAuthAuthorization.serializer(), encoded))
+        assertFalse(value.toString().contains(value.url))
+        assertFalse(value.toString().contains("test-state"))
     }
 
     test("authorization decoding preserves positive id and nonblank URL requirements") {

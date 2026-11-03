@@ -4,14 +4,16 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * A frontend-local command receiving a complete notification as JSON on stdin.
+ * A configured command receiving a complete notification as JSON on stdin.
  *
  * Matching any selected type invokes this Hook once per notification. Type order is
- * irrelevant; command order comes from the frontend settings' ordered hooks list.
+ * irrelevant; command order comes from the owning configuration's ordered hooks list.
  * Each notification captures that list once; later edits affect only later notifications.
  * Names must be unique within that list. Strings are preserved without trimming.
- * Commands are not executed by this model and are never included in backend settings
- * or RPC requests. Output cannot block tools, inject context or continue an Agent turn.
+ * Backend Stop Hooks and frontend error Hooks execute on the backend. Frontend error
+ * Hooks use the backend Home; this model neither executes commands nor authorizes an
+ * execution request. Configuration still uses the existing settings RPC.
+ * Output cannot block tools, inject context or continue an Agent turn.
  */
 @Serializable
 public data class NotificationHook(

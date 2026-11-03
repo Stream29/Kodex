@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.notification
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
@@ -186,17 +187,21 @@ private suspend fun withNotificationRpc(
         SystemCoroutineFileSystem.createDirectories(root)
         withBackendServices(
             home = Path(root, "home"), codexHome = Path(root, "codex"), agentsHome = Path(root, "agents"),
-            defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
+            defaults = defaultBackendSettings().copy(
+                sessionTitle = SessionTitleSettings(false),
+                newSession = KodexNewSessionSettings(model = OpenAiModelId("test-model")),
+            ),
             createClient = { api }, createLoginClient = { NoNetworkLogin },
         ) { backend ->
             withInMemoryRpc(backend::register) { raw ->
                 val client = RestoringRpcClient(raw)
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
-                global.getModelsFlow().first { it.any { model -> model.slug == OpenAiModelId("test-model") } }
-                val settings = KodexAgentSettings(OpenAiModelId("test-model"), cwd = root)
-                val index = global.createSession(settings)
-                val probeIndex = global.createSession(settings)
+                // The isolated Home has no account; the model catalog starts with built-ins
+                // and resolves the fake model through its normal fallback.
+                global.getModelsFlow().first()
+                val index = global.createSession(root)
+                val probeIndex = global.createSession(root)
                 val ready = CompletableDeferred<Unit>()
                 val selected = global.getNotificationFlow()
                     .onEach { notification ->

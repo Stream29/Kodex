@@ -26,6 +26,12 @@ public expect suspend fun runBackendHost(
 public expect suspend fun ensureBackend(home: Path): BackendEndpoint
 
 /**
+ * Connects to an already-locked local backend in [home] at the exact [port] without starting,
+ * replacing or stopping any backend instance.
+ */
+public expect suspend fun connectBackend(home: Path, port: Int): BackendEndpoint
+
+/**
  * Independent rolling writers for each process, with bounded inactive history.
  * Never deletes live process groups, legacy Kodex logs or names outside this owner's pattern.
  */

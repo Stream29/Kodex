@@ -17,4 +17,6 @@ public data class OAuthAuthorization(
         require(attemptId > 0) { "An OAuth attempt id must be positive." }
         require(url.isNotBlank()) { "An OAuth authorization URL must not be blank." }
     }
+
+    override fun toString(): String = "OAuthAuthorization(attemptId=$attemptId, url=<redacted>)"
 }

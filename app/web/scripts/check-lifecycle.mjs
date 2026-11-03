@@ -161,10 +161,10 @@ class Page {
   async openOnlySession() {
     await this.click("Sessions");
     await this.has("Show archived");
-    const nodes = await wait(() => this.tree(), nodes => nodes.some(n => n.name?.value?.startsWith("Actions for session ")), "persisted catalog row");
-    const actions = nodes.filter(n => n.role?.value === "button" && n.name?.value?.startsWith("Actions for session "));
+    const nodes = await wait(() => this.tree(), nodes => nodes.some(n => n.name?.value?.startsWith("Open menu for session ")), "persisted catalog row");
+    const actions = nodes.filter(n => n.role?.value === "button" && n.name?.value?.startsWith("Open menu for session "));
     assert.equal(actions.length, 1);
-    const index = actions[0].name.value.slice("Actions for session ".length);
+    const index = actions[0].name.value.slice("Open menu for session ".length);
     await this.clickMatching(n => n.role?.value === "button" && n.name?.value?.startsWith(`Session ${index}`),
       "open the exact untitled fixture session");
     await wait(() => this.tree(), nodes => historyText(nodes, "lifecycle shared history") === 1, "persisted history after navigation");

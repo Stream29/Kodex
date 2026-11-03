@@ -3,7 +3,7 @@ package io.github.stream29.kodex.backend
 import kotlinx.serialization.Serializable
 
 /** Business compatibility is independent of application releases and transport handshakes. */
-public const val BackendBusinessProtocol: String = "0.5.2"
+public const val BackendBusinessProtocol: String = "0.5.4"
 public const val BackendControlProtocol: Int = 1
 
 /** Same-machine opt-in browser transport only; not a cloud authentication protocol. */

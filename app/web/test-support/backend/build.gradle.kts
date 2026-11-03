@@ -21,6 +21,7 @@ kotlin {
     sourceSets.commonMain.dependencies {
         implementation(project(":app-backend-migration"))
         implementation(project(":app-backend-host"))
+        implementation(project(":app-web-host"))
         implementation(project(":rpc-backend-control-client"))
         implementation(project(":app-rpc-test-support"))
         implementation(project(":rpc-server"))
@@ -29,6 +30,8 @@ kotlin {
         implementation(project(":utils-os-environment"))
         implementation(libs.ktor.server.cio)
         implementation(libs.ktor.server.websockets)
+        implementation(libs.ktor.client.core)
+        implementation(libs.ktor.client.cio)
         implementation(libs.kotlinx.rpc.krpc.server)
         implementation(libs.kotlinx.rpc.krpc.serialization.json)
         implementation(libs.kotlinx.serialization.json)

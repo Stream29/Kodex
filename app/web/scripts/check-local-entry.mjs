@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { copyFile, chmod, mkdtemp, mkdir, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
+import {
+    abortable, cleanupSteps, privateEnvironment, runOwnedCommand, spawnOwned,
+    stopIdentifiedProcess, stopOwned,
+} from "./local-entry-tools.mjs";
 
+export async function main() {
 const executable = resolve(process.argv[2]);
 const output = resolve(process.argv[3]);
 await mkdir(output, { recursive: true });
@@ -17,22 +22,7 @@ const capture = join(temporary, "launch.private");
 const firstProject = join(temporary, "project-a");
 const secondProject = join(temporary, "project-b");
 const runtime = join(temporary, "runtime");
-for (const path of [home, bin, profile, firstProject, secondProject, runtime]) await mkdir(path, { mode: 0o700 });
-await copyFile(executable, copied);
-await chmod(copied, 0o700);
-// This owned launcher records the handoff privately. It does not change the user's MIME handler.
-await writeFile(join(bin, "xdg-open"), '#!/bin/sh\numask 077\nprintf "%s" "$1" > "$KODEX_ENTRY_CAPTURE"\n', { mode: 0o700 });
-for (const tool of ["node", "java", "javac", "wasm-opt"]) {
-    await writeFile(join(bin, tool), '#!/bin/sh\n: > "$KODEX_ENTRY_TOOL_ATTEMPT"\nexit 97\n', { mode: 0o700 });
-}
-const env = {
-    ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, ".config"),
-    XDG_DATA_HOME: join(home, ".local/share"), XDG_CACHE_HOME: join(home, ".cache"),
-    PATH: `${bin}:/usr/bin:/bin`, KODEX_ENTRY_CAPTURE: capture, TMPDIR: "/tmp",
-    KODEX_ENTRY_TOOL_ATTEMPT: join(temporary, "tool-attempt"),
-    XDG_RUNTIME_DIR: runtime, GDK_BACKEND: "wayland",
-};
-for (const name of ["JAVA_HOME", "DISPLAY", "WAYLAND_DISPLAY", "SWAYSOCK", "BROWSER"]) delete env[name];
+const env = privateEnvironment({ home, bin, runtime, temporary, capture });
 const recordPath = join(home, ".kodex/.locks/backend/connection.json");
 const checks = {};
 const visualChecks = {};
@@ -43,52 +33,93 @@ const pending = new Map();
 let next = 0;
 let socket;
 let chrome;
-let chromeExit;
 let safeToRemove = false;
+let interrupted = false;
+let cleaning = false;
+let primary;
+let backendOwner;
+const lifecycleErrors = [];
+const work = new AbortController();
 const frontendHosts = [];
+const commandChildren = [];
+function failWork(error) {
+    if (!cleaning) work.abort(error);
+    for (const request of pending.values()) {
+        clearTimeout(request.timer);
+        request.fail(error);
+    }
+    pending.clear();
+    try { socket?.close(); } catch (error) { lifecycleErrors.push(error); }
+}
+function interruptOwnedCheck() {
+    interrupted = true;
+    failWork(new Error("Owned local-entry check interrupted"));
+}
+process.on("SIGTERM", interruptOwnedCheck);
+process.on("SIGINT", interruptOwnedCheck);
 
 async function command(args, cwd = firstProject, expectedCode = 0) {
-    const child = spawn(copied, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
-    let text = "";
-    child.stdout.on("data", bytes => { text += bytes; });
-    child.stderr.on("data", bytes => { text += bytes; });
-    const code = await new Promise((done, fail) => { child.once("exit", done); child.once("error", fail); });
-    assert.equal(code, expectedCode, `Owned kodex ${args.join(" ")} had an unexpected exit; private command output is not printed.`);
-    return text;
+    return runOwnedCommand(copied, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] },
+        { expectedCode, signal: cleaning ? undefined : work.signal, onError: failWork, children: commandChildren });
+}
+function checkWork() {
+    assert.ok(!interrupted || cleaning, "Owned local-entry check interrupted");
+    if (!cleaning) work.signal.throwIfAborted();
+}
+async function privateFetch(url, options = {}) {
+    checkWork();
+    const signal = cleaning ? AbortSignal.timeout(5000) : AbortSignal.any([work.signal, AbortSignal.timeout(5000)]);
+    return fetch(url, { ...options, signal });
 }
 async function wait(read, matches, label, duration = 30_000) {
     const until = Date.now() + duration;
     while (Date.now() < until) {
-        const result = await read();
+        checkWork();
+        const result = await abortable(Promise.resolve().then(read), cleaning ? undefined : work.signal);
         if (matches(result)) return result;
         await delay(100);
     }
     throw new Error(`${label} timed out`);
 }
-async function record() { return JSON.parse(await readFile(recordPath, "utf8")); }
+async function record() {
+    const current = JSON.parse(await readFile(recordPath, "utf8"));
+    backendOwner ??= current;
+    return current;
+}
 async function status(entry) {
     try {
-        const reply = await fetch(`http://127.0.0.1:${entry.port}/control/status`, {
+        const reply = await privateFetch(`http://127.0.0.1:${entry.port}/control/status`, {
             headers: { Authorization: `Bearer ${entry.password}`, "X-Kodex-Instance": entry.instanceId },
         });
         return reply.ok ? await reply.json() : null;
-    } catch { return null; }
+    } catch { checkWork(); return null; }
 }
 async function backendAlive(entry) {
-    if (await readlink(`/proc/${entry.pid}/exe`).catch(() => null) !== copied) return false;
-    const state = await readFile(`/proc/${entry.pid}/status`, "utf8").catch(() => "");
-    return !/^State:\s+Z/m.test(state);
+    assert.ok(Number.isSafeInteger(entry.pid) && entry.pid > 1, "Invalid private backend PID");
+    if (await readProc(() => readlink(`/proc/${entry.pid}/exe`)) !== copied) return false;
+    const state = await readProc(() => readFile(`/proc/${entry.pid}/status`, "utf8"));
+    return state !== null && !/^State:\s+Z/m.test(state);
+}
+async function readProc(read) {
+    try { return await read(); }
+    catch (error) {
+        if (["ENOENT", "ESRCH"].includes(error.code)) return null;
+        throw error;
+    }
 }
 async function launch(cwd) {
+    checkWork();
     await rm(capture, { force: true });
-    const child = spawn(copied, ["web"], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const host = spawnOwned(copied, ["web"], { cwd, env, stdio: ["ignore", "pipe", "pipe"] }, { onError: failWork });
+    const { child } = host;
     let text = "";
-    const exited = new Promise((done, fail) => { child.once("exit", done); child.once("error", fail); });
     child.stdout.on("data", bytes => { text += bytes; });
     child.stderr.on("data", bytes => { text += bytes; });
-    const host = { child, exited };
     frontendHosts.push(host);
-    const url = await wait(() => readFile(capture, "utf8").catch(() => ""), value => value.includes("#"), "frontend host launch");
+    const url = await wait(async () => {
+        assert.equal(host.result, null, "Frontend host exited before launch");
+        return readFile(capture, "utf8").catch(() => "");
+    }, value => value.includes("#"), "frontend host launch");
     assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/web\/[0-9a-f]{64}\/#[0-9a-f]{64}$/);
     const current = await record();
     assert.ok(!text.includes(current.password) && !text.includes(url) && !text.includes(url.split("#")[1]));
@@ -98,11 +129,13 @@ async function launch(cwd) {
     return { url, current, cwd, host };
 }
 function send(method, params = {}, sessionId) {
+    checkWork();
     return new Promise((done, fail) => {
         const id = ++next;
         const timer = setTimeout(() => { pending.delete(id); fail(new Error(`${method} timed out`)); }, 20_000);
         pending.set(id, { done, fail, timer });
-        socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+        try { socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); }
+        catch (error) { clearTimeout(timer); pending.delete(id); fail(error); }
     });
 }
 async function evaluate(session, expression) {
@@ -119,7 +152,7 @@ async function connected(session, entry, welcomeStart = 0) {
         values => values.some(item => item.directory === entry.cwd && item.instance === entry.current.instanceId),
         "original business welcome with bound directory");
     assert.equal(await evaluate(session, "location.hash"), "");
-    assert.ok(!(await text(session)).includes("Choose private connection record"));
+    assert.ok(!(await text(session)).includes("Choose scoped pairing record"));
     const cookies = (await send("Network.getCookies", {}, session)).cookies
         .filter(cookie => cookie.name === "kodex_local_web");
     assert.equal(cookies.length, 0, "Neither frontend nor backend creates a local-entry cookie");
@@ -209,23 +242,41 @@ async function visualAcceptance(session) {
 }
 async function closeBrowser() {
     if (!chrome) return;
-    if (socket?.readyState === WebSocket.OPEN) await send("Browser.close").catch(() => {});
-    chrome.kill("SIGTERM");
-    await chromeExit;
-    chrome = null;
-    socket?.close();
-    for (const request of pending.values()) { clearTimeout(request.timer); request.fail(new Error("Owned browser closed")); }
-    pending.clear();
+    await cleanupSteps([
+        async () => {
+            if (socket?.readyState === WebSocket.OPEN) await send("Browser.close");
+        },
+        () => stopOwned(chrome, { label: "Owned Chrome" }),
+        () => {
+            try { socket?.close(); }
+            finally {
+                for (const request of pending.values()) {
+                    clearTimeout(request.timer); request.fail(new Error("Owned browser closed"));
+                }
+                pending.clear();
+            }
+        },
+    ]);
 }
 async function stopHost(host) {
-    if (host.child.exitCode !== null) return;
-    host.child.kill("SIGTERM");
-    const code = await Promise.race([host.exited, delay(10_000).then(() => { throw Error("Frontend host cleanup timed out"); })]);
-    assert.equal(code, 130);
+    return stopOwned(host, { label: "Frontend host", expectedCode: 130, termMs: 10_000 });
 }
 
 try {
-    assert.match(await command(["--help"]), /kodex web.*kodex app/);
+    for (const path of [home, bin, profile, firstProject, secondProject, runtime, env.TMPDIR])
+        await mkdir(path, { mode: 0o700 });
+    await copyFile(executable, copied);
+    await chmod(copied, 0o700);
+    // This owned launcher records the handoff privately, without changing MIME handlers.
+    await writeFile(join(bin, "xdg-open"), '#!/bin/sh\numask 077\nprintf "%s" "$1" > "$KODEX_ENTRY_CAPTURE"\n', { mode: 0o700 });
+    for (const tool of ["node", "java", "javac", "wasm-opt"])
+        await writeFile(join(bin, tool), '#!/bin/sh\n: > "$KODEX_ENTRY_TOOL_ATTEMPT"\nexit 97\n', { mode: 0o700 });
+    checkWork();
+    const help = await command(["--help"]);
+    assert.match(help, /^Usage: kodex\b/m);
+    assert.match(help, /^\s+tui\s+/m);
+    assert.match(help, /^\s+web\s+/m);
+    assert.match(help, /^\s+app\s+/m);
     checks.copiedExecutableWithoutAdjacentAssets = true;
     const first = await launch(firstProject);
     assert.doesNotMatch(await readFile(`/proc/${first.current.pid}/maps`, "utf8"), /libgtk|libwebkit|libgobject/);
@@ -234,15 +285,17 @@ try {
     assert.match(await command(["app"], firstProject, 1), /Cannot initialize GTK display/);
     assert.equal((await status(first.current)).phase, "ready");
     checks.noDisplayAppFailurePreservesBackend = true;
-    chrome = spawn(process.env.CHROME_BIN ?? "/usr/bin/google-chrome", [
+    chrome = spawnOwned(process.env.CHROME_BIN ?? "/usr/bin/google-chrome", [
         "--headless=new", "--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check",
         "--disable-background-networking", "--disable-component-update", "--remote-debugging-address=127.0.0.1",
         "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--force-renderer-accessibility",
         "--window-size=1280,1000", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
         "about:blank",
-    ], { stdio: "ignore" });
-    chromeExit = new Promise(done => chrome.once("exit", done));
-    const active = await wait(() => readFile(join(profile, "DevToolsActivePort"), "utf8").catch(() => ""),
+    ], { stdio: "ignore", env, cwd: home }, { onError: failWork });
+    const active = await wait(() => {
+        assert.equal(chrome.result, null, "Owned Chrome exited before readiness");
+        return readFile(join(profile, "DevToolsActivePort"), "utf8").catch(() => "");
+    },
         value => value.includes("\n"), "owned Chrome startup");
     const [port, path] = active.trim().split("\n");
     socket = new WebSocket(`ws://127.0.0.1:${port}${path}`);
@@ -268,8 +321,14 @@ try {
             }
         }
     });
-    await new Promise((done, fail) => {
+    await abortable(new Promise((done, fail) => {
         socket.addEventListener("open", done, { once: true }); socket.addEventListener("error", fail, { once: true });
+    }), work.signal);
+    socket.addEventListener("close", () => {
+        for (const request of pending.values()) {
+            clearTimeout(request.timer); request.fail(new Error("Owned browser connection closed"));
+        }
+        pending.clear();
     });
     const session = await open(first);
     checks.frontendHostedBootstrapAndDirectBackendRpc = true;
@@ -304,20 +363,20 @@ try {
     for (const entry of [first, second]) {
         assert.equal(entry.host.child.exitCode, null, "Closing browser leaves web host alive for refresh");
         const url = new URL(entry.url);
-        const bootstrap = await fetch(new URL("bootstrap", url), {
+        const bootstrap = await privateFetch(new URL("bootstrap", url), {
             method: "POST", headers: { Origin: url.origin, "Content-Type": "application/json" },
             body: JSON.stringify({ ticket: url.hash.slice(1) }),
         });
         assert.equal(bootstrap.status, 200);
         const info = await bootstrap.json();
         assert.notEqual(info.endpoint.password, entry.current.password);
-        const denied = await fetch(`http://127.0.0.1:${entry.current.port}/control/status`, {
+        const denied = await privateFetch(`http://127.0.0.1:${entry.current.port}/control/status`, {
             headers: { Authorization: `Bearer ${info.endpoint.password}`, "X-Kodex-Instance": entry.current.instanceId },
         });
         assert.equal(denied.status, 401, "Scoped browser credential must not authorize management");
         await stopHost(entry.host);
-        assert.equal(await fetch(new URL(url.pathname, url)).then(() => true, () => false), false);
-        const revoked = await fetch(`http://127.0.0.1:${entry.current.port}/heartbeat`, {
+        assert.equal(await privateFetch(new URL(url.pathname, url)).then(() => true, () => false), false);
+        const revoked = await privateFetch(`http://127.0.0.1:${entry.current.port}/heartbeat`, {
             method: "POST", headers: {
                 Origin: url.origin, Authorization: `Bearer ${info.endpoint.password}`,
                 "X-Kodex-Instance": entry.current.instanceId, "X-Kodex-Protocol": entry.current.businessProtocol,
@@ -332,20 +391,69 @@ try {
     await wait(() => backendAlive(first.current), value => !value, "owned backend cooperative cleanup");
     safeToRemove = true;
     assert.deepEqual(failures, []);
-    await writeFile(join(output, "local-entry.json"), JSON.stringify({ checks, failures,
-        launcher: "owned xdg-open handoff adapter; not the user's default browser configuration",
-    }, null, 2));
-    console.log(JSON.stringify({ checks, failures }));
-} finally {
-    await closeBrowser();
-    for (const host of frontendHosts) await stopHost(host);
-    if (!safeToRemove) {
-        const current = await record().catch(() => null);
-        if (current && await backendAlive(current)) {
-            await command(["backend", "stop"]).catch(() => {});
-            safeToRemove = await wait(() => backendAlive(current), value => !value, "owned backend cleanup").then(() => true).catch(() => false);
-        } else safeToRemove = true;
-    }
-    if (safeToRemove) await rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    else throw new Error("Owned backend cleanup is incomplete; its temporary Home was retained.");
+    assert.equal(interrupted, false);
+} catch (error) { primary = work.signal.aborted ? work.signal.reason : error; }
+finally {
+    cleaning = true;
+    await cleanupSteps([
+        () => closeBrowser(),
+        ...frontendHosts.map(host => () => stopHost(host)),
+        ...commandChildren.map(child => () => stopOwned(child, { label: "Owned command" })),
+        async () => {
+            if (safeToRemove) return;
+            const current = backendOwner ?? await record().catch(error => {
+                if (error.code === "ENOENT") return null;
+                throw error;
+            });
+            if (!current || !await backendAlive(current)) { safeToRemove = true; return; }
+            await cleanupSteps([
+                async () => {
+                    await command(["backend", "stop"]);
+                    await wait(() => backendAlive(current), value => !value, "owned backend cleanup");
+                },
+                async () => {
+                    try {
+                        if (!await backendAlive(current)) return;
+                        const identify = async () => {
+                            if (!Number.isSafeInteger(current.pid) || current.pid <= 1 || !await backendAlive(current)) return null;
+                            const state = await readProc(() => readFile(`/proc/${current.pid}/stat`, "utf8"));
+                            if (state === null) return null;
+                            const start = state.slice(state.lastIndexOf(")") + 2).split(" ")[19];
+                            return start ? { pid: current.pid, executable: copied, start } : null;
+                        };
+                        const identity = await identify();
+                        assert.ok(identity, "Cannot confirm private backend identity; retaining temporary Home");
+                        await stopIdentifiedProcess({
+                            identity, identify, signal: name => process.kill(identity.pid, name),
+                            waitUntilGone: duration => wait(() => identify(), value => !value ||
+                                JSON.stringify(value) !== JSON.stringify(identity), "owned backend signal cleanup", duration)
+                                .then(() => true, () => false),
+                        });
+                        throw new Error("Owned backend required signal cleanup");
+                    } finally { safeToRemove = !await backendAlive(current); }
+                },
+            ]);
+        },
+        async () => {
+            const alive = (chrome && !chrome.result) || [...frontendHosts, ...commandChildren].some(child => !child.result);
+            if (!safeToRemove || alive)
+                throw new Error("Owned cleanup is incomplete; temporary Home retained.");
+            await rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        },
+        () => {
+            process.off("SIGTERM", interruptOwnedCheck);
+            process.off("SIGINT", interruptOwnedCheck);
+        },
+        () => {
+            if (lifecycleErrors.length) throw new AggregateError(lifecycleErrors, "Owned socket cleanup failed");
+        },
+    ], primary);
 }
+assert.equal(interrupted, false, "Owned local-entry check interrupted");
+await writeFile(join(output, "local-entry.json"), JSON.stringify({ checks, failures,
+    launcher: "owned xdg-open handoff adapter; not the user's default browser configuration",
+}, null, 2));
+console.log(JSON.stringify({ checks, failures }));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();

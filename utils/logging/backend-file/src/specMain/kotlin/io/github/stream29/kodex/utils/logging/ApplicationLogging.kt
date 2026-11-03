@@ -13,3 +13,9 @@ import kotlinx.io.files.Path
  * @throws kotlinx.coroutines.CancellationException if directory creation is cancelled.
  */
 public expect suspend fun initializeLogging(kodexHome: Path, processName: String = "Kodex"): Unit
+
+/**
+ * Writes one CLI terminal failure to a private, uniquely named process log and
+ * flushes it before returning, including the throwable's stack and causes.
+ */
+public expect suspend fun writeCliTerminalFailure(kodexHome: Path, processId: Long, failure: Throwable): Unit

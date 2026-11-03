@@ -12,6 +12,7 @@ kotlin {
         }
         commonMain.dependencies {
             implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlin.logging)
             implementation(libs.kermit.core)
             implementation(libs.kermit.io)

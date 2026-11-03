@@ -10,7 +10,11 @@ import io.github.oshai.kotlinlogging.KLoggingEvent
 import io.github.oshai.kotlinlogging.KotlinLoggingConfiguration
 import io.github.oshai.kotlinlogging.Level
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.writeBytes
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
+import kotlin.random.Random
 
 public actual suspend fun initializeLogging(kodexHome: Path, processName: String): Unit {
     val logDirectory = Path(kodexHome, LogDirectoryName)
@@ -23,6 +27,31 @@ public actual suspend fun initializeLogging(kodexHome: Path, processName: String
     KotlinLoggingConfiguration.loggerFactory = DirectLoggerFactory
     KotlinLoggingConfiguration.direct.logLevel = Level.INFO
     KotlinLoggingConfiguration.direct.appender = appender
+}
+
+public actual suspend fun writeCliTerminalFailure(kodexHome: Path, processId: Long, failure: Throwable) {
+    val directory = Path(kodexHome, LogDirectoryName)
+    SystemCoroutineFileSystem.createDirectories(directory)
+    // Numeric suffixes are owned by the existing process-log retention policy.
+    val path = Path(directory, "Cli-$processId-${Random.nextLong(1, Long.MAX_VALUE)}.log")
+    var created = false
+    try {
+        SystemCoroutineFileSystem.useSink(path, mustCreate = true) { sink ->
+            created = true
+            SystemCoroutineFileSystem.protectPrivateFile(path)
+            sink.writeBytes(("CLI invocation failed\n" + failure.stackTraceToString() + "\n").encodeToByteArray())
+            sink.flush()
+        }
+    } catch (writeFailure: Throwable) {
+        if (created) {
+            try {
+                withContext(NonCancellable) { SystemCoroutineFileSystem.delete(path, mustExist = false) }
+            } catch (cleanup: Throwable) {
+                if (cleanup !== writeFailure) writeFailure.addSuppressed(cleanup)
+            }
+        }
+        throw writeFailure
+    }
 }
 
 internal fun rollingFileLogWriterConfig(logDirectory: Path, processName: String = LogFileBaseName): RollingFileLogWriterConfig =

@@ -21,7 +21,6 @@ val shellSessionModelsTest by testSuite {
             command = "fixture command\nsecond line",
             workdir = "/fixture/work",
             shell = Shell(ShellType.Bash, Path("/fixture/bin/bash")),
-            tty = true,
             yieldTimeMillis = 1234,
             maxOutputTokens = 5678,
         )

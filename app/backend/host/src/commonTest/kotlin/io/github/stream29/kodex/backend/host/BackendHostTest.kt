@@ -223,6 +223,99 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
             assertEquals(null, BackendInstance.discover(home))
         }
     }
+    test("connectBackend connects to exact target in current or separate backend Home without touching frontend Home") {
+        withHost { backendHome, endpoint, _ ->
+            val frontendHome = Path(SystemTemporaryDirectory, "kodex-frontend-only-${Random.nextLong()}")
+            try {
+                assertEquals(endpoint.instanceId, connectBackend(backendHome, endpoint.port).instanceId)
+                val target = connectBackend(backendHome, endpoint.port)
+                initializeProcessLogging(frontendHome, "Tui-${processId()}")
+                withLocalRpcClient(backendHome, target) { connection ->
+                    val rpc = RpcServices(RestoringRpcClient(connection))
+                    val old = rpc.global.getFrontendSettings()
+                    assertTrue(rpc.global.compareAndSetFrontendSettings(old, old.copy(newLineKey = NewLineKey.Enter)))
+                }
+                assertTrue(SystemCoroutineFileSystem.exists(Path(frontendHome, "log")))
+                assertNull(BackendInstance.discover(frontendHome))
+                assertTrue(!SystemCoroutineFileSystem.exists(Path(frontendHome, ".locks", "backend")))
+            } finally {
+                removeHost(frontendHome)
+            }
+        }
+    }
+    test("connectBackend rejects missing lock missing record port mismatch unreachable auth and protocol failures without starting or replacing a backend") {
+        val unlockedHome = Path(SystemTemporaryDirectory, "kodex-unlocked-${Random.nextLong()}")
+        val lockedNoRecordHome = Path(SystemTemporaryDirectory, "kodex-no-record-${Random.nextLong()}")
+        val unreachableHome = Path(SystemTemporaryDirectory, "kodex-unreachable-${Random.nextLong()}")
+        try {
+            assertFailsWith<IllegalStateException> { connectBackend(unlockedHome, 18080) }
+            assertTrue(!SystemCoroutineFileSystem.exists(unlockedHome))
+
+            BackendInstance.acquire(lockedNoRecordHome).use {
+                assertFailsWith<IllegalStateException> { connectBackend(lockedNoRecordHome, 18080) }
+            }
+
+            BackendInstance.acquire(unreachableHome).use { instance ->
+                instance.publish(BackendEndpoint("unreachable-id", processId(), 1, "a".repeat(64), "0.6.0"))
+                assertFailsWith<Exception> { connectBackend(unreachableHome, 1) }
+            }
+
+            withHost { homeA, endpointA, backendA ->
+                withHost { homeB, endpointB, backendB ->
+                    assertFailsWith<IllegalStateException> { connectBackend(homeA, endpointB.port) }
+                    val recordPath = Path(homeA, ".locks", "backend", "connection.json")
+                    val originalRecord = SystemCoroutineFileSystem.readString(recordPath)
+                    try {
+                        val wrongPassword = BackendEndpoint(
+                            endpointA.instanceId, endpointA.pid, endpointA.port,
+                            "0".repeat(64), endpointA.applicationVersion,
+                        )
+                        SystemCoroutineFileSystem.writeString(
+                            recordPath, Json.encodeToString(BackendEndpoint.serializer(), wrongPassword),
+                        )
+                        assertFailsWith<Exception> { connectBackend(homeA, endpointA.port) }
+
+                        val wrongProtocol = BackendEndpoint(
+                            endpointA.instanceId, endpointA.pid, endpointA.port,
+                            endpointA.password, endpointA.applicationVersion, businessProtocol = "0.5.3",
+                        )
+                        SystemCoroutineFileSystem.writeString(
+                            recordPath, Json.encodeToString(BackendEndpoint.serializer(), wrongProtocol),
+                        )
+                        assertFailsWith<IllegalStateException> { connectBackend(homeA, endpointA.port) }
+                    } finally {
+                        SystemCoroutineFileSystem.writeString(recordPath, originalRecord)
+                    }
+                    assertEquals(endpointA.instanceId, connectBackend(homeA, endpointA.port).instanceId)
+                    assertEquals(endpointB.instanceId, connectBackend(homeB, endpointB.port).instanceId)
+                    assertTrue(backendA.isActive)
+                    assertTrue(backendB.isActive)
+                }
+            }
+        } finally {
+            removeHost(unlockedHome)
+            removeHost(lockedNoRecordHome)
+            removeHost(unreachableHome)
+        }
+    }
+    test("same-instance reconnect with separate backend Home stays pinned to target Home and never falls back to frontend Home") {
+        withHost { frontendHome, frontendEndpoint, frontendBackend ->
+            withHost { backendHome, targetEndpoint, targetBackend ->
+                val connected = connectBackend(backendHome, targetEndpoint.port)
+                withLocalRpcClient(backendHome, connected) { connection ->
+                    assertEquals(io.github.stream29.kodex.rpc.local.BackendConnectionState.Connected, connection.state.value)
+                    backendControlRequest(targetEndpoint, "stop")
+                    withTimeout(10.seconds) { targetBackend.join() }
+                    withTimeout(10.seconds) {
+                        connection.state.first { it == io.github.stream29.kodex.rpc.local.BackendConnectionState.Failed }
+                    }
+                    assertNull(BackendInstance.discover(backendHome))
+                    assertEquals(frontendEndpoint.instanceId, BackendInstance.discover(frontendHome)?.instanceId)
+                    assertTrue(frontendBackend.isActive)
+                }
+            }
+        }
+    }
 }
 
 internal suspend fun withHost(

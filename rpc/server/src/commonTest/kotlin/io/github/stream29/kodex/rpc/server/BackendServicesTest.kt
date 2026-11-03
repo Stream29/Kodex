@@ -4,6 +4,7 @@ import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
+import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
@@ -32,6 +33,52 @@ import kotlin.test.*
 import kotlin.time.Duration.Companion.seconds
 
 val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("real JSON path RPCs use captured backend base and actual built-ins without acquiring a Session") {
+        withServices { services, _ ->
+            val roots = services.settings.contextSettings.value
+            val base = Path(roots.kodexHome, "captured-base")
+            SystemCoroutineFileSystem.createDirectories(Path(base, "B"))
+            SystemCoroutineFileSystem.createDirectories(Path(base, "a"))
+            SystemCoroutineFileSystem.writeString(Path(base, "not-a-directory"), "private fixture contents")
+            val repository = Path(roots.kodexHome, "sessions")
+            assertNull(SystemCoroutineFileSystem.metadataOrNull(repository))
+            withInMemoryRpc(services::register) { raw ->
+                val global = RestoringRpcClient(raw).withService<GlobalRpc>()
+                val selected = assertIs<DirectoryValidationResult.Directory>(
+                    global.validateDirectory(DirectoryQuery(".", base.toString())),
+                )
+                val resolved = SystemCoroutineFileSystem.resolve(base).toString()
+                assertEquals(resolved, selected.path)
+                val listing = assertIs<DirectoryListResult.Directories>(
+                    global.listDirectories(DirectoryQuery(".", base.toString())),
+                )
+                assertEquals(resolved, listing.directory)
+                assertEquals(listOf("a", "B"), listing.children.map { it.name })
+                assertEquals(listOf(Path(Path(resolved), "a").toString(), Path(Path(resolved), "B").toString()),
+                    listing.children.map { it.path })
+                val failure = assertIs<DirectoryValidationResult.Failure>(
+                    global.validateDirectory(DirectoryQuery("not-a-directory", base.toString())),
+                )
+                assertEquals(DirectoryQueryFailure.NotDirectory, failure.reason)
+                val invalidBase = assertIs<DirectoryListResult.Failure>(
+                    global.listDirectories(DirectoryQuery(".", "relative-base")),
+                )
+                assertEquals(DirectoryQueryFailure.InvalidLaunchBase, invalidBase.reason)
+                val evaluation = assertIs<ContextPathEvaluation.Evaluated>(
+                    global.evaluateContextPaths(ContextPathQuery(
+                        roots.agentsHome.toString(), listOf(roots.agentsHome.toString(), "relative", "\$HOME"),
+                        base.toString(),
+                    )),
+                )
+                assertTrue(evaluation.candidate.matchesBuiltIn)
+                assertEquals(roots.agentsHome.toString(), evaluation.candidate.lexicalKey)
+                assertEquals(listOf(roots.agentsHome.toString(), null, null),
+                    evaluation.originalPaths.map { it.lexicalKey })
+                assertNull(SystemCoroutineFileSystem.metadataOrNull(repository),
+                    "Read-only paths must not open the Session repository.")
+            }
+        }
+    }
     test("real JSON GlobalRpc creation uses backend defaults despite an intentionally stale frontend snapshot") {
         withServices { services, _ ->
             withInMemoryRpc(services::register) { raw ->
@@ -93,7 +140,11 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertTrue(runCatching { global.keepSessionAlive(index) }.isFailure)
                 assertTrue(runCatching { global.compareAndSetSettings(before, before.copy(daemonTtlSeconds = -1)) }.isFailure)
                 assertTrue(runCatching { global.compareAndSetFrontendSettings(front, front.copy(newLineKey = io.github.stream29.kodex.cli.settings.NewLineKey.Enter)) }.isFailure)
-                assertEquals(4, rejected)
+                assertTrue(runCatching { global.validateDirectory(DirectoryQuery(".", ".")) }.isFailure)
+                assertTrue(runCatching { global.listDirectories(DirectoryQuery(".", ".")) }.isFailure)
+                assertTrue(runCatching { global.evaluateContextPaths(ContextPathQuery("/", emptyList(), ".")) }.isFailure)
+                assertTrue(runCatching { global.abandonPendingOAuthLogin(Long.MAX_VALUE) }.isFailure)
+                assertEquals(8, rejected)
                 assertEquals(before, services.settings.unified.current.backend)
                 assertEquals(front, services.settings.unified.current.frontend)
             }
@@ -134,35 +185,6 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertFalse(global.deleteSession(index))
                 assertFailsWith<SessionNotFound> { global.keepSessionAlive(index) }
                 assertFailsWith<SessionNotActive> { runtime.getLatestIndex(index) }
-            }
-        }
-    }
-
-    test("full-service OAuth persists selected credentials and usage consumes only the selected credit") {
-        withServices { services, login ->
-            withInMemoryRpc(services::register) { raw ->
-                val global = RestoringRpcClient(raw).withService<GlobalRpc>()
-                assertIs<SettingsAuthenticationState.Unavailable>(global.getAuthentication())
-                val old = global.getSettings()
-                assertTrue(global.compareAndSetSettings(old, old.copy(authSource = KodexAuthSource.Kodex)))
-                val redirect = "http://localhost:1455/auth/callback"
-                val authorization = global.startOAuthLogin(OAuthTarget.OpenAi(KodexAuthSource.Kodex), redirect)
-                val callback = URLBuilder(redirect).apply {
-                    parameters.append("state", requireNotNull(Url(authorization.url).parameters["state"]))
-                    parameters.append("code", "one-code")
-                }.buildString()
-                global.completeOAuthLogin(authorization.attemptId, callback)
-                val summary = global.getAuthenticationFlow().filterIsInstance<SettingsAuthenticationState.Authenticated>().first()
-                assertEquals("account", summary.accountId)
-                assertEquals(1, login.exchanges)
-                // Login must refresh the catalog without recreating the backend or RPC client.
-                global.getModelsFlow().first { models -> models.any { it.slug == OpenAiModelId("test-model") } }
-                global.getAccountUsageFlow().filterIsInstance<SettingsAccountUsageState.Available>().first()
-                global.refreshAccountUsage()
-                assertEquals(CodexRateLimitResetOutcome.NoCredit, global.consumeUsageReset("specific"))
-                global.cancelOAuthLogin(authorization.attemptId)
-                global.removeAuthentication(KodexAuthSource.Kodex)
-                global.getAuthenticationFlow().filterIsInstance<SettingsAuthenticationState.Unavailable>().first()
             }
         }
     }
@@ -264,7 +286,10 @@ internal class ServicesTestLogin : OpenAiLoginClient {
     var exchanges = 0
     var closed = false
     override fun authorizationUrl(request: OpenAiLoginAuthorization): String =
-        URLBuilder("https://auth.example.test/authorize").apply { parameters.append("state", request.state) }.buildString()
+        URLBuilder("https://auth.example.test/authorize").apply {
+            parameters.append("state", request.state)
+            parameters.append("redirect_uri", request.redirectUri)
+        }.buildString()
     override suspend fun exchangeAuthorizationCode(
         request: OpenAiAuthorizationCodeExchange,
     ): OpenAiLoginResult<OpenAiSubscriptionTokens> {

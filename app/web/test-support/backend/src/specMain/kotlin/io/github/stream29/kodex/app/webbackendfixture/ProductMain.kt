@@ -1,4 +1,4 @@
 package io.github.stream29.kodex.app.webbackendfixture
 
-/** Temporary Home and offline SDK around the production backend host; no alternate RPC server. */
+/** Private Home/offline external boundaries around the production backend and optional public frontend hosts. */
 public expect fun productMain(): Unit

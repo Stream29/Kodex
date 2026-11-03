@@ -114,13 +114,11 @@ public expect suspend fun <T, F> SuspendMutableStateFlow<T>.editField(
     checkOwner: () -> Unit = {},
 ): Boolean
 
-/** Browser URLs and callback payloads live only for the attempt; neither is logged. */
+/** The backend owns the callback; its transient authorization URL belongs to this attempt. */
 public expect suspend fun startRpcOAuth(
     rpc: GlobalRpc,
     target: OAuthTarget,
     scope: CoroutineScope,
-    callbackProvider: RpcOAuthCallbackProvider,
-    mcpRedirectUri: String? = null,
 ): KodexAuthLoginAttempt
 
 /** Borrowed proxies from an already restoring client. This object owns no connection. */

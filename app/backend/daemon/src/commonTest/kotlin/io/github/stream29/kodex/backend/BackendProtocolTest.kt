@@ -5,8 +5,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
 val backendProtocolTest by testSuite {
-    test("strict terminal waits advance only the business checkpoint and keep management protocol one") {
-        assertEquals("0.5.2", BackendBusinessProtocol)
+    test("frontend capability parity advances only the business checkpoint and keeps management protocol one") {
+        assertEquals("0.5.4", BackendBusinessProtocol)
+        assertNotEquals("0.5.3", BackendBusinessProtocol)
+        assertNotEquals("0.5.2", BackendBusinessProtocol)
         assertNotEquals("0.5.0", BackendBusinessProtocol)
         assertEquals(1, BackendControlProtocol)
         val endpoint = BackendEndpoint(

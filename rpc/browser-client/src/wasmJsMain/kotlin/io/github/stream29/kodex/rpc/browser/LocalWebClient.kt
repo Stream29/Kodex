@@ -8,7 +8,6 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.js.Js
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.*
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
@@ -31,8 +30,9 @@ public actual suspend fun <R> withLocalWebClient(
 ): R {
     validateLocalWebLocation(origin, path, ticket)
     require(origin == pageOrigin()) { "Local Web context must use this page's origin." }
-    val info = bootstrapLocalFrontend(origin, path, ticket)
-    return withLocalBrowserClient(info.endpoint, info.workingDirectory, block)
+    return withLocalFrontendClient(origin, path, ticket) { directory, connection, _ ->
+        block(directory, connection)
+    }
 }
 
 internal suspend fun bootstrapLocalFrontend(origin: String, path: String, ticket: String?): LocalFrontendBootstrap {
@@ -42,19 +42,16 @@ internal suspend fun bootstrapLocalFrontend(origin: String, path: String, ticket
         install(HttpTimeout) { requestTimeoutMillis = 10_000; connectTimeoutMillis = 5_000 }
     }
     return try {
-        val reply = http.post(origin + path + "bootstrap") {
+        val info = http.preparePost(origin + path + "bootstrap") {
             contentType(ContentType.Application.Json)
             setBody(Json.encodeToString(LocalWebTicket.serializer(), LocalWebTicket(ticket)))
+        }.execute { reply ->
+            check(reply.status.value in 200..299) { "Frontend bootstrap rejected." }
+            // Read inside the streaming statement so Ktor never pre-buffers an unbounded reply.
+            decodeBootstrap(readFrontendFrame(reply))
         }
-        check(reply.status.value in 200..299) { "Frontend bootstrap rejected." }
-        // Never expose a malformed private bootstrap response through serializer diagnostics.
-        val info = try { Json.decodeFromString(LocalFrontendBootstrap.serializer(), reply.bodyAsText()) }
-        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (_: Exception) { error("Invalid frontend bootstrap response.") }
         info.also {
-            check(it.protocol == LocalBrowserGrantProtocol && it.workingDirectory.isNotBlank()) {
-                "Frontend bootstrap is incompatible."
-            }
+            validateFrontendBootstrap(it, origin, origin)
             validateBrowserEndpoint(it.endpoint)
         }
     } catch (failure: Throwable) {

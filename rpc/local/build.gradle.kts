@@ -11,12 +11,14 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":rpc-connection"))
+            api(project(":rpc-models"))
             api(libs.kotlinx.rpc.core)
             api(libs.kotlinx.coroutines.core)
             api(project(":app-backend-daemon"))
             api(libs.kotlinx.io.core)
         }
         commonMain.dependencies {
+            implementation(project(":rpc-client"))
             implementation(project(":rpc-websocket"))
             api(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.rpc.krpc.client)

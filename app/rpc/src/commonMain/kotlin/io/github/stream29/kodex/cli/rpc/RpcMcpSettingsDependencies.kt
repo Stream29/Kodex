@@ -14,7 +14,6 @@ internal class RpcMcpSettingsDependencies(
     private val rpc: GlobalRpc,
     private val mcp: RpcMcpSettings,
     private val accept: (suspend () -> Unit) -> Boolean,
-    private val callbackProvider: RpcOAuthCallbackProvider,
 ) : McpSettingsDependencies {
     override val servers: StateFlow<List<McpServerSettingsState>> = mcp.servers
     override val operationFailure: StateFlow<Boolean> = global.operationFailure
@@ -67,12 +66,13 @@ internal class RpcMcpSettingsDependencies(
     override suspend fun startLogin(serverName: String, interactionScope: CoroutineScope): McpSettingsLogin? {
         val configuration = global.settings.value.mcpServers[serverName] as? McpServerConfiguration.StreamableHttp
             ?: return null
-        val redirect = configuration.oauth?.client?.redirectUri ?: return null
-        val attempt = startRpcOAuth(rpc, OAuthTarget.Mcp(serverName), interactionScope, callbackProvider, redirect)
+        if (configuration.oauth == null) return null
+        val attempt = startRpcOAuth(rpc, OAuthTarget.Mcp(serverName), interactionScope)
         return object : McpSettingsLogin {
             override val serverName: String = serverName
             override val authorizationUrl: String = attempt.authorizationUrl
             override suspend fun awaitCompletion() { attempt.awaitCompletion() }
+            override fun release() { attempt.release() }
             override fun cancel() { attempt.cancel() }
         }
     }

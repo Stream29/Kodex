@@ -9,6 +9,7 @@ plugins {
 kotlin {
     sourceSets {
         named("specMain").dependencies {
+            api(project(":app-rpc-protocol"))
             api(project(":agent-state-contract"))
             api(project(":agent-storage-clean-models"))
             api(project(":agent-storage-core"))
@@ -21,6 +22,7 @@ kotlin {
             api(project(":app-component-mcp-settings-viewmodel"))
             api(project(":app-component-new-session-defaults-viewmodel"))
             api(project(":app-component-openai-login-viewmodel"))
+            api(project(":app-component-path-picker-viewmodel"))
             api(project(":app-component-runtime-configuration-viewmodel"))
             api(project(":app-component-session-catalog-viewmodel"))
             api(project(":app-component-session-settings-viewmodel"))
