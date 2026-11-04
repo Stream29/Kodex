@@ -34,6 +34,7 @@ import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.openai.CodexResponsesMetadata
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.codexRequestWindowId
 import io.github.stream29.kodex.openai.FailedResponse
@@ -117,6 +118,11 @@ val kodexAgentStateImplTest by testSuite {
                     agent.requestResponseApi()
                     assertEquals(4, requests.size)
                     for (request in requests) {
+                        val metadata = OpenAiJsonCodec.decodeFromString(
+                            CodexResponsesMetadata.serializer(), requireNotNull(request.clientMetadata).turnMetadata,
+                        )
+                        assertEquals("user", metadata.threadSource)
+                        assertEquals("user", metadata.turnTrigger)
                         val expected = override ?: storage.uri.toCodexThreadId()
                         assertEquals(expected, request.promptCacheKey)
                         val json = OpenAiJsonCodec.encodeToJsonElement(ResponsesApiRequest.serializer(), request).jsonObject

@@ -14,6 +14,8 @@ import io.github.stream29.kodex.openai.TextControls
 import io.github.stream29.kodex.openai.TextFormat
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
+import kotlin.uuid.Uuid
+import kotlin.uuid.ExperimentalUuidApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
@@ -21,6 +23,7 @@ import kotlinx.serialization.json.jsonObject
 public actual class OpenAiSessionTitleGenerator actual constructor(
     private val client: OpenAiClient,
 ) : SessionTitleGenerator {
+    @OptIn(ExperimentalUuidApi::class)
     actual override suspend fun generateTitle(
         userText: String,
         model: OpenAiModelId,
@@ -29,8 +32,15 @@ public actual class OpenAiSessionTitleGenerator actual constructor(
         val streamedText = StringBuilder()
         val completedItemsText = StringBuilder()
         var terminal: TitleStreamTerminal = TitleStreamTerminal.Open
+        val threadId = Uuid.generateV7().toString()
+        val turnId = Uuid.generateV7().toString()
+        val windowId = "$threadId:0"
         client.createResponse(
             model = model,
+            threadId = threadId,
+            turnId = turnId,
+            windowId = windowId,
+            threadSource = "thread_title",
             input = listOf(
                 ResponseItem.Message(
                     role = MessageRole.User,

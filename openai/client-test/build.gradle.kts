@@ -15,6 +15,7 @@ kotlin {
             }
         }
         commonMain.dependencies {
+            implementation(project(":openai-json-codec"))
             api(project(":openai-client"))
             api(project(":openai-models"))
             api(libs.kotlinx.coroutines.core)

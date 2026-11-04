@@ -315,6 +315,8 @@ public actual class OpenAiClient actual constructor(
         threadId: String?,
         turnId: String?,
         windowId: String?,
+        threadSource: String?,
+        turnTrigger: String?,
         turnState: String?,
         onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
     ): Flow<ResponsesStreamEvent> {
@@ -338,6 +340,8 @@ public actual class OpenAiClient actual constructor(
                 threadId = threadId,
                 turnId = turnId,
                 windowId = windowId,
+                threadSource = threadSource,
+                turnTrigger = turnTrigger,
                 turnState = turnState,
             ),
         )
@@ -1107,6 +1111,8 @@ private fun codexClientMetadataOrNull(
     threadId: String?,
     turnId: String?,
     windowId: String?,
+    threadSource: String?,
+    turnTrigger: String?,
     turnState: String?,
 ): CodexResponsesClientMetadata? {
     if (
@@ -1115,7 +1121,9 @@ private fun codexClientMetadataOrNull(
         threadId == null &&
         turnId == null &&
         windowId == null &&
-        turnState == null
+        turnState == null &&
+        threadSource == null &&
+        turnTrigger == null
     ) {
         return null
     }
@@ -1128,6 +1136,8 @@ private fun codexClientMetadataOrNull(
         turnId = turnId,
         windowId = windowId,
         requestKind = CodexResponsesRequestKind.Turn,
+        threadSource = threadSource,
+        turnTrigger = turnTrigger,
     )
     return CodexResponsesClientMetadata(
         installationId = installationId,

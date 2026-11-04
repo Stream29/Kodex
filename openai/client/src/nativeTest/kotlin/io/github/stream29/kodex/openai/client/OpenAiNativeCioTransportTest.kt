@@ -2,6 +2,16 @@ package io.github.stream29.kodex.openai.client
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.openai.CodexResponsesMetadata
+import io.github.stream29.kodex.openai.CodexResponsesRequestKind
+import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
+import io.github.stream29.kodex.openai.ResponsesApiRequest
+import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
+import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
+import io.ktor.server.request.receiveText
+import kotlinx.serialization.json.jsonObject
+import kotlin.test.assertNotNull
 import io.github.stream29.kodex.openai.OpenAiFailureReason
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
@@ -47,6 +57,61 @@ private const val syntheticToken = "synthetic-token"
 private const val syntheticBody = "synthetic-body-marker"
 
 val openAiNativeCioTransportTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("real client projects attribution into Responses client metadata") {
+        val captured = CompletableDeferred<String>()
+        val server = embeddedServer(ServerCIO, host = "127.0.0.1", port = 0) {
+            routing {
+                post("/responses") {
+                    captured.complete(call.receiveText())
+                    call.respondText(
+                        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"synthetic\"}}\n\n",
+                        ContentType.Text.EventStream,
+                    )
+                }
+            }
+        }
+        try {
+            server.startSuspend()
+            val endpoint = "http://127.0.0.1:${server.engine.resolvedConnectors().single().port}"
+            OpenAiClient(
+                InMemoryOpenAiAuthStore(OpenAiSubscriptionAuthState(accessToken = syntheticToken, accountId = null)),
+                OpenAiClientConfig(baseUrl = endpoint, retry = retry),
+            ).use { client ->
+                for (attribution in listOf("user" to null, null to "user")) {
+                    assertFailsWith<IllegalArgumentException> {
+                        client.createResponse(
+                            model = OpenAiModelId("test"), input = emptyList(),
+                            threadSource = attribution.first, turnTrigger = attribution.second,
+                        )
+                    }
+                }
+                withTimeout(30_000) {
+                    client.createResponse(
+                        model = OpenAiModelId("test"), input = emptyList(),
+                        threadId = "thread", turnId = "turn", windowId = "thread:0",
+                        threadSource = "user", turnTrigger = "user",
+                    ).toList()
+                    val body = captured.await()
+                    val request = OpenAiJsonCodec.decodeFromString(ResponsesApiRequest.serializer(), body)
+                    val metadata = OpenAiJsonCodec.decodeFromString(
+                        CodexResponsesMetadata.serializer(), assertNotNull(request.clientMetadata).turnMetadata,
+                    )
+                    assertEquals(CodexResponsesRequestKind.Turn, metadata.requestKind)
+                    assertEquals("user", metadata.threadSource)
+                    assertEquals("user", metadata.turnTrigger)
+                    assertEquals("thread", metadata.threadId)
+                    assertEquals("turn", metadata.turnId)
+                    assertEquals("thread:0", metadata.windowId)
+                    val json = OpenAiJsonCodec.parseToJsonElement(body).jsonObject
+                    assertFalse("thread_source" in json)
+                    assertFalse("turn_trigger" in json)
+                }
+            }
+        } finally {
+            withContext(NonCancellable) { server.stopSuspend() }
+        }
+    }
+
     test("CIO policy errors precede ordinary and compaction retries") {
         for (status in listOf(HttpStatusCode.TooManyRequests, HttpStatusCode.ServiceUnavailable)) {
             for (compaction in listOf(false, true)) {

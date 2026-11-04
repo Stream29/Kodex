@@ -122,6 +122,8 @@ private class RecordingOpenAiClient(
         threadId: String?,
         turnId: String?,
         windowId: String?,
+        threadSource: String?,
+        turnTrigger: String?,
         turnState: String?,
         onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
     ): Flow<ResponsesStreamEvent> {
@@ -161,6 +163,8 @@ private class RecordingOpenAiClient(
             threadId = threadId,
             turnId = turnId,
             windowId = windowId,
+            threadSource = threadSource,
+            turnTrigger = turnTrigger,
             turnState = turnState,
             onResponseHeaders = onResponseHeaders,
         )

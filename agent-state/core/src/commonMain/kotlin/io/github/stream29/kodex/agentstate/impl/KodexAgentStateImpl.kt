@@ -224,6 +224,8 @@ private class KodexAgentStateImpl(
                 threadId = threadId,
                 turnId = settings.turnId,
                 windowId = windowId,
+                threadSource = "user",
+                turnTrigger = "user",
                 turnState = settings.turnState,
                 onResponseHeaders = { headers ->
                     val failure = headers.failure
@@ -381,6 +383,8 @@ private class KodexAgentStateImpl(
                 threadId = threadId,
                 turnId = snapshot.settings.turnId,
                 windowId = windowId,
+                threadSource = "user",
+                turnTrigger = "user",
                 requestKind = CodexResponsesRequestKind.Compaction(
                     metadata = CompactionTurnMetadata(
                         trigger = trigger,

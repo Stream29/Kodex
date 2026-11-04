@@ -20,6 +20,8 @@ import kotlinx.serialization.Serializable
  * @property windowId Identity of the active context window. Detached memory
  * metadata omits it from the wire.
  * @property requestKind Request purpose and its request-specific metadata.
+ * @property threadSource Optional request attribution source; omitted when null.
+ * @property turnTrigger Optional turn-start attribution; omitted when null.
  */
 @OptIn(ExperimentalSerializationApi::class)
 @KeepGeneratedSerializer
@@ -37,6 +39,10 @@ public data class CodexResponsesMetadata(
     public val windowId: String,
     @SerialName("request_kind")
     public val requestKind: CodexResponsesRequestKind,
+    @SerialName("thread_source")
+    public val threadSource: String? = null,
+    @SerialName("turn_trigger")
+    public val turnTrigger: String? = null,
 )
 
 /**

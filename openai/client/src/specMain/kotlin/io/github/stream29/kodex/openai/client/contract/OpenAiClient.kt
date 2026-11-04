@@ -137,6 +137,8 @@ public interface OpenAiClient : AutoCloseable {
      * @param threadId Optional Codex thread identity.
      * @param turnId Optional Codex turn identity.
      * @param windowId Optional Codex context-window identity.
+     * @param threadSource Optional Codex request attribution source.
+     * @param turnTrigger Optional Codex turn-start attribution.
      * @param turnState Optional server-issued Codex turn state for continuing
      * a turn.
      * @param onResponseHeaders Observer invoked before stream body events; on
@@ -166,6 +168,8 @@ public interface OpenAiClient : AutoCloseable {
         threadId: String? = null,
         turnId: String? = null,
         windowId: String? = null,
+        threadSource: String? = null,
+        turnTrigger: String? = null,
         turnState: String? = null,
         onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit = {},
     ): Flow<ResponsesStreamEvent>

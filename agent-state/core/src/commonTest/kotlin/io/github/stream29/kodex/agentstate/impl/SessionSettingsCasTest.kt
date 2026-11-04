@@ -285,6 +285,8 @@ val sessionSettingsCasTest by testSuite {
                         threadId: String?,
                         turnId: String?,
                         windowId: String?,
+                        threadSource: String?,
+                        turnTrigger: String?,
                         turnState: String?,
                         onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
                     ): Flow<ResponsesStreamEvent> = flow {

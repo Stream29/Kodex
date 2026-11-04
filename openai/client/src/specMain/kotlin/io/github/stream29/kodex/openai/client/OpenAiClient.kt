@@ -62,6 +62,8 @@ public expect class OpenAiClient(
         threadId: String?,
         turnId: String?,
         windowId: String?,
+        threadSource: String?,
+        turnTrigger: String?,
         turnState: String?,
         onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
     ): Flow<ResponsesStreamEvent>

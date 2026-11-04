@@ -9,6 +9,54 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
 val codexResponsesMetadataSerializationTest by testSuite {
+    test("attribution fields round trip and null fields are omitted") {
+        val metadata = CodexResponsesMetadata(
+            threadId = "thread",
+            windowId = "window",
+            requestKind = CodexResponsesRequestKind.Turn,
+            threadSource = "user",
+            turnTrigger = "user",
+        )
+        val encoded = OpenAiJsonCodec
+            .encodeToJsonElement(CodexResponsesMetadata.serializer(), metadata).jsonObject
+        assertEquals(JsonPrimitive("user"), encoded["thread_source"])
+        assertEquals(JsonPrimitive("user"), encoded["turn_trigger"])
+        assertEquals(metadata, OpenAiJsonCodec.decodeFromJsonElement(CodexResponsesMetadata.serializer(), encoded))
+        val omitted = OpenAiJsonCodec.encodeToJsonElement(
+            CodexResponsesMetadata.serializer(), metadata.copy(threadSource = null, turnTrigger = null),
+        ).jsonObject
+        assertFalse("thread_source" in omitted)
+        assertFalse("turn_trigger" in omitted)
+        val title = metadata.copy(threadSource = "thread_title", turnTrigger = null)
+        val titleJson = OpenAiJsonCodec.encodeToJsonElement(CodexResponsesMetadata.serializer(), title).jsonObject
+        assertEquals(JsonPrimitive("thread_title"), titleJson["thread_source"])
+        assertFalse("turn_trigger" in titleJson)
+        assertEquals(title, OpenAiJsonCodec.decodeFromJsonElement(CodexResponsesMetadata.serializer(), titleJson))
+    }
+
+    test("memory retains attribution while removing only turn identity") {
+        val metadata = CodexResponsesMetadata(
+            installationId = "installation",
+            sessionId = "session",
+            threadId = "thread",
+            turnId = "turn",
+            windowId = "window",
+            requestKind = CodexResponsesRequestKind.Memory,
+            threadSource = "user",
+            turnTrigger = "user",
+        )
+        val encoded = OpenAiJsonCodec
+            .encodeToJsonElement(CodexResponsesMetadata.serializer(), metadata).jsonObject
+        assertEquals(JsonObject(mapOf(
+            "request_kind" to JsonPrimitive("memory"),
+            "thread_source" to JsonPrimitive("user"),
+            "turn_trigger" to JsonPrimitive("user"),
+        )), encoded)
+        val decoded = OpenAiJsonCodec.decodeFromJsonElement(CodexResponsesMetadata.serializer(), encoded)
+        assertEquals("user", decoded.threadSource)
+        assertEquals("user", decoded.turnTrigger)
+    }
+
     test("keeps turn state transport-only") {
         val request = ResponsesApiRequest(
             model = OpenAiModelId("model"),

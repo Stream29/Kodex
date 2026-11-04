@@ -5,6 +5,9 @@ import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeRequest
 import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeResponse
 import io.github.stream29.kodex.openai.CodexRateLimitResetCreditsResponse
 import io.github.stream29.kodex.openai.CodexTokenUsageProfile
+import io.github.stream29.kodex.openai.CodexResponsesMetadata
+import io.github.stream29.kodex.openai.CodexResponsesRequestKind
+import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.openai.CodexResponsesClientMetadata
 import io.github.stream29.kodex.openai.ImageEditRequest
 import io.github.stream29.kodex.openai.ImageGenerationRequest
@@ -226,6 +229,8 @@ private class MockOpenAiClient(
         threadId: String?,
         turnId: String?,
         windowId: String?,
+        threadSource: String?,
+        turnTrigger: String?,
         turnState: String?,
         onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
     ): Flow<ResponsesStreamEvent> =
@@ -250,6 +255,8 @@ private class MockOpenAiClient(
                     threadId = threadId,
                     turnId = turnId,
                     windowId = windowId,
+                    threadSource = threadSource,
+                    turnTrigger = turnTrigger,
                     turnState = turnState,
                 ),
             ),
@@ -280,6 +287,8 @@ private fun mockCodexClientMetadata(
     threadId: String?,
     turnId: String?,
     windowId: String?,
+    threadSource: String?,
+    turnTrigger: String?,
     turnState: String?,
 ): CodexResponsesClientMetadata? {
     if (
@@ -288,7 +297,9 @@ private fun mockCodexClientMetadata(
         threadId == null &&
         turnId == null &&
         windowId == null &&
-        turnState == null
+        turnState == null &&
+        threadSource == null &&
+        turnTrigger == null
     ) {
         return null
     }
@@ -300,6 +311,18 @@ private fun mockCodexClientMetadata(
         threadId = threadId,
         turnId = turnId,
         windowId = windowId,
-        turnMetadata = "mock-turn-metadata",
+        turnMetadata = OpenAiJsonCodec.encodeToString(
+            CodexResponsesMetadata.serializer(),
+            CodexResponsesMetadata(
+                installationId = installationId,
+                sessionId = sessionId,
+                threadId = threadId,
+                turnId = turnId,
+                windowId = windowId,
+                requestKind = CodexResponsesRequestKind.Turn,
+                threadSource = threadSource,
+                turnTrigger = turnTrigger,
+            ),
+        ),
     )
 }

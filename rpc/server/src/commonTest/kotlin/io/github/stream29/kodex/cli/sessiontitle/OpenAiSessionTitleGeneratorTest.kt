@@ -3,6 +3,9 @@ package io.github.stream29.kodex.cli.sessiontitle
 import kotlinx.serialization.json.JsonPrimitive
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.openai.CodexResponsesMetadata
+import io.github.stream29.kodex.openai.CodexResponsesRequestKind
+import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -18,6 +21,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -68,6 +74,17 @@ val openAiSessionTitleGeneratorTest by testSuite {
             SessionTitleGenerationResult.Generated("Add automatic session titles"),
             result,
         )
+        val clientMetadata = assertNotNull(captured.clientMetadata)
+        assertEquals("${clientMetadata.threadId}:0", clientMetadata.windowId)
+        assertNotNull(clientMetadata.turnId)
+        assertNotEquals(clientMetadata.threadId, clientMetadata.turnId)
+        val metadata = OpenAiJsonCodec.decodeFromString(CodexResponsesMetadata.serializer(), clientMetadata.turnMetadata)
+        assertEquals(CodexResponsesRequestKind.Turn, metadata.requestKind)
+        assertEquals("thread_title", metadata.threadSource)
+        assertNull(metadata.turnTrigger)
+        assertEquals(clientMetadata.threadId, metadata.threadId)
+        assertEquals(clientMetadata.turnId, metadata.turnId)
+        assertEquals(clientMetadata.windowId, metadata.windowId)
         assertEquals(OpenAiModelId("title-model"), captured.model)
         assertEquals(false, captured.store)
         assertTrue(captured.tools.isEmpty())
@@ -87,6 +104,11 @@ val openAiSessionTitleGeneratorTest by testSuite {
         assertEquals(false, schema.getValue("additionalProperties").jsonPrimitive.content.toBoolean())
         assertEquals("session_title", captured.text.format?.name)
         assertTrue(captured.instructions.contains("Write the title in the user's locale."))
+        OpenAiSessionTitleGenerator(client).generateTitle(
+            "Another title", OpenAiModelId("title-model"), ReasoningEffort.High,
+        )
+        assertNotEquals(clientMetadata.threadId, captured.clientMetadata?.threadId)
+        assertNotEquals(clientMetadata.turnId, captured.clientMetadata?.turnId)
     }
 
     test("limits request input by Unicode scalar count") {
