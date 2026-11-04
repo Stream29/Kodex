@@ -15,6 +15,7 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.logging.ApplicationLoggingSession
 import io.github.stream29.kodex.utils.logging.initializeLogging
 import io.github.stream29.kodex.utils.osenvironment.processId
 import kotlinx.coroutines.*
@@ -55,6 +56,7 @@ public actual suspend fun runBackendHost(
     var failed: Throwable? = null
     var port = 0
     var published: BackendEndpoint? = null
+    var logging: ApplicationLoggingSession? = null
     var primary: Throwable? = null
     fun reason(failure: Throwable): String {
         val diagnostic = if (failure is CancellationException) failure.cause ?: failure else failure
@@ -83,7 +85,7 @@ public actual suspend fun runBackendHost(
         val password = randomBackendPassword()
         installBackendSignals()
         setBackendWorkingDirectory(home)
-        initializeProcessLogging(home, "Backend-${processId()}")
+        logging = initializeProcessLogging(home, "Backend-${processId()}")
         val control = object : BackendControl {
             override fun status() = buildJsonObject {
                 put("control_protocol", BackendControlProtocol)
@@ -153,6 +155,7 @@ public actual suspend fun runBackendHost(
                             withContext(NonCancellable) {
                                 coreEnded()
                                 failed?.let { reportFailure(it) }
+                                backend.shutdownSessions()
                             }
                         }
                     }
@@ -195,6 +198,7 @@ public actual suspend fun runBackendHost(
                         lifecycle.requestStop()
                     }
                     work.cancelAndJoin()
+                    services?.shutdownSessions()
                     lifecycle.finishStop()
                 }
             }
@@ -210,7 +214,9 @@ public actual suspend fun runBackendHost(
         throw failure
     } finally {
         // Network and services have both closed before the stable lock inode is released.
-        try { instance.close() }
+        try {
+            try { logging?.close() } finally { instance.close() }
+        }
         catch (cleanup: Throwable) {
             val failure = primary ?: failed
             if (failure == null) throw cleanup else if (failure !== cleanup) failure.addSuppressed(cleanup)
@@ -301,7 +307,7 @@ private suspend fun rejectLiveLegacyOwner(home: Path) {
     }
 }
 
-public actual suspend fun initializeProcessLogging(home: Path, processName: String) {
+public actual suspend fun initializeProcessLogging(home: Path, processName: String): ApplicationLoggingSession {
     val directory = Path(home, "log")
     SystemCoroutineFileSystem.createDirectories(directory)
     // Kermit 2.1.0 rolls "<base>-1.log", not "<base>.1.log".
@@ -323,5 +329,5 @@ public actual suspend fun initializeProcessLogging(home: Path, processName: Stri
             SystemCoroutineFileSystem.writeString(startup, "")
         }
     }
-    initializeLogging(home, processName)
+    return initializeLogging(home, processName)
 }

@@ -55,6 +55,83 @@ import kotlin.time.TestTimeSource
 import kotlin.time.Duration.Companion.seconds
 
 val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
+    for (exit in listOf("shutdown", "return", "cancel")) {
+        test("$exit drains active operations before Session storage closes") {
+            runTest {
+                val entered = CompletableDeferred<Unit>()
+                val written = CompletableDeferred<Result<Unit>>()
+                lateinit var binding: BackendSessionBinding
+                val hostJob = launch {
+                    withBackendSessionHost(testScheduler.timeSource, {
+                        InMemoryKodexSessionRepository(testKodexAgentDependencies())
+                    }) { host ->
+                        val index = host.repository().create()
+                        host.keepSessionAlive(index)
+                        binding = host.session(index)
+                        binding.operations.launch(start = CoroutineStart.UNDISPATCHED) {
+                            try {
+                                entered.complete(Unit)
+                                awaitCancellation()
+                            } finally {
+                                withContext(NonCancellable) {
+                                    written.complete(runCatching {
+                                        delay(1)
+                                        assertTrue(binding.session.coroutineContext.job.isActive)
+                                        binding.session.runtime.modify {
+                                            it.initialize(KodexAgentSettings(model = OpenAiModelId("cleanup-model")))
+                                        }
+                                        Unit
+                                    })
+                                }
+                            }
+                        }
+                        if (exit == "cancel") awaitCancellation()
+                        if (exit == "shutdown") {
+                            host.shutdown()
+                            host.shutdown()
+                            assertFailsWith<IllegalStateException> { host.keepSessionAlive(index) }
+                            assertFailsWith<IllegalStateException> { host.repository() }
+                            assertFailsWith<IllegalStateException> { host.session(index) }
+                        }
+                    }
+                }
+                entered.await()
+                if (exit == "cancel") hostJob.cancel()
+                hostJob.join()
+                written.await().getOrThrow()
+                assertTrue(binding.session.coroutineContext.job.isCompleted)
+                assertTrue(binding.inactive.isCompleted)
+            }
+        }
+    }
+    test("concurrent shutdown waits for cleanup and rejects renewal during draining") {
+        runTest {
+            withBackendSessionHost(testScheduler.timeSource, {
+                InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            }) { host ->
+                val index = host.repository().create()
+                host.keepSessionAlive(index)
+                val binding = host.session(index)
+                val cleaning = CompletableDeferred<Unit>()
+                val finish = CompletableDeferred<Unit>()
+                binding.operations.launch(start = CoroutineStart.UNDISPATCHED) {
+                    try { awaitCancellation() }
+                    finally { withContext(NonCancellable) { cleaning.complete(Unit); finish.await() } }
+                }
+                val first = async { host.shutdown() }
+                cleaning.await()
+                assertFailsWith<IllegalStateException> { host.ensureAdmission() }
+                val second = async { host.shutdown() }
+                runCurrent()
+                assertFalse(first.isCompleted)
+                assertFalse(second.isCompleted)
+                assertTrue(binding.session.coroutineContext.job.isActive)
+                finish.complete(Unit)
+                first.await()
+                second.await()
+            }
+        }
+    }
     test("closed backend admission rejects existing callers before owner cancellation") {
         runTest {
             var ready = true

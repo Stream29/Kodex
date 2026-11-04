@@ -149,6 +149,8 @@ public actual class BackendServices internal constructor(
     public actual val settings: BackendGlobalState,
     public actual val notifications: kotlinx.coroutines.flow.Flow<io.github.stream29.kodex.rpc.models.Notification>,
 ) {
+    public actual suspend fun shutdownSessions(): Unit = host.shutdown()
+
     public actual fun register(server: RpcServer) {
         server.registerService(GlobalRpc::class) { global }
         server.registerService(AgentRuntimeRpc::class) { runtime }

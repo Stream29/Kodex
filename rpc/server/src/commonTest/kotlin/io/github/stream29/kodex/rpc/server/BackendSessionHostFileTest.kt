@@ -11,6 +11,13 @@ import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.job
@@ -29,6 +36,53 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 val backendSessionHostFileTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
+    for (exit in listOf("shutdown", "return", "cancel")) {
+        test("$exit preserves file storage until operation cleanup is persisted") {
+            runTest {
+                val root = Path(SystemTemporaryDirectory, "kodex-rpc-shutdown-${Random.nextLong()}")
+                val entered = CompletableDeferred<Unit>()
+                val written = CompletableDeferred<Result<Unit>>()
+                var index = -1
+                try {
+                    val work = backgroundScope.async {
+                        withBackendSessionHost(TestTimeSource(), {
+                            FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+                        }) { host ->
+                            index = host.repository().create()
+                            host.keepSessionAlive(index)
+                            val binding = host.session(index)
+                            binding.operations.launch(start = CoroutineStart.UNDISPATCHED) {
+                                try { entered.complete(Unit); awaitCancellation() }
+                                finally {
+                                    withContext(NonCancellable) {
+                                        written.complete(runCatching {
+                                            binding.session.runtime.modify {
+                                                it.initialize(KodexAgentSettings(model = OpenAiModelId("persisted-cleanup")))
+                                            }
+                                            Unit
+                                        })
+                                    }
+                                }
+                            }
+                            if (exit == "cancel") awaitCancellation()
+                            if (exit == "shutdown") host.shutdown()
+                        }
+                    }
+                    entered.await()
+                    if (exit == "cancel") work.cancelAndJoin() else work.await()
+                    written.await().getOrThrow()
+                    backgroundScope.async {
+                        withBackendSessionHost(TestTimeSource(), {
+                            FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+                        }) { host ->
+                            host.keepSessionAlive(index)
+                            assertEquals(OpenAiModelId("persisted-cleanup"), host.session(index).session.storage.settings[0].model)
+                        }
+                    }.await()
+                } finally { deleteTestTree(root) }
+            }
+        }
+    }
     test("concurrent first file catalog access creates sessions only once under the host owner") {
         runTest {
             backgroundScope.async {

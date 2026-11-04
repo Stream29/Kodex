@@ -3,12 +3,16 @@ plugins {
     id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
     id("kodex.kmp-frontend")
+    id("kodex.kmp-tests")
 }
 
 kotlin {
 sourceSets.named("specMain").dependencies {
     api(libs.kotlinx.rpc.krpc.core)
     api(libs.ktor.websockets)
+}
+sourceSets.commonTest.dependencies {
+    implementation(libs.kotlinx.coroutines.test)
 }
 sourceSets.commonMain.dependencies {
     implementation(libs.kotlinx.coroutines.core)

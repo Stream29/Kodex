@@ -15,7 +15,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlin.logging)
             implementation(libs.kermit.core)
-            implementation(libs.kermit.io)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.core)

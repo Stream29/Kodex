@@ -35,4 +35,4 @@ public expect suspend fun connectBackend(home: Path, port: Int): BackendEndpoint
  * Independent rolling writers for each process, with bounded inactive history.
  * Never deletes live process groups, legacy Kodex logs or names outside this owner's pattern.
  */
-public expect suspend fun initializeProcessLogging(home: Path, processName: String)
+public expect suspend fun initializeProcessLogging(home: Path, processName: String): io.github.stream29.kodex.utils.logging.ApplicationLoggingSession

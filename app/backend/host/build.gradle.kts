@@ -13,6 +13,7 @@ kotlin {
             api(project(":app-backend-daemon"))
             api(project(":openai-client"))
             api(project(":utils-os-environment"))
+            api(project(":utils-logging-backend-file"))
             api(libs.kotlinx.io.core)
         }
         commonMain.dependencies {
@@ -23,7 +24,6 @@ kotlin {
             implementation(project(":app-backend-settings"))
             implementation(project(":hook-notification"))
             implementation(project(":utils-kotlinx-io-coroutines-system"))
-            implementation(project(":utils-logging-backend-file"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlin.logging)

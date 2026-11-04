@@ -1,10 +1,18 @@
 package io.github.stream29.kodex.utils.logging
 
+import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.oshai.kotlinlogging.KMarkerFactory
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.oshai.kotlinlogging.Level
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import co.touchlab.kermit.Severity
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.io.RawSink
+import kotlinx.io.files.SystemFileSystem
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -22,12 +30,85 @@ private suspend fun temporaryKodexHome(): Path =
         SystemCoroutineFileSystem.createDirectories(it)
     }
 
-val applicationLoggingTest by testSuite {
-    // RollingFileLogWriter owns its file for the test process lifetime, so Windows
-    // cannot remove it during fixture teardown. Keep it in Gradle's build output.
+val applicationLoggingTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("logging in runBlocking completion callbacks never reenters its event loop") {
+        val home = temporaryKodexHome()
+        val writer = BackgroundRollingFileLogWriter(rollingFileLogWriterConfig(home))
+        try {
+            runBlocking {
+                var dispatched = false
+                val queued = launch { dispatched = true }
+                val completed = Job()
+                completed.invokeOnCompletion {
+                    repeat(20_000) { writer.log(Severity.Info, "completion-$it", "test", null) }
+                    assertFalse(dispatched, "Logging dispatched queued work inside a completion callback.")
+                }
+                completed.complete()
+                assertFalse(dispatched)
+                queued.join()
+            }
+        } finally { writer.close() }
+    }
+    test("close drains queued events to disk and is repeatable") {
+        val home = temporaryKodexHome()
+        val session = initializeLogging(home)
+        val logger = KotlinLogging.logger("drain")
+        repeat(2_000) { logger.info { "drain-event-$it" } }
+        session.close()
+        session.close()
+        val text = SystemCoroutineFileSystem.readString(Path(home, "log/Kodex.log"))
+        assertEquals(2_000, text.lineSequence().count { "drain-event-" in it })
+        assertTrue(text.contains("drain-event-1999"))
+    }
+    test("rolling retains five files with the existing numeric sibling names") {
+        val home = temporaryKodexHome()
+        val writer = BackgroundRollingFileLogWriter(RollingLogConfig("Backend-123", home, 128, 5))
+        repeat(20) { writer.log(Severity.Info, "event-$it " + "x".repeat(180), "roll", null) }
+        writer.close()
+        assertEquals(setOf("Backend-123.log") + (1..4).map { "Backend-123-$it.log" },
+            SystemCoroutineFileSystem.list(home).map { it.name }.toSet())
+        assertTrue(SystemCoroutineFileSystem.readString(Path(home, "Backend-123.log")).contains("event-19"))
+        assertTrue(SystemCoroutineFileSystem.readString(Path(home, "Backend-123-4.log")).contains("event-15"))
+    }
+    test("sink failure cannot strand log producers or close") {
+        val home = temporaryKodexHome()
+        SystemCoroutineFileSystem.createDirectories(Path(home, "Kodex.log"))
+        val writer = BackgroundRollingFileLogWriter(rollingFileLogWriterConfig(home))
+        repeat(2_000) { writer.log(Severity.Info, "failed-sink-$it", "test", null) }
+        withTimeout(3.seconds) { writer.close(); writer.close() }
+        writer.log(Severity.Info, "after-close", "test", null)
+    }
+    test("close returns within its deadline when background flush is stalled") {
+        val home = temporaryKodexHome()
+        val flushing = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val closed = CompletableDeferred<Unit>()
+        val writer = BackgroundRollingFileLogWriter(rollingFileLogWriterConfig(home)) { path ->
+            val sink = SystemFileSystem.sink(path, append = true)
+            object : RawSink by sink {
+                override fun flush() {
+                    flushing.complete(Unit)
+                    runBlocking { release.await() }
+                    sink.flush()
+                }
+                override fun close() {
+                    try { sink.close() } finally { closed.complete(Unit) }
+                }
+            }
+        }
+        try {
+            writer.log(Severity.Info, "stalled flush", "test", null)
+            withTimeout(3.seconds) { flushing.await() }
+            withTimeout(3.seconds) { writer.close() }
+            assertFalse(closed.isCompleted)
+        } finally {
+            release.complete(Unit)
+            withTimeout(3.seconds) { closed.await() }
+        }
+    }
     testFixture { temporaryKodexHome() } asParameterForEach {
         test("initializes direct logging and writes mapped events to the rolling file") { kodexHome ->
-            initializeLogging(kodexHome)
+            val session = initializeLogging(kodexHome)
 
             val config = rollingFileLogWriterConfig(Path(kodexHome, LogDirectoryName))
             assertEquals(LogFileBaseName, config.logFileName)
@@ -63,6 +144,7 @@ val applicationLoggingTest by testSuite {
                 payload = mapOf("server" to "local")
             }
 
+            session.close()
             val logFile = Path(kodexHome, "$LogDirectoryName/$LogFileBaseName.log")
             val text = withContext(Dispatchers.Default.limitedParallelism(1)) {
                 withTimeout(5.seconds) {

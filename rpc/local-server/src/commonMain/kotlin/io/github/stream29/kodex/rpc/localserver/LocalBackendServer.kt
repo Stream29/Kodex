@@ -26,6 +26,10 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import io.ktor.websocket.close
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -52,6 +56,9 @@ public actual suspend fun <R> withLocalBackendServer(
     browserAccess: LocalBrowserAccess?,
     block: suspend CoroutineScope.(Int) -> R,
 ): R = coroutineScope {
+    val connections = Mutex()
+    val transports = mutableSetOf<WebSocketRpcTransport>()
+    var stopping = false
     val grants = BrowserGrants()
     val expiry = launch {
         while (true) { delay(1_000); grants.expire() }
@@ -67,11 +74,20 @@ public actual suspend fun <R> withLocalBackendServer(
             request.headers.getAll(HttpHeaders.Host)?.singleOrNull() == "127.0.0.1:${request.local.localPort}"
         suspend fun DefaultWebSocketServerSession.serveBusiness() {
             val transport = WebSocketRpcTransport(this, coroutineContext)
-            val server = object : KrpcServer(rpcServerConfig { serialization { json() } }, transport) {}
             try {
+                val admitted = connections.withLock {
+                    if (stopping) false else { transports.add(transport); true }
+                }
+                if (!admitted) return
+                val server = object : KrpcServer(rpcServerConfig { serialization { json() } }, transport) {}
                 server.registerServices()
                 transport.awaitClosed()
-            } finally { withContext(NonCancellable) { transport.shutdown() } }
+            } finally {
+                withContext(NonCancellable) {
+                    try { transport.shutdown() }
+                    finally { connections.withLock { transports.remove(transport) } }
+                }
+            }
         }
         suspend fun ApplicationCall.authorized(): Boolean {
             if (request.headers.contains(HttpHeaders.Origin) || !browserHostAllowed() ||
@@ -264,8 +280,16 @@ public actual suspend fun <R> withLocalBackendServer(
         throw failure
     } finally {
         withContext(NonCancellable) { expiry.cancelAndJoin() }
-        try { withContext(NonCancellable) { engine.stopSuspend() } }
-        catch (cleanup: Throwable) { if (primary == null) throw cleanup else primary.addSuppressed(cleanup) }
+        try {
+            withContext(NonCancellable) {
+                val active = connections.withLock { stopping = true; transports.toList() }
+                try {
+                    coroutineScope { active.map { async { it.shutdown() } }.awaitAll() }
+                } finally {
+                    engine.stopSuspend(gracePeriodMillis = 0, timeoutMillis = 2_000)
+                }
+            }
+        } catch (cleanup: Throwable) { if (primary == null) throw cleanup else primary.addSuppressed(cleanup) }
     }
 }
 

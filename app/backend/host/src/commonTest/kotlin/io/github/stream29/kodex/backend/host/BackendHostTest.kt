@@ -216,6 +216,39 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
             assertEquals("x", SystemCoroutineFileSystem.readString(marker))
         }
     }
+    test("manual stop drains an active turn with a connected client and flushes its log") {
+        val started = CompletableDeferred<Unit>()
+        val cleaned = CompletableDeferred<Unit>()
+        withHost(stream = {
+            flow {
+                started.complete(Unit)
+                try { awaitCancellation() }
+                finally { withContext(NonCancellable) { delay(50); cleaned.complete(Unit) } }
+            }
+        }) { home, endpoint, stopped ->
+            withLocalRpcClient(home, endpoint) { connection ->
+                val rpc = RpcServices(RestoringRpcClient(connection))
+                val model = withTimeout(10.seconds) { rpc.global.getModelsFlow().first { it.isNotEmpty() }.first().slug }
+                val defaults = rpc.global.getSettings()
+                assertTrue(rpc.global.compareAndSetSettings(
+                    defaults, defaults.copy(newSession = defaults.newSession.copy(model = model)),
+                ))
+                val index = rpc.global.createSession(home)
+                rpc.global.keepSessionAlive(index)
+                rpc.runtime.appendUserMessage(index, listOf(ContentItem.InputText("shutdown fixture")))
+                val waiter = launch { runCatching { rpc.runtime.resume(index) } }
+                withTimeout(10.seconds) { started.await() }
+                backendControlRequest(endpoint, "stop")
+                withTimeout(10.seconds) { stopped.join() }
+                assertTrue(cleaned.isCompleted)
+                assertNull(BackendInstance.discover(home))
+                assertNull(BackendInstance.readRecord(home)?.failureReason)
+                val log = SystemCoroutineFileSystem.readString(Path(home, "log/Backend-${processId()}.log"))
+                assertTrue(!log.contains("AgentSession storage is closed."), log)
+                waiter.cancelAndJoin()
+            }
+        }
+    }
     test("manual stop acceptance eventually releases the lock") {
         withHost { home, endpoint, stopped ->
             backendControlRequest(endpoint, "stop")

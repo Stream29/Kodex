@@ -13,6 +13,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -50,7 +51,9 @@ internal suspend fun <R> withBackendSessionHost(
     checkAdmission: () -> Unit = {},
     block: suspend CoroutineScope.(BackendSessionHost) -> R,
 ): R = coroutineScope {
-    val owner = supervisorChildScope()
+    // Parent cancellation reaches the callback first; storage stays live until
+    // accepted operations have completed their NonCancellable cleanup.
+    val owner = CoroutineScope(currentCoroutineContext() + SupervisorJob())
     val backgroundFailure = CompletableDeferred<Throwable>()
     val monitor = launch { throw backgroundFailure.await() }
     var host: BackendSessionHost? = null
@@ -65,7 +68,7 @@ internal suspend fun <R> withBackendSessionHost(
         monitor.cancel()
         try {
             withContext(NonCancellable) {
-                owner.cancelAndJoin()
+                try { host?.shutdown() } finally { owner.cancelAndJoin() }
                 host?.completeDeactivation()
                 monitor.join()
             }
@@ -89,16 +92,18 @@ public actual class BackendSessionHost internal constructor(
     private val backendRenewalInterval: () -> Duration,
     private val checkAdmission: () -> Unit,
 ) {
+    @kotlin.concurrent.Volatile
+    private var stopping = false
     private val lifecycle = Mutex()
     private val acquisition = Mutex()
     private var acquiredRepository: KodexRootSessionRepository? = null
 
     public actual suspend fun repository(): KodexRootSessionRepository = inBackend {
         acquisition.withLock {
-            owner.ensureActive()
+            ensureAdmission()
             acquiredRepository ?: owner.createRepository().also { repository ->
                 currentCoroutineContext().ensureActive()
-                owner.ensureActive()
+                ensureAdmission()
                 repository.coroutineContext.ensureActive()
                 acquiredRepository = repository
             }
@@ -110,12 +115,13 @@ public actual class BackendSessionHost internal constructor(
     private val renewals = mutableMapOf<Int, Renewal>()
     public actual fun ensureAdmission() {
         owner.ensureActive()
+        check(!stopping) { "Backend Session host is stopping." }
         checkAdmission()
     }
 
     public actual suspend fun keepSessionAlive(index: Int): Unit = inBackend {
         lifecycle.withLock {
-            owner.ensureActive()
+            ensureAdmission()
             val repository = repository()
             if (index !in repository.entries.value) throw SessionNotFound()
             val previous = renewals[index]
@@ -164,7 +170,7 @@ public actual class BackendSessionHost internal constructor(
 
     public actual suspend fun deleteSession(index: Int): Boolean = inBackend {
         lifecycle.withLock {
-            owner.ensureActive()
+            ensureAdmission()
             val repository = repository()
             if (index !in repository.entries.value) return@withLock false
             renewals[index]?.let { closeLocked(index, it) }
@@ -204,7 +210,7 @@ public actual class BackendSessionHost internal constructor(
     }
 
     private fun activeLocked(index: Int): Renewal {
-        owner.ensureActive()
+        ensureAdmission()
         val renewal = renewals[index] ?: throw SessionNotActive()
         if (!renewal.binding.session.coroutineContext.job.isActive) throw SessionNotActive()
         return renewal
@@ -284,6 +290,13 @@ public actual class BackendSessionHost internal constructor(
             throw cancelled
         } catch (failure: Throwable) {
             backgroundFailure.complete(failure)
+        }
+    }
+
+    public actual suspend fun shutdown(): Unit = withContext(NonCancellable) {
+        lifecycle.withLock {
+            stopping = true
+            for ((index, renewal) in renewals.toList()) closeLocked(index, renewal)
         }
     }
 

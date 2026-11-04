@@ -58,6 +58,9 @@ public expect class BackendSessionHost {
     /** Global accepted work belongs to the host, not its RPC waiter. */
     public suspend fun <R> inBackend(block: suspend () -> R): R
 
+    /** Closes admission and drains operations before closing their Session storage. Idempotent. */
+    public suspend fun shutdown()
+
     /** Coordinates delete with activation/expiry; missing entries remain false. */
     public suspend fun deleteSession(index: Int): Boolean
 }

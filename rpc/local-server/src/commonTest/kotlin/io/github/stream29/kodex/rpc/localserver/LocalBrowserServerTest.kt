@@ -24,6 +24,22 @@ private const val Instance = "local-browser-server-test"
 private val Secret = "private-local-test-password-".repeat(3)
 
 val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("server teardown closes live business connections before stopping the engine") {
+        val http = HttpClient { install(WebSockets) }
+        val control = Control()
+        val registered = CompletableDeferred<Unit>()
+        lateinit var socket: DefaultClientWebSocketSession
+        try {
+            withTimeout(8.seconds) {
+                withLocalBackendServer(Secret, Instance, control, { registered.complete(Unit) }) { port ->
+                    socket = http.webSocketSession("ws://127.0.0.1:$port/rpc") { nativeCredentials() }
+                    registered.await()
+                }
+            }
+            withTimeout(3.seconds) { socket.coroutineContext.job.join() }
+            assertTrue(socket.coroutineContext.job.isCompleted)
+        } finally { http.close() }
+    }
     test("Native grant allows only scoped business access and revocation closes its transport") {
         withServer(origins = emptySet()) { harness ->
             val endpoint = BackendEndpoint(Instance, 123, harness.port, Secret, "test")

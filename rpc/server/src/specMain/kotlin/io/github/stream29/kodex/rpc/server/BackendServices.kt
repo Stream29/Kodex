@@ -67,5 +67,8 @@ public expect class BackendServices {
     public val settings: BackendGlobalState
     public val notifications: Flow<Notification>
 
+    /** Drains accepted Session operations before network teardown. */
+    public suspend fun shutdownSessions(): Unit
+
     public fun register(server: RpcServer): Unit
 }

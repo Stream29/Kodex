@@ -4,12 +4,19 @@ package io.github.stream29.kodex.rpc.websocket
 
 import io.ktor.websocket.Frame
 import io.ktor.websocket.WebSocketSession
-import io.ktor.websocket.close
+import io.ktor.websocket.CloseReason
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
@@ -22,6 +29,8 @@ public actual class WebSocketRpcTransport actual constructor(
     context: CoroutineContext,
 ) : KrpcTransport {
     private val owner = SupervisorJob(context.job)
+    private val shutdownMutex = Mutex()
+    private var shutdownFinished = false
     private val closed = CompletableDeferred<Unit>()
     @kotlin.concurrent.Volatile
     public actual var alive: Boolean = true
@@ -51,8 +60,25 @@ public actual class WebSocketRpcTransport actual constructor(
         } catch (failure: Throwable) { lost(); throw failure }
     }
     public actual suspend fun awaitClosed() { closed.await() }
-    public actual suspend fun shutdown() {
-        lost()
-        try { socket.close() } finally { owner.cancelAndJoin() }
+    public actual suspend fun shutdown(): Unit = withContext(NonCancellable) {
+        shutdownMutex.withLock {
+            if (shutdownFinished) return@withLock
+            lost()
+            try {
+                val graceful = withTimeoutOrNull(1.seconds) {
+                    try {
+                        // Ktor close() swallows send/flush failures, including cancellation.
+                        socket.send(Frame.Close(CloseReason(CloseReason.Codes.NORMAL, "")))
+                        socket.flush()
+                        true
+                    }
+                    catch (_: Exception) { false }
+                }
+                if (graceful != true) runCatching { socket.cancel() }
+            } finally {
+                withTimeoutOrNull(1.seconds) { owner.cancelAndJoin() }
+                shutdownFinished = true
+            }
+        }
     }
 }
