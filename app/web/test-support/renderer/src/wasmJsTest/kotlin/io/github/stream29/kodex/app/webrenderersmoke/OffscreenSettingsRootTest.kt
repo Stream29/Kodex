@@ -29,6 +29,7 @@ import io.github.stream29.kodex.app.sessiontitlesettings.createSessionTitleSetti
 import io.github.stream29.kodex.app.settings.*
 import io.github.stream29.kodex.app.settings.contract.*
 import io.github.stream29.kodex.app.ui.UiText
+import io.github.stream29.kodex.app.ui.UiAction
 import io.github.stream29.kodex.app.ui.UiTextRole
 import io.github.stream29.kodex.app.ui.UiChoiceOption
 import io.github.stream29.kodex.app.ui.SettingsRenderer
@@ -46,6 +47,176 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlin.test.*
 
 val offscreenSettingsRootTest by testSuite {
+    test("nested Settings modal pages its body and Escape restores only its trigger") { offscreenTest {
+        var modal by mutableStateOf(false)
+        var dismissals = 0
+        val scene = OffscreenScene.create(width = 900, height = 600) {
+            val root = rememberComposeSettingsRootRenderer()
+            root.Frame(SettingsPage.General, listOf(SettingsNavigationEntry(SettingsPage.General, "General")),
+                {}, { dismissals++ }, {}, {
+                    UiAction("Open nested modal", { modal = true })
+                })
+            if (modal) root.Modal(SettingsModalFrame.ContextSource, "Nested modal", { modal = false }) {
+                UiAction("Safe close", { modal = false }, autoFocus = true)
+                repeat(50) { UiText("Long modal line $it") }
+            }
+        }
+        fun scroll() = scene.nodes().single {
+            it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Settings modal content") == true
+        }.config[SemanticsProperties.VerticalScrollAxisRange]
+        try {
+            scene.settle { scene.hasText("Open nested modal") }
+            scene.click("Open nested modal")
+            scene.settle { scene.overlayTextFocused("Safe close") }
+            assertEquals(0f, scroll().value())
+            scene.key(Key.PageDown)
+            scene.settle("modal PageDown") { scroll().value() > 0f }
+            scene.key(Key.PageUp)
+            scene.settle("modal PageUp") { scroll().value() == 0f }
+            scene.escape()
+            scene.settle { !scene.hasText("Safe close") && scene.overlayTextFocused("Open nested modal") }
+            assertEquals(0, dismissals)
+            scene.escape()
+            scene.settle { dismissals == 1 }
+        } finally { scene.close() }
+    } }
+
+    test("choice removal disable and field replacement reject retained option callbacks") { offscreenTest {
+        val options = mutableStateOf(listOf(UiChoiceOption("one", "One"), UiChoiceOption("two", "Two")))
+        val enabled = mutableStateOf(true)
+        val field = mutableStateOf("original")
+        val commands = mutableListOf<String>()
+        val scene = OffscreenScene.create {
+            rememberComposeSettingsRootRenderer().fields.preferences.Choice(
+                field.value, "Choice", options.value, "one", commands::add, enabled.value, null)
+        }
+        fun retainedTwo() = assertNotNull(scene.nodes().first {
+            it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Choice: Two") == true
+        }.config.getOrNull(SemanticsActions.OnClick)?.action)
+        try {
+            scene.settle { scene.hasDescription("Choice: One") }
+            scene.clickDescription("Choice: One")
+            scene.settle { scene.hasDescription("Choice: Two") }
+            val removed = retainedTwo()
+            options.value = options.value.take(1)
+            scene.settle { !scene.hasDescription("Choice: Two") }
+            removed()
+            assertTrue(commands.isEmpty())
+            scene.escape()
+            scene.settle { scene.nodes().none { it.config.getOrNull(SemanticsProperties.Selected) != null } }
+            options.value = listOf(UiChoiceOption("one", "One"), UiChoiceOption("two", "Two"))
+            scene.settle { true }
+            scene.clickDescription("Choice: One")
+            scene.settle { scene.hasDescription("Choice: Two") }
+            val disabled = retainedTwo()
+            enabled.value = false
+            scene.settle { !scene.hasDescription("Choice: Two") }
+            disabled()
+            assertTrue(commands.isEmpty())
+            enabled.value = true
+            scene.settle { true }
+            scene.clickDescription("Choice: One")
+            scene.settle { scene.hasDescription("Choice: Two") }
+            val replaced = retainedTwo()
+            field.value = "replacement"
+            scene.settle { !scene.hasDescription("Choice: Two") }
+            replaced()
+            assertTrue(commands.isEmpty())
+            scene.key(Key.Tab)
+            scene.key(Key.Enter)
+            scene.settle { scene.hasDescription("Choice: Two") }
+        } finally { scene.close() }
+    } }
+
+    test("Settings navigation uses Tab and spatial traversal across all seven pages") { settingsRootScene { fixture ->
+        val scene = OffscreenScene.create(width = 1024, height = 768) {
+            SettingsContent(fixture.root, rememberComposeSettingsRootRenderer(), { fixture.dismissals++ }, {})
+        }
+        fun navigationFocused(page: SettingsPage) = scene.nodes().any {
+            it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Settings page ${page.name}") == true &&
+                it.config.getOrNull(SemanticsProperties.Focused) == true
+        }
+        try {
+            scene.settle { navigationFocused(SettingsPage.General) }
+            for (page in SettingsPage.entries.drop(1)) {
+                scene.key(Key.DirectionDown)
+                scene.settle { navigationFocused(page) }
+                scene.key(Key.Enter)
+                scene.settle { scene.hasDescription("Settings content ${page.name}") }
+                scene.key(Key.DirectionRight)
+                scene.settle { !navigationFocused(page) }
+                var lefts = 0
+                while (SettingsPage.entries.none(::navigationFocused) && lefts++ < 12) {
+                    scene.key(Key.DirectionLeft)
+                    scene.settle { true }
+                }
+                assertTrue(SettingsPage.entries.any(::navigationFocused),
+                    "Left returns to Settings navigation from $page; focused=" + scene.nodes().filter {
+                        it.config.getOrNull(SemanticsProperties.Focused) == true
+                    }.map { it.config.toString() })
+                var tabs = 0
+                while (!navigationFocused(page) && tabs++ < SettingsPage.entries.size) {
+                    val current = SettingsPage.entries.indexOfFirst(::navigationFocused)
+                    scene.key(Key.Tab, shift = current > SettingsPage.entries.indexOf(page))
+                    scene.settle { true }
+                }
+                assertTrue(navigationFocused(page), "Tab returns to the selected $page navigation entry")
+            }
+            scene.key(Key.DirectionUp)
+            scene.settle { navigationFocused(SettingsPage.CurrentSession) }
+            scene.key(Key.Tab, shift = true)
+            scene.settle { navigationFocused(SettingsPage.Hooks) }
+            assertEquals(0, fixture.dismissals)
+        } finally { scene.close() }
+    } }
+
+    for (selectedKey in listOf("two", "missing")) {
+        test("nested choice initially focuses selected or first and restores trigger selected=$selectedKey") { offscreenTest {
+            var dismissals = 0
+            val commands = mutableListOf<String>()
+            val scene = OffscreenScene.create(width = 900, height = 600) {
+                val root = rememberComposeSettingsRootRenderer()
+                root.Frame(SettingsPage.General,
+                    listOf(SettingsNavigationEntry(SettingsPage.General, "General")), {}, { dismissals++ }, {}, {
+                        root.fields.preferences.Choice("choice", "Choice",
+                            listOf(UiChoiceOption("one", "One"), UiChoiceOption("two", "Two")),
+                            selectedKey, commands::add, true, null)
+                    })
+            }
+            fun optionFocused(label: String) = scene.nodes().any {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Choice: $label") == true &&
+                    it.config.getOrNull(SemanticsProperties.Selected) != null &&
+                    it.config.getOrNull(SemanticsProperties.Focused) == true
+            }
+            fun triggerFocused() = scene.nodes().any {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Choice: ${if (selectedKey == "two") "Two" else "missing"}") == true &&
+                    it.config.getOrNull(SemanticsProperties.Selected) == null &&
+                    it.config.getOrNull(SemanticsProperties.Focused) == true
+            }
+            try {
+                scene.settle { scene.hasText("Settings") }
+                scene.clickDescription("Choice: ${if (selectedKey == "two") "Two" else "missing"}")
+                scene.settle("initial choice focus") { optionFocused(if (selectedKey == "two") "Two" else "One") }
+                scene.key(Key.Tab, shift = selectedKey == "two")
+                scene.settle { optionFocused(if (selectedKey == "two") "One" else "Two") }
+                scene.escape()
+                scene.settle("dropdown dismissal restores trigger") { !scene.hasText("One") && triggerFocused() }
+                assertEquals(0, dismissals)
+                assertTrue(commands.isEmpty())
+                scene.key(Key.Enter)
+                scene.settle { optionFocused(if (selectedKey == "two") "Two" else "One") }
+                scene.key(Key.DirectionDown)
+                scene.key(Key.DirectionUp)
+                scene.settle { optionFocused(if (selectedKey == "two") "Two" else "One") }
+                scene.key(Key.Spacebar)
+                scene.settle("selection restores trigger") { commands.size == 1 && triggerFocused() }
+                assertEquals(listOf(if (selectedKey == "two") "two" else "one"), commands)
+                assertEquals(0, dismissals)
+                scene.escape()
+                scene.settle { dismissals == 1 }
+            } finally { scene.close() }
+        } }
+    }
     for (dark in listOf(false, true)) {
         for (fontScale in listOf(1f, 1.5f)) {
             test("compact choice focus is visible and commits once dark=$dark font=$fontScale") { offscreenTest {

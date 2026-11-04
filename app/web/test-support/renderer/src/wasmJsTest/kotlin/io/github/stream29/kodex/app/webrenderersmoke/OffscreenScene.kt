@@ -45,7 +45,10 @@ internal class OffscreenScene private constructor(
 ) : AutoCloseable {
     private var frame = 0L
     private fun checkFailures() {
-        if (failures.isNotEmpty()) throw AssertionError("Offscreen composition failed", failures.removeAt(0))
+        if (failures.isNotEmpty()) {
+            val failure = failures.removeAt(0)
+            throw AssertionError("Offscreen composition failed: ${failure.stackTraceToString()}", failure)
+        }
     }
     fun advance() {
         checkFailures()
@@ -67,13 +70,23 @@ internal class OffscreenScene private constructor(
         } finally { image.close() }
     }
 
-    suspend fun settle(label: String = "scene condition", until: () -> Boolean) {
+    suspend fun settle(label: String = "scene condition", waitForIdle: Boolean = true, until: () -> Boolean) {
         try {
             withTimeout(10_000) {
-                do { advance(); delay(1) } while (
-                    !until() || Snapshot.current.hasPendingChanges() ||
-                        Snapshot.isApplyObserverNotificationPending || scene.hasInvalidations()
-                )
+                var matchingFrames = 0
+                var previousSemantics: String? = null
+                do {
+                    advance()
+                    delay(1)
+                    val waitingForIdle = waitForIdle && (Snapshot.current.hasPendingChanges() ||
+                        Snapshot.isApplyObserverNotificationPending || scene.hasInvalidations())
+                    val semantics = if (waitForIdle) null else nodes().joinToString("\n") {
+                        "${it.id} ${it.boundsInWindow} ${it.config}"
+                    }
+                    val stable = waitForIdle || semantics == previousSemantics
+                    matchingFrames = if (until() && !waitingForIdle && stable) matchingFrames + 1 else 0
+                    previousSemantics = semantics
+                } while (matchingFrames < if (waitForIdle) 1 else 12)
             }
         } catch (failure: TimeoutCancellationException) {
             val text = nodes().flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty() }

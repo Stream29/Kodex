@@ -18,12 +18,18 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import io.github.stream29.kodex.app.ui.UiTheme
+import io.github.stream29.kodex.cli.patch.*
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Density
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.*
 import io.github.stream29.kodex.app.history.contract.*
+import io.github.stream29.kodex.app.ui.compose.rememberComposeHistoryItemRenderer
+import kotlin.time.Duration.Companion.seconds
 import io.github.stream29.kodex.app.ui.compose.rememberComposeHistoryContentRenderer
 import io.github.stream29.kodex.cli.history.*
 import io.github.stream29.kodex.openai.*
@@ -42,6 +48,57 @@ import kotlin.math.abs
 private val emptyHistoryArguments = JsonObject(emptyMap())
 
 val offscreenHistoryEventsTest by testSuite {
+    for (dark in listOf(false, true)) for (scale in listOf(1f, 1.5f)) {
+        test("history headings escape button labels dark=$dark scale=$scale") { offscreenTest {
+            val scheme = if (dark) darkColorScheme() else lightColorScheme()
+            val scene = OffscreenScene.create(width = 360, height = 1600) {
+                UiTheme {
+                    MaterialTheme(colorScheme = scheme) {
+                        CompositionLocalProvider(LocalDensity provides Density(1f, scale)) {
+                            Column {
+                                val renderer = rememberComposeHistoryContentRenderer()
+                                renderer.Heading("Outside heading", HistoryTextStyle.Bold)
+                                renderer.Expandable("Inside heading", "typography", HistoryTextStyle.Bold) {
+                                    renderer.Text("Expanded body", HistoryTextStyle.Normal)
+                                }
+                                renderer.Tool("Tool heading", "inspect", "succeeded", "tool", HistoryTextStyle.Normal, null) {
+                                    it.Section("Section heading") { it.Text("Section body", HistoryTextStyle.Normal) }
+                                }
+                                TextButton(onClick = {}) {
+                                    rememberComposeHistoryItemRenderer().TurnMarker(2.seconds)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            try {
+                fun check(value: String, weight: FontWeight) {
+                    val layouts = mutableListOf<TextLayoutResult>()
+                    assertTrue(assertNotNull(scene.text(value).config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
+                    val actual = layouts.single().layoutInput.style
+                    assertEquals(16.sp, actual.fontSize, value)
+                    assertEquals(24.sp, actual.lineHeight, value)
+                    assertEquals(weight, actual.fontWeight, value)
+                }
+                scene.settle { scene.hasText("Inside heading") }
+                check("Outside heading", FontWeight.Bold)
+                check("Inside heading", FontWeight.Bold)
+                check("Worked for 2s", FontWeight.Normal)
+                scene.clickDescription("History disclosure: Inside heading")
+                scene.settle { scene.hasText("Expanded body") }
+                check("Inside heading", FontWeight.Bold)
+                check("Expanded body", FontWeight.Normal)
+                scene.clickDescription("History tool: Tool heading")
+                scene.settle { scene.hasText("Section heading") }
+                check("Section heading", FontWeight.Normal)
+                scene.click("Section heading")
+                scene.settle { scene.hasText("Section body") }
+                check("Section body", FontWeight.Normal)
+            } finally { scene.close() }
+        } }
+    }
+
     for (width in listOf(180, 360)) for (scale in listOf(1f, 1.5f)) for (pending in listOf(false, true)) {
         test("MCP typed JSON preserves fields and wraps width=$width scale=$scale pending=$pending") { offscreenTest {
             val payload = "漢字 " + "preserve ".repeat(23)
@@ -660,11 +717,104 @@ val offscreenHistoryEventsTest by testSuite {
         } finally { scene.close() }
     } }
 
+    for (width in listOf(180, 800)) for (scale in listOf(1f, 1.5f))
+        for (dark in listOf(false, true)) for (status in listOf("running", "completed", "failed")) {
+        test("patch actual typography roles width=$width scale=$scale dark=$dark status=$status") { offscreenTest {
+            val path = "目录/" + "long-path/".repeat(20) + "漢字-café.txt"
+            val diff = Patch("", listOf(UpdateFileHunk(path, chunks = listOf(
+                UpdateFileChunk(oldLines = listOf("old α"), newLines = listOf("new 漢字")),
+            ))), workdir = "/workspace/目录", environmentId = "环境")
+            val stable = StablePatchToolEvent("styles", diff = diff, result =
+                if (status == "failed") StablePatchToolExecutionResult.Failure("context 不匹配")
+                else StablePatchToolExecutionResult.Success(PatchApplyResult(
+                    PatchAffectedPaths(emptyList(), listOf(path), emptyList()))))
+            val presentation = if (status == "running") diff.toPendingPatchPresentation()
+                else stable.toStablePatchPresentation()
+            val scheme = if (dark) darkColorScheme() else lightColorScheme()
+            var bodyFamily: FontFamily? = null
+            val scene = OffscreenScene.create(width = width, height = 2400) {
+                UiTheme {
+                    MaterialTheme(colorScheme = scheme) {
+                        bodyFamily = MaterialTheme.typography.bodyMedium.fontFamily
+                        CompositionLocalProvider(LocalDensity provides Density(1f, scale)) {
+                            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                                val renderer = rememberComposeHistoryContentRenderer()
+                                if (status == "running") HistoryEventContent(PendingPatchToolEvent("styles", diff = diff), renderer)
+                                else HistoryEventContent(stable, renderer)
+                            }
+                        }
+                    }
+                }
+            }
+            try {
+                fun layout(value: String): TextLayoutResult {
+                    val layouts = mutableListOf<TextLayoutResult>()
+                    assertTrue(assertNotNull(scene.text(value).config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
+                    return layouts.single()
+                }
+                fun check(value: String, size: Int, height: Int, weight: FontWeight,
+                          mono: Boolean, color: androidx.compose.ui.graphics.Color) {
+                    val actual = layout(value).layoutInput.style
+                    assertEquals(size.sp, actual.fontSize, value)
+                    assertEquals(height.sp, actual.lineHeight, value)
+                    assertEquals(weight, actual.fontWeight, value)
+                    assertEquals(if (mono) FontFamily.Monospace else bodyFamily, actual.fontFamily, value)
+                    assertEquals(color, actual.color, value)
+                }
+                scene.settle { scene.hasDescription("History tool: ${presentation.header}") }
+                val titleColor = when (status) {
+                    "running" -> scheme.tertiary
+                    "failed" -> scheme.error
+                    else -> scheme.onSurface
+                }
+                check(presentation.header, 16, 24, FontWeight.SemiBold, false, titleColor)
+                val collapsed = layout(presentation.header).layoutInput.style
+                scene.clickDescription("History tool: ${presentation.header}")
+                scene.settle { scene.hasText("apply_patch") }
+                assertEquals(collapsed, layout(presentation.header).layoutInput.style)
+                check("apply_patch", 14, 20, FontWeight.Normal, false, scheme.onSurfaceVariant)
+                for (line in presentation.lines) {
+                    val metadata = line.kind == PatchPresentationLineKind.Metadata
+                    val mono = line.kind in listOf(PatchPresentationLineKind.File, PatchPresentationLineKind.Context,
+                        PatchPresentationLineKind.Addition, PatchPresentationLineKind.Removal)
+                    val color = when (line.kind) {
+                        PatchPresentationLineKind.File -> scheme.onSurface
+                        PatchPresentationLineKind.Addition -> scheme.tertiary
+                        PatchPresentationLineKind.Removal, PatchPresentationLineKind.Failure -> scheme.error
+                        else -> scheme.onSurfaceVariant
+                    }
+                    check(line.text, if (metadata) 14 else 16, if (metadata) 20 else 24,
+                        if (line.kind == PatchPresentationLineKind.File) FontWeight.Bold else FontWeight.Normal, mono, color)
+                    assertEquals(line.text, layout(line.text).layoutInput.text.text)
+                    assertTrue(layout(line.text).layoutInput.softWrap)
+                    assertFalse(layout(line.text).hasVisualOverflow)
+                }
+                assertTrue(layout("M $path").lineCount > 1, "Long path must wrap at width=$width scale=$scale")
+            } finally { scene.close() }
+        } }
+    }
+
     test("patch keeps a bounded first page and explicit show-more retains original line order") { offscreenTest {
         val diff = Patch(patch = "", hunks = listOf(AddFileHunk("new.txt", (0..430).joinToString("\n") { "line $it" })))
         val event = PendingPatchToolEvent("patch", diff = diff)
-        val scene = OffscreenScene.create { HistoryEventContent(event, rememberComposeHistoryContentRenderer()) }
+        var buttonColor = androidx.compose.ui.graphics.Color.Unspecified
+        val scene = OffscreenScene.create {
+            UiTheme {
+                buttonColor = MaterialTheme.colorScheme.primary
+                HistoryEventContent(event, rememberComposeHistoryContentRenderer())
+            }
+        }
         try {
+            fun checkPageLabel(label: String) {
+                val layouts = mutableListOf<TextLayoutResult>()
+                assertTrue(assertNotNull(scene.text(label).config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
+                val style = layouts.single().layoutInput.style
+                assertEquals(14.sp, style.fontSize)
+                assertEquals(20.sp, style.lineHeight)
+                assertEquals(FontWeight.Medium, style.fontWeight)
+                assertNotEquals(FontFamily.Monospace, style.fontFamily)
+                assertEquals(buttonColor, style.color)
+            }
             scene.settle { scene.hasDescription("History tool: Editing new.txt") }
             scene.clickDescription("History tool: Editing new.txt")
             scene.settle { scene.hasText("+ line 198") }
@@ -672,19 +822,24 @@ val offscreenHistoryEventsTest by testSuite {
             val showMore = scene.nodes().single { it.config.contains(SemanticsActions.OnClick) &&
                 it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription)
                     ?.any { it.startsWith("Show next ") && it.endsWith(" remaining") } == true }
+            checkPageLabel("Show next 200 lines 232 remaining")
             assertTrue(assertNotNull(showMore.config[SemanticsActions.OnClick].action).invoke())
             scene.settle { scene.hasText("+ line 398") }
             assertFalse(scene.hasText("+ line 399"))
             val lastPage = scene.nodes().single { it.config.contains(SemanticsActions.OnClick) &&
                 it.config.getOrNull(SemanticsProperties.ContentDescription)
                     ?.any { it.startsWith("Show next ") && it.endsWith(" remaining") } == true }
+            checkPageLabel("Show next 32 lines 32 remaining")
             assertTrue(assertNotNull(lastPage.config[SemanticsActions.OnClick].action).invoke())
             scene.settle { scene.hasText("+ line 430") }
-            for (number in listOf(0, 198, 199, 398, 399, 430)) {
+            for (number in 0..430) {
                 assertEquals(1, scene.nodes().count { node ->
                     node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == "+ line $number" } == true
                 })
             }
+            assertEquals((0..430).map { "+ line $it" }, scene.nodes().flatMap {
+                it.config.getOrNull(SemanticsProperties.Text).orEmpty().map { text -> text.text }
+            }.filter { it.startsWith("+ line ") })
             assertFalse(scene.nodes().any {
                 it.config.getOrNull(SemanticsProperties.ContentDescription)?.any { value ->
                     value.startsWith("Show next ") && value.endsWith(" remaining")

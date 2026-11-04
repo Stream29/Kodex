@@ -31,6 +31,53 @@ import kotlin.test.*
 import kotlin.time.Instant
 
 val offscreenHistoryIndexTest by testSuite {
+    test("disposed Index anchor rejects retained menu requests while its target remains current") { offscreenTest {
+        val model = IndexRenderFixture(listOf(1))
+        var show by mutableStateOf(true)
+        var row: HistoryIndexRowInteraction? = null
+        val openings = mutableListOf<HistoryIndexMenuOpening>()
+        val scene = OffscreenScene.create(width = 320, height = 120) {
+            val graphical = rememberComposeHistoryIndexRenderer(onOpenMenu = openings::add)
+            val renderer = object : HistoryIndexRenderer by graphical {
+                @Composable override fun rememberInteraction(target: HistoryIndexTarget, side: HistoryIndexSide): HistoryIndexRowInteraction =
+                    graphical.rememberInteraction(target, side).also { row = it }
+            }
+            if (show) HistoryIndexContent(model, HistoryIndexSide.Left, renderer)
+        }
+        try {
+            scene.settle { scene.hasDescription("History index 1") }
+            scene.key(Key.Tab)
+            scene.key(Key.F10, shift = true)
+            scene.settle { openings.size == 1 }
+            show = false
+            scene.settle { !scene.hasDescription("History index 1") }
+            assertTrue(assertNotNull(row).target.isCurrent())
+            assertFalse(assertNotNull(row).isPlaced)
+            assertNotNull(row).emitMenu()
+            assertEquals(1, openings.size)
+            assertTrue(model.scrolled.isEmpty())
+        } finally { scene.close(); model.close() }
+    } }
+
+    for (key in listOf(Key.PageUp, Key.DirectionUp)) {
+        test("Index keyboard scrolling beyond bounds retains reading position on append key=$key") { offscreenTest {
+            val model = IndexRenderFixture((1..100).toList())
+            val scene = OffscreenScene.create(width = 360, height = 240) {
+                HistoryIndexContent(model, HistoryIndexSide.Right, rememberComposeHistoryIndexRenderer())
+            }
+            try {
+                scene.settle { scene.hasDescription("History index 100") }
+                scene.key(Key.Tab)
+                scene.settle { scene.nodes().any { it.config.getOrNull(SemanticsProperties.Focused) == true } }
+                repeat(12) { scene.key(key); scene.advance(); delay(1) }
+                scene.settle { !scene.hasDescription("History index 100") }
+                model.append(101)
+                repeat(5) { scene.advance(); delay(1) }
+                assertFalse(scene.hasDescription("History index 101"), "Append must not reclaim a keyboard-scrolled viewport")
+            } finally { scene.close(); model.close() }
+        } }
+    }
+
     test("Index menu renders typed plan without terminal markers or editable controls") { offscreenTest {
         val model = IndexRenderFixture(listOf(1))
         val plan = StablePlanUpdate("plan", arguments = UpdatePlanArgs(

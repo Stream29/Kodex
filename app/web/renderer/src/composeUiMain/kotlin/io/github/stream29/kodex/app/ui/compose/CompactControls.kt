@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -105,17 +106,20 @@ internal fun CompactChoiceMenuItem(
     selected: Boolean,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    autoFocus: Boolean = false,
     onClick: () -> Unit,
 ) {
     val admitted by rememberUpdatedState(enabled)
     val invoke by rememberUpdatedState(onClick)
     var focused by remember { mutableStateOf(false) }
+    var mounted by remember { mutableStateOf(true) }
+    DisposableEffect(Unit) { onDispose { mounted = false } }
     Row(
-        modifier.fillMaxWidth().defaultMinSize(minHeight = 32.dp)
+        modifier.then(rememberInitialFocusModifier(autoFocus, enabled)).fillMaxWidth().defaultMinSize(minHeight = 32.dp)
             .onFocusChanged { focused = it.isFocused }
             .border(1.dp, if (focused && enabled) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(4.dp))
             .semantics { this.selected = selected }
-            .clickable(enabled = enabled, role = Role.Button) { if (admitted) invoke() }
+            .clickable(enabled = enabled, role = Role.Button) { if (mounted && admitted) invoke() }
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

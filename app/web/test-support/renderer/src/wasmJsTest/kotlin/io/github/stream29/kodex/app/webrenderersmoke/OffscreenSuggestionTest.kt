@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
@@ -28,6 +29,36 @@ import kotlinx.io.files.Path
 import kotlin.test.*
 
 val offscreenSuggestionTest by testSuite {
+    test("runtime fields and decisions tab to Reject then feedback and rejection submit") { suggestionScene { ports, vm, _ ->
+        val scene = OffscreenScene.create { SuggestionHost(vm) }
+        try {
+            scene.settle { scene.hasText("Reject") }
+            var tabs = 0
+            while (!scene.overlayTextFocused("Reject") && tabs++ < 20) {
+                scene.key(Key.Tab)
+                scene.settle { true }
+            }
+            assertTrue(scene.overlayTextFocused("Reject"))
+            scene.key(Key.Tab, shift = true)
+            scene.settle { scene.overlayTextFocused("Accept") }
+            scene.key(Key.Tab)
+            scene.key(Key.Enter)
+            scene.settle { vm.pendingSuggestion().rejecting && scene.nodes().any {
+                it.config.getOrNull(SemanticsProperties.Focused) == true &&
+                    it.config.getOrNull(SemanticsProperties.EditableText)?.text == ""
+            } }
+            assertTrue(ports.creations.isEmpty())
+            assertTrue(ports.completed.isEmpty())
+            scene.editSuggestionFeedback("keyboard rejection")
+            scene.key(Key.Tab)
+            scene.settle { scene.overlayTextFocused("Submit rejection") }
+            scene.key(Key.Spacebar)
+            scene.settle { scene.hasText("No pending suggestion") }
+            assertTrue(ports.creations.isEmpty())
+            assertEquals(listOf("complete", "resume"), ports.order)
+        } finally { scene.close() }
+    } }
+
     test("rejection submit is compact and refuses a retained disabled action") { offscreenTest {
         val enabled = mutableStateOf(true)
         var calls = 0

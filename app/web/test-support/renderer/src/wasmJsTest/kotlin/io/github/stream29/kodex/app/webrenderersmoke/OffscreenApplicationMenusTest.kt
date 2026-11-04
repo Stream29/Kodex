@@ -380,8 +380,10 @@ val offscreenApplicationMenusTest by testSuite {
             scene.settle { actual.history.historyItems.value.size > 0 }
             val generation = actual.history.historyItems.value.generation
             action.value = AgentHistoryActionState.ConfirmRevert(11, 2, generation)
-            scene.settle { scene.hasText("Revert history to here?") }
-            scene.click("Revert")
+            scene.settle { scene.overlayTextFocused("Cancel") }
+            scene.key(Key.Tab)
+            scene.settle { scene.overlayTextFocused("Revert") }
+            scene.key(Key.Enter)
             scene.settle { confirmed == listOf(11L) }
             action.value = AgentHistoryActionState.ConfirmRevert(12, 2, generation)
             scene.settle { dismissed.contains(11) }

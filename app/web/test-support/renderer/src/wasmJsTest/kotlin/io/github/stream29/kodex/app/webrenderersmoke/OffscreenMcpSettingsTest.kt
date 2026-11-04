@@ -6,6 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -33,6 +34,26 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.*
 
 val offscreenMcpSettingsTest by testSuite {
+    test("server delete initially focuses Cancel and Escape only dismisses confirmation") { mcpScene { ports, child ->
+        var dismissals = 0
+        var deletes = 0
+        val visible = mutableStateOf(true)
+        val scene = OffscreenScene.create {
+            if (visible.value) rememberComposeMcpDialogRenderer().Deleting(mcpServer(), null,
+                { dismissals++; visible.value = false }, { deletes++ })
+        }
+        try {
+            scene.awaitMcp { scene.overlayTextFocused("Cancel") }
+            scene.key(Key.Tab)
+            scene.awaitMcp { scene.overlayTextFocused("Delete") }
+            scene.key(Key.Tab, shift = true)
+            scene.awaitMcp { scene.overlayTextFocused("Cancel") }
+            scene.escape()
+            scene.awaitMcp { dismissals == 1 && !scene.hasText("Cancel") }
+            assertEquals(0, deletes)
+        } finally { scene.close() }
+    } }
+
     test("a long MCP name stays complete in pane semantics while short details keep Close reachable") { offscreenTest {
         val name = "完整 MCP server name ".repeat(25)
         var closes = 0
@@ -43,7 +64,7 @@ val offscreenMcpSettingsTest by testSuite {
             }
         }
         try {
-            scene.settle { scene.hasText(name) }
+            scene.awaitMcp { scene.hasText(name) }
             assertTrue(scene.mcpPaneHeight(name) <= 240)
             scene.showMcpText("Close")
             assertTrue(scene.text("Close").boundsInWindow.bottom <= 240)
@@ -60,7 +81,7 @@ val offscreenMcpSettingsTest by testSuite {
             McpSettingsDialogHost(child, rememberComposeMcpDialogRenderer())
         }
         val compactHeight = try {
-            compact.settle { compact.hasText("Server name") }
+            compact.awaitMcp { compact.hasText("Server name") }
             compact.mcpPaneHeight("Add MCP server")
         } finally { compact.close() }
         val baseline = OffscreenScene.create(width = 1024, height = 900) {
@@ -81,7 +102,7 @@ val offscreenMcpSettingsTest by testSuite {
             }
         }
         try {
-            baseline.settle { baseline.hasText("Server name") }
+            baseline.awaitMcp { baseline.hasText("Server name") }
             assertTrue(compactHeight < baseline.mcpPaneHeight("Original MCP frame"))
         } finally { baseline.close() }
         assertSame(editor.token, assertIs<McpSettingsDialog.Editing>(child.state.value.dialog).token)
@@ -101,25 +122,26 @@ val offscreenMcpSettingsTest by testSuite {
                     }
                 }
                 try {
-                    scene.settle { scene.hasText("Server name") && scene.hasText("Scopes (comma separated)") }
+                    scene.awaitMcp { scene.hasText("Server name") && scene.hasText("Scopes (comma separated)") }
                     assertTrue(scene.nodes().any {
                         it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Server name") == true &&
                             it.config.getOrNull(SemanticsProperties.Focused) == true
                     }, "The original editor focus remains on Server name.")
                     scene.editMcpField("Server name", "synthetic-server")
                     scene.editMcpField("URL", "https://example.invalid/mcp")
-                    scene.showMcpText("Save")
-                    scene.click("Save")
-                    scene.settle { scene.hasText(rejection) }
+                    scene.focusMcpAction("Save")
+                    scene.key(Key.Enter)
+                    scene.awaitMcp("MCP editor rejected Save") { scene.hasText(rejection) }
                     assertSame(token, assertIs<McpSettingsDialog.Editing>(child.state.value.dialog).token)
                     assertTrue(ports.saved.isEmpty())
-                    scene.showMcpText("Cancel")
-                    assertTrue(scene.text("Cancel").boundsInWindow.bottom <= height)
-                    scene.click("Cancel")
-                    scene.settle { child.state.value.dialog == McpSettingsDialog.Hidden }
+                    scene.focusMcpAction("Cancel")
+                    assertTrue(scene.text("Cancel").boundsInWindow.height > 0 &&
+                        scene.text("Cancel").boundsInWindow.bottom <= height)
+                    scene.key(Key.Enter)
+                    scene.awaitMcp("keyboard Cancel dismisses MCP editor") { child.state.value.dialog == McpSettingsDialog.Hidden }
                     assertEquals(1, ports.editReleases)
                     child.importCodex()
-                    scene.settle { scene.hasText("Import selected (2)") }
+                    scene.awaitMcp { scene.hasText("Import selected (2)") }
                     val body = scene.nodes().single {
                         it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("MCP dialog content") == true
                     }
@@ -127,17 +149,18 @@ val offscreenMcpSettingsTest by testSuite {
                         it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("MCP dialog footer") == true
                     }
                     assertTrue(body.boundsInWindow.height > 0 && footer.boundsInWindow.height > 0)
-                    scene.showMcpText("Import selected (2)")
-                    scene.click("Import selected (2)")
-                    scene.settle { scene.hasText(rejection) }
+                    scene.focusMcpAction("Import selected (2)")
+                    scene.key(Key.Enter)
+                    scene.awaitMcp("MCP import rejected Apply") { scene.hasText(rejection) }
                     assertTrue(ports.applied.isEmpty())
                     val decisions = assertIs<McpSettingsDialog.ImportPreview>(child.state.value.dialog).decisions
                     assertEquals(3, decisions.size)
                     assertEquals(2, decisions.values.count { it != McpImportDecision.Skip })
-                    scene.showMcpText("Cancel")
-                    assertTrue(scene.text("Cancel").boundsInWindow.bottom <= height)
-                    scene.click("Cancel")
-                    scene.settle { child.state.value.dialog == McpSettingsDialog.Hidden }
+                    scene.focusMcpAction("Cancel")
+                    assertTrue(scene.text("Cancel").boundsInWindow.height > 0 &&
+                        scene.text("Cancel").boundsInWindow.bottom <= height)
+                    scene.key(Key.Enter)
+                    scene.awaitMcp("keyboard Cancel dismisses MCP import") { child.state.value.dialog == McpSettingsDialog.Hidden }
                     assertEquals(1, ports.importReleases)
                     scene.frame()
                 } finally { scene.close() }
@@ -156,7 +179,7 @@ val offscreenMcpSettingsTest by testSuite {
             ) { _, _, content -> io.github.stream29.kodex.app.ui.UiColumn(content) }
         }
         try {
-            scene.settle { scene.hasText("Log in") }
+            scene.awaitMcp { scene.hasText("Log in") }
             scene.click("Log in")
             assertEquals(0, logins)
             scene.click("Edit")
@@ -179,7 +202,7 @@ val offscreenMcpSettingsTest by testSuite {
                 rememberComposeMcpDialogRenderer().Details(server, {}, {}, {}, {}, { calls++ }, { calls++ }, { calls++ }, { calls++ })
             }
             try {
-                scene.settle { scene.hasText("Headers: Authorization (values hidden)") }
+                scene.awaitMcp { scene.hasText("Headers: Authorization (values hidden)") }
                 assertTrue(scene.hasText("OAuth client secret: Configured"))
                 assertTrue(scene.hasText("OAuth client: Dynamic registration pending"))
                 assertTrue(scene.hasText("Reconnect"))
@@ -199,13 +222,13 @@ val offscreenMcpSettingsTest by testSuite {
         child.edit((child.state.value.dialog as McpSettingsDialog.Details).token)
         val scene = OffscreenScene.create { McpSettingsDialogHost(child, rememberComposeMcpDialogRenderer()) }
         try {
-            scene.settle { scene.hasDescription("Transport: HTTP") }
+            scene.awaitMcp { scene.hasDescription("Transport: HTTP") }
             scene.editMcpField("Server name", " renamed-server ")
             scene.editMcpField("URL", "https://new.invalid/mcp")
             scene.clickDescription("Transport: HTTP")
-            scene.settle { scene.hasDescription("Transport: stdio") }
+            scene.awaitMcp { scene.hasDescription("Transport: stdio") }
             scene.clickDescription("Transport: stdio")
-            scene.settle { scene.hasText("Command") }
+            scene.awaitMcp { scene.hasText("Command") }
             scene.editMcpField("Command", "mcp-offline")
             scene.editMcpField("Arguments (space separated)", "--flag argument")
             scene.editMcpField("Working directory", "/fixture")
@@ -215,12 +238,12 @@ val offscreenMcpSettingsTest by testSuite {
             assertEquals("mcp-offline", draft.command)
             scene.scrollMcpDialog(-10_000f)
             scene.clickDescription("Transport: stdio")
-            scene.settle { scene.hasDescription("Transport: HTTP") }
+            scene.awaitMcp { scene.hasDescription("Transport: HTTP") }
             scene.clickDescription("Transport: HTTP")
-            scene.settle { scene.hasText("URL") }
+            scene.awaitMcp { scene.hasText("URL") }
             scene.showMcpText("Save")
             scene.click("Save")
-            scene.settle { child.state.value.dialog == McpSettingsDialog.Hidden }
+            scene.awaitMcp { child.state.value.dialog == McpSettingsDialog.Hidden }
             val saved = assertIs<McpServerDraft.StreamableHttp>(ports.saved.single())
             assertEquals("renamed-server", saved.serverName)
             assertEquals("https://new.invalid/mcp", saved.configuration.url)
@@ -238,39 +261,39 @@ val offscreenMcpSettingsTest by testSuite {
             McpSettingsDialogHost(child, rememberComposeMcpDialogRenderer())
         }
         try {
-            scene.settle { scene.hasText("Import from Codex") }
+            scene.awaitMcp { scene.hasText("Import from Codex") }
             scene.click("Import from Codex")
-            scene.settle { scene.hasText("Loading Codex MCP servers…") }
+            scene.awaitMcp { scene.hasText("Loading Codex MCP servers…") }
             ports.readGate?.complete(Unit)
-            scene.settle { scene.hasText("The Codex MCP settings could not be loaded.") }
+            scene.awaitMcp { scene.hasText("The Codex MCP settings could not be loaded.") }
             assertFalse(scene.hasText("private file detail"))
             ports.readGate = null
             ports.readFailure = null
             scene.click("Retry")
-            scene.settle { scene.hasText("Import selected (2)") }
+            scene.awaitMcp { scene.hasText("Import selected (2)") }
             scene.showMcpText("– unsupported Unsupported")
             scene.click("– unsupported Unsupported")
             assertTrue(ports.applied.isEmpty())
             scene.showMcpText("Clear")
             scene.click("Clear")
-            scene.settle { scene.hasText("Import selected (0)") }
+            scene.awaitMcp { scene.hasText("Import selected (0)") }
             scene.click("Import selected (0)")
             assertTrue(ports.applied.isEmpty())
             scene.scrollMcpDialog(-10_000f)
             scene.editMcpField("Filter", "nothing-matches")
-            scene.settle { scene.hasText("No Codex MCP servers found.") }
+            scene.awaitMcp { scene.hasText("No Codex MCP servers found.") }
             scene.click("Select all")
-            scene.settle { scene.hasText("Import selected (2)") }
+            scene.awaitMcp { scene.hasText("Import selected (2)") }
             val decisions = (child.state.value.dialog as McpSettingsDialog.ImportPreview).decisions
             assertEquals(3, decisions.size)
             assertEquals(McpImportDecision.Skip, decisions["unsupported"])
             ports.admission = McpWriteAdmission.Rejected("Import target changed.")
             scene.click("Import selected (2)")
-            scene.settle { scene.hasText("Import target changed.") }
+            scene.awaitMcp { scene.hasText("Import target changed.") }
             assertTrue(ports.applied.isEmpty())
             ports.admission = McpWriteAdmission.Accepted
             scene.click("Import selected (2)")
-            scene.settle { child.state.value.dialog == McpSettingsDialog.Hidden }
+            scene.awaitMcp { child.state.value.dialog == McpSettingsDialog.Hidden }
             assertEquals(listOf(mapOf(
                 "new" to McpImportDecision.Import, "conflict" to McpImportDecision.Replace, "unsupported" to McpImportDecision.Skip,
             )), ports.applied)
@@ -292,17 +315,17 @@ val offscreenMcpSettingsTest by testSuite {
             if (visible.collectAsState().value) McpSettingsPage(child)
         }
         try {
-            scene.settle { scene.hasText("MCP servers") }
+            scene.awaitMcp { scene.hasText("MCP servers") }
             child.login(token)
-            scene.settle { calls == 1 }
+            scene.awaitMcp { calls == 1 }
             ports.logins.first().completion.complete(Unit)
-            scene.settle { ports.logins.first().releases == 1 }
+            scene.awaitMcp { ports.logins.first().releases == 1 }
             child.login(token)
-            scene.settle { ports.logins.size == 2 }
+            scene.awaitMcp { ports.logins.size == 2 }
             child.hidePage()
             visible.value = false
             opening.complete(Unit)
-            scene.settle { calls == 2 && !scene.hasText("MCP servers") }
+            scene.awaitMcp { calls == 2 && !scene.hasText("MCP servers") }
             assertEquals(1, ports.logins.first().releases)
             assertEquals(0, ports.logins.first().cancellations)
             assertEquals(0, ports.logins.last().cancellations)
@@ -320,12 +343,12 @@ val offscreenMcpSettingsTest by testSuite {
             McpSettingsDialogHost(child, rememberComposeMcpDialogRenderer())
         }
         try {
-            scene.settle { scene.hasText("MCP servers") }
+            scene.awaitMcp { scene.hasText("MCP servers") }
             child.login(token)
-            scene.settle { scene.hasText("https://example.invalid/authorize") }
+            scene.awaitMcp { scene.hasText("https://example.invalid/authorize") }
             assertEquals(0, ports.logins.single().releases)
             ports.logins.single().completion.complete(Unit)
-            scene.settle { ports.logins.single().releases == 1 && !scene.hasText("https://example.invalid/authorize") }
+            scene.awaitMcp { ports.logins.single().releases == 1 && !scene.hasText("https://example.invalid/authorize") }
         } finally { scene.close() }
     } }
 }
@@ -337,22 +360,49 @@ private fun OffscreenScene.editMcpField(label: String, text: String) {
     assertTrue(assertNotNull(action(root))(AnnotatedString(text)))
 }
 
+private suspend fun OffscreenScene.awaitMcp(label: String = "MCP state", until: () -> Boolean) {
+    // Focused text inputs keep their caret animation running after the asserted state is ready.
+    settle(label, waitForIdle = false, until = until)
+}
+
 private suspend fun OffscreenScene.scrollMcpDialog(delta: Float) {
-    val scrollers = nodes().filter { it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null }
-        .mapNotNull { it.config.getOrNull(SemanticsActions.ScrollBy)?.action }
-    assertTrue(scrollers.isNotEmpty())
-    scrollers.first()(0f, delta)
-    settle { true }
+    val scroller = nodes().first {
+        it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null &&
+            it.config.getOrNull(SemanticsActions.ScrollBy) != null
+    }
+    val range = assertNotNull(scroller.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange))
+    val target = (range.value() + delta).coerceIn(0f, range.maxValue())
+    assertNotNull(scroller.config.getOrNull(SemanticsActions.ScrollBy)?.action)(0f, delta)
+    awaitMcp("MCP scroll reaches $target") { kotlin.math.abs(range.value() - target) < 1f }
+}
+
+private suspend fun OffscreenScene.focusMcpAction(label: String) {
+    var tabs = 0
+    while (!overlayTextFocused(label) && tabs++ < 30) {
+        key(Key.Tab, shift = true)
+        awaitMcp("MCP keyboard traversal to $label at tab $tabs") { true }
+    }
+    awaitMcp("Focused $label is revealed") {
+        overlayTextFocused(label) && hasText(label) && text(label).boundsInWindow.height > 0
+    }
+    assertTrue(overlayTextFocused(label), "Keyboard focus reaches $label")
+    assertTrue(text(label).boundsInWindow.height > 0, "Focused $label remains visible")
 }
 
 private suspend fun OffscreenScene.showMcpText(label: String) {
     fun visible() = hasText(label) && text(label).boundsInWindow.height > 0 && text(label).boundsInWindow.width > 0
     if (visible()) return
-    val scrollers = nodes().mapNotNull { it.config.getOrNull(SemanticsActions.ScrollBy)?.action }
-    for (scroll in scrollers) {
+    val scrollers = nodes().filter {
+        it.config.getOrNull(SemanticsActions.ScrollBy) != null &&
+            it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null
+    }
+    for (scroller in scrollers) {
+        val scroll = assertNotNull(scroller.config.getOrNull(SemanticsActions.ScrollBy)?.action)
+        val range = assertNotNull(scroller.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange))
         for (delta in listOf(-10_000f, 10_000f)) {
+            val target = (range.value() + delta).coerceIn(0f, range.maxValue())
             scroll(0f, delta)
-            settle { true }
+            awaitMcp("MCP scroll reveals $label") { kotlin.math.abs(range.value() - target) < 1f }
             if (visible()) return
         }
     }

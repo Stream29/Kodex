@@ -137,6 +137,7 @@ private class ComposeHistoryItemRenderer(
         Column(Modifier.fillMaxWidth()) {
             Text(
                 "Worked for ${duration.roundToMilliseconds()}",
+                style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -149,7 +150,6 @@ private class ComposeHistoryItemRenderer(
     @Composable override fun Entry(item: HistoryItemViewModel, storageIndex: Int, content: @Composable () -> Unit) {
         val origin = remember(HistoryOriginKey(item)) { ComposeMenuOrigin() }
         val disclosure = remember(HistoryOriginKey(item)) { DisclosureFocusOwner(item) }
-        val hasDisclosure = item is ToolHistoryItemViewModel || item is PatchHistoryItemViewModel
         val toolState = (item as? ToolHistoryItemViewModel)?.state?.collectAsState()?.value
         val toolHeader = when (toolState) {
             is ToolHistoryItemState.Collapsed -> toolState.header
@@ -174,6 +174,11 @@ private class ComposeHistoryItemRenderer(
                     disclosure.expected = next
                 }
             }
+        }
+        val entryFocus = LocalHistoryEntryFocus.current
+        DisposableEffect(item, entryFocus, disclosure.requester) {
+            entryFocus?.set(item, disclosure.requester)
+            onDispose { if (entryFocus?.get(item) === disclosure.requester) entryFocus.remove(item) }
         }
         DisposableEffect(origin) { onDispose { origin.bounds = null } }
         Box(
@@ -225,7 +230,7 @@ private class ComposeHistoryItemRenderer(
                     disclosure.focused = it.isFocused
                     if (wasFocused && !it.isFocused) disclosure.expected = null
                 }
-                .focusable(enabled = contextMenu.value != null || hasDisclosure),
+                .focusable(),
         ) {
             CompositionLocalProvider(
                 LocalDisclosureFocusOwner provides disclosure,

@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.ui
 
 import androidx.compose.runtime.Composable
+import io.github.stream29.kodex.app.ui.compose.DirectionalFocusBoundary
 
 @Composable
 public actual fun WithBrowserComponentRenderers(content: @Composable () -> Unit) {
@@ -13,7 +14,7 @@ public actual fun WithBrowserComponentRenderers(content: @Composable () -> Unit)
                             io.github.stream29.kodex.cli.settings.WithLoginLayoutRenderer(io.github.stream29.kodex.cli.settings.BrowserLoginLayoutRenderer) {
                                 io.github.stream29.kodex.cli.sessionsettings.WithSessionSettingsLayoutRenderer(io.github.stream29.kodex.cli.sessionsettings.BrowserSessionSettingsLayoutRenderer) {
                                     io.github.stream29.kodex.cli.usagereset.WithUsageResetLayoutRenderer(io.github.stream29.kodex.cli.usagereset.BrowserUsageResetLayoutRenderer) {
-                                        content()
+                                        DirectionalFocusBoundary(content)
                                     }
                                 }
                             }

@@ -4,6 +4,11 @@ package io.github.stream29.kodex.app.ui
 
 import de.infix.testBalloon.framework.core.testSuite
 import kotlinx.browser.document
+import kotlinx.browser.window
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLTextAreaElement
 import org.w3c.dom.events.KeyboardEvent
@@ -12,6 +17,45 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 val browserEditorBridgeTest by testSuite {
+    test("mount update honors Compose focus with autoFocus false") {
+        val input = document.createElement("textarea") as HTMLTextAreaElement
+        val bridge = BrowserEditorBridge()
+        bridge.composeFocus(true)
+        bridge.bindFocus { if (it) bridge.focusNative(input) }
+        input.disabled = true
+        bridge.focus(input, false)
+        document.body!!.appendChild(input)
+        try {
+            input.disabled = false
+            bridge.focus(input, false)
+            assertTrue(document.activeElement === input)
+        } finally { bridge.release(); input.remove() }
+    }
+
+    test("focus frame handles attachment after binding and respects focus loss and release") {
+        withContext(Dispatchers.Default) {
+            for (cancel in listOf("none", "focus loss", "release", "disabled")) {
+                val input = document.createElement("textarea") as HTMLTextAreaElement
+                val bridge = BrowserEditorBridge()
+                bridge.bindFocus { if (it) bridge.focusNative(input) }
+                bridge.composeFocus(true)
+                when (cancel) {
+                    "focus loss" -> bridge.composeFocus(false)
+                    "release" -> bridge.release()
+                    "disabled" -> input.disabled = true
+                }
+                document.body!!.appendChild(input)
+                try {
+                    val frame = CompletableDeferred<Unit>()
+                    val token = window.requestAnimationFrame { frame.complete(Unit) }
+                    try { withTimeout(10_000) { frame.await() } }
+                    finally { window.cancelAnimationFrame(token) }
+                    assertEquals(cancel == "none", document.activeElement === input, cancel)
+                } finally { bridge.release(); input.remove() }
+            }
+        }
+    }
+
     test("disabling a value field restores an unchanged owner after a rejected same-length edit") {
         val input = document.createElement("textarea") as HTMLTextAreaElement
         val bridge = BrowserEditorBridge()

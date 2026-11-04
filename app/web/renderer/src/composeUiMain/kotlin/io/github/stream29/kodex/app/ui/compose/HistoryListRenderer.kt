@@ -3,6 +3,9 @@
 
 package io.github.stream29.kodex.app.ui.compose
 
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.focus.FocusRequester
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Box
@@ -35,6 +38,8 @@ import io.github.stream29.kodex.cli.history.*
 import io.github.stream29.kodex.cli.app.ApplicationHistoryMenuPlacement
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
+
+internal val LocalHistoryEntryFocus = staticCompositionLocalOf<MutableMap<HistoryItemViewModel, FocusRequester>?> { null }
 
 public actual class ComposeHistoryViewState actual constructor() {
     internal val list = LazyListState()
@@ -88,6 +93,8 @@ private class ComposeHistoryListRenderer(
         content: (HistoryListScope) -> Unit,
     ) {
         val list = state.list
+        val scope = rememberCoroutineScope()
+        val entryFocus = remember(model) { mutableMapOf<HistoryItemViewModel, FocusRequester>() }
         val currentWindow by rememberUpdatedState(window)
         val streaming = model.streamingItem.collectAsState().value as? HistoryStreamingItem.Output
         var lastUserScrollDelta by remember(model, state, window.generation) { mutableFloatStateOf(0f) }
@@ -187,8 +194,41 @@ private class ComposeHistoryListRenderer(
                 }
             }
         }
-        LazyColumn(state = list, reverseLayout = true, modifier = Modifier.fillMaxSize().nestedScroll(gesture)) {
-            content(ComposeHistoryListScope(this))
+        CompositionLocalProvider(LocalHistoryEntryFocus provides entryFocus) {
+            LazyColumn(state = list, reverseLayout = true, modifier = Modifier.fillMaxSize().nestedScroll(gesture)
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown || event.isShiftPressed || event.isCtrlPressed ||
+                        event.isAltPressed || event.isMetaPressed) return@onPreviewKeyEvent false
+                    val direction = when (event.key) {
+                        Key.PageUp -> 1
+                        Key.PageDown -> -1
+                        else -> return@onPreviewKeyEvent false
+                    }
+                    if (if (direction > 0) !list.canScrollForward else !list.canScrollBackward)
+                        return@onPreviewKeyEvent false
+                    val generation = currentWindow.generation
+                    scope.launch {
+                        val viewport = list.layoutInfo.viewportEndOffset - list.layoutInfo.viewportStartOffset
+                        val consumed = list.scrollBy(direction * (viewport / 2f).coerceAtLeast(1f))
+                        if (consumed == 0f || state.owner !== model || model.historyItems.value.generation != generation)
+                            return@launch
+                        val newest = list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset == 0
+                        lastUserScrollDelta = if (currentWindow.hasNewer && model.pendingScrollEffect.value == null) -consumed else 0f
+                        model.setFollowsLatest(currentWindow, newest && !currentWindow.hasNewer)
+                        withFrameNanos { }
+                        val layout = list.layoutInfo
+                        val candidates = layout.visibleItemsInfo.filter {
+                            it.key is HistoryItemViewModel && it.key !is WorkGroupHistoryItemViewModel &&
+                                it.offset >= layout.viewportStartOffset && it.offset + it.size <= layout.viewportEndOffset
+                        }
+                        val target = if (direction > 0) candidates.maxByOrNull { it.offset + it.size }
+                            else candidates.minByOrNull { it.offset }
+                        (target?.key as? HistoryItemViewModel)?.let { entryFocus[it]?.requestFocus() }
+                    }
+                    true
+                }) {
+                content(ComposeHistoryListScope(this))
+            }
         }
     }
     @Composable override fun StoredItem(item: HistoryItemViewModel, generation: Long, shellSessions: AgentShellSessionRegistry?) {

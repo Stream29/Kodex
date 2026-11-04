@@ -32,6 +32,58 @@ import kotlinx.io.files.Path
 import kotlin.test.*
 
 val offscreenSidebarTest by testSuite {
+    test("disposed shell anchor rejects a retained keyboard menu origin") { offscreenTest {
+        val shell = SidebarTestShell(19, "retained anchor")
+        var show by mutableStateOf(true)
+        var row: SidebarShellRowInteraction? = null
+        val openings = mutableListOf<SidebarShellMenuOpening>()
+        val scene = OffscreenScene.create(width = 320, height = 120) {
+            val graphical = rememberComposeSessionSidebarRenderer(onOpenShellMenu = openings::add)
+            val renderer = object : SessionSidebarRenderer by graphical {
+                @Composable override fun rememberShellInteraction(side: SessionSidebarSide, session: AgentShellSession): SidebarShellRowInteraction =
+                    graphical.rememberShellInteraction(side, session).also { row = it }
+            }
+            if (show) ShellSessionSidebarContent(SessionSidebarSide.Left, shell, renderer)
+        }
+        try {
+            scene.settle { scene.hasDescription("Shell session 19") }
+            scene.key(Key.Tab)
+            scene.key(Key.Menu)
+            scene.settle { openings.size == 1 }
+            show = false
+            scene.settle { !scene.hasDescription("Shell session 19") }
+            assertFalse(assertNotNull(row).isPlaced)
+            assertNotNull(row).emitMenu()
+            assertEquals(1, openings.size)
+            assertEquals(0, shell.closeCount)
+        } finally { scene.close() }
+    } }
+
+    for (side in SessionSidebarSide.entries) {
+        test("sidebar header naturally tabs through exact side collapse side=$side") { offscreenTest {
+            var collapsed = false
+            val scene = OffscreenScene.create(width = 320, height = 120) {
+                rememberComposeSessionSidebarRenderer().Header(side, SidebarContent.None, "None") { collapsed = true }
+            }
+            fun focused(description: String) = scene.nodes().any {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(description) == true &&
+                    it.config.getOrNull(SemanticsProperties.Focused) == true
+            }
+            try {
+                val collapse = "Collapse ${side.name.lowercase()} sidebar"
+                scene.settle { scene.hasDescription(collapse) }
+                scene.key(Key.Tab)
+                if (side == SessionSidebarSide.Right) {
+                    scene.settle { focused("Sidebar content right") }
+                    scene.key(Key.Tab)
+                }
+                scene.settle { focused(collapse) }
+                scene.key(Key.Enter)
+                assertTrue(collapsed)
+            } finally { scene.close() }
+        } }
+    }
+
     test("right sidebar choice uses keyboard focus and emits only its exact side") { offscreenTest {
         val choices = mutableListOf<Pair<SessionSidebarSide, SidebarContent>>()
         val scene = OffscreenScene.create(width = 360, height = 240) {
@@ -51,13 +103,23 @@ val offscreenSidebarTest by testSuite {
             scene.settle { scene.hasDescription("Sidebar content right") }
             scene.clickDescription("Sidebar content right")
             scene.settle { scene.hasText("Terminal sessions") }
-            assertTrue(assertNotNull(option("None").config.getOrNull(SemanticsActions.RequestFocus)?.action)())
+            scene.settle { option("None").config.getOrNull(SemanticsProperties.Focused) == true }
             scene.key(Key.DirectionDown)
             scene.settle { option("Terminal sessions").config.getOrNull(SemanticsProperties.Focused) == true }
             assertTrue(choices.isEmpty())
             scene.key(Key.Enter)
             scene.settle { choices.size == 1 && !scene.hasText("Terminal sessions") }
             assertEquals(listOf(SessionSidebarSide.Right to SidebarContent.TerminalSessions), choices)
+            fun triggerFocused() = scene.nodes().any {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Sidebar content right") == true &&
+                    it.config.getOrNull(SemanticsProperties.Focused) == true
+            }
+            scene.settle { triggerFocused() }
+            scene.key(Key.Spacebar)
+            scene.settle { option("None").config.getOrNull(SemanticsProperties.Focused) == true }
+            scene.escape()
+            scene.settle { !scene.hasText("Terminal sessions") && triggerFocused() }
+            assertEquals(1, choices.size)
         } finally { scene.close() }
     } }
     test("shell summary preserves a command's own leading status-like character") { offscreenTest {

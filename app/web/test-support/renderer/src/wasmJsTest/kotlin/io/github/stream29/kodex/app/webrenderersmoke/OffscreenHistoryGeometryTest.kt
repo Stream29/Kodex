@@ -38,6 +38,36 @@ import kotlin.test.*
 import kotlin.time.Instant
 
 val offscreenHistoryGeometryTest by testSuite {
+    test("read only entries naturally traverse beyond bounds and page to visible committed rows") { historyGeometryModel(80) { model ->
+        val scene = OffscreenScene.create(width = 480, height = 240) {
+            AgentHistoryContent(model, rememberComposeHistoryListRenderer(remember { ComposeHistoryViewState() }, canEditHistory = false))
+        }
+        fun focusedEntry() = scene.nodes().firstOrNull {
+            it.config.getOrNull(SemanticsProperties.Focused) == true &&
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.any { text -> text.startsWith("History entry ") } == true
+        }
+        try {
+            scene.settle { scene.hasDescription("History entry 80") }
+            scene.key(Key.Tab)
+            scene.settle("read only entry takes natural focus") { focusedEntry() != null }
+            repeat(16) { scene.key(Key.DirectionUp); scene.advance(); delay(1) }
+            scene.settle("directional traversal composes old rows") { !scene.hasDescription("History entry 80") }
+            scene.key(Key.PageUp)
+            scene.settle("page focuses a fully visible entry") {
+                val bounds = focusedEntry()?.boundsInWindow
+                bounds != null && bounds.top >= 0 && bounds.bottom <= 240
+            }
+            val visible = scene.nodes().filter {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.any { text -> text.startsWith("History entry ") } == true &&
+                    it.positionInRoot.y >= 0 && it.positionInRoot.y + it.size.height <= 240
+            }
+            assertEquals(visible.minOf { it.positionInRoot.y }, assertNotNull(focusedEntry()).positionInRoot.y,
+                "PageUp must focus the visual top in reverse layout")
+            assertFalse(model.followsLatest.value)
+            assertNull(model.pendingScrollEffect.value)
+        } finally { scene.close() }
+    } }
+
     test("sparse product history is bottom aligned in original newest-first window order") { historyGeometryModel(2) { model ->
         val scene = OffscreenScene.create(width = 480, height = 600) {
             Box(Modifier.height(400.dp)) {
@@ -278,6 +308,7 @@ val offscreenHistoryGeometryTest by testSuite {
             scene.settle { scene.hasText("Keyboard latest tail") }
             scene.key(Key.PageUp)
             scene.settle("PageUp must actually move the long newest row") { tail > 320f }
+            assertEquals(450f, tail, 2f, "History pages by half its 300px viewport")
             assertFalse(model.followsLatest.value, "A genuine PageUp must stop automatic Latest following")
             scene.key(Key.PageDown)
             scene.settle("PageDown returns to the latest edge") { abs(tail - 300f) < 1f }

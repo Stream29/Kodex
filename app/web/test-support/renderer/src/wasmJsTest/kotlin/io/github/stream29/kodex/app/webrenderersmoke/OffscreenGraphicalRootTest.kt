@@ -229,11 +229,19 @@ val offscreenGraphicalRootTest by testSuite {
             viewport = 800
             scene.settle { scene.hasDescription("Left sidebar") && scene.descriptionBounds("Left sidebar").width == width }
             assertEquals(before, sidebars.resized)
-            scene.clickDescription("Collapse left sidebar")
-            scene.settle { !scene.hasDescription("Left sidebar") && scene.nodes().any {
-                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Expand left sidebar") == true &&
-                    it.config.getOrNull(SemanticsProperties.Focused) == true
-            } }
+            for (side in listOf("left", "right")) {
+                val collapse = scene.nodes().single {
+                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Collapse $side sidebar") == true
+                }
+                assertTrue(assertNotNull(collapse.config.getOrNull(SemanticsActions.RequestFocus)?.action).invoke())
+                scene.key(Key.Enter)
+                scene.settle { !scene.hasDescription("${side.replaceFirstChar { it.uppercase() }} sidebar") && scene.nodes().any {
+                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Expand $side sidebar") == true &&
+                        it.config.getOrNull(SemanticsProperties.Focused) == true
+                } }
+                scene.key(Key.Enter)
+                scene.settle { scene.hasDescription("Collapse $side sidebar") }
+            }
             assertTrue(failures.isEmpty())
             scene.frame()
         } finally { scene.close() }

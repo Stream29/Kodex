@@ -44,6 +44,7 @@ import androidx.navigationevent.compose.rememberNavigationEventState
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexWindow
 import io.github.stream29.kodex.cli.historyindex.*
+import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlin.coroutines.cancellation.CancellationException
@@ -79,7 +80,7 @@ private class ComposeIndexRowOrigin(
     var openingPoint: Offset? = null
     override val isPlaced: Boolean get() = bounds?.let { it.width > 0 && it.height > 0 } == true
     override fun emitHover(hovered: Boolean) { hover.value(this, hovered) }
-    override fun emitMenu() { menu.value(HistoryIndexMenuOpening(ComposeIndexMenuOrigin(this, openingPoint))) }
+    override fun emitMenu() { if (isPlaced && target.isCurrent()) menu.value(HistoryIndexMenuOpening(ComposeIndexMenuOrigin(this, openingPoint))) }
 }
 
 private class ComposeIndexMenuOrigin(
@@ -92,6 +93,8 @@ private class ComposeIndexMenuOrigin(
     override val fallback: FocusRequester? get() = row.fallback
 }
 
+private val LocalIndexRowFocused = staticCompositionLocalOf<(() -> Unit)?> { null }
+
 private class ComposeHistoryIndexRenderer(
     private val hover: State<(HistoryIndexInteraction, Boolean) -> Unit>,
     private val menu: State<(HistoryIndexMenuOpening) -> Unit>,
@@ -103,6 +106,7 @@ private class ComposeHistoryIndexRenderer(
         viewModel: HistoryIndexViewModel, window: HistoryIndexWindow, content: (HistoryIndexListScope) -> Unit,
     ) {
         val list = rememberLazyListState()
+        val scope = rememberCoroutineScope()
         var follows by remember(viewModel) { mutableStateOf(true) }
         LaunchedEffect(viewModel, list) {
             snapshotFlow { list.canScrollForward }.collect { if (!it) follows = true }
@@ -118,8 +122,16 @@ private class ComposeHistoryIndexRenderer(
                 }
             }
         }
-        LazyColumn(state = list, modifier = Modifier.fillMaxSize().nestedScroll(gesture)) {
-            content(ComposeHistoryIndexListScope(this))
+        CompositionLocalProvider(LocalIndexRowFocused provides {
+            follows = false
+            scope.launch {
+                withFrameNanos { }
+                follows = !list.canScrollForward
+            }
+        }) {
+            LazyColumn(state = list, modifier = Modifier.fillMaxSize().nestedScroll(gesture)) {
+                content(ComposeHistoryIndexListScope(this))
+            }
         }
     }
     @Composable override fun rememberInteraction(target: HistoryIndexTarget, side: HistoryIndexSide): HistoryIndexRowInteraction {
@@ -132,6 +144,7 @@ private class ComposeHistoryIndexRenderer(
         onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit,
     ) {
         val origin = interaction as ComposeIndexRowOrigin
+        val rowFocused = LocalIndexRowFocused.current
         val focus = remember(origin) { FocusRequester() }
         var focused by remember(origin) { mutableStateOf(false) }
         var hovered by remember(origin) { mutableStateOf(false) }
@@ -173,7 +186,7 @@ private class ComposeHistoryIndexRenderer(
                         onOpenMenu()
                         true
                     } else false
-                }.onFocusChanged { focused = it.isFocused }.focusRequester(focus).focusable(), verticalAlignment = Alignment.CenterVertically,
+                }.onFocusChanged { focused = it.isFocused; if (it.isFocused) rowFocused?.invoke() }.focusRequester(focus).focusable(), verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.padding(start = 8.dp, end = 6.dp).size(5.dp)
                 .background(if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, CircleShape))
@@ -208,7 +221,7 @@ private class ComposeHistoryIndexRenderer(
             ) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        presentation.title, fontWeight = FontWeight.Bold,
+                        presentation.title, style = MaterialTheme.typography.titleSmall,
                         color = if (presentation.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                     )
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
@@ -284,7 +297,7 @@ private class ComposeHistoryIndexRenderer(
                                     questions.forEach { renderer.Row(it) }
                                 }
                                 plan != null -> ComposeHistoryPlanBody(plan)
-                                else -> SelectionContainer { Text(detail.content, style = MaterialTheme.typography.bodySmall) }
+                                else -> SelectionContainer { Text(detail.content, style = MaterialTheme.typography.bodyLarge) }
                             }
                         }
                     }

@@ -201,7 +201,9 @@ private fun GraphicalApplication(
                                             }
                                             Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainerLow) {
                                                 Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                    NewSessionDraft(draft.composer, currentNewLineKey, submit)
+                                                    io.github.stream29.kodex.app.ui.WithAdaptiveEditor {
+                                                        NewSessionDraft(draft.composer, currentNewLineKey, submit)
+                                                    }
                                                     ApplicationDraftStatusContent(
                                                         settings, draft.runtimeConfiguration, rememberComposeAgentStatusRenderer(),
                                                         { actions.browseWorkingDirectory(draft) }, { actions.openSettings(null) },

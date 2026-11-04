@@ -92,21 +92,19 @@ val offscreenAssistantMarkdownTest by testSuite {
             append("BODY_PARAGRAPH")
         }
         val scene = OffscreenScene.create(width = 760, height = 560) {
-            UiTheme {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    val renderer = rememberComposeHistoryContentRenderer()
-                    HistoryEventContent(
-                        StableUserMessage(listOf(ContentItem.InputText("# MARKDOWN_USER **raw**"))),
-                        renderer,
-                    )
-                    HistoryEventContent(
-                        StableAssistantMessage(listOf(ContentItem.OutputText(source))),
-                        renderer,
-                    )
-                }
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                val renderer = rememberComposeHistoryContentRenderer()
+                HistoryEventContent(
+                    StableUserMessage(listOf(ContentItem.InputText("# MARKDOWN_USER **raw**"))),
+                    renderer,
+                )
+                HistoryEventContent(
+                    StableAssistantMessage(listOf(ContentItem.OutputText(source))),
+                    renderer,
+                )
             }
         }
         try {

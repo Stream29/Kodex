@@ -23,6 +23,34 @@ import kotlin.test.*
 import kotlin.time.Instant
 
 val offscreenSessionCatalogTest by testSuite {
+    test("catalog directions naturally reach lazy rows and open their exact keyboard menu") { offscreenTest {
+        val ports = CatalogPorts().apply { entries = List(40) { SessionCatalogEntry(it, "Natural row $it") } }
+        withCatalogFixture(ports) { vm ->
+            val scene = OffscreenScene.create(width = 480, height = 360) {
+                SessionCatalogContent(vm, rememberComposeSessionCatalogRenderer(), { throw it })
+            }
+            fun focusedRow() = scene.nodes().firstOrNull {
+                it.config.getOrNull(SemanticsProperties.Focused) == true &&
+                    it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("session-catalog-row-") == true
+            }
+            try {
+                scene.settle { scene.hasText("Natural row 0") }
+                repeat(3) { if (focusedRow() == null) { scene.key(Key.Tab); scene.advance() } }
+                scene.settle { focusedRow() != null }
+                for (index in 1..24) {
+                    scene.key(Key.DirectionDown)
+                    scene.settle("catalog natural row $index") {
+                        focusedRow()?.config?.getOrNull(SemanticsProperties.TestTag) == "session-catalog-row-$index"
+                    }
+                }
+                scene.key(Key.Menu)
+                scene.settle { scene.hasText("Index: 24") }
+                scene.escape()
+                scene.settle { !scene.hasText("Index: 24") }
+            } finally { scene.close() }
+        }
+    } }
+
     test("compact short catalog keeps full names status close and keyboard actions reachable") { offscreenTest {
         val name = "完整长会话 " + "narrow ".repeat(24)
         val ports = CatalogPorts().apply {
@@ -223,9 +251,11 @@ val offscreenSessionCatalogTest by testSuite {
                     scene.openCatalogMenu(7)
                     scene.settle { scene.hasText("Delete") && scene.hasText("Index: 7") }
                     scene.click("Delete")
-                    scene.settle { scene.hasText("Delete first?") }
+                    scene.settle { scene.hasText("Delete first?") && scene.overlayTextFocused("Cancel") }
                     val handle = assertNotNull(vm.deleteTarget.value)
-                    scene.click("Delete")
+                    scene.key(Key.Tab)
+                    scene.settle { scene.overlayTextFocused("Delete") }
+                    scene.key(Key.Enter)
                     scene.settle { ports.calls.contains("delete:7") && vm.state.value is SessionCatalogState.Loaded }
                     if (deleted) {
                         scene.settle { vm.deleteTarget.value == null && scene.hasText("No persisted sessions") }

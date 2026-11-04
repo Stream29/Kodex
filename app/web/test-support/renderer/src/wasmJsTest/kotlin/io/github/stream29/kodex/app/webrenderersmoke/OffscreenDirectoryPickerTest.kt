@@ -225,14 +225,12 @@ val offscreenDirectoryPickerTest by testSuite {
         val selected = mutableListOf<Path>()
         var dismissals = 0
         val scene = OffscreenScene.create(width = 560, height = 420) {
-            UiTheme {
-                DirectoryPickerContent(
-                    picker,
-                    rememberComposeDirectoryPickerRenderer(),
-                    onDismissRequest = { dismissals++ },
-                    onDirectorySelected = { selected += it },
-                )
-            }
+            DirectoryPickerContent(
+                picker,
+                rememberComposeDirectoryPickerRenderer(),
+                onDismissRequest = { dismissals++ },
+                onDirectorySelected = { selected += it },
+            )
         }
         try {
             scene.settle { scene.hasText("checklist/") && scene.hasText("Filter: type letters") }

@@ -26,6 +26,62 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.*
 
 val offscreenUserInputTest by testSuite {
+    test("secret metadata freeform keeps keyboard submission and in-flight disabled guards") { userInputScene { ports, vm, _ ->
+        ports.pending.value = PendingRequestUserInputToolEvent("secret-input", arguments = RequestUserInputArgs(listOf(
+            RequestUserInputQuestion("secret", "Secret", "Value", isSecret = true),
+        )))
+        ports.gate = CompletableDeferred()
+        val scene = OffscreenScene.create { UserInputHost(vm) }
+        try {
+            scene.settle { scene.hasDescription("Answer for secret") && scene.hasFocusedInput("") }
+            scene.setUserAnswer("secret", "test value")
+            val edit = assertNotNull(scene.nodes().first {
+                it.config.getOrNull(SemanticsActions.SetText) != null
+            }.config.getOrNull(SemanticsActions.SetText)?.action)
+            scene.doneUserAnswer("secret")
+            scene.settle { scene.overlayTextFocused("Submit") }
+            scene.key(Key.Spacebar)
+            scene.settle { scene.hasText("Submitting…") && ports.completed.size == 1 }
+            edit(AnnotatedString("late edit"))
+            scene.key(Key.Enter)
+            scene.key(Key.Tab)
+            scene.settle { true }
+            assertEquals(RequestUserInputDraftAnswer.FreeForm("test value"), vm.pendingInput().answers["secret"])
+            assertEquals(1, ports.completed.size)
+            assertFalse(vm.pendingInput().canSubmit)
+            ports.gate!!.complete(Unit)
+            scene.settle { scene.hasText("No pending input") }
+            assertEquals(listOf("complete", "resume"), ports.order)
+        } finally { scene.close() }
+    } }
+
+    test("pending options Other and freeform traverse and activate without pointer input") { userInputScene { ports, vm, _ ->
+        val scene = OffscreenScene.create { UserInputHost(vm) }
+        try {
+            scene.settle { scene.overlayTextFocused("Current module") }
+            scene.key(Key.Tab)
+            scene.settle { scene.overlayTextFocused("Whole workspace") }
+            scene.key(Key.Tab, shift = true)
+            scene.settle { scene.overlayTextFocused("Current module") }
+            scene.key(Key.Tab)
+            scene.key(Key.Tab)
+            scene.settle { scene.overlayTextFocused("Other") }
+            scene.key(Key.Spacebar)
+            scene.settle { scene.hasDescription("Answer for scope") && scene.hasFocusedInput("") }
+            scene.setUserAnswer("scope", "keyboard choice")
+            scene.doneUserAnswer("scope")
+            scene.settle { scene.hasFocusedInput("") }
+            scene.setUserAnswer("note", "keyboard note")
+            scene.doneUserAnswer("note")
+            scene.settle { scene.overlayTextFocused("Submit") }
+            scene.key(Key.Enter)
+            scene.settle { scene.hasText("No pending input") }
+            assertEquals(listOf("complete", "resume"), ports.order)
+            assertEquals(1, ports.completed.size)
+            assertTrue(vm.state.value !is RequestUserInputState.Pending)
+        } finally { scene.close() }
+    } }
+
     test("submit action is compact and keeps exact focus and disabled admission") { offscreenTest {
         val enabled = mutableStateOf(true)
         var calls = 0

@@ -84,7 +84,7 @@ internal fun BrowserUiEditor(
         if (adaptive && input != null && input.isConnected && editorWidth > 0) {
             val cssWidth = editorCssWidth(input)
             if (cssWidth > 0.0) {
-                val cssHeight = measureEditorHeight(input).coerceIn(24.0, 24.0 * rows)
+                val cssHeight = measureAdaptiveEditorHeight(input, rows)
                 val heightDp = (cssHeight * editorWidth / cssWidth / density).toFloat()
                 if (kotlin.math.abs(editorHeight - heightDp) > 0.1f) editorHeight = heightDp
             }
@@ -147,7 +147,7 @@ internal fun BrowserUiEditor(
                             setAttribute("autocapitalize", "off")
                             spellcheck = false
                             bridge.bindFocus { focused ->
-                                if (focused && isConnected && !disabled) this.focus()
+                                if (focused && policy.enabled) bridge.focusNative(this)
                                 else if (!focused) bridge.restoreCanvasAfterFocusChange(this)
                             }
                             onfocus = {
@@ -167,6 +167,9 @@ internal fun BrowserUiEditor(
                             onkeydown = keyDown@{ event ->
                                 val current = policy
                                 if (bridge.routeBack(event, current.enabled, backAction)) return@keyDown
+                                if (bridge.routeVerticalFocus(event, this, current.multiline, focusManager::moveFocus)) {
+                                    return@keyDown
+                                }
                                 if (event.key == "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey &&
                                     !bridge.composing && !event.isComposing
                                 ) {
@@ -199,6 +202,7 @@ internal fun BrowserUiEditor(
                         input.readOnly = readOnly
                         input.rows = rows
                         input.wrap = if (multiline) "soft" else "off"
+                        syncOverlayElement(input, singleLine = !multiline, adaptive = adaptive, maximumLines = rows)
                         input.setAttribute("aria-label", label.ifEmpty { "Message" })
                         input.style.color = (if (enabled) colors.onSurface else colors.onSurface.copy(alpha = 0.38f)).css()
                         input.style.setProperty("caret-color", colors.primary.css())
@@ -304,6 +308,27 @@ internal class BrowserEditorBridge {
         change(current.first, current.second)?.let { acceptedRevision = it }
     }
 
+    fun routeVerticalFocus(
+        event: KeyboardEvent, input: HTMLTextAreaElement, multiline: Boolean,
+        moveFocus: (FocusDirection) -> Boolean,
+    ): Boolean {
+        if (!alive || input.disabled || event.defaultPrevented ||
+            (event.key != "ArrowUp" && event.key != "ArrowDown") ||
+            event.shiftKey || event.ctrlKey || event.altKey || event.metaKey ||
+            composing || event.isComposing || event.keyCode == 229 ||
+            !shouldBridgeVerticalFocus(
+                event.key, multiline, input.value, input.selectionStart, input.selectionEnd,
+                input.scrollHeight, input.clientHeight,
+            )
+        ) return false
+        val moved = moveFocus(if (event.key == "ArrowUp") FocusDirection.Up else FocusDirection.Down)
+        if (moved) {
+            event.preventDefault()
+            if (input.nativeFocused()) input.focusCanvas()
+        }
+        return moved
+    }
+
     fun routeBack(event: KeyboardEvent, enabled: Boolean, action: (() -> Unit)?): Boolean {
         if (!alive || !enabled || action == null || event.defaultPrevented || event.key != "Escape" ||
             event.ctrlKey || event.altKey || event.metaKey || event.shiftKey ||
@@ -332,13 +357,28 @@ internal class BrowserEditorBridge {
     }
 
     fun focus(input: HTMLTextAreaElement, requested: Boolean) {
+        if (composeFocused && !input.disabled) focusNative(input)
         if (requested && !autoFocused) {
+            focusFrame?.let(window::cancelAnimationFrame)
             focusFrame = window.requestAnimationFrame {
                 focusFrame = null
                 if (alive && input.isConnected && !input.disabled) input.focus()
             }
         }
         autoFocused = requested
+    }
+
+    fun focusNative(input: HTMLTextAreaElement) {
+        if (!alive || !composeFocused || input.nativeFocused()) return
+        if (input.isConnected && !input.disabled) input.focus()
+        if (!input.nativeFocused() && focusFrame == null) {
+            focusFrame = window.requestAnimationFrame {
+                focusFrame = null
+                if (alive && composeFocused && input.isConnected && !input.disabled && !input.nativeFocused()) {
+                    input.focus()
+                }
+            }
+        }
     }
 
     fun release() {
@@ -353,11 +393,50 @@ internal class BrowserEditorBridge {
     }
 }
 
+internal fun shouldBridgeVerticalFocus(
+    key: String, multiline: Boolean, value: String, selectionStart: Int?, selectionEnd: Int?,
+    scrollHeight: Int, clientHeight: Int,
+): Boolean {
+    if (key != "ArrowUp" && key != "ArrowDown") return false
+    if (selectionStart == null || selectionStart != selectionEnd) return false
+    if (!multiline || value.isEmpty()) return true
+    if (value.contains('\n') || value.contains('\r')) return false
+    if (clientHeight > 0 && scrollHeight > clientHeight + 2) return false
+    return (key == "ArrowUp" && selectionStart == 0) ||
+        (key == "ArrowDown" && selectionStart == value.length)
+}
+
 private fun HTMLTextAreaElement.activeCursor(): Int =
     (if (selectionDirection == "backward") selectionStart else selectionEnd) ?: value.length
 
 internal fun editorCssWidth(input: HTMLTextAreaElement): Double =
     js("input.getBoundingClientRect().width")
+
+internal fun adaptiveOverflowY(scrollHeight: Int, maxHeight: Int): String =
+    if (scrollHeight > maxHeight) "auto" else "hidden"
+
+internal fun syncOverlayElement(
+    input: HTMLTextAreaElement, singleLine: Boolean, adaptive: Boolean, maximumLines: Int,
+) {
+    input.style.apply {
+        whiteSpace = if (singleLine) "pre" else "pre-wrap"
+        setProperty("overflow-wrap", if (singleLine) "normal" else "anywhere")
+        setProperty("word-break", if (singleLine) "normal" else "break-word")
+        setProperty("overflow-x", if (singleLine) "auto" else "hidden")
+        setProperty("scrollbar-width", if (singleLine) "none" else "thin")
+        setProperty("overflow-y", when {
+            singleLine -> "hidden"
+            adaptive -> adaptiveOverflowY(measureEditorHeight(input).roundToInt(), 24 * maximumLines)
+            else -> "auto"
+        })
+    }
+}
+
+internal fun measureAdaptiveEditorHeight(input: HTMLTextAreaElement, maximumLines: Int): Double {
+    val height = measureEditorHeight(input)
+    input.style.setProperty("overflow-y", adaptiveOverflowY(height.roundToInt(), 24 * maximumLines))
+    return height.coerceIn(24.0, 24.0 * maximumLines)
+}
 
 private fun browserEditorFontEvents(): org.w3c.dom.events.EventTarget = js("document.fonts")
 

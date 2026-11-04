@@ -101,6 +101,9 @@ private class ComposeSettingsRenderer : SettingsRenderer {
     ) {
         key(fieldKey) {
             var expanded by remember { mutableStateOf(false) }
+            var mounted by remember { mutableStateOf(true) }
+            val currentOptions by rememberUpdatedState(options)
+            DisposableEffect(Unit) { onDispose { mounted = false } }
             val selected = options.firstOrNull { it.key == selectedKey }?.label ?: selectedKey
             LaunchedEffect(enabled, options.isEmpty()) { if (!enabled || options.isEmpty()) expanded = false }
             Item(label, supportingText, enabled) {
@@ -115,9 +118,10 @@ private class ComposeSettingsRenderer : SettingsRenderer {
                                 CompactChoiceMenuItem(
                                     label = option.label,
                                     selected = option.key == selectedKey,
+                                    autoFocus = option.key == (options.firstOrNull { it.key == selectedKey } ?: options.firstOrNull())?.key,
                                     enabled = enabled && expanded,
                                     onClick = {
-                                        if (expanded && enabled) {
+                                        if (mounted && expanded && enabled && currentOptions.any { it.key == option.key }) {
                                             expanded = false
                                             onSelect(option.key)
                                         }

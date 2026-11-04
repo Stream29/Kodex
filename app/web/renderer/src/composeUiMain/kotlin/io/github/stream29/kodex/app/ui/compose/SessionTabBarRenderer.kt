@@ -3,6 +3,7 @@
 package io.github.stream29.kodex.app.ui.compose
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -45,6 +46,7 @@ private class ComposeSessionTabBarRenderer : SessionTabBarRenderer {
         tab: @Composable (SessionTabPresentation, Int) -> Unit, newSession: @Composable () -> Unit,
     ) {
         val scroll = rememberLazyListState()
+        val scope = rememberCoroutineScope()
         val identities = state.tabs.map { it.identity }
         val density = LocalDensity.current.density
         val layoutDirection = LocalLayoutDirection.current
@@ -80,7 +82,22 @@ private class ComposeSessionTabBarRenderer : SessionTabBarRenderer {
         }
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val sessionsMaximum = (maxWidth * 0.4f).coerceAtMost(96.dp)
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown || event.isShiftPressed || event.isCtrlPressed ||
+                    event.isAltPressed || event.isMetaPressed) return@onPreviewKeyEvent false
+                val direction = when (event.key) {
+                    Key.PageUp -> -1
+                    Key.PageDown -> 1
+                    else -> return@onPreviewKeyEvent false
+                }
+                if (if (direction > 0) !scroll.canScrollForward else !scroll.canScrollBackward)
+                    return@onPreviewKeyEvent false
+                wheelPending.interrupt(wheelInput)
+                scope.launch {
+                    scroll.scrollBy(direction * (scroll.layoutInfo.viewportEndOffset - scroll.layoutInfo.viewportStartOffset).toFloat())
+                }
+                true
+            }, verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.widthIn(max = sessionsMaximum)) { sessions() }
                 LazyRow(
                     Modifier.weight(1f).pointerInput(scroll, wheelInput, density, layoutDirection) {
@@ -169,7 +186,7 @@ private class ComposeSessionTabBarRenderer : SessionTabBarRenderer {
                 RunningSpinner()
                 Spacer(Modifier.width(4.dp))
             }
-            Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+            Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
         }
     }
 

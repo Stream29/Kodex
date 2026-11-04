@@ -79,7 +79,7 @@ private class ComposeShellRowOrigin(
     var openingPoint: Offset? = null
     override val isPlaced: Boolean get() = bounds?.let { it.width > 0 && it.height > 0 } == true
     override fun emitHover(hovered: Boolean) { hover.value(this, hovered) }
-    override fun emitMenu() { menu.value(SidebarShellMenuOpening(ComposeShellMenuOrigin(this, openingPoint))) }
+    override fun emitMenu() { if (isPlaced && !session.completed.value) menu.value(SidebarShellMenuOpening(ComposeShellMenuOrigin(this, openingPoint))) }
 }
 
 private class ComposeShellMenuOrigin(private val row: ComposeShellRowOrigin, override val point: Offset?) : ComposeShellPlacement {
@@ -126,7 +126,7 @@ private class ComposeSessionSidebarRenderer(
                     modifier = Modifier.fillMaxWidth()
                         .then(if (fallback == null) Modifier else Modifier.focusRequester(fallback))
                         .semantics { contentDescription = "Sidebar content ${side.name.lowercase()}" },
-                ) { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) }
+                ) { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge) }
                 SessionSidebarContentMenuContent(content, { select.value(side, it) }, object : SidebarContentMenuRenderer {
                     @Composable override fun Menu(
                         options: List<SidebarContent>, selected: SidebarContent, label: (SidebarContent) -> String,
@@ -137,6 +137,7 @@ private class ComposeSessionSidebarRenderer(
                                 CompactChoiceMenuItem(
                                     label = label(option),
                                     selected = option == selected,
+                                    autoFocus = option == (options.firstOrNull { it == selected } ?: options.firstOrNull()),
                                     enabled = expanded,
                                     onClick = { expanded = false; onSelect(option) },
                                 )
@@ -216,9 +217,10 @@ private class ComposeSessionSidebarRenderer(
                     .onPointerEvent(PointerEventType.Exit) { onHoverChanged(false) },
             ) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(title, fontWeight = FontWeight.Bold)
+                    Text(title, style = MaterialTheme.typography.titleSmall)
                     SelectionContainer {
-                        Text(command, Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()))
+                        Text(command, Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                            style = MaterialTheme.typography.bodyLarge, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                     }
                 }
             }
@@ -228,6 +230,8 @@ private class ComposeSessionSidebarRenderer(
         val origin = opening.interaction as ComposeShellPlacement
         val mayRestore = LocalSidebarFocusRestoreAllowed.current
         restoration.Track(opening, origin.fallback, mayRestore) { origin.isPlaced && !origin.session.completed.value }
+        LaunchedEffect(opening, origin.isPlaced) { if (!origin.isPlaced) onDismiss() }
+        if (!origin.isPlaced) return
         val bounds = origin.bounds ?: return
         val placement = remember(bounds, origin.side, origin.point) { PointerPopupPosition(bounds, origin.side == SessionSidebarSide.Left, origin.point) }
         val close = remember(opening) { FocusRequester() }
@@ -239,10 +243,11 @@ private class ComposeSessionSidebarRenderer(
                 Column(Modifier.widthIn(min = 160.dp, max = 480.dp).heightIn(max = 480.dp).padding(8.dp)) {
                     Text("Session ${origin.session.sessionId}", style = MaterialTheme.typography.titleSmall)
                     SelectionContainer(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                        Text(origin.session.arguments.command, style = MaterialTheme.typography.bodySmall)
+                        Text(origin.session.arguments.command, style = MaterialTheme.typography.bodyLarge,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                     }
                     CompactTextButton(
-                        onClick = { onDismiss(); onClose() },
+                        onClick = { if (origin.isPlaced && !origin.session.completed.value) { onDismiss(); onClose() } },
                         modifier = Modifier.fillMaxWidth().focusRequester(close),
                         colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
                     ) { Text(label, Modifier.weight(1f)) }

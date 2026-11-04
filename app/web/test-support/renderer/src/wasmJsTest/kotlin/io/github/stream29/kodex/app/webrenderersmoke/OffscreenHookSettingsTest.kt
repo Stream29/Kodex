@@ -6,6 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -30,6 +31,26 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.*
 
 val offscreenHookSettingsTest by testSuite {
+    test("hook delete initially focuses Cancel and Escape only dismisses confirmation") { hookScene { ports, child ->
+        var dismissals = 0
+        var deletes = 0
+        val visible = mutableStateOf(true)
+        val scene = OffscreenScene.create {
+            if (visible.value) rememberComposeHookDialogRenderer().Deleting(ports.hooks.value.single(), null,
+                { dismissals++; visible.value = false }, { deletes++ })
+        }
+        try {
+            scene.settle { scene.overlayTextFocused("Cancel") }
+            scene.key(Key.Tab)
+            scene.settle { scene.overlayTextFocused("Delete") }
+            scene.key(Key.Tab, shift = true)
+            scene.settle { scene.overlayTextFocused("Cancel") }
+            scene.escape()
+            scene.settle { dismissals == 1 && !scene.hasText("Cancel") }
+            assertEquals(0, deletes)
+        } finally { scene.close() }
+    } }
+
     test("Hook editor frame is strictly shorter than the original with all supported choices") { hookScene { _, child ->
         child.add()
         val editor = assertIs<HookSettingsDialog.Editing>(child.state.value.dialog)

@@ -5,6 +5,7 @@ package io.github.stream29.kodex.app.webrenderersmoke
 import androidx.compose.runtime.*
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.semantics.Role
@@ -17,6 +18,82 @@ import io.github.stream29.kodex.app.ui.compose.rememberComposeSessionTabBarRende
 import kotlin.test.*
 
 val offscreenSessionTabBarTest by testSuite {
+    for (key in listOf(Key.Tab, Key.DirectionRight)) {
+        test("natural tab navigation reaches beyond bounds and returns across fixed controls key=$key") { offscreenTest {
+            val tabs = List(18) { SessionTabPresentation(SessionTabIdentity("nav-$it"), "Navigation tab $it") }
+            val calls = mutableListOf<String>()
+            val scene = OffscreenScene.create(width = 480, height = 100) {
+                SessionTabBarContent(SessionTabBarState(tabs, tabs.first().identity), TabCommands("nav", calls),
+                    rememberComposeSessionTabBarRenderer())
+            }
+            fun focused(description: String) = scene.nodes().any {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(description) == true &&
+                    it.config.getOrNull(SemanticsProperties.Focused) == true
+            }
+            try {
+                scene.settle { scene.hasDescription("Sessions") }
+                scene.key(Key.Tab)
+                scene.settle { focused("Sessions") }
+                for (index in tabs.indices) {
+                    scene.key(key)
+                    scene.settle("natural traversal tab $index") { focused("Session tab: nav-$index") }
+                }
+                scene.key(key)
+                scene.settle { focused("New Session") }
+                scene.key(Key.Enter)
+                assertEquals(listOf("nav:new"), calls)
+                for (index in tabs.indices.reversed()) {
+                    scene.key(if (key == Key.Tab) Key.Tab else Key.DirectionLeft, shift = key == Key.Tab)
+                    scene.settle("reverse natural traversal tab $index") { focused("Session tab: nav-$index") }
+                }
+                scene.key(if (key == Key.Tab) Key.Tab else Key.DirectionLeft, shift = key == Key.Tab)
+                scene.settle { focused("Sessions") }
+            } finally { scene.close() }
+        } }
+    }
+
+    test("tab bar pages horizontally by its viewport and ignores modified page keys") { offscreenTest {
+        val tabs = List(40) { SessionTabPresentation(SessionTabIdentity("page-$it"), "Paging tab $it") }
+        val scene = OffscreenScene.create(width = 480, height = 100) {
+            SessionTabBarContent(SessionTabBarState(tabs, tabs.first().identity), TabCommands("page", mutableListOf()),
+                rememberComposeSessionTabBarRenderer())
+        }
+        fun scroll() = scene.nodes().mapNotNull { it.config.getOrNull(SemanticsProperties.HorizontalScrollAxisRange) }.single().value()
+        try {
+            scene.settle { scene.hasDescription("Session tab: page-0") }
+            scene.key(Key.Tab)
+            val before = scroll()
+            scene.key(Key.PageDown, shift = true)
+            scene.advance()
+            assertEquals(before, scroll())
+            scene.key(Key.PageDown)
+            scene.settle { scroll() > before }
+            scene.key(Key.PageUp)
+            scene.settle { scroll() == before }
+        } finally { scene.close() }
+    } }
+
+    test("session navigation consumes the production label role") { offscreenTest {
+        val tab = SessionTabPresentation(SessionTabIdentity("typography"), "Navigation 漢字")
+        val scene = OffscreenScene.create(width = 800) {
+            io.github.stream29.kodex.app.ui.UiTheme {
+                SessionTabBarContent(
+                    SessionTabBarState(listOf(tab), tab.identity),
+                    TabCommands("typography", mutableListOf()), rememberComposeSessionTabBarRenderer(), {},
+                )
+            }
+        }
+        try {
+            scene.settle { scene.hasText(tab.label) }
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            assertTrue(assertNotNull(scene.text(tab.label).config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
+            val style = layouts.single().layoutInput.style
+            assertEquals(14.sp, style.fontSize)
+            assertEquals(20.sp, style.lineHeight)
+            assertEquals(androidx.compose.ui.text.font.FontWeight.Medium, style.fontWeight)
+        } finally { scene.close() }
+    } }
+
     test("narrow compact tabs retain exact tail selection full names and keyboard menu activation") { offscreenTest {
         val fullName = "完整会话名称 " + "Long name ".repeat(25)
         val tabs = List(80) { SessionTabPresentation(SessionTabIdentity("narrow-$it"), fullName + it, running = it == 79) }
