@@ -61,5 +61,29 @@ static inline int kodex_close_inherited_fds(void) {
        Without either kernel close_range or proc enumeration, fail closed. */
     return -1;
 }
+#elif defined(__APPLE__)
+#include <errno.h>
+#include <libproc.h>
+#include <sys/proc_info.h>
+#include <unistd.h>
+
+static inline int kodex_close_inherited_fds(void) {
+    struct proc_fdinfo buffer[256];
+    for (unsigned int pass = 0; pass < 65536U; ++pass) {
+        int bytes = proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, buffer, (int)sizeof(buffer));
+        if (bytes <= 0 || (size_t)bytes % sizeof(struct proc_fdinfo) != 0) return -1;
+        size_t count = (size_t)bytes / sizeof(struct proc_fdinfo);
+        if (count > 256) return -1;
+        size_t closed_in_pass = 0;
+        for (size_t i = 0; i < count; ++i) {
+            if (buffer[i].proc_fd >= 3) {
+                ++closed_in_pass;
+                if (close(buffer[i].proc_fd) != 0 && errno != EBADF) return -1;
+            }
+        }
+        if (closed_in_pass == 0 || count < 256) return 0;
+    }
+    return -1;
+}
 #endif
 #endif

@@ -261,7 +261,7 @@ static inline int kodex_spawn_process(
             if (output_write > STDERR_FILENO) close(output_write);
             if (error_read > STDERR_FILENO) close(error_read);
             if (error_write > STDERR_FILENO) close(error_write);
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
             if (kodex_close_inherited_fds() != 0) _exit(127);
 #endif
             if (chdir(working_directory) != 0 || resolved_executable == NULL) {
