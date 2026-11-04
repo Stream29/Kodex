@@ -105,7 +105,7 @@ private class ComposeSettingsRoot(
                                         ),
                                     ) {
                                         Text(entry.label, if (wide) Modifier.weight(1f) else Modifier,
-                                            style = MaterialTheme.typography.bodyMedium)
+                                            style = MaterialTheme.typography.labelLarge)
                                     }
                                     LaunchedEffect(isSelected) { if (isSelected) reveal.bringIntoView() }
                                 }

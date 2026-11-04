@@ -100,7 +100,7 @@ private class ComposeSuggestionScope(
                 ))
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(label, style = MaterialTheme.typography.bodyMedium)
-                    Text(description, style = MaterialTheme.typography.bodySmall)
+                    Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

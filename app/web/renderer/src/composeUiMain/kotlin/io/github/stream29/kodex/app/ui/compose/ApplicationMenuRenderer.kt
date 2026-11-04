@@ -136,7 +136,7 @@ private fun ApplicationMenu(bounds: Rect, point: Offset?, entries: List<Applicat
                                 modifier = Modifier.fillMaxWidth().focusRequester(requesters.getValue(entry.key))
                                     .onFocusChanged { if (it.isFocused) focusedKey = entry.key }
                                     .semantics { contentDescription = "Application menu action: ${entry.key}" },
-                            ) { Text(entry.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium) }
+                            ) { Text(entry.label, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge) }
                         }
                     }
                 }

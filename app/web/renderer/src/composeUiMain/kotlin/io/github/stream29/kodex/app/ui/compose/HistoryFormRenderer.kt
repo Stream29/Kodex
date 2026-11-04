@@ -36,7 +36,12 @@ private object ComposeHistoryFormRenderer : HistoryFormRenderer {
         val text: @Composable () -> Unit = {
             Text(
                 row.value,
-                fontWeight = if (row.role == RequestUserInputHistoryRowRole.Header) FontWeight.Bold else FontWeight.Normal,
+                style = when (row.role) {
+                    RequestUserInputHistoryRowRole.Header -> MaterialTheme.typography.titleMedium
+                    RequestUserInputHistoryRowRole.Supporting -> MaterialTheme.typography.bodySmall
+                    else -> MaterialTheme.typography.bodyLarge
+                },
+                fontWeight = if (row.role == RequestUserInputHistoryRowRole.Header) FontWeight.SemiBold else FontWeight.Normal,
                 color = when (row.role) {
                     RequestUserInputHistoryRowRole.Error -> MaterialTheme.colorScheme.error
                     RequestUserInputHistoryRowRole.Supporting -> MaterialTheme.colorScheme.onSurfaceVariant

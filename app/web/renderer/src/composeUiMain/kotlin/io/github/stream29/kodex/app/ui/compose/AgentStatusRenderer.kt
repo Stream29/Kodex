@@ -36,7 +36,7 @@ private class ComposeAgentStatusRenderer : AgentStatusRenderer {
     }
 
     @Composable
-    override fun Text(value: String) { MaterialText(value) }
+    override fun Text(value: String) { MaterialText(value, style = MaterialTheme.typography.labelLarge) }
 
     @Composable
     override fun Action(label: String, enabled: Boolean, onClick: () -> Unit) {

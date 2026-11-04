@@ -152,7 +152,7 @@ private fun UserInputChoiceRow(
             }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(label, style = MaterialTheme.typography.bodyMedium)
-                if (description.isNotEmpty()) Text(description, style = MaterialTheme.typography.bodySmall)
+                if (description.isNotEmpty()) Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

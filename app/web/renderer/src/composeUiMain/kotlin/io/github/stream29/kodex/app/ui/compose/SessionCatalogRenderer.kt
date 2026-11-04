@@ -179,7 +179,7 @@ private fun CatalogRow(
         }) {
             Column(Modifier.fillMaxWidth()) {
                 Text(entry.threadName ?: "Session ${entry.sessionIndex}", maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium)
+                    style = MaterialTheme.typography.labelLarge)
                 if (entry.running) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),

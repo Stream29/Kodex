@@ -83,7 +83,7 @@ internal fun RuntimeCascadeMenu(
     val position = remember { CascadeWindowPosition() }
     val columns = (0..state.path.size).map(state::entries)
     val textMeasurer = rememberTextMeasurer()
-    val rowTextStyle = MaterialTheme.typography.bodyMedium
+    val rowTextStyle = MaterialTheme.typography.labelLarge
     val panels = columns.indices.map { level ->
         key(state.path.take(level)) { remember { CascadePanel() } }
     }
@@ -325,7 +325,7 @@ private fun CascadeSurface(
                             } else {
                                 Spacer(Modifier.width(16.dp))
                             }
-                            Text(entry.label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            Text(entry.label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
                             if (entry is RuntimeMenuEntry.Branch) {
                                 Text(
                                     if (entry.key == expandedKey) "▸" else "›",

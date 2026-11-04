@@ -45,6 +45,7 @@ private class ComposeHistoryContentRenderer(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MaterialText(
                 value, Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
                 fontWeight = if (style == HistoryTextStyle.Bold) FontWeight.Bold else FontWeight.Normal,
                 color = if (style == HistoryTextStyle.Dim) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             )
@@ -157,11 +158,13 @@ private class ComposeHistoryContentRenderer(
                     PatchPresentationStatus.Failed -> "failed"
                 }, identity, HistoryTextStyle.Normal, null,
             ) {
-                HistoryPlainText(presentation.rawToolName, HistoryTextStyle.Dim)
+                RecordedMetadata(presentation.rawToolName, HistoryTextStyle.Dim)
                 presentation.lines.take(visible).forEach { line ->
                     SelectionContainer {
                         MaterialText(
                             line.text, Modifier.fillMaxWidth(),
+                            style = if (line.kind == PatchPresentationLineKind.Metadata)
+                                MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
                             fontFamily = when (line.kind) {
                                 PatchPresentationLineKind.Addition, PatchPresentationLineKind.Removal,
                                 PatchPresentationLineKind.Context, PatchPresentationLineKind.File -> FontFamily.Monospace
@@ -184,7 +187,8 @@ private class ComposeHistoryContentRenderer(
                     modifier = Modifier.semantics {
                         contentDescription = "Show next ${minOf(200, remaining)} lines, $remaining remaining"
                     },
-                ) { MaterialText("Show next ${minOf(200, remaining)} lines $remaining remaining") }
+                ) { MaterialText("Show next ${minOf(200, remaining)} lines $remaining remaining",
+                    style = MaterialTheme.typography.labelLarge) }
             }
         }
     }
@@ -208,6 +212,7 @@ private class ComposeHistoryToolDetails(private val style: HistoryTextStyle) : H
                 Box(Modifier.weight(1f)) {
                     MaterialText(
                         label, Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.bodyLarge,
                         fontWeight = if (style == HistoryTextStyle.Bold) FontWeight.Bold else FontWeight.Normal,
                         color = if (style == HistoryTextStyle.Dim) MaterialTheme.colorScheme.onSurfaceVariant
                             else MaterialTheme.colorScheme.onSurface,
@@ -222,7 +227,7 @@ private class ComposeHistoryToolDetails(private val style: HistoryTextStyle) : H
 @Composable
 private fun HistoryPlainText(
     value: String, style: HistoryTextStyle, fontFamily: FontFamily? = null, colorOverride: Color? = null,
-    textStyle: TextStyle = LocalTextStyle.current,
+    textStyle: TextStyle = MaterialTheme.typography.bodyLarge,
 ) {
     SelectionContainer {
         MaterialText(
