@@ -588,7 +588,10 @@ private fun JsonDetail(
     value: JsonElement,
     textStyle: TextStyle = TextStyle.Normal,
 ) {
-    Detail(label, value.historyPreview(), textStyle)
+    val preview = value.historyPreview()
+    if (preview.isNotBlank()) {
+        LocalHistoryRenderer.current.RecordedJson("$label: $preview", textStyle)
+    }
 }
 
 @Composable

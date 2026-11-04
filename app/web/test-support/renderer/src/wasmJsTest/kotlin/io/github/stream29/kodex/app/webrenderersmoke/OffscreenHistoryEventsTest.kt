@@ -48,6 +48,36 @@ import kotlin.math.abs
 private val emptyHistoryArguments = JsonObject(emptyMap())
 
 val offscreenHistoryEventsTest by testSuite {
+    for (width in listOf(180, 360)) {
+        test("generic JSON details use monospace and wrap width=$width") { offscreenTest {
+            val arguments = JsonObject(mapOf("query" to JsonPrimitive("Unicode 漢字 " + "detail ".repeat(30))))
+            val result = JsonArray(listOf(JsonPrimitive(42), JsonPrimitive(false)))
+            val event = StableJsonToolEvent("generic-json", name = "external", arguments = arguments, result = result)
+            val scene = OffscreenScene.create(width = width, height = 1800) {
+                HistoryEventContent(event, rememberComposeHistoryContentRenderer())
+            }
+            try {
+                scene.settle { scene.hasDescription("History tool: external") }
+                scene.clickDescription("History tool: external")
+                scene.settle { scene.hasText("Arguments") && scene.hasText("Result") }
+                scene.click("Arguments")
+                scene.settle { scene.hasText("Arguments: $arguments") }
+                scene.click("Result")
+                scene.settle { scene.hasText("Result: $result") }
+                for (text in listOf("Arguments: $arguments", "Result: $result")) {
+                    val layouts = mutableListOf<TextLayoutResult>()
+                    assertTrue(assertNotNull(scene.text(text).config.getOrNull(
+                        SemanticsActions.GetTextLayoutResult,
+                    )?.action)(layouts))
+                    val layout = layouts.single()
+                    assertEquals(FontFamily.Monospace, layout.layoutInput.style.fontFamily)
+                    assertEquals(text, layout.layoutInput.text.text)
+                    assertFalse(layout.hasVisualOverflow)
+                    if (text.startsWith("Arguments:")) assertTrue(layout.lineCount > 1)
+                }
+            } finally { scene.close() }
+        } }
+    }
     for (dark in listOf(false, true)) for (scale in listOf(1f, 1.5f)) {
         test("history headings escape button labels dark=$dark scale=$scale") { offscreenTest {
             val scheme = if (dark) darkColorScheme() else lightColorScheme()

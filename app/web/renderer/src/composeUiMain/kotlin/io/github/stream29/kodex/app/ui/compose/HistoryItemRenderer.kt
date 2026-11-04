@@ -256,6 +256,11 @@ private class ComposeHistoryItemRenderer(
     @Composable override fun Collapsed(
         summary: String, status: String, elapsed: Duration, disclosure: HistoryDisclosureState, onClick: () -> Unit,
     ) {
+        val color = when (status) {
+            "failed" -> MaterialTheme.colorScheme.error
+            "running", "streaming", "starting", "in_progress", "inprogress" -> MaterialTheme.colorScheme.tertiary
+            else -> MaterialTheme.colorScheme.onSurface
+        }
         HistoryDisclosureButton(
             onClick, Modifier.fillMaxWidth().semantics {
                 contentDescription = "Expand History item: $summary"
@@ -264,19 +269,15 @@ private class ComposeHistoryItemRenderer(
             stage = if (disclosure == HistoryDisclosureState.Loading) DisclosureFocusStage.Loading
                 else DisclosureFocusStage.Collapsed,
         ) {
-            HistoryToolDisclosureMark(disclosure)
+            HistoryToolDisclosureMark(disclosure, color)
             Text(
                 summary, Modifier.weight(1f),
                 style = if (LocalHistoryPatchTitle.current) historyPatchTitleStyle() else historyToolTitleStyle(),
                 maxLines = if (LocalCollapsedCommand.current) 1 else Int.MAX_VALUE,
                 overflow = if (LocalCollapsedCommand.current) TextOverflow.Ellipsis else TextOverflow.Clip,
-                color = when (status) {
-                    "failed" -> MaterialTheme.colorScheme.error
-                    "running", "streaming", "starting", "in_progress", "inprogress" -> MaterialTheme.colorScheme.tertiary
-                    else -> MaterialTheme.colorScheme.onSurface
-                },
+                color = color,
             )
-            Text(elapsed.historyElapsedSuffix(), style = MaterialTheme.typography.bodySmall)
+            Text(elapsed.historyElapsedSuffix(), color = color, style = MaterialTheme.typography.bodySmall)
         }
     }
     @Composable override fun Event(

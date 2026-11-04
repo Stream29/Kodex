@@ -38,6 +38,38 @@ import kotlin.time.Duration
 import kotlin.time.Instant
 
 val offscreenHistoryItemsTest by testSuite {
+    for (dark in listOf(false, true)) {
+        for (status in listOf("failed", "running", "streaming", "starting", "in_progress", "inprogress", "completed")) {
+            test("lazy collapsed tool uses status color for title and elapsed dark=$dark status=$status") { offscreenTest {
+                val scheme = if (dark) darkColorScheme() else lightColorScheme()
+                val scene = OffscreenScene.create(width = 360) {
+                    MaterialTheme(colorScheme = scheme) {
+                        rememberComposeHistoryItemRenderer().Collapsed(
+                            "Lazy tool", status, 123.milliseconds, HistoryDisclosureState.Collapsed,
+                        ) {}
+                    }
+                }
+                try {
+                    scene.settle { scene.hasText("Lazy tool") }
+                    val expected = when (status) {
+                        "failed" -> scheme.error
+                        "completed" -> scheme.onSurface
+                        else -> scheme.tertiary
+                    }
+                    for (text in listOf("Lazy tool", 123.milliseconds.historyElapsedSuffix())) {
+                        val layouts = mutableListOf<TextLayoutResult>()
+                        assertTrue(assertNotNull(scene.text(text).config.getOrNull(
+                            SemanticsActions.GetTextLayoutResult,
+                        )?.action)(layouts))
+                        assertEquals(expected, layouts.single().layoutInput.style.color, text)
+                    }
+                    assertEquals(1, scene.nodes().count {
+                        it.config.getOrNull(SemanticsProperties.TestTag) == "history-tool-disclosure-Collapsed"
+                    })
+                } finally { scene.close() }
+            } }
+        }
+    }
     for (width in listOf(180, 360)) for (dark in listOf(false, true)) {
         test("running patch title keeps status and typography on expansion width=$width dark=$dark") { offscreenTest {
             val diff = Patch("", listOf(AddFileHunk("folder/进行中.txt", "line")))
