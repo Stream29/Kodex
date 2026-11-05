@@ -29,6 +29,9 @@ kotlin {
             implementation(libs.kotlin.logging)
         }
         commonTest.dependencies {
+            implementation(project(":utils-sqlite"))
+            implementation(project(":agent-storage-sqlite"))
+            implementation(project(":app-backend-migration"))
             implementation(project(":rpc-local"))
             implementation(project(":rpc-backend-control-client"))
             implementation(libs.kotlinx.coroutines.test)

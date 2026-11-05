@@ -355,6 +355,8 @@ internal suspend fun withHost(
     ttl: Long = -1,
     hooks: String = "",
     stream: (suspend () -> kotlinx.coroutines.flow.Flow<io.github.stream29.kodex.openai.ResponsesStreamEvent>)? = null,
+    prepareHome: suspend CoroutineScope.(Path) -> Unit = {},
+    observeRequest: (io.github.stream29.kodex.openai.ResponsesApiRequest) -> Unit = {},
     block: suspend CoroutineScope.(Path, BackendEndpoint, Job) -> Unit,
 ) = withTimeout(45.seconds) {
     coroutineScope {
@@ -364,11 +366,20 @@ internal suspend fun withHost(
         SystemCoroutineFileSystem.writeString(Path(home, "settings.yml"),
             "backend:\n  daemon_ttl_seconds: $ttl\n  new_session:\n    model: fixture\n  session_title:\n    enabled: false\n" +
                 (if (hooks.isEmpty()) "" else hooks.prependIndent("  ") + "\n") + "frontend: {}\n")
+        try {
+            prepareHome(home)
+        } catch (failure: Throwable) {
+            withContext(NonCancellable) { removeHost(home) }
+            throw failure
+        }
         val mock = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse(listOf(ModelInfo(
                 OpenAiModelId("fixture"), "Fixture", contextWindow = 100_000, maxContextWindow = 100_000,
             )))) }
-            createResponse { _ -> stream?.invoke() ?: flow { awaitCancellation() } }
+            createResponse { request ->
+                observeRequest(request)
+                stream?.invoke() ?: flow { awaitCancellation() }
+            }
         }
         val backend = launch {
             runBackendHost(home, Path(home, "codex"), Path(home, "agents"), createClient = { mock })

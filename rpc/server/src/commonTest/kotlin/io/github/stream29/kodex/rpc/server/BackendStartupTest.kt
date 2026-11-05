@@ -20,6 +20,7 @@ val backendStartupTest by testSuite(compartment = { TestCompartment.RealTime }) 
         test("settings auth model and global startup leave sessions absent until $firstAccess") {
             withTimeout(30.seconds) {
                 val home = Path(SystemTemporaryDirectory, "kodex-backend-startup-${Random.nextLong()}")
+                val database = Path(home, "kodex.db")
                 val sessions = Path(home, "sessions")
                 try {
                     withBackendServices(
@@ -38,15 +39,19 @@ val backendStartupTest by testSuite(compartment = { TestCompartment.RealTime }) 
                         services.global.getAuthentication()
                         services.global.getModels()
                         services.global.getMcpServers()
+                        assertNull(SystemCoroutineFileSystem.metadataOrNull(database))
                         assertNull(SystemCoroutineFileSystem.metadataOrNull(sessions))
                         if (firstAccess == "catalog") {
                             assertEquals(emptyList(), services.global.getSessionCatalog(false))
                         } else {
                             assertEquals(0, services.global.createSession(home))
                         }
-                        assertTrue(SystemCoroutineFileSystem.metadataOrNull(sessions)?.isDirectory == true)
+                        assertTrue(SystemCoroutineFileSystem.metadataOrNull(database)?.isRegularFile == true)
                     }
-                    if (firstAccess == "create") {
+                    if (firstAccess == "catalog") {
+                        assertNull(SystemCoroutineFileSystem.metadataOrNull(sessions))
+                    } else {
+                        assertTrue(SystemCoroutineFileSystem.metadataOrNull(sessions)?.isDirectory == true)
                         // Reopening the same persisted entry uses the new host's
                         // one on-demand repository, not a per-tab root.
                         withBackendServices(

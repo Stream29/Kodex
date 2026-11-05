@@ -21,6 +21,7 @@ import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.models.*
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.rpcexception.*
+import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
 import io.ktor.http.URLBuilder
 import io.ktor.http.Url
 import kotlinx.coroutines.*
@@ -40,6 +41,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
             SystemCoroutineFileSystem.createDirectories(Path(base, "B"))
             SystemCoroutineFileSystem.createDirectories(Path(base, "a"))
             SystemCoroutineFileSystem.writeString(Path(base, "not-a-directory"), "private fixture contents")
+            val database = Path(roots.kodexHome, "kodex.db")
+            assertNull(SystemCoroutineFileSystem.metadataOrNull(database))
             val repository = Path(roots.kodexHome, "sessions")
             assertNull(SystemCoroutineFileSystem.metadataOrNull(repository))
             withInMemoryRpc(services::register) { raw ->
@@ -74,6 +77,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertEquals(roots.agentsHome.toString(), evaluation.candidate.lexicalKey)
                 assertEquals(listOf(roots.agentsHome.toString(), null, null),
                     evaluation.originalPaths.map { it.lexicalKey })
+                assertNull(SystemCoroutineFileSystem.metadataOrNull(database))
                 assertNull(SystemCoroutineFileSystem.metadataOrNull(repository),
                     "Read-only paths must not open the Session repository.")
             }
@@ -185,6 +189,55 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertFalse(global.deleteSession(index))
                 assertFailsWith<SessionNotFound> { global.keepSessionAlive(index) }
                 assertFailsWith<SessionNotActive> { runtime.getLatestIndex(index) }
+            }
+        }
+    }
+
+    test("session RPC mutations commit to SQLite and mirror files while settings stay in settings.yml") {
+        withServices { services, _ ->
+            val home = services.settings.contextSettings.value.kodexHome
+            val fs = SystemCoroutineFileSystem
+            suspend fun mirrored(predicate: suspend () -> Boolean) {
+                withTimeout(10.seconds) { while (!predicate()) delay(10) }
+            }
+            withInMemoryRpc(services::register) { raw ->
+                val client = RestoringRpcClient(raw)
+                val global = client.withService<GlobalRpc>()
+                val runtime = client.withService<AgentRuntimeRpc>()
+                val before = global.getSettings()
+                assertTrue(global.compareAndSetSettings(before, before.copy(daemonTtlSeconds = 123)))
+                val settingsFile = Path(home, "settings.yml")
+                assertTrue(fs.readString(settingsFile).contains("123"))
+                val index = global.createSession(Path("."))
+                openSqliteConnection(Path(home, "kodex.db"), readOnly = true).use { db ->
+                    assertEquals(listOf(listOf(index.toLong())), db.query("SELECT session_id FROM sessions"))
+                    val state = runtime.appendUserMessage(index, listOf(ContentItem.InputText("SQLite mutation")))
+                    val payload = db.query("SELECT payload_json FROM agent_commits WHERE agent_id = ? AND timeline = 'index' AND state_index = ?",
+                        listOf(index.toLong(), state.toLong())).single().single() as String
+                    assertTrue(payload.contains("SQLite mutation"))
+                    val message = Path(home, "sessions", index.toString(), "index", "$state.json")
+                    mirrored { fs.metadataOrNull(message) != null && fs.readString(message).contains("SQLite mutation") }
+                    global.archiveSession(index)
+                    assertEquals(listOf(listOf(1L)), db.query("SELECT archived FROM sessions"))
+                    val marker = Path(home, "sessions", index.toString(), "archive.mark")
+                    mirrored { fs.metadataOrNull(marker) != null }
+                    global.unarchiveSession(index)
+                    mirrored { fs.metadataOrNull(marker) == null }
+                    val fork = global.forkSession(index)
+                    assertEquals(listOf(listOf(2L)), db.query("SELECT count(*) FROM sessions"))
+                    val forkMessage = Path(home, "sessions", fork.toString(), "index", "$state.json")
+                    mirrored { fs.metadataOrNull(forkMessage) != null && fs.readString(forkMessage).contains("SQLite mutation") }
+                    assertTrue(fs.readString(forkMessage).contains("SQLite mutation"))
+                    assertTrue(global.deleteSession(fork))
+                    assertTrue(global.deleteSession(index))
+                    assertEquals(listOf(listOf(0L)), db.query("SELECT count(*) FROM sessions"))
+                    assertEquals(listOf(listOf(0L)), db.query("SELECT count(*) FROM agent_commits"))
+                    mirrored { fs.metadataOrNull(Path(home, "sessions", index.toString())) == null &&
+                        fs.metadataOrNull(Path(home, "sessions", fork.toString())) == null }
+                    assertEquals(123, global.getSettings().daemonTtlSeconds.toInt())
+                    assertTrue(fs.readString(settingsFile).contains("123"))
+                    assertTrue(db.query("SELECT name FROM sqlite_master WHERE name = 'global_settings'").isEmpty())
+                }
             }
         }
     }

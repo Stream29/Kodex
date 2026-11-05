@@ -7,7 +7,7 @@ import io.github.stream29.kodex.utils.shellclient.default
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
-import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
+import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
 import io.github.stream29.kodex.cli.notification.collectNotificationHooks
 import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
@@ -109,7 +109,9 @@ public actual suspend fun <R> withBackendServices(
                     global.mcpService,
                 )
                 withBackendSessionHost({
-                    FileSystemKodexSessionRepository(home, dependencies)
+                    SqliteKodexSessionRepository(home, dependencies) { failure ->
+                        BackendLogger.warn(failure) { "Session file mirror write failed." }
+                    }
                 }, renewBackend, backendRenewalInterval, checkAdmission) { host ->
                     val runtime = BackendAgentRuntimeRpc(host, { store.settings.value.sessionTitle }, createTitleGenerator(api))
                     val management = BackendSessionManagement(host, runtime, { store.settings.value.newSession }) {

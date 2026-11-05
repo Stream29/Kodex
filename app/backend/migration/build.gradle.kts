@@ -30,6 +30,7 @@ kotlin {
             kotlin.srcDir(files(generatedVersionDirectory).builtBy(generateKodexVersion))
             dependencies {
                 implementation(project(":agent-storage-filesystem-layout"))
+                implementation(project(":utils-sqlite"))
                 implementation(project(":utils-filesystem-lease"))
                 implementation(libs.kotlinx.serialization.json)
                 implementation(libs.kaml)
@@ -42,6 +43,9 @@ kotlin {
             kotlin.exclude("**/v0_4_7/MigrateToV0_4_7Test.kt")
             dependencies {
                 implementation(libs.kotlinx.coroutines.test)
+                implementation(project(":agent-storage-sqlite"))
+                implementation(project(":agent-session-sqlite"))
+                implementation(project(":agent-session-test"))
                 implementation(project(":app-backend-settings"))
                 implementation(project(":agent-storage-clean-models"))
                 implementation(project(":agent-storage-core"))
