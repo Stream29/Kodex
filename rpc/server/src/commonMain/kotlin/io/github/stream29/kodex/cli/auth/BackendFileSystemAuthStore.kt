@@ -13,6 +13,7 @@ import io.github.stream29.kodex.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.kodex.openai.codexclistorage.CodexAuthMode
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.kodex.utils.coroutines.closeOnFailure
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import kotlinx.coroutines.CancellationException
@@ -249,13 +250,8 @@ public actual suspend fun CoroutineScope.BackendFileSystemAuthStore(
     loginClient: OpenAiLoginClient,
     fileSystem: CoroutineFileSystem,
     clock: Clock,
-): BackendFileSystemAuthStore {
-    val owner = supervisorChildScope()
-    return try {
+): BackendFileSystemAuthStore =
+    supervisorChildScope().closeOnFailure({ it.cancel() }) { owner ->
         BackendFileSystemAuthStore(owner, dataDirectory, codexHome, selectedSource, fileSystem, loginClient, clock)
             .also { it.start() }
-    } catch (failure: Throwable) {
-        owner.cancel()
-        throw failure
     }
-}

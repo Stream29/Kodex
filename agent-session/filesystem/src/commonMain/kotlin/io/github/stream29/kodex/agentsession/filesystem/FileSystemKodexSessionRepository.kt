@@ -12,7 +12,10 @@ import io.github.stream29.kodex.agentstorage.filesystem.forkRawTo
 import io.github.stream29.kodex.agentstorage.filesystem.ofEmpty
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
+import io.github.stream29.kodex.utils.coroutines.CoroutineCloseable
+import io.github.stream29.kodex.utils.coroutines.closeOnFailure
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
+import io.github.stream29.kodex.utils.coroutines.use
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLease
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
@@ -144,7 +147,7 @@ public actual class FileSystemKodexSessionRepository internal constructor(
     actual override suspend fun create(): Int = entriesMutex.withLock {
         requireOpen()
         val (index, directory) = reserveSessionDirectory()
-        try {
+        directory.closeOnFailure(::deleteRecursively) {
             FileSystemAgentStorage.ofEmpty(
                 directory = directory,
                 fileSystem = fileSystem,
@@ -152,14 +155,6 @@ public actual class FileSystemKodexSessionRepository internal constructor(
             )
             mutableEntries.value = (entries.value + index).sorted()
             index
-        } catch (failure: Throwable) {
-            withContext(NonCancellable) {
-                runCatching { deleteRecursively(directory) }
-                    .onFailure { cleanupFailure ->
-                        if (cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
-                    }
-            }
-            throw failure
         }
     }
 
@@ -168,7 +163,7 @@ public actual class FileSystemKodexSessionRepository internal constructor(
         requireEntry(sourceEntryIndex)
         val source = FileSystemAgentStorage(sessionDirectory(sourceEntryIndex), fileSystem)
         val (index, directory) = reserveSessionDirectory()
-        try {
+        directory.closeOnFailure(::deleteRecursively) {
             val target = FileSystemAgentStorage.ofEmpty(
                 directory = directory,
                 fileSystem = fileSystem,
@@ -177,14 +172,6 @@ public actual class FileSystemKodexSessionRepository internal constructor(
             materializeFork(source, target)
             mutableEntries.value = (entries.value + index).sorted()
             index
-        } catch (failure: Throwable) {
-            withContext(NonCancellable) {
-                runCatching { deleteRecursively(directory) }
-                    .onFailure { cleanupFailure ->
-                        if (cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
-                    }
-            }
-            throw failure
         }
     }
 
@@ -427,24 +414,10 @@ private suspend fun CoroutineScope.tryAcquireSessionLease(
     }
 }
 
-private suspend fun <T> FileSystemLease.useAndRelease(block: suspend () -> T): T {
-    var primaryFailure: Throwable? = null
-    return try {
+private suspend fun <T> FileSystemLease.useAndRelease(block: suspend () -> T): T =
+    CoroutineCloseable(::closeAndJoin).use {
         async(start = CoroutineStart.UNDISPATCHED) { block() }.await()
-    } catch (failure: Throwable) {
-        primaryFailure = failure
-        throw failure
-    } finally {
-        val cleanupFailure = withContext(NonCancellable) {
-            runCatching { closeAndJoin() }.exceptionOrNull()
-        }
-        if (cleanupFailure != null) {
-            val primary = primaryFailure
-            if (primary == null) throw cleanupFailure
-            if (cleanupFailure !== primary) primary.addSuppressed(cleanupFailure)
-        }
     }
-}
 
 private suspend fun <T> FileSystemIndexVersioned<T>.scannedLatestIndex(): Int =
     storedIndexes().lastOrNull() ?: -1

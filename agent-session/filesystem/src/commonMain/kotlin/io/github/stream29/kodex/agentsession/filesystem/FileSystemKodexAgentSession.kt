@@ -9,13 +9,12 @@ import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
+import io.github.stream29.kodex.utils.coroutines.closeOnFailure
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLease
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 
 internal class FileSystemKodexAgentSession(
@@ -29,41 +28,29 @@ internal suspend fun CoroutineScope.FileSystemKodexAgentSession(
     fileSystem: CoroutineFileSystem,
     valueCacheSize: Int,
     dependencies: KodexAgentDependencies,
-): KodexAgentSession {
-    val scope = supervisorChildScope()
-    val lease = try {
+): KodexAgentSession =
+    supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
         scope.FileSystemLease(
             lockPath = Path(directory, LockFile),
             fileSystem = fileSystem,
             duration = SessionLeaseDuration,
-        )
-    } catch (failure: Throwable) {
-        scope.cancelAndJoin()
-        throw failure
-    }
-    try {
-        val storage = FileSystemAgentStorage(directory, fileSystem).cached(scope, valueCacheSize)
-        val state: KodexAgentStateContract = scope.KodexAgentState(
-            client = dependencies.client,
-            storage = storage,
-            contextSettings = dependencies.contextSettings,
-            mcpService = dependencies.mcpService,
-        )
-        val session = FileSystemKodexAgentSession(
-            storage = storage,
-            scope = scope,
-            runtime = state.buildMasterAgentRuntime(dependencies),
-        )
-        scope.coroutineContext[Job]?.invokeOnCompletion { lease.close() }
-        return session
-    } catch (failure: Throwable) {
-        val cleanupFailure = withContext(NonCancellable) {
-            runCatching {
-                scope.cancelAndJoin()
-                lease.closeAndJoin()
-            }.exceptionOrNull()
+        ).closeOnFailure({ lease ->
+            scope.cancelAndJoin()
+            lease.closeAndJoin()
+        }) { lease ->
+            val storage = FileSystemAgentStorage(directory, fileSystem).cached(scope, valueCacheSize)
+            val state: KodexAgentStateContract = scope.KodexAgentState(
+                client = dependencies.client,
+                storage = storage,
+                contextSettings = dependencies.contextSettings,
+                mcpService = dependencies.mcpService,
+            )
+            FileSystemKodexAgentSession(
+                storage = storage,
+                scope = scope,
+                runtime = state.buildMasterAgentRuntime(dependencies),
+            ).also {
+                scope.coroutineContext[Job]?.invokeOnCompletion { lease.close() }
+            }
         }
-        if (cleanupFailure != null && cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
-        throw failure
     }
-}

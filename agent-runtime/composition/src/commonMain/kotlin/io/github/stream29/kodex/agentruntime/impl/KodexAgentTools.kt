@@ -24,6 +24,7 @@ import io.github.stream29.kodex.tool.viewimage.ViewImageToolClient
 import io.github.stream29.kodex.tool.viewimage.ViewImageTools
 import io.github.stream29.kodex.tool.webrun.WebRunToolClient
 import io.github.stream29.kodex.tool.webrun.WebRunTools
+import io.github.stream29.kodex.utils.coroutines.closeOnFailure
 import io.github.stream29.kodex.utils.kodexhome.KodexHome
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -125,17 +126,3 @@ internal fun KodexAgentState.toolSearchState(
 
 private fun Map<String, McpClient>.listTools(): List<McpTool> =
     values.flatMap(McpClient::listTools)
-
-private inline fun <Resource : AutoCloseable, Result> Resource.closeOnFailure(
-    block: () -> Result,
-): Result =
-    try {
-        block()
-    } catch (failure: Throwable) {
-        try {
-            close()
-        } catch (closeFailure: Throwable) {
-            failure.addSuppressed(closeFailure)
-        }
-        throw failure
-    }

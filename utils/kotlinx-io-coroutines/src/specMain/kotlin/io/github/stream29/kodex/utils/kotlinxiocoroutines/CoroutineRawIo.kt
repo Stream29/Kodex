@@ -9,9 +9,7 @@ internal const val CoroutineIoSegmentByteCount: Int = 64 * 1024
 /**
  * Coroutine-friendly close boundary for resources whose close operation can perform I/O.
  */
-public interface CoroutineCloseable {
-    public suspend fun close()
-}
+public typealias CoroutineCloseable = io.github.stream29.kodex.utils.coroutines.CoroutineCloseable
 
 /**
  * Coroutine counterpart of `kotlinx-io` `RawSource`.

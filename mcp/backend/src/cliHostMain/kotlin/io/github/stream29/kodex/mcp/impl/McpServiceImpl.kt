@@ -15,6 +15,7 @@ import io.github.stream29.kodex.mcp.stdio.openMcpStdioTransport
 import io.github.stream29.kodex.mcp.streamablehttp.McpStreamableHttpClient
 import io.github.stream29.kodex.mcp.streamablehttp.openMcpStreamableHttpTransport
 import io.github.stream29.kodex.mcp.streamablehttp.withMcpAuthorization
+import io.github.stream29.kodex.utils.coroutines.closeOnFailure
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.processclient.ProcessClient
 import io.ktor.client.HttpClient
@@ -337,16 +338,13 @@ public actual fun CoroutineScope.McpServiceImpl(
     // initialization coroutine behind an apparently usable service.
     requireUniqueMcpModelNames(settings.value.mcpServers.keys, "server")
     val serviceScope = supervisorChildScope()
-    return try {
+    return AutoCloseable { serviceScope.cancel() }.closeOnFailure {
         McpServiceImpl(
             scope = serviceScope,
             settings = settings,
             configurationStore = configurationStore,
             tokenRefresher = tokenRefresher,
         )
-    } catch (failure: Throwable) {
-        serviceScope.cancel()
-        throw failure
     }
 }
 

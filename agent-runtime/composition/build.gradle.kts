@@ -33,6 +33,7 @@ kotlin {
             implementation(project(":tool-unified-exec"))
             implementation(project(":tool-view-image"))
             implementation(project(":tool-web-run"))
+            implementation(project(":utils-coroutines"))
             implementation(project(":utils-kodex-home"))
             implementation(project(":utils-logging-backend-scope"))
             implementation(project(":utils-shell-client-system"))

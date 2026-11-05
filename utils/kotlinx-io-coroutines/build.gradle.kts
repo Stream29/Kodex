@@ -8,6 +8,7 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
+                api(project(":utils-coroutines"))
                 api(libs.kotlinx.coroutines.core)
                 api(libs.kotlinx.io.core)
             }
