@@ -130,13 +130,16 @@ public actual class SqliteKodexSessionRepository internal constructor(
                 listOf(candidate, candidate))
             if (source != null) {
                 connection.execute(
-                    "INSERT INTO agent_commits SELECT ?, timeline, state_index, payload_json FROM agent_commits WHERE agent_id = ?",
+                    """INSERT INTO agent_commits SELECT ?, type, "index", payload_json FROM agent_commits WHERE agent_id = ?""",
                     listOf(candidate, source.toLong()),
                 )
-                val snapshot = connection.query("SELECT timeline, state_index, payload_json FROM agent_commits WHERE agent_id = ? ORDER BY timeline, state_index", listOf(candidate))
+                val snapshot = connection.query(
+                    """SELECT type, "index", payload_json FROM agent_commits WHERE agent_id = ? ORDER BY "index", type""",
+                    listOf(candidate),
+                )
                 files = snapshot.map { row ->
-                    val timeline = row[0] as String
-                    Triple(if (timeline == "token_count") "token-count" else timeline, (row[1] as Long).toInt(), row[2] as String)
+                    val type = row[0] as String
+                    Triple(mirrorTimelineDirectory(type), (row[1] as Long).toInt(), row[2] as String)
                 }
             }
             candidate.toInt()
@@ -178,10 +181,18 @@ public actual class SqliteKodexSessionRepository internal constructor(
                     mutex = mutex,
                     requireAccess = { check(sessionScope.isActive) { "Session storage is closed" } },
                 )
-                val tails = connection.query(
-                    "SELECT timeline, max(state_index) FROM agent_commits WHERE agent_id = ? GROUP BY timeline",
+                val tails = mutableMapOf<String, Int>()
+                connection.query(
+                    """SELECT type, max("index") FROM agent_commits WHERE agent_id = ? GROUP BY type""",
                     listOf(entryIndex.toLong()),
-                ).associate { (it[0] as String) to (it[1] as Long).toInt() }
+                ).forEach { row ->
+                    val timeline = mirrorTimelineDirectory(row[0] as String)
+                    val maxIndex = (row[1] as Long).toInt()
+                    val current = tails[timeline]
+                    if (current == null || maxIndex > current) {
+                        tails[timeline] = maxIndex
+                    }
+                }
                 CachedSqliteAgentStorage(sessionScope, storage, targetDirectory, fileSystem, tails, mirror)
             }
             val state = sessionScope.KodexAgentState(client = dependencies.client, storage = cache, contextSettings = dependencies.contextSettings, mcpService = dependencies.mcpService)

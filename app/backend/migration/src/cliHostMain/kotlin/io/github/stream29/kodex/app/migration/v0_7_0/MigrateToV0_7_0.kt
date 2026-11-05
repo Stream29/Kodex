@@ -46,9 +46,58 @@ internal suspend fun migrateToV0_7_0(home: Path, fileSystem: CoroutineFileSystem
 }
 
 private const val StagingName = ".kodex-migration-0.7.0-staging.db"
-private val Timelines = linkedMapOf(
-    "index" to "index", "work" to "work", "settings" to "settings",
-    "timestamp" to "timestamp", "token-count" to "token_count", "unstable" to "unstable",
+private val DirectIndexCommitTypes = setOf(
+    "user_message",
+    "developer_message",
+    "agent_message",
+    "request_user_input_tool_event",
+    "suggest_subagent_task_tool_event",
+    "plan_update",
+    "compaction_point",
+)
+private val IndexCommitTypes = listOf(
+    "user_message",
+    "assistant_message",
+    "assistant_message_commentary",
+    "assistant_message_final",
+    "developer_message",
+    "agent_message",
+    "request_user_input_tool_event",
+    "suggest_subagent_task_tool_event",
+    "plan_update",
+    "compaction_point",
+)
+private val WorkCommitTypes = listOf(
+    "reasoning",
+    "context_compaction",
+    "command_execution_tool_event",
+    "patch_tool_event",
+    "mcp_tool_event",
+    "web_search_tool_event",
+    "image_generation_tool_event",
+    "image_view_tool_event",
+    "tool_search_event",
+    "invalid_tool_call",
+    "server_tool_search",
+    "hosted_web_search",
+    "hosted_image_generation",
+    "json_tool_event",
+    "text_tool_event",
+    "custom_tool_event",
+)
+private val TokenCountCommitTypes = listOf(
+    "token_count_legacy",
+    "token_count_initialization",
+    "token_count_compaction",
+    "token_count_response",
+)
+private val TimelineTypes = linkedMapOf(
+    "index" to IndexCommitTypes,
+    "work" to WorkCommitTypes,
+    "settings" to listOf("settings"),
+    "timestamp" to listOf("timestamp"),
+    "token-count" to TokenCountCommitTypes,
+    "unstable" to listOf("unstable"),
 )
 private val MigrationJson = Json
 
@@ -59,6 +108,7 @@ private fun initializeV0_7_0Schema(connection: SqliteConnection) {
     }
 }
 
+// language=SQL
 private val v0_7_0Schema: String = """
 CREATE TABLE sessions (
     session_id INTEGER PRIMARY KEY CHECK (session_id BETWEEN 0 AND 2147483647),
@@ -73,18 +123,52 @@ CREATE TABLE agents (
 
 CREATE TABLE agent_commits (
     agent_id INTEGER NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
-    timeline TEXT NOT NULL CHECK (
-        timeline IN ('index', 'work', 'settings', 'timestamp', 'token_count', 'unstable')
+    type TEXT NOT NULL CHECK (
+        type IN (
+            'user_message',
+            'assistant_message',
+            'assistant_message_commentary',
+            'assistant_message_final',
+            'developer_message',
+            'agent_message',
+            'request_user_input_tool_event',
+            'suggest_subagent_task_tool_event',
+            'plan_update',
+            'compaction_point',
+            'reasoning',
+            'context_compaction',
+            'command_execution_tool_event',
+            'patch_tool_event',
+            'mcp_tool_event',
+            'web_search_tool_event',
+            'image_generation_tool_event',
+            'image_view_tool_event',
+            'tool_search_event',
+            'invalid_tool_call',
+            'server_tool_search',
+            'hosted_web_search',
+            'hosted_image_generation',
+            'json_tool_event',
+            'text_tool_event',
+            'custom_tool_event',
+            'settings',
+            'timestamp',
+            'token_count_legacy',
+            'token_count_initialization',
+            'token_count_compaction',
+            'token_count_response',
+            'unstable'
+        )
     ),
-    state_index INTEGER NOT NULL CHECK (state_index BETWEEN 0 AND 2147483647),
+    "index" INTEGER NOT NULL CHECK ("index" BETWEEN 0 AND 2147483647),
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
-    PRIMARY KEY (agent_id, timeline, state_index)
+    PRIMARY KEY (agent_id, type, "index")
 ) STRICT, WITHOUT ROWID;
 
-CREATE INDEX commits_global_index ON agent_commits(agent_id, state_index, timeline);
+CREATE INDEX commits_global_index ON agent_commits(agent_id, "index", type);
 CREATE INDEX commits_settings_cwd ON agent_commits(
-    json_extract(payload_json, '$.cwd'), agent_id, state_index DESC
-) WHERE timeline = 'settings';
+    json_extract(payload_json, '$.cwd'), agent_id, "index" DESC
+) WHERE type = 'settings';
 
 CREATE VIEW session_catalog (
     session_id, archived, thread_name, cwd,
@@ -99,19 +183,19 @@ SELECT s.session_id, s.archived,
     json_extract(ut.payload_json, '$')
 FROM sessions AS s
 LEFT JOIN agent_commits AS st
-    ON st.agent_id = s.session_id AND st.timeline = 'settings'
-    AND st.state_index = (
-        SELECT max(state_index) FROM agent_commits
-        WHERE agent_id = s.session_id AND timeline = 'settings'
+    ON st.agent_id = s.session_id AND st.type = 'settings'
+    AND st."index" = (
+        SELECT max("index") FROM agent_commits
+        WHERE agent_id = s.session_id AND type = 'settings'
     )
 LEFT JOIN agent_commits AS ct
-    ON ct.agent_id = s.session_id AND ct.timeline = 'timestamp'
-    AND ct.state_index = 0
+    ON ct.agent_id = s.session_id AND ct.type = 'timestamp'
+    AND ct."index" = 0
 LEFT JOIN agent_commits AS ut
-    ON ut.agent_id = s.session_id AND ut.timeline = 'timestamp'
-    AND ut.state_index = (
-        SELECT max(state_index) FROM agent_commits
-        WHERE agent_id = s.session_id AND timeline = 'timestamp'
+    ON ut.agent_id = s.session_id AND ut.type = 'timestamp'
+    AND ut."index" = (
+        SELECT max("index") FROM agent_commits
+        WHERE agent_id = s.session_id AND type = 'timestamp'
     );
 """.trimIndent()
 
@@ -143,7 +227,7 @@ private suspend fun scanSessions(home: Path, fs: CoroutineFileSystem): List<Sess
             fs.metadataOrNull(entry)?.isDirectory != true
         ) throw IOException("Invalid session entry: $entry")
         val directory = fs.resolve(entry)
-        val indexes = Timelines.mapValues { (fileName, timeline) ->
+        val indexes = TimelineTypes.mapValues { (fileName, _) ->
             val path = Path(directory, fileName)
             if (fs.metadataOrNull(path)?.isDirectory != true) throw IOException("Missing timeline directory: $path")
             val stored = storedRecordIndexes(path, fs)
@@ -153,7 +237,7 @@ private suspend fun scanSessions(home: Path, fs: CoroutineFileSystem): List<Sess
                 throw IOException("Timeline latest pointer does not match records: $path")
             }
             for (stateIndex in setOfNotNull(stored.firstOrNull(), stored.lastOrNull())) {
-                readBoundaryPayload(path, timeline, stateIndex, fs)
+                readBoundaryPayload(path, fileName, stateIndex, fs)
             }
             stored
         }
@@ -182,23 +266,66 @@ private suspend fun readPayload(path: Path, stateIndex: Int, fs: CoroutineFileSy
     }
 }
 
-private suspend fun readBoundaryPayload(path: Path, timeline: String, stateIndex: Int, fs: CoroutineFileSystem): String {
-    val raw = readPayload(path, stateIndex, fs)
+private fun resolveCommitType(path: Path, fileName: String, stateIndex: Int, raw: String): String {
     try {
         val json = MigrationJson.parseToJsonElement(raw)
-        when (timeline) {
+        return when (fileName) {
             "timestamp" -> {
                 val primitive = json as? JsonPrimitive ?: throw IllegalArgumentException()
                 require(primitive.isString)
                 Instant.parse(primitive.content)
+                "timestamp"
             }
-            "unstable" -> json.jsonArray
-            else -> json.jsonObject
+            "unstable" -> {
+                json.jsonArray
+                "unstable"
+            }
+            "settings" -> {
+                json.jsonObject
+                "settings"
+            }
+            "token-count" -> {
+                val obj = json.jsonObject
+                when (obj["kind"]?.jsonPrimitive?.takeIf { it.isString }?.content) {
+                    "legacy" -> "token_count_legacy"
+                    "initialization" -> "token_count_initialization"
+                    "compaction" -> "token_count_compaction"
+                    "response" -> "token_count_response"
+                    else -> throw IllegalArgumentException()
+                }
+            }
+            "index" -> {
+                val obj = json.jsonObject
+                when (val type = obj["type"]?.jsonPrimitive?.takeIf { it.isString }?.content) {
+                    "assistant_message" -> when (val phase = obj["phase"]) {
+                        null, JsonNull -> "assistant_message"
+                        is JsonPrimitive -> when (phase.takeIf { it.isString }?.content) {
+                            "commentary" -> "assistant_message_commentary"
+                            "final_answer" -> "assistant_message_final"
+                            else -> throw IllegalArgumentException()
+                        }
+                        else -> throw IllegalArgumentException()
+                    }
+                    in DirectIndexCommitTypes -> type!!
+                    else -> throw IllegalArgumentException()
+                }
+            }
+            "work" -> {
+                val obj = json.jsonObject
+                val type = obj["type"]?.jsonPrimitive?.takeIf { it.isString }?.content
+                if (type != null && type in WorkCommitTypes) type else throw IllegalArgumentException()
+            }
+            else -> throw IllegalArgumentException()
         }
-        return raw
     } catch (_: Exception) {
         throw IOException("Invalid migration record: $path/$stateIndex.json")
     }
+}
+
+private suspend fun readBoundaryPayload(path: Path, fileName: String, stateIndex: Int, fs: CoroutineFileSystem): String {
+    val raw = readPayload(path, stateIndex, fs)
+    resolveCommitType(path, fileName, stateIndex, raw)
+    return raw
 }
 
 private suspend fun importSessions(db: SqliteConnection, sessions: List<SessionManifest>, fs: CoroutineFileSystem) {
@@ -211,12 +338,13 @@ private suspend fun importSessions(db: SqliteConnection, sessions: List<SessionM
             val id = session.index.toLong()
             db.execute("INSERT INTO sessions VALUES (?, ?)", listOf(id, session.archived))
             db.execute("INSERT INTO agents VALUES (?, ?, NULL)", listOf(id, id))
-            for ((fileName, timeline) in Timelines) {
+            for ((fileName, _) in TimelineTypes) {
                 val timelinePath = Path(session.directory, fileName)
                 for (index in session.indexes.getValue(fileName)) {
                     val payload = readPayload(timelinePath, index, fs)
+                    val type = resolveCommitType(timelinePath, fileName, index, payload)
                     try {
-                        db.execute("INSERT INTO agent_commits VALUES (?, ?, ?, ?)", listOf(id, timeline, index.toLong(), payload))
+                        db.execute("INSERT INTO agent_commits VALUES (?, ?, ?, ?)", listOf(id, type, index.toLong(), payload))
                     } catch (failure: SqliteFailure) {
                         throw IOException("Invalid migration record: $timelinePath/$index.json", failure)
                     }
@@ -267,18 +395,21 @@ private suspend fun verifyManifest(db: SqliteConnection, sessions: List<SessionM
         val id = session.index.toLong()
         verify(db.query("SELECT agent_id, session_id, parent_agent_id FROM agents WHERE agent_id=?", listOf(id)) ==
             listOf(listOf(id, id, null)))
-        for ((fileName, timeline) in Timelines) {
+        for ((fileName, types) in TimelineTypes) {
             val indexes = session.indexes.getValue(fileName)
             val expectedSum = if (indexes.isEmpty()) null else indexes.sumOf { it.toLong() }
+            val typeClause = if (types.size == 1) "type=?" else "type IN (${types.joinToString(",") { "?" }})"
             verify(
                 db.query(
-                    "SELECT count(*), min(state_index), max(state_index), sum(state_index) FROM agent_commits WHERE agent_id=? AND timeline=?",
-                    listOf(id, timeline),
-                ) == listOf(listOf(indexes.size.toLong(), indexes.firstOrNull()?.toLong(), indexes.lastOrNull()?.toLong(), expectedSum)),
+                    """SELECT count(*), count(DISTINCT "index"), min("index"), max("index"), sum("index") FROM agent_commits WHERE agent_id=? AND $typeClause""",
+                    listOf(id) + types,
+                ) == listOf(listOf(indexes.size.toLong(), indexes.size.toLong(), indexes.firstOrNull()?.toLong(), indexes.lastOrNull()?.toLong(), expectedSum)),
             )
+            val timelinePath = Path(session.directory, fileName)
             for (index in setOfNotNull(indexes.firstOrNull(), indexes.lastOrNull())) {
-                val source = readPayload(Path(session.directory, fileName), index, fs)
-                verify(db.query("SELECT payload_json FROM agent_commits WHERE agent_id=? AND timeline=? AND state_index=?", listOf(id, timeline, index.toLong())) ==
+                val source = readPayload(timelinePath, index, fs)
+                val expectedType = resolveCommitType(timelinePath, fileName, index, source)
+                verify(db.query("""SELECT payload_json FROM agent_commits WHERE agent_id=? AND type=? AND "index"=?""", listOf(id, expectedType, index.toLong())) ==
                     listOf(listOf(source)))
             }
         }

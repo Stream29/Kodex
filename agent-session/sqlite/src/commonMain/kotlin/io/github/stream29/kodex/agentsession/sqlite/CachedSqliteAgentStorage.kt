@@ -72,8 +72,50 @@ internal class CachedSqliteAgentStorage(
     override val work = CachedSqliteTimeline(owner, backing.work, { mirrorStorage().work }, tails["work"] ?: -1, mirrorQueue)
     override val settings = CachedSqliteTimeline(owner, backing.settings, { mirrorStorage().settings }, tails["settings"] ?: -1, mirrorQueue)
     override val timestamp = CachedSqliteTimeline(owner, backing.timestamp, { mirrorStorage().timestamp }, tails["timestamp"] ?: -1, mirrorQueue)
-    override val tokenCount = CachedSqliteTimeline(owner, backing.tokenCount, { mirrorStorage().tokenCount }, tails["token_count"] ?: -1, mirrorQueue)
+    override val tokenCount = CachedSqliteTimeline(owner, backing.tokenCount, { mirrorStorage().tokenCount }, tails["token-count"] ?: -1, mirrorQueue)
     override val unstable = CachedSqliteTimeline(owner, backing.unstable, { mirrorStorage().unstable }, tails["unstable"] ?: -1, mirrorQueue)
+}
+
+internal fun mirrorTimelineDirectory(type: String): String = when (type) {
+    "user_message",
+    "assistant_message",
+    "assistant_message_commentary",
+    "assistant_message_final",
+    "developer_message",
+    "agent_message",
+    "request_user_input_tool_event",
+    "suggest_subagent_task_tool_event",
+    "plan_update",
+    "compaction_point",
+    -> "index"
+
+    "reasoning",
+    "context_compaction",
+    "command_execution_tool_event",
+    "patch_tool_event",
+    "mcp_tool_event",
+    "web_search_tool_event",
+    "image_generation_tool_event",
+    "image_view_tool_event",
+    "tool_search_event",
+    "invalid_tool_call",
+    "server_tool_search",
+    "hosted_web_search",
+    "hosted_image_generation",
+    "json_tool_event",
+    "text_tool_event",
+    "custom_tool_event",
+    -> "work"
+
+    "settings" -> "settings"
+    "timestamp" -> "timestamp"
+    "token_count_legacy",
+    "token_count_initialization",
+    "token_count_compaction",
+    "token_count_response",
+    -> "token-count"
+    "unstable" -> "unstable"
+    else -> error("Unknown commit type: $type")
 }
 
 internal class CachedSqliteTimeline<T>(

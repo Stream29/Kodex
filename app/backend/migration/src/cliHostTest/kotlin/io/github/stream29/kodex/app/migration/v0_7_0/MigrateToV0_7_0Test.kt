@@ -60,7 +60,7 @@ public val migrateToV0_7_0Test by testSuite {
                 assertEquals(KodexHomeMigrations.map { it.toVersion }, activated)
                 assertEquals("\"0.7.0\"", fs.readString(Path(home, "version.json")))
                 database(home) { db ->
-                    val token = db.query("SELECT payload_json FROM agent_commits WHERE timeline='token_count'").single().single() as String
+                    val token = db.query("SELECT payload_json FROM agent_commits WHERE type='token_count_legacy'").single().single() as String
                     assertEquals(42L, OpenAiJsonCodec.decodeFromString(TokenCountSnapshot.serializer(), token).totalTokens)
                     assertEquals(listOf(listOf(0L, 0L, "migration", "/synthetic")),
                         db.query("SELECT session_id, archived, thread_name, cwd FROM session_catalog"))
@@ -89,13 +89,13 @@ public val migrateToV0_7_0Test by testSuite {
             database(home) { db ->
                 assertEquals(listOf(listOf(2L, 0L), listOf(9L, 1L), listOf(15L, 0L)),
                     db.query("SELECT * FROM sessions ORDER BY session_id"))
-                for ((fileName, timeline) in Names) {
+                for ((fileName, commitType) in Names) {
                     assertEquals(listOf(listOf(0L), listOf(7L)), db.query(
-                        "SELECT state_index FROM agent_commits WHERE agent_id=2 AND timeline=? ORDER BY state_index", listOf(timeline)))
+                        """SELECT "index" FROM agent_commits WHERE agent_id=2 AND type=? ORDER BY "index"""", listOf(commitType)))
                     for (index in listOf(0, 7)) {
                         val raw = fs.readString(Path(home, "sessions", "2", fileName, "$index.json"))
-                        val imported = db.query("SELECT payload_json FROM agent_commits WHERE agent_id=2 AND timeline=? AND state_index=?",
-                            listOf(timeline, index.toLong())).single().single() as String
+                        val imported = db.query("""SELECT payload_json FROM agent_commits WHERE agent_id=2 AND type=? AND "index"=?""",
+                            listOf(commitType, index.toLong())).single().single() as String
                         assertEquals(raw, imported)
                     }
                 }
@@ -138,6 +138,32 @@ public val migrateToV0_7_0Test by testSuite {
             database(home) { db ->
                 assertEquals(listOf(listOf(0L, 0L, "", ".", null, "2026-10-25T12:00:07.987654321Z")),
                     db.query("SELECT * FROM session_catalog"))
+            }
+        }
+
+        test("maps assistant message phases and token count kinds into fine-grained commit types") { home ->
+            emptySession(home, 0)
+            record(home, 0, "index", 1, """{"type":"assistant_message","content":[{"type":"output_text","text":"plain"}]}""")
+            record(home, 0, "index", 2, """{"type":"assistant_message","phase":"commentary","content":[{"type":"output_text","text":"thinking"}]}""")
+            record(home, 0, "index", 3, """{"type":"assistant_message","phase":"final_answer","content":[{"type":"output_text","text":"done"}]}""")
+            record(home, 0, "token-count", 0, """{"kind":"initialization","total_tokens":0}""")
+            record(home, 0, "token-count", 1, """{"kind":"legacy","total_tokens":10}""")
+            record(home, 0, "token-count", 2, """{"kind":"compaction","total_tokens":20}""")
+            record(home, 0, "token-count", 3, """{"kind":"response","total_tokens":30}""")
+            migrateToV0_7_0(home, fs)
+            database(home) { db ->
+                assertEquals(
+                    listOf(
+                        listOf(0L, "token_count_initialization"),
+                        listOf(1L, "assistant_message"),
+                        listOf(1L, "token_count_legacy"),
+                        listOf(2L, "assistant_message_commentary"),
+                        listOf(2L, "token_count_compaction"),
+                        listOf(3L, "assistant_message_final"),
+                        listOf(3L, "token_count_response"),
+                    ),
+                    db.query("""SELECT "index", type FROM agent_commits WHERE agent_id=0 ORDER BY "index", type"""),
+                )
             }
         }
 
@@ -246,7 +272,7 @@ public val migrateToV0_7_0Test by testSuite {
                         // Scan, old database verification, import, then staging verification.
                         if (reads == 4) {
                             databaseAt(Path(home, Staging)) { db ->
-                                db.execute("UPDATE agent_commits SET payload_json=json_set(payload_json,'$.future_top',99) WHERE timeline='index' AND state_index=0")
+                                db.execute("""UPDATE agent_commits SET payload_json=json_set(payload_json,'$.future_top',99) WHERE type='user_message' AND "index"=0""")
                             }
                             injected = true
                         }
@@ -270,9 +296,9 @@ public val migrateToV0_7_0Test by testSuite {
 
         val mismatches = linkedMapOf(
             "archived" to "UPDATE sessions SET archived=1",
-            "sparse index set with same count and maximum" to "UPDATE agent_commits SET state_index=1 WHERE timeline='index' AND state_index=0",
-            "payload unknown field" to "UPDATE agent_commits SET payload_json=json_set(payload_json,'$.future',99) WHERE timeline='settings'",
-            "missing timeline row" to "DELETE FROM agent_commits WHERE timeline='work' AND state_index=0",
+            "sparse index set with same count and maximum" to """UPDATE agent_commits SET "index"=1 WHERE type='user_message' AND "index"=0""",
+            "payload unknown field" to "UPDATE agent_commits SET payload_json=json_set(payload_json,'$.future',99) WHERE type='settings'",
+            "missing timeline row" to """DELETE FROM agent_commits WHERE type='text_tool_event' AND "index"=0""",
             "extra session" to "INSERT INTO sessions VALUES(1,0)",
             "catalog view" to "DROP VIEW session_catalog",
         )
@@ -364,7 +390,7 @@ public val migrateToV0_7_0Test by testSuite {
 
 private val fs = SystemCoroutineFileSystem
 private const val Staging = ".kodex-migration-0.7.0-staging.db"
-private val Names = linkedMapOf("index" to "index", "work" to "work", "settings" to "settings", "timestamp" to "timestamp", "token-count" to "token_count", "unstable" to "unstable")
+private val Names = linkedMapOf("index" to "user_message", "work" to "text_tool_event", "settings" to "settings", "timestamp" to "timestamp", "token-count" to "token_count_response", "unstable" to "unstable")
 private const val Settings = """{"model":"synthetic","threadName":"migration","cwd":"/synthetic","future":{"nested":[1,null,"opaque"]}}"""
 private const val Index = """{"type":"user_message","content":[{"type":"input_text","text":"hello","future_nested":9}],"future_top":8}"""
 private const val Work = """{"type":"text_tool_event","call_id":"c","name":"test","arguments":{"opaque":"{unparsed}","z":99},"result":"OK","success":true,"future":42}"""

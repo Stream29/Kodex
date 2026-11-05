@@ -45,7 +45,7 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                     db.execute("INSERT INTO agent_commits VALUES (0, 'settings', 0, ?)",
                         listOf("""{"model":"fixture","threadName":"Synthetic history"}"""))
                     repeat(240) { index ->
-                        db.execute("INSERT INTO agent_commits VALUES (0, 'index', ?, ?)", listOf(index.toLong(),
+                        db.execute("INSERT INTO agent_commits VALUES (0, 'user_message', ?, ?)", listOf(index.toLong(),
                             """{"type":"user_message","content":[{"type":"input_text","text":"Fixture $index"}]}"""))
                     }
                 }
@@ -92,7 +92,7 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                         listOf("""{"model":"fixture","threadName":"Migrated session"}"""),
                     )
                     db.execute(
-                        "INSERT INTO agent_commits VALUES (0, 'index', 0, ?)",
+                        "INSERT INTO agent_commits VALUES (0, 'user_message', 0, ?)",
                         listOf("""{"type":"user_message","content":[{"type":"input_text","text":"Migrated history"}]}"""),
                     )
                 }
@@ -120,7 +120,7 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                 assertNotNull(sent.clientMetadata?.threadId)
                 assertEquals(sent.clientMetadata?.threadId, sent.promptCacheKey)
                 openSqliteConnection(Path(home, "kodex.db"), readOnly = true).use { db ->
-                    assertTrue((db.query("SELECT payload_json FROM agent_commits WHERE agent_id = 0 AND timeline = 'index' AND state_index = ?",
+                    assertTrue((db.query("""SELECT payload_json FROM agent_commits WHERE agent_id = 0 AND type = 'user_message' AND "index" = ?""",
                         listOf(next.toLong())).single().single() as String).contains("After migration"))
                 }
                 val mirror = Path(home, "sessions", "0", "index", "$next.json")

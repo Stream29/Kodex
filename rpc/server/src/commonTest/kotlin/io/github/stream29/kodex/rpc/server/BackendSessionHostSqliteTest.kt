@@ -74,7 +74,7 @@ val backendSessionHostSqliteTest by testSuite(testConfig = TestConfig.testScope(
                     if (exit == "cancel") work.cancelAndJoin() else work.await()
                     written.await().getOrThrow()
                     openSqliteConnection(Path(root, "kodex.db"), readOnly = true).use { db ->
-                        assertTrue((db.query("SELECT payload_json FROM agent_commits WHERE timeline = 'settings'")
+                        assertTrue((db.query("SELECT payload_json FROM agent_commits WHERE type = 'settings'")
                             .single().single() as String).contains("persisted-cleanup"))
                     }
                     assertTrue(SystemCoroutineFileSystem.metadataOrNull(Path(root, "kodex.db"))?.isRegularFile == true)

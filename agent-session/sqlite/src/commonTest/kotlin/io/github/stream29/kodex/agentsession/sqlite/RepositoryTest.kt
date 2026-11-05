@@ -102,7 +102,7 @@ val sqliteRepositoryTest by testSuite {
                         val session = repository.open(0)
                         val observable = session.storage as ObservableKodexAgentStorage
                         val nonce = observable.settings.cacheNonce.value
-                        db.execute("CREATE TRIGGER reject_init BEFORE INSERT ON agent_commits WHEN NEW.timeline = 'timestamp' AND NEW.state_index = 0 BEGIN SELECT RAISE(ABORT, 'injected'); END")
+                        db.execute("""CREATE TRIGGER reject_init BEFORE INSERT ON agent_commits WHEN NEW.type = 'timestamp' AND NEW."index" = 0 BEGIN SELECT RAISE(ABORT, 'injected'); END""")
                         assertFailsWith<SqliteFailure> { session.runtime.modify { it.initialize(settings("failed")) } }
                         assertEquals(-1, observable.settings.latestIndex.value)
                         assertEquals(nonce, observable.settings.cacheNonce.value)
@@ -111,12 +111,12 @@ val sqliteRepositoryTest by testSuite {
                         db.execute("DROP TRIGGER reject_init")
                         session.runtime.modify { it.initialize(settings("committed")) }
                         assertEquals(0, observable.settings.latestIndex.value)
-                        db.execute("CREATE TRIGGER reject_settings_update BEFORE INSERT ON agent_commits WHEN NEW.timeline = 'settings' AND NEW.state_index > 0 BEGIN SELECT RAISE(ABORT, 'injected'); END")
+                        db.execute("""CREATE TRIGGER reject_settings_update BEFORE INSERT ON agent_commits WHEN NEW.type = 'settings' AND NEW."index" > 0 BEGIN SELECT RAISE(ABORT, 'injected'); END""")
                         assertFailsWith<SqliteFailure> { session.runtime.updateSettings(settings("uncommitted")) }
                         assertEquals("committed", repository.getEntry(0).threadName)
                         assertEquals(0, observable.settings.latestIndex.value)
                         db.execute("DROP TRIGGER reject_settings_update")
-                        db.execute("CREATE TRIGGER reject_index_insert BEFORE INSERT ON agent_commits WHEN NEW.timeline = 'index' BEGIN SELECT RAISE(ABORT, 'injected'); END")
+                        db.execute("CREATE TRIGGER reject_index_insert BEFORE INSERT ON agent_commits WHEN NEW.type = 'user_message' BEGIN SELECT RAISE(ABORT, 'injected'); END")
                         assertFailsWith<SqliteFailure> { session.runtime.appendUserMessage(listOf(ContentItem.InputText("uncommitted"))) }
                         assertEquals(-1, session.storage.index.latestIndex())
                         assertEquals(0, session.storage.latestIndex())

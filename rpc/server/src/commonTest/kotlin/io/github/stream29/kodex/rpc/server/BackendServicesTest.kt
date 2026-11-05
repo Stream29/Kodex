@@ -212,7 +212,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 openSqliteConnection(Path(home, "kodex.db"), readOnly = true).use { db ->
                     assertEquals(listOf(listOf(index.toLong())), db.query("SELECT session_id FROM sessions"))
                     val state = runtime.appendUserMessage(index, listOf(ContentItem.InputText("SQLite mutation")))
-                    val payload = db.query("SELECT payload_json FROM agent_commits WHERE agent_id = ? AND timeline = 'index' AND state_index = ?",
+                    val payload = db.query("""SELECT payload_json FROM agent_commits WHERE agent_id = ? AND type = 'user_message' AND "index" = ?""",
                         listOf(index.toLong(), state.toLong())).single().single() as String
                     assertTrue(payload.contains("SQLite mutation"))
                     val message = Path(home, "sessions", index.toString(), "index", "$state.json")
