@@ -126,6 +126,7 @@ moduleTree("agent-runtime") {
 }
 
 moduleTree("agent-session") {
+    module("sqlite")
     module("contract")
     module("filesystem")
     module("in-memory")
@@ -140,6 +141,7 @@ moduleTree("agent-state") {
 }
 
 moduleTree("agent-storage") {
+    module("sqlite")
     module("filesystem")
     module("clean-models")
     module("core")
@@ -361,6 +363,7 @@ moduleTree("tool") {
 }
 
 moduleTree("utils") {
+    module("sqlite")
     module("coroutines")
     module("external-url")
     module("filesystem-lease")
