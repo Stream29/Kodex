@@ -120,7 +120,7 @@ public val migrateToV0_7_0Test by testSuite {
                     assertEquals(listOf(2, 15), repository.listEntries(false).map { it.entryIndex })
                     assertEquals(listOf(2, 9, 15), repository.listEntries(true).map { it.entryIndex })
                     val storage = repository.open(2).storage
-                    assertEquals(Path(home, "sessions", "2").toStorageUri(), storage.uri)
+                    assertEquals(fs.resolve(Path(home, "sessions", "2")).toStorageUri(), storage.uri)
                     assertEquals("migration", checkNotNull(storage.getSettingsAt(7)).threadName)
                     assertEquals(Instant.parse("2026-10-25T12:00:07.987654321Z"), storage.getTimestampExact(7))
                     assertEquals(OpenAiJsonCodec.decodeFromString(CleanIndexEntry.serializer(), Index), storage.getIndexEntryAt(7))
