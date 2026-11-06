@@ -9,11 +9,15 @@ import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
 import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
-import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAtOrNull
+import io.github.stream29.kodex.agentstorage.contract.getTimestampAtOrNull
+import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -21,12 +25,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -89,13 +90,14 @@ public actual class InMemoryKodexSessionRepository internal constructor(
 
     actual override suspend fun readCreatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
         requireOpen()
-        requireSession(entryIndex).storage.timestamp.getExact(0)
+        requireSession(entryIndex).storage.getTimestampExact(0)
     }
 
     actual override suspend fun readUpdatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
         requireOpen()
-        val timestamp = requireSession(entryIndex).storage.timestamp
-        timestamp.latestIndex().takeIf { it >= 0 }?.let { timestamp.getExact(it) }
+        val storage = requireSession(entryIndex).storage
+        val latest = storage.latestIndex()
+        if (latest < 0) null else storage.getTimestampAtOrNull(latest)
     }
 
     private suspend fun updateArchived(
@@ -236,12 +238,11 @@ private class InMemoryRootSessionEntry(
 }
 
 private suspend fun SessionNode.entry(entryIndex: Int): KodexSessionEntry {
-    val settingsIndex = storage.settings.latestIndex()
-    val timestampIndex = storage.timestamp.latestIndex()
+    val latest = storage.latestIndex()
     return InMemorySessionEntry(
         entryIndex = entryIndex,
-        threadName = settingsIndex.takeIf { it >= 0 }?.let { index -> storage.settings[index].threadName },
-        lastActivityAt = timestampIndex.takeIf { it >= 0 }?.let { index -> storage.timestamp[index] },
+        threadName = if (latest >= 0) storage.getSettingsAtOrNull(latest)?.threadName else null,
+        lastActivityAt = if (latest >= 0) storage.getTimestampAtOrNull(latest) else null,
     )
 }
 
@@ -261,86 +262,70 @@ private suspend fun SessionNode.rootEntry(
     )
 }
 
-private fun smallestMissing(values: Iterable<Int>): Int {
-    var candidate = 0
-    while (candidate in values) candidate += 1
-    return candidate
-}
-
 private class SessionAgentStorage(
     parentScope: CoroutineScope,
-    delegate: InMemoryKodexAgentStorage,
-) : MutableKodexAgentStorage {
-    override val uri: String = delegate.uri
-    override val index = SessionIndexVersioned(parentScope, delegate.index)
-    override val work = SessionIndexVersioned(parentScope, delegate.work)
-    override val settings = SessionIndexVersioned(parentScope, delegate.settings)
-    override val timestamp = SessionIndexVersioned(parentScope, delegate.timestamp)
-    override val tokenCount = SessionIndexVersioned(parentScope, delegate.tokenCount)
-    override val unstable = SessionIndexVersioned(parentScope, delegate.unstable)
-}
-
-private class SessionIndexVersioned<T>(
-    parentScope: CoroutineScope,
-    private val delegate: MutableIndexVersioned<T>,
+    private val delegate: InMemoryKodexAgentStorage,
 ) :
-    MutableIndexVersioned<T>,
+    MutableKodexAgentStorage,
     CoroutineScope by parentScope.supervisorChildScope(),
     AutoCloseable {
-    override fun indexes(from: Int): Flow<Int> = owned(delegate.indexes(from))
-
-    override fun indexesDescending(from: Int): Flow<Int> = owned(delegate.indexesDescending(from))
-
-    override fun values(from: Int): Flow<Pair<Int, T>> = owned(delegate.values(from))
-
-    override fun valuesDescending(from: Int): Flow<Pair<Int, T>> = owned(delegate.valuesDescending(from))
-
-    private fun <V> owned(upstream: Flow<V>): Flow<V> = flow {
-        requireActive()
-        upstream.collect { value ->
-            requireActive()
-            emit(value)
-        }
-    }
+    override val uri: String = delegate.uri
 
     override suspend fun latestIndex(): Int {
         requireActive()
         return delegate.latestIndex()
     }
 
-    override suspend fun get(index: Int): T {
+    override suspend fun indexesIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+    ): List<Int> {
         requireActive()
-        return delegate[index]
+        return delegate.indexesIn(range, types)
     }
 
-    override suspend fun getExact(index: Int): T? {
+    override suspend fun getCommitsExact(
+        index: Int,
+        types: Set<AgentCommitType>,
+    ): List<AgentCommit> {
         requireActive()
-        return delegate.getExact(index)
+        return delegate.getCommitsExact(index, types)
     }
 
-    override suspend fun floorToIndex(index: Int): Int? {
+    override suspend fun getCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+    ): List<IndexedAgentCommit> {
         requireActive()
-        return delegate.floorToIndex(index)
+        return delegate.getCommitsIn(range, types)
     }
 
-    override suspend fun ceilToIndex(index: Int): Int? {
+    override suspend fun getFirstCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> {
         requireActive()
-        return delegate.ceilToIndex(index)
+        return delegate.getFirstCommitsIn(range, types, limit)
     }
 
-    override suspend fun indexesIn(range: IntRange): List<Int> {
+    override suspend fun getLastCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> {
         requireActive()
-        return delegate.indexesIn(range)
+        return delegate.getLastCommitsIn(range, types, limit)
     }
 
-    override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> {
+    override suspend fun commit(commit: AgentCommit): Int {
         requireActive()
-        return delegate.valuesIn(range)
+        return delegate.commit(commit)
     }
 
-    override suspend fun set(index: Int, value: T) {
+    override suspend fun commit(commits: List<AgentCommit>): Int {
         requireActive()
-        delegate[index] = value
+        return delegate.commit(commits)
     }
 
     override suspend fun revert(untilExclusive: Int) {
@@ -361,19 +346,11 @@ private suspend fun cloneStorage(
     source: KodexAgentStorage,
     target: MutableKodexAgentStorage,
 ) {
-    cloneTimeline(source.index, target.index)
-    cloneTimeline(source.work, target.work)
-    cloneTimeline(source.settings, target.settings)
-    cloneTimeline(source.timestamp, target.timestamp)
-    cloneTimeline(source.tokenCount, target.tokenCount)
-    cloneTimeline(source.unstable, target.unstable)
-}
-
-private suspend fun <T> cloneTimeline(
-    source: io.github.stream29.kodex.agentstorage.contract.IndexVersioned<T>,
-    target: MutableIndexVersioned<T>,
-) {
-    for (index in source.indexesIn(0..Int.MAX_VALUE)) {
-        target.set(index, requireNotNull(source.getExact(index)))
+    val latest = source.latestIndex()
+    if (latest < 0) return
+    val grouped = source.getCommitsIn(0..latest).groupBy({ it.index }, { it.commit })
+    for (index in 0..latest) {
+        val commits = grouped[index] ?: continue
+        target.commit(commits)
     }
 }

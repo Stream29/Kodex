@@ -4,7 +4,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdInstruction
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.shellclient.Shell

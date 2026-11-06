@@ -27,9 +27,9 @@ import de.infix.testBalloon.framework.core.testSuite
 import de.infix.testBalloon.framework.core.TestCompartment
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.cli.components.TuiPopupHost
@@ -38,7 +38,6 @@ import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
@@ -143,7 +142,7 @@ val docsHistoryRecordingTest by testSuite(compartment = { TestCompartment.RealTi
                 clip.add(settle(), "[↓]")
                 assertNull(menu)
                 assertTrue(!agent.history.followsLatest.value)
-                assertEquals(824, fixture.rpc.services.index.getLatestIndex(sourceIndex), "Check out must not alter storage")
+                assertEquals(824, fixture.rpc.services.storage.getLatestIndex(sourceIndex), "Check out must not alter storage")
                 binding.appendUserMessage((history.getValue(826) as StableUserMessage).content)
                 clip.add(settle(), "[↓]")
                 assertTrue(!agent.history.followsLatest.value)
@@ -236,8 +235,8 @@ val docsHistoryRecordingTest by testSuite(compartment = { TestCompartment.RealTi
                 clickLabel("Fork from here")
                 withTimeout(5.seconds) { while (tabs.size < 2) delay(20) }
                 clip.add(settle(), "[fork]")
-                assertEquals(5, fixture.rpc.services.index.getLatestIndex(sourceIndex), "Fork must preserve its source")
-                assertEquals(4, fixture.rpc.services.index.getLatestIndex(selected.sessionIndex))
+                assertEquals(5, fixture.rpc.services.storage.getLatestIndex(sourceIndex), "Fork must preserve its source")
+                assertEquals(4, fixture.rpc.services.storage.getLatestIndex(selected.sessionIndex))
                 clickLabel("[History example]")
                 clip.add(settle(), "Offline example entry 5")
                 clickLabel("Offline example entry 4", MouseEvent.Button.Right)
@@ -246,7 +245,7 @@ val docsHistoryRecordingTest by testSuite(compartment = { TestCompartment.RealTi
                 clip.add(settle(), "This cannot be undone.")
                 clickLabel("Cancel")
                 assertIs<AgentHistoryActionState.None>(agent.historyAction.value)
-                assertEquals(5, fixture.rpc.services.index.getLatestIndex(sourceIndex))
+                assertEquals(5, fixture.rpc.services.storage.getLatestIndex(sourceIndex))
                 clip.add(settle(), "Offline example entry 5")
                 clickLabel("Offline example entry 4", MouseEvent.Button.Right)
                 clip.add(settle(), "Revert to here")
@@ -262,7 +261,7 @@ val docsHistoryRecordingTest by testSuite(compartment = { TestCompartment.RealTi
                     }
                 }
                 clip.add(rendered, "Offline example entry 4")
-                assertEquals(4, fixture.rpc.services.index.getLatestIndex(sourceIndex))
+                assertEquals(4, fixture.rpc.services.storage.getLatestIndex(sourceIndex))
             }
             clip.save()
         } finally {

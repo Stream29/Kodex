@@ -9,7 +9,7 @@ import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.prefix.contract.AgentContextPrefix
 import io.github.stream29.kodex.agentcontext.prefix.contract.AgentSessionMeta
 import io.github.stream29.kodex.agentcontext.skill.filesystem.FileSystemSkillsResolver
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import kotlinx.coroutines.flow.StateFlow

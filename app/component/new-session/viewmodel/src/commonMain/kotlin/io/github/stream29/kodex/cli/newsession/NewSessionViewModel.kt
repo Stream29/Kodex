@@ -2,6 +2,7 @@
 
 package io.github.stream29.kodex.cli.newsession
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
 import io.github.stream29.kodex.app.session.contract.*

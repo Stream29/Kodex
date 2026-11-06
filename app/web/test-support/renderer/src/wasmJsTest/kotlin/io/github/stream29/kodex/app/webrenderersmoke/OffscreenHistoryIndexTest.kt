@@ -194,11 +194,16 @@ val offscreenHistoryIndexTest by testSuite {
 
     test("two product bodies use independent handles of the real Index owner") { offscreenTest {
         val stored = InMemoryKodexAgentStorage.empty()
-        for (index in listOf(1, 4, 8)) stored.index[index] = StableUserMessage(listOf(ContentItem.InputText("Index row $index")))
+        for (index in 1..8) {
+            if (index in setOf(1, 4, 8)) {
+                stored.commit(StableUserMessage(listOf(ContentItem.InputText("Index row $index"))))
+            } else {
+                stored.commit(CommitTimestamp(Instant.DISTANT_PAST))
+            }
+        }
         val owner = CoroutineScope(currentCoroutineContext() + Job(currentCoroutineContext()[Job]))
         val model = createHistoryIndexViewModel(object : HistoryIndexDependencies {
-            override val timeline = stored.index
-            override val timestamp = stored.timestamp
+            override val storage = stored
             override val latestIndex = MutableStateFlow(8)
             override val cacheNonce = null
             override val externalWrite = MutableStateFlow(false)

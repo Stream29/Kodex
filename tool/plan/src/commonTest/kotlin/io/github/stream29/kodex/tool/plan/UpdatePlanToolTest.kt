@@ -5,11 +5,12 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
-import io.github.stream29.kodex.agentstorage.contract.latestValue
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.PlanItemArg
@@ -69,10 +70,13 @@ val updatePlanToolTest by testSuite {
             val completed = assertIs<StablePlanUpdate>(state.updatePlanTool().handle(pending))
 
             assertEquals(StablePlanUpdate(callId = call.callId, arguments = plan), completed)
-            assertEquals(plan, state.storage.settings.latestValue().plan)
+            assertEquals(plan, state.storage.getSettingsAt(state.storage.latestIndex()).plan)
             assertEquals(KodexAgentStateValue.ToolCompleted, state.state.value)
-            val persisted = state.storage.index.indexesIn(0..state.latestIndex.value)
-                .mapNotNull { index -> state.storage.index.getExact(index) as? StablePlanUpdate }
+            val persisted = state.storage.getCommitsIn(
+                0..state.latestIndex.value,
+                AgentCommitType.IndexTypes,
+            )
+                .mapNotNull { it.commit as? StablePlanUpdate }
                 .single()
             assertEquals(completed, persisted)
         }

@@ -82,7 +82,7 @@ val sessionBindingOwnershipTest by testSuite(compartment = { TestCompartment.Rea
                 assertSame(view.current().settings, nextAgent.settings)
                 assertSame(view.agent, session.rootAgent)
                 assertFailsWith<IllegalArgumentException> {
-                    session.fork(firstAgent, 1, view.current().storage.index.cacheNonce.value)
+                    session.fork(firstAgent, 1, view.current().storage.cacheNonce.value)
                 }
                 session.rename("current")
                 session.name.first { it == "current" }

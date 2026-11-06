@@ -2,72 +2,109 @@
 
 package io.github.stream29.kodex.rpc.server
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.CachedIndexVersioned
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
-import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.rpc.contract.*
+import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
+import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
-import kotlin.time.Instant
+import kotlinx.coroutines.job
 
 /** Uses the actual cache metadata, never a service-owned index or random marker. */
-internal class BackendTimeline<T>(
+public actual class BackendAgentStorageRpc actual constructor(
     private val host: BackendSessionHost,
-    private val select: (ObservableKodexAgentStorage) -> CachedIndexVersioned<T>,
-) : TimelineRpc<T> {
-    private suspend fun cache(sessionIndex: Int): CachedIndexVersioned<T> =
-        select(host.session(sessionIndex).session.storage as ObservableKodexAgentStorage)
+) : AgentStorageRpc {
+    private suspend fun cache(sessionIndex: Int): ObservableKodexAgentStorage =
+        host.session(sessionIndex).session.storage as ObservableKodexAgentStorage
 
-    private suspend fun checked(sessionIndex: Int, nonce: Long): CachedIndexVersioned<T> =
-        cache(sessionIndex).also { if (it.cacheNonce.value != nonce) throw CacheNonceMismatch() }
-
-    override suspend fun getCacheNonce(sessionIndex: Int): Long = cache(sessionIndex).cacheNonce.value
-    override suspend fun getLatestIndex(sessionIndex: Int): Int = cache(sessionIndex).latestIndex.value
-    override fun getCacheNonceFlow(sessionIndex: Int): Flow<Long> = flow {
+    private suspend fun <R> checked(
+        sessionIndex: Int,
+        nonce: Long,
+        block: suspend ObservableKodexAgentStorage.() -> R,
+    ): R {
         val binding = host.session(sessionIndex)
-        emitAll(binding.observe(select(binding.session.storage as ObservableKodexAgentStorage).cacheNonce))
+        val storage = binding.session.storage as ObservableKodexAgentStorage
+        if (storage.cacheNonce.value != nonce) throw CacheNonceMismatch()
+        return try {
+            storage.block()
+        } catch (failure: IllegalStateException) {
+            if (binding.inactive.isCompleted || !binding.session.coroutineContext.job.isActive) {
+                throw SessionNotActive()
+            }
+            throw failure
+        }
     }
-    override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int> = flow {
+
+    actual override suspend fun getCacheNonce(sessionIndex: Int): Long =
+        cache(sessionIndex).cacheNonce.value
+
+    actual override suspend fun getLatestIndex(sessionIndex: Int): Int =
+        cache(sessionIndex).latestIndexFlow.value
+
+    actual override fun getCacheNonceFlow(sessionIndex: Int): Flow<Long> = flow {
         val binding = host.session(sessionIndex)
-        emitAll(binding.observe(select(binding.session.storage as ObservableKodexAgentStorage).latestIndex))
+        emitAll(binding.observe((binding.session.storage as ObservableKodexAgentStorage).cacheNonce))
     }
-    override suspend fun get(sessionIndex: Int, cacheNonce: Long, index: Int): T =
-        checked(sessionIndex, cacheNonce)[index]
-    override suspend fun getExact(sessionIndex: Int, cacheNonce: Long, index: Int): T? =
-        checked(sessionIndex, cacheNonce).getExact(index)
-    override suspend fun floorToIndex(sessionIndex: Int, cacheNonce: Long, index: Int): Int? =
-        checked(sessionIndex, cacheNonce).floorToIndex(index)
-    override suspend fun ceilToIndex(sessionIndex: Int, cacheNonce: Long, index: Int): Int? =
-        checked(sessionIndex, cacheNonce).ceilToIndex(index)
-    override suspend fun indexesIn(sessionIndex: Int, cacheNonce: Long, fromInclusive: Int, toInclusive: Int): List<Int> =
-        checked(sessionIndex, cacheNonce).indexesIn(fromInclusive..toInclusive)
-    override suspend fun valuesIn(sessionIndex: Int, cacheNonce: Long, fromInclusive: Int, toInclusive: Int): List<Pair<Int, T>> =
-        checked(sessionIndex, cacheNonce).valuesIn(fromInclusive..toInclusive)
-}
 
-public actual class BackendIndexTimelineRpc actual constructor(host: BackendSessionHost) :
-    IndexTimelineRpc, TimelineRpc<CleanIndexEntry> by BackendTimeline(host, { it.index })
+    actual override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int> = flow {
+        val binding = host.session(sessionIndex)
+        emitAll(binding.observe((binding.session.storage as ObservableKodexAgentStorage).latestIndexFlow))
+    }
 
-public actual class BackendWorkTimelineRpc actual constructor(host: BackendSessionHost) :
-    WorkTimelineRpc, TimelineRpc<StableWorkEvent> by BackendTimeline(host, { it.work })
+    actual override suspend fun indexesIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType>,
+    ): List<Int> =
+        checked(sessionIndex, cacheNonce) { indexesIn(fromInclusive..toInclusive, types) }
 
-public actual class BackendTimestampTimelineRpc actual constructor(host: BackendSessionHost) :
-    TimestampTimelineRpc, TimelineRpc<Instant> by BackendTimeline(host, { it.timestamp })
+    actual override suspend fun getCommitsExact(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        index: Int,
+        types: Set<AgentCommitType>,
+    ): List<AgentCommit> =
+        checked(sessionIndex, cacheNonce) { getCommitsExact(index, types) }
 
-public actual class BackendTokenCountTimelineRpc actual constructor(host: BackendSessionHost) :
-    TokenCountTimelineRpc, TimelineRpc<TokenCountSnapshot> by BackendTimeline(host, { it.tokenCount })
+    actual override suspend fun getCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType>,
+    ): List<IndexedAgentCommit> =
+        checked(sessionIndex, cacheNonce) { getCommitsIn(fromInclusive..toInclusive, types) }
 
-public actual class BackendUnstableTimelineRpc actual constructor(host: BackendSessionHost) :
-    UnstableTimelineRpc, TimelineRpc<List<UnstableCleanEvent>> by BackendTimeline(host, { it.unstable })
+    actual override suspend fun getFirstCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> =
+        checked(sessionIndex, cacheNonce) { getFirstCommitsIn(fromInclusive..toInclusive, types, limit) }
 
-public actual class BackendSettingsTimelineRpc actual constructor(private val host: BackendSessionHost) :
-    SettingsTimelineRpc, TimelineRpc<KodexAgentSettings> by BackendTimeline(host, { it.settings }) {
-    actual override suspend fun compareAndSet(sessionIndex: Int, expect: KodexAgentSettings, update: KodexAgentSettings): Boolean =
-        host.inSession(sessionIndex) { runtime.compareAndSetSettings(expect, update) }
+    actual override suspend fun getLastCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> =
+        checked(sessionIndex, cacheNonce) { getLastCommitsIn(fromInclusive..toInclusive, types, limit) }
+
+    actual override suspend fun compareAndSetSettings(
+        sessionIndex: Int,
+        expect: KodexAgentSettings,
+        update: KodexAgentSettings,
+    ): Boolean = host.inSession(sessionIndex) { runtime.compareAndSetSettings(expect, update) }
 }

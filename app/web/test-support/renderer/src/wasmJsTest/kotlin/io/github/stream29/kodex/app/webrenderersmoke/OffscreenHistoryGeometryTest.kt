@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
@@ -326,10 +327,14 @@ private suspend fun historyGeometryModel(
 ) = offscreenTest {
     val stored = InMemoryKodexAgentStorage.empty()
     for (index in 1..count) {
-        stored.index[index] = StableUserMessage(listOf(ContentItem.InputText(
-            if (index == count && newestText != null) newestText else "Geometry message $index",
-        )))
-        stored.timestamp[index] = Instant.fromEpochMilliseconds(index * 1_000L)
+        stored.commit(
+            listOf(
+                StableUserMessage(listOf(ContentItem.InputText(
+                    if (index == count && newestText != null) newestText else "Geometry message $index",
+                ))),
+                CommitTimestamp(Instant.fromEpochMilliseconds(index * 1_000L)),
+            ),
+        )
     }
     val owner = CoroutineScope(currentCoroutineContext() + Job(currentCoroutineContext()[Job]))
     val model = createAgentHistoryViewModel(

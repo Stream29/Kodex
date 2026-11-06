@@ -2,6 +2,8 @@ package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
@@ -88,12 +90,12 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
             withInMemoryRpc(services::register) { raw ->
                 val client = RestoringRpcClient(raw)
                 val global = client.withService<GlobalRpc>()
-                val timeline = client.withService<SettingsTimelineRpc>()
+                val storage = client.withService<AgentStorageRpc>()
                 val staleFrontend = global.getSettings()
                 val firstCwd = Path("/fixture/旧目录 with spaces")
                 val first = global.createSession(firstCwd)
-                val firstNonce = timeline.getCacheNonce(first)
-                val original = timeline.get(first, firstNonce, 0)
+                val firstNonce = storage.getCacheNonce(first)
+                val original = storage.getLastCommitsIn(first, firstNonce, 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings
                 val defaults = KodexNewSessionSettings(
                     model = OpenAiModelId("backend-only-model"),
                     reasoningEffort = ReasoningEffort.High,
@@ -108,7 +110,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertNotEquals(defaults, staleFrontend.newSession)
                 val cwd = Path("/fixture/新目录 with spaces")
                 val second = global.createSession(cwd)
-                val current = timeline.get(second, timeline.getCacheNonce(second), 0)
+                val current = storage.getLastCommitsIn(second, storage.getCacheNonce(second), 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings
                 assertEquals(defaults.model, current.model)
                 assertEquals(defaults.reasoningEffort, current.reasoning.effort)
                 assertEquals(defaults.serviceTier, current.serviceTier)
@@ -121,7 +123,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertFalse(services.runtime.getRunningTurn(second))
                 assertEquals(firstCwd, original.cwd)
                 assertEquals(staleFrontend.newSession.model, original.model)
-                assertEquals(original, timeline.get(first, firstNonce, 0))
+                assertEquals(original, storage.getLastCommitsIn(first, firstNonce, 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings)
             }
         }
     }
@@ -169,14 +171,18 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 global.keepSessionAlive(index)
                 assertEquals(0, runtime.getLatestIndex(index))
                 assertTrue(global.getSessionCatalog(false).single().isActive)
-                for (timeline in listOf<TimelineRpc<*>>(
-                    client.withService<IndexTimelineRpc>(), client.withService<WorkTimelineRpc>(),
-                    client.withService<SettingsTimelineRpc>(), client.withService<TimestampTimelineRpc>(),
-                    client.withService<TokenCountTimelineRpc>(), client.withService<UnstableTimelineRpc>(),
+                val storage = client.withService<AgentStorageRpc>()
+                val nonce = storage.getCacheNonce(index)
+                assertEquals(nonce, storage.getCacheNonceFlow(index).first())
+                for (types in listOf(
+                    AgentCommitType.IndexTypes,
+                    AgentCommitType.WorkTypes,
+                    AgentCommitType.SettingsTypes,
+                    AgentCommitType.TimestampTypes,
+                    AgentCommitType.TokenCountTypes,
+                    AgentCommitType.UnstableTypes,
                 )) {
-                    val nonce = timeline.getCacheNonce(index)
-                    assertEquals(nonce, timeline.getCacheNonceFlow(index).first())
-                    timeline.valuesIn(index, nonce, 0, 1)
+                    storage.getCommitsIn(index, nonce, 0, 1, types)
                 }
                 global.archiveSession(index)
                 assertTrue(global.getSessionCatalog(false).isEmpty())

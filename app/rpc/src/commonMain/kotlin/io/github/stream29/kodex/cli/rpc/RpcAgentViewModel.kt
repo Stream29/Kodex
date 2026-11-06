@@ -25,9 +25,9 @@ import io.github.stream29.kodex.cli.agent.createRequestUserInputViewModel
 import io.github.stream29.kodex.cli.agent.createSuggestSubagentTaskViewModel
 import io.github.stream29.kodex.cli.history.AgentHistorySource
 import io.github.stream29.kodex.cli.history.createAgentHistoryViewModel
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ModelInfo
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
@@ -106,16 +106,15 @@ private class RpcAgentViewModel(
         override val activeSessions: StateFlow<Map<Int, AgentShellSession>> = mutableShells.asStateFlow()
     }
     override val history: AgentHistoryViewModel = createAgentHistoryViewModel(
-        AgentHistorySource(binding.storage, binding.latestIndex, binding.displayState, binding.storage.index.cacheNonce),
+        AgentHistorySource(binding.storage, binding.latestIndex, binding.displayState, binding.storage.cacheNonce),
         CoroutineScope(local.coroutineContext + Job(owner)),
         binding.running,
     )
     override val historyIndex: HistoryIndexViewModel = createHistoryIndexViewModel(
         dependencies = object : HistoryIndexDependencies {
-            override val timeline = binding.storage.index
-            override val timestamp = binding.storage.timestamp
+            override val storage = binding.storage
             override val latestIndex = binding.latestIndex
-            override val cacheNonce = binding.storage.index.cacheNonce
+            override val cacheNonce = binding.storage.cacheNonce
             override val externalWrite = binding.displayState.projectState {
                 it == io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue.ExternalWrite
             }
@@ -244,7 +243,7 @@ private class RpcAgentViewModel(
         check(binding.state.value !is AgentStateValue.RequestResponse &&
             binding.state.value != AgentStateValue.Compacting &&
             binding.state.value != AgentStateValue.ExternalWrite) { "History is not currently editable." }
-        if (binding.storage.index.cacheNonce.value != nonce) throw CacheNonceMismatch()
+        if (binding.storage.cacheNonce.value != nonce) throw CacheNonceMismatch()
         require(untilExclusive > 0 && untilExclusive.toLong() <= binding.latestIndex.value.toLong() + 1)
     }
 

@@ -3,6 +3,7 @@ package io.github.stream29.kodex.agentstate.contract
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
@@ -18,7 +19,9 @@ import kotlinx.coroutines.CancellationException
  * @throws IllegalArgumentException when no initial settings can be updated.
  */
 public actual suspend fun KodexAgentState.updateThreadName(threadName: String): Int {
-    val currentSettings = storage.settings[latestIndex.value]
+    val currentSettings = requireNotNull(storage.getSettingsAt(latestIndex.value)) {
+        "Initial settings are required before updating agent settings."
+    }
     return updateSettings(currentSettings.copy(threadName = threadName))
 }
 
@@ -45,7 +48,9 @@ public actual suspend fun KodexAgentState.appendPlanUpdate(completed: StablePlan
         "Plan updates can complete only a pending update_plan function call."
     }
 
-    val currentSettings = storage.settings[latestIndex.value]
+    val currentSettings = requireNotNull(storage.getSettingsAt(latestIndex.value)) {
+        "Initial settings are required before updating agent settings."
+    }
     updateSettings(currentSettings.copy(plan = completed.arguments))
     return completeToolCall(completed)
 }

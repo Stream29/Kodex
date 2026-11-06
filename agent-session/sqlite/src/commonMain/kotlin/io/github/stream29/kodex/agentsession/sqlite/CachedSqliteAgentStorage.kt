@@ -1,22 +1,38 @@
 package io.github.stream29.kodex.agentsession.sqlite
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.*
-import io.github.stream29.kodex.agentstorage.contract.*
-import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
-import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
-import io.github.stream29.kodex.agentstorage.sqlite.SqliteAgentStorage
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
+import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.filesystemlayout.deleteRecord
+import io.github.stream29.kodex.agentstorage.filesystemlayout.latestIndexPath
+import io.github.stream29.kodex.agentstorage.filesystemlayout.recordPath
+import io.github.stream29.kodex.agentstorage.filesystemlayout.storedRecordIndexes
+import io.github.stream29.kodex.agentstorage.filesystemlayout.timelineDirectory
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.IOException
 import kotlinx.io.files.Path
 import kotlin.random.Random
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
-import kotlin.time.Instant
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 internal class SequentialMirrorQueue(
     scope: CoroutineScope,
@@ -56,98 +72,62 @@ internal class SequentialMirrorQueue(
 }
 
 internal class CachedSqliteAgentStorage(
-    owner: CoroutineScope,
-    private val backing: SqliteAgentStorage,
-    private val directory: Path,
-    private val fileSystem: CoroutineFileSystem,
-    tails: Map<String, Int>,
-    mirrorQueue: SequentialMirrorQueue,
-) : MutableKodexAgentStorage, ObservableKodexAgentStorage {
-    private suspend fun mirrorStorage(): FileSystemAgentStorage {
-        fileSystem.createDirectories(directory)
-        return FileSystemAgentStorage(directory, fileSystem)
-    }
-    override val uri: String get() = backing.uri
-    override val index = CachedSqliteTimeline(owner, backing.index, { mirrorStorage().index }, tails["index"] ?: -1, mirrorQueue)
-    override val work = CachedSqliteTimeline(owner, backing.work, { mirrorStorage().work }, tails["work"] ?: -1, mirrorQueue)
-    override val settings = CachedSqliteTimeline(owner, backing.settings, { mirrorStorage().settings }, tails["settings"] ?: -1, mirrorQueue)
-    override val timestamp = CachedSqliteTimeline(owner, backing.timestamp, { mirrorStorage().timestamp }, tails["timestamp"] ?: -1, mirrorQueue)
-    override val tokenCount = CachedSqliteTimeline(owner, backing.tokenCount, { mirrorStorage().tokenCount }, tails["token-count"] ?: -1, mirrorQueue)
-    override val unstable = CachedSqliteTimeline(owner, backing.unstable, { mirrorStorage().unstable }, tails["unstable"] ?: -1, mirrorQueue)
-}
-
-internal fun mirrorTimelineDirectory(type: String): String = when (type) {
-    "user_message",
-    "assistant_message",
-    "assistant_message_commentary",
-    "assistant_message_final",
-    "developer_message",
-    "agent_message",
-    "request_user_input_tool_event",
-    "suggest_subagent_task_tool_event",
-    "plan_update",
-    "compaction_point",
-    -> "index"
-
-    "reasoning",
-    "context_compaction",
-    "command_execution_tool_event",
-    "patch_tool_event",
-    "mcp_tool_event",
-    "web_search_tool_event",
-    "image_generation_tool_event",
-    "image_view_tool_event",
-    "tool_search_event",
-    "invalid_tool_call",
-    "server_tool_search",
-    "hosted_web_search",
-    "hosted_image_generation",
-    "json_tool_event",
-    "text_tool_event",
-    "custom_tool_event",
-    -> "work"
-
-    "settings" -> "settings"
-    "timestamp" -> "timestamp"
-    "token_count_legacy",
-    "token_count_initialization",
-    "token_count_compaction",
-    "token_count_response",
-    -> "token-count"
-    "unstable" -> "unstable"
-    else -> error("Unknown commit type: $type")
-}
-
-internal class CachedSqliteTimeline<T>(
     private val owner: CoroutineScope,
-    private val source: MutableIndexVersioned<T>,
-    private val mirror: suspend () -> FileSystemIndexVersioned<T>,
+    private val source: MutableKodexAgentStorage,
     initialLatestIndex: Int,
-    private val mirrorQueue: SequentialMirrorQueue,
-) : MutableIndexVersioned<T>, CachedIndexVersioned<T> {
+) : MutableKodexAgentStorage, ObservableKodexAgentStorage {
     private val nonce = MutableStateFlow(Random.nextLong())
     private val tail = MutableStateFlow(initialLatestIndex)
+
+    override val uri: String get() = source.uri
     override val cacheNonce: StateFlow<Long> = nonce.asStateFlow()
-    override val latestIndex: StateFlow<Int> = tail.asStateFlow()
-    private fun backing(): MutableIndexVersioned<T> {
+    override val latestIndexFlow: StateFlow<Int> = tail.asStateFlow()
+
+    private fun backing(): MutableKodexAgentStorage {
         check(owner.isActive) { "Session storage is closed" }
         return source
     }
+
     override suspend fun latestIndex(): Int = backing().latestIndex()
-    override suspend fun get(index: Int): T = backing()[index]
-    override suspend fun getExact(index: Int): T? = backing().getExact(index)
-    override suspend fun floorToIndex(index: Int): Int? = backing().floorToIndex(index)
-    override suspend fun ceilToIndex(index: Int): Int? = backing().ceilToIndex(index)
-    override suspend fun indexesIn(range: IntRange): List<Int> = backing().indexesIn(range)
-    override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> = backing().valuesIn(range)
-    override suspend fun set(index: Int, value: T) {
+
+    override suspend fun indexesIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+    ): List<Int> = backing().indexesIn(range, types)
+
+    override suspend fun getCommitsExact(
+        index: Int,
+        types: Set<AgentCommitType>,
+    ): List<AgentCommit> = backing().getCommitsExact(index, types)
+
+    override suspend fun getCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+    ): List<IndexedAgentCommit> = backing().getCommitsIn(range, types)
+
+    override suspend fun getFirstCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> = backing().getFirstCommitsIn(range, types, limit)
+
+    override suspend fun getLastCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> = backing().getLastCommitsIn(range, types, limit)
+
+    override suspend fun commit(commit: AgentCommit): Int = commit(listOf(commit))
+
+    override suspend fun commit(commits: List<AgentCommit>): Int {
         currentCoroutineContext().ensureActive()
-        withContext(NonCancellable) {
-            backing()[index] = value
+        return withContext(NonCancellable) {
+            val index = backing().commit(commits)
             tail.value = index
-            mirrorQueue.enqueue { mirror().setUnsafe(index, value) }
+            index
         }
     }
+
     override suspend fun revert(untilExclusive: Int) {
         currentCoroutineContext().ensureActive()
         withContext(NonCancellable) {
@@ -158,19 +138,141 @@ internal class CachedSqliteTimeline<T>(
                 nonce.value = Random.nextLong()
                 tail.value = latest
             }
-            mirrorQueue.enqueue { mirror().revert(untilExclusive) }
         }
     }
 }
 
-internal fun FileSystemAgentStorage.timeline(directoryName: String): FileSystemIndexVersioned<*> = when (directoryName) {
-    "index" -> index
-    "work" -> work
-    "settings" -> settings
-    "timestamp" -> timestamp
-    "token-count" -> tokenCount
-    "unstable" -> unstable
-    else -> error("Unknown timeline directory: $directoryName")
+internal class FileMirrorKodexAgentStorage(
+    private val delegate: CachedSqliteAgentStorage,
+    private val directory: Path,
+    private val fileSystem: CoroutineFileSystem,
+    private val mirrorQueue: SequentialMirrorQueue,
+) : MutableKodexAgentStorage, ObservableKodexAgentStorage by delegate {
+    override suspend fun commit(commit: AgentCommit): Int = commit(listOf(commit))
+
+    override suspend fun commit(commits: List<AgentCommit>): Int {
+        currentCoroutineContext().ensureActive()
+        return withContext(NonCancellable) {
+            val index = delegate.commit(commits)
+            val encoded = commits.map { commit ->
+                commit.commitType.legacyTimelineName to commit.encodePayloadJson()
+            }
+            mirrorQueue.enqueue {
+                for ((timelineName, payloadJson) in encoded) {
+                    writeMirrorRecordAtomically(directory, timelineName, index, payloadJson, fileSystem)
+                }
+            }
+            index
+        }
+    }
+
+    override suspend fun revert(untilExclusive: Int) {
+        currentCoroutineContext().ensureActive()
+        withContext(NonCancellable) {
+            delegate.revert(untilExclusive)
+            mirrorQueue.enqueue {
+                revertMirrorDirectory(directory, untilExclusive, fileSystem)
+            }
+        }
+    }
+}
+
+internal val MirrorTimelineDirectories: List<String> = listOf(
+    "index",
+    "work",
+    "settings",
+    "timestamp",
+    "token-count",
+    "unstable",
+)
+
+internal fun mirrorTimelineDirectory(type: String): String =
+    AgentCommitType.fromWireName(type).legacyTimelineName
+
+internal suspend fun initializeMirrorDirectory(
+    directory: Path,
+    fileSystem: CoroutineFileSystem,
+    initialRecords: List<Triple<String, Int, String>> = emptyList(),
+) {
+    fileSystem.createDirectories(directory, mustCreate = true)
+    val resolved = fileSystem.resolve(directory)
+    for (timeline in MirrorTimelineDirectories) {
+        val timelineDir = timelineDirectory(resolved, timeline)
+        fileSystem.createDirectories(timelineDir, mustCreate = true)
+        val rows = initialRecords.filter { it.first == timeline }
+        rows.forEach { (_, index, payloadJson) ->
+            fileSystem.writeString(recordPath(timelineDir, index), payloadJson)
+        }
+        val latest = rows.maxOfOrNull { it.second } ?: -1
+        writeMirrorLatestIndexAtomically(timelineDir, latest, fileSystem)
+    }
+}
+
+internal suspend fun writeMirrorRecordAtomically(
+    directory: Path,
+    timelineName: String,
+    index: Int,
+    payloadJson: String,
+    fileSystem: CoroutineFileSystem,
+) {
+    fileSystem.createDirectories(directory)
+    val timelineDir = timelineDirectory(directory, timelineName)
+    fileSystem.createDirectories(timelineDir)
+    writeAtomically(timelineDir, recordPath(timelineDir, index), payloadJson, fileSystem)
+    writeMirrorLatestIndexAtomically(timelineDir, index, fileSystem)
+}
+
+internal suspend fun revertMirrorDirectory(
+    directory: Path,
+    untilExclusive: Int,
+    fileSystem: CoroutineFileSystem,
+) {
+    for (timeline in MirrorTimelineDirectories) {
+        val timelineDir = timelineDirectory(directory, timeline)
+        if (fileSystem.metadataOrNull(timelineDir)?.isDirectory != true) continue
+        val indexes = storedRecordIndexes(timelineDir, fileSystem)
+        val suffix = indexes.filter { it >= untilExclusive }
+        if (suffix.isEmpty()) continue
+        for (idx in suffix.asReversed()) {
+            deleteRecord(timelineDir, idx, fileSystem, mustExist = false)
+        }
+        val revertedLatest = indexes.lastOrNull { it < untilExclusive } ?: -1
+        writeMirrorLatestIndexAtomically(timelineDir, revertedLatest, fileSystem)
+    }
+}
+
+private suspend fun writeMirrorLatestIndexAtomically(
+    timelineDir: Path,
+    index: Int,
+    fileSystem: CoroutineFileSystem,
+) {
+    writeAtomically(timelineDir, latestIndexPath(timelineDir), index.toString(), fileSystem)
+}
+
+@OptIn(ExperimentalUuidApi::class)
+private suspend fun writeAtomically(
+    directory: Path,
+    destination: Path,
+    content: String,
+    fileSystem: CoroutineFileSystem,
+) {
+    val temporary = Path(directory, ".kodex-write-${Uuid.generateV7()}.tmp")
+    var primaryFailure: Throwable? = null
+    try {
+        fileSystem.writeString(temporary, content, mustCreate = true)
+        fileSystem.atomicMove(temporary, destination)
+    } catch (failure: Throwable) {
+        primaryFailure = failure
+        throw failure
+    } finally {
+        val cleanup = withContext(NonCancellable) {
+            runCatching { fileSystem.delete(temporary, mustExist = false) }
+        }
+        cleanup.onFailure { cleanupFailure ->
+            val failure = primaryFailure ?: throw cleanupFailure
+            if (cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
+        }
+    }
 }
 
 internal fun Path.toStorageUri(): String {

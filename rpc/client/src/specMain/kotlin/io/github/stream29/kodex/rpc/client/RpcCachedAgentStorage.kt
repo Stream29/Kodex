@@ -1,11 +1,11 @@
 package io.github.stream29.kodex.rpc.client
 
-import io.github.stream29.kodex.agentstorage.contract.CachedIndexVersioned
-import io.github.stream29.kodex.rpc.contract.TimelineRpc
+import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import kotlinx.coroutines.CoroutineScope
 
 /**
- * Opens one frontend timeline binding in this owner's lifetime.
+ * Opens one frontend storage binding in this owner's lifetime.
  *
  * [rpc] must come from the restoring client. The Session must already be active.
  * Only existing exact entries are cached; metadata is initialized once and then observed.
@@ -13,7 +13,8 @@ import kotlinx.coroutines.CoroutineScope
  * Metadata failure invalidates the binding and follows the owner's exception policy.
  * There is no activation, resubscription, query retry or frontend-generated nonce.
  */
-public expect suspend fun <T : Any> CoroutineScope.rpcCachedIndexVersioned(
+public expect suspend fun CoroutineScope.rpcCachedAgentStorage(
     sessionIndex: Int,
-    rpc: TimelineRpc<T>,
-): CachedIndexVersioned<T>
+    uri: String,
+    rpc: AgentStorageRpc,
+): ObservableKodexAgentStorage

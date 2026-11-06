@@ -10,6 +10,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToo
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
@@ -17,9 +18,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalid
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
-import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.kodex.agentstorage.filesystemlayout.recordPath
 import io.github.stream29.kodex.agentstorage.filesystemlayout.timelineDirectory
 import io.github.stream29.kodex.app.migration.v0_4_7.LegacySettingsFixture
@@ -47,6 +45,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.io.IOException
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.jsonObject
@@ -120,13 +119,13 @@ public val migrateToV052CurrentModelsTest by testSuite(
                 )
                 assertEquals("\"0.5.2\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
 
-                val storage0 = FileSystemAgentStorage(session0, SystemCoroutineFileSystem)
-                val storage1 = FileSystemAgentStorage(session1, SystemCoroutineFileSystem)
+                val storage0 = LegacySessionDirectory(session0)
+                val storage1 = LegacySessionDirectory(session1)
 
                 // Verify 0.3.3 and 0.4.5 outputs are readable alongside 0.5.2
                 assertIs<StablePatchToolEvent>(storage0.work[0])
                 assertEquals(
-                    TokenCountSnapshot(kind = TokenCountKind.Legacy, totalTokens = 42L),
+                    TokenCountSnapshot.Legacy(totalTokens = 42L),
                     storage0.tokenCount[0],
                 )
 
@@ -316,7 +315,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
             assertEquals("\"0.4.15\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
 
             // Unmigrated records missing yield_time_ms must be rejected by the strict current reader
-            val unmigratedStorage = FileSystemAgentStorage(session, SystemCoroutineFileSystem)
+            val unmigratedStorage = LegacySessionDirectory(session)
             assertFailsWith<SerializationException> {
                 unmigratedStorage.work[0]
             }
@@ -346,7 +345,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
             assertEquals(listOf(MigrationVersion("0.5.2")), activated)
             assertEquals("\"0.5.2\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
 
-            val migratedStorage = FileSystemAgentStorage(session, SystemCoroutineFileSystem)
+            val migratedStorage = LegacySessionDirectory(session)
             val workEvent = assertIs<StableCommandExecutionToolEvent>(migratedStorage.work[0])
             assertEquals(
                 10_000L,
@@ -379,7 +378,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
                 onMigrationStarted = { _, _ -> migrated = true },
             )
             try {
-                val storage = FileSystemAgentStorage(session, SystemCoroutineFileSystem)
+                val storage = LegacySessionDirectory(session)
                 val stable = assertIs<StableCommandExecutionToolEvent>(storage.work[0])
                 val arguments = assertIs<StableCommandExecutionAction.ExecCommand>(stable.action).arguments
                 assertEquals("echo hello", arguments.command)
@@ -485,7 +484,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
                 migrations = KodexHomeMigrations,
                 fileSystem = SystemCoroutineFileSystem,
             ).closeAndJoin()
-            val storage = FileSystemAgentStorage(session, SystemCoroutineFileSystem)
+            val storage = LegacySessionDirectory(session)
             assertEquals(
                 10_000L,
                 assertIs<StableCommandExecutionAction.ExecCommand>(
@@ -547,4 +546,23 @@ private suspend fun deleteRecursively(path: Path) {
         SystemCoroutineFileSystem.list(path).forEach { child -> deleteRecursively(child) }
     }
     SystemCoroutineFileSystem.delete(path, mustExist = false)
+}
+
+private class LegacySessionDirectory(root: Path) {
+    val work = LegacyTimeline(timelineDirectory(root, "work"), StableWorkEvent.serializer())
+    val tokenCount = LegacyTimeline(timelineDirectory(root, "token-count"), TokenCountSnapshot.Legacy.serializer())
+    val unstable = LegacyTimeline(timelineDirectory(root, "unstable"), ListSerializer(UnstableCleanEvent.serializer()))
+}
+
+private class LegacyTimeline<T>(
+    private val dir: Path,
+    private val serializer: KSerializer<T>,
+) {
+    suspend operator fun get(index: Int): T =
+        OpenAiJsonCodec.decodeFromString(serializer, SystemCoroutineFileSystem.readString(recordPath(dir, index)))
+
+    suspend operator fun set(index: Int, value: T) {
+        SystemCoroutineFileSystem.writeString(recordPath(dir, index), OpenAiJsonCodec.encodeToString(serializer, value))
+        SystemCoroutineFileSystem.writeString(Path(dir, "latest.json"), index.toString())
+    }
 }

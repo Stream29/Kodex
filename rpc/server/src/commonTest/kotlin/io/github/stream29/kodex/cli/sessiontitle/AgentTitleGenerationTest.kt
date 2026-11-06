@@ -4,8 +4,9 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -64,7 +65,7 @@ val agentTitleGenerationTest by testSuite {
             ))
             assertEquals("Use the first nonblank text", captured.await())
             job.await().join()
-            assertEquals("Name accepted user text", root.storage.settings[root.runtime.latestIndex.value].threadName)
+            assertEquals("Name accepted user text", root.storage.getSettingsAt(root.runtime.latestIndex.value).threadName)
             assertFalse(generation.start(root.runtime, content, true, null, ReasoningEffort.Low, generator))
             assertEquals(1, calls)
         }
@@ -77,7 +78,7 @@ val agentTitleGenerationTest by testSuite {
                 val generator = SessionTitleGenerator { _, _, _ -> error("This gate must not call the provider") }
                 root.runtime.appendUserMessage(content)
                 assertFalse(generation.start(root.runtime, content, customName, null, ReasoningEffort.Low, generator))
-                val current = root.storage.settings[root.runtime.latestIndex.value]
+                val current = root.storage.getSettingsAt(root.runtime.latestIndex.value)
                 assertTrue(root.runtime.compareAndSetSettings(current, current.copy(threadName = "Session 99")))
                 // Re-enabling or restoring a default name cannot undo the consumed gate.
                 assertFalse(generation.start(root.runtime, content, true, null, ReasoningEffort.Low, generator))
@@ -101,7 +102,7 @@ val agentTitleGenerationTest by testSuite {
                 assertTrue(generation.start(root.runtime, content, true, null, ReasoningEffort.Low, generator))
                 job.await().join()
                 assertEquals(accepted, root.runtime.latestIndex.value)
-                assertTrue(root.storage.settings[accepted].threadName.startsWith("Session "))
+                assertTrue(root.storage.getSettingsAt(accepted).threadName.startsWith("Session "))
                 assertFalse(generation.start(root.runtime, content, true, null, ReasoningEffort.Low, generator))
                 assertEquals(1, calls)
             }
@@ -144,7 +145,7 @@ val agentTitleGenerationTest by testSuite {
                     root.runtime.latestIndex.first { index -> index >= 2 }
                 }
             }
-            assertEquals("Plan agent title handoff", root.storage.settings[titleIndex].threadName)
+            assertEquals("Plan agent title handoff", root.storage.getSettingsAt(titleIndex).threadName)
         }
 
         test("an explicit Agent rename wins over an in-flight generated title") {
@@ -181,7 +182,7 @@ val agentTitleGenerationTest by testSuite {
 
             val renamedAt = generation.renameThread(root.runtime, "Manual title")
 
-            assertEquals("Manual title", root.storage.settings[renamedAt].threadName)
+            assertEquals("Manual title", root.storage.getSettingsAt(renamedAt).threadName)
         }
 
         test("history replacement restores eligibility when no accepted text remains") {

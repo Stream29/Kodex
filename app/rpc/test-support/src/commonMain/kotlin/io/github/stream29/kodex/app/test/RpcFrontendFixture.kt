@@ -4,8 +4,10 @@ package io.github.stream29.kodex.app.test
 
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.session.contract.*
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
+import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
@@ -159,12 +161,18 @@ public actual suspend fun deleteTestDirectory(path: Path) {
 public actual suspend fun CoroutineScope.seedTestHistory(
     home: Path, name: String, events: Map<Int, StableIndexEvent>,
 ): Int {
-    val repository = FileSystemKodexSessionRepository(home, testKodexAgentDependencies())
+    val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies())
     try {
         val index = repository.create()
         repository.open(index).runtime.modify { storage ->
             storage.initialize(testSettings(name, home))
-            events.forEach { (at, event) -> storage.index[at] = event }
+            events.entries.sortedBy { it.key }.forEach { (at, event) ->
+                while (storage.latestIndex() + 1 < at) {
+                    storage.commit(UnstableSnapshot(emptyList()))
+                }
+                val committed = storage.commit(event)
+                check(committed == at) { "Expected event to commit at $at, but committed at $committed." }
+            }
         }
         return index
     } finally { withContext(NonCancellable) { repository.cancelAndJoin() } }

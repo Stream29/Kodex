@@ -3,11 +3,21 @@ package io.github.stream29.kodex.app.migration.v0_7_0
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
-import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.ceilToIndex
+import io.github.stream29.kodex.agentstorage.contract.floorToIndex
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
+import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAt
+import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
+import io.github.stream29.kodex.agentstorage.contract.latestIndexOf
 import io.github.stream29.kodex.app.migration.KodexHomeMigrations
 import io.github.stream29.kodex.app.migration.MigrationVersion
 import io.github.stream29.kodex.app.migration.prepareKodexHome
@@ -61,7 +71,7 @@ public val migrateToV0_7_0Test by testSuite {
                 assertEquals("\"0.7.0\"", fs.readString(Path(home, "version.json")))
                 database(home) { db ->
                     val token = db.query("SELECT payload_json FROM agent_commits WHERE type='token_count_legacy'").single().single() as String
-                    assertEquals(42L, OpenAiJsonCodec.decodeFromString(TokenCountSnapshot.serializer(), token).totalTokens)
+                    assertEquals(42L, OpenAiJsonCodec.decodeFromString(TokenCountSnapshot.Legacy.serializer(), token).totalTokens)
                     assertEquals(listOf(listOf(0L, 0L, "migration", "/synthetic")),
                         db.query("SELECT session_id, archived, thread_name, cwd FROM session_catalog"))
                 }
@@ -110,20 +120,20 @@ public val migrateToV0_7_0Test by testSuite {
                     assertEquals(listOf(2, 15), repository.listEntries(false).map { it.entryIndex })
                     assertEquals(listOf(2, 9, 15), repository.listEntries(true).map { it.entryIndex })
                     val storage = repository.open(2).storage
-                    assertEquals(FileSystemAgentStorage(Path(home, "sessions", "2"), fs).uri, storage.uri)
-                    assertEquals("migration", storage.settings[7].threadName)
-                    assertEquals(Instant.parse("2026-10-25T12:00:07.987654321Z"), storage.timestamp[7])
-                    assertEquals(OpenAiJsonCodec.decodeFromString(CleanIndexEntry.serializer(), Index), storage.index[7])
-                    assertEquals(OpenAiJsonCodec.decodeFromString(StableWorkEvent.serializer(), Work), storage.work[7])
-                    assertEquals(OpenAiJsonCodec.decodeFromString(TokenCountSnapshot.serializer(), TokenCount), storage.tokenCount[7])
-                    assertEquals(OpenAiJsonCodec.decodeFromString(ListSerializer(UnstableCleanEvent.serializer()), Unstable), storage.unstable[7])
-                    assertNull(storage.index.getExact(6))
-                    assertEquals(0, storage.index.floorToIndex(6))
-                    assertEquals(7, storage.index.ceilToIndex(6))
+                    assertEquals(Path(home, "sessions", "2").toStorageUri(), storage.uri)
+                    assertEquals("migration", checkNotNull(storage.getSettingsAt(7)).threadName)
+                    assertEquals(Instant.parse("2026-10-25T12:00:07.987654321Z"), storage.getTimestampExact(7))
+                    assertEquals(OpenAiJsonCodec.decodeFromString(CleanIndexEntry.serializer(), Index), storage.getIndexEntryAt(7))
+                    assertEquals(OpenAiJsonCodec.decodeFromString(StableWorkEvent.serializer(), Work), storage.getWorkEventAt(7))
+                    assertEquals(OpenAiJsonCodec.decodeFromString(TokenCountSnapshot.Response.serializer(), TokenCount), storage.getTokenCountAt(7))
+                    assertEquals(OpenAiJsonCodec.decodeFromString(ListSerializer(UnstableCleanEvent.serializer()), Unstable), storage.getUnstableAt(7))
+                    assertNull(storage.getIndexEntryExact(6))
+                    assertEquals(0, storage.floorToIndex(6, AgentCommitType.IndexTypes))
+                    assertEquals(7, storage.ceilToIndex(6, AgentCommitType.IndexTypes))
                     assertEquals(Instant.parse("2026-10-25T12:00:00.123456789Z"), repository.readCreatedAt(2))
-                    assertEquals(storage.timestamp[7], repository.readUpdatedAt(2))
+                    assertEquals(storage.getTimestampExact(7), repository.readUpdatedAt(2))
                     assertNull(repository.readCreatedAt(15))
-                    assertEquals(-1, repository.open(15).storage.settings.latestIndex())
+                    assertEquals(-1, repository.open(15).storage.latestIndexOf(AgentCommitType.SettingsTypes))
                 }
             }
             assertEquals(before, snapshot(home).filterKeys { it != "kodex.db" })
@@ -467,7 +477,19 @@ private suspend fun CoroutineScope.assertRejected(home: Path) {
     val before = snapshot(Path(home, "sessions"))
     assertFailsWith<IOException> { upgrade(home) }
     assertEquals(before, snapshot(Path(home, "sessions")))
-    assertEquals("\"0.5.2\"", fs.readString(Path(home, "version.json")))
+    assertEquals("0.5.2".let { "\"$it\"" }, fs.readString(Path(home, "version.json")))
     assertFalse(fs.exists(Path(home, "kodex.db")))
     assertNoStaging(home)
+}
+
+private fun Path.toStorageUri(): String {
+    val path = toString()
+    if (
+        path.startsWith("""\\""") ||
+        (path.length >= 3 && path[1] == ':' && path[2] in charArrayOf('\\', '/'))
+    ) {
+        val normalized = path.removePrefix("""\\?\""").replace('\\', '/')
+        return if (normalized.startsWith("//")) "file:$normalized" else "file:///$normalized"
+    }
+    return "file://$path"
 }

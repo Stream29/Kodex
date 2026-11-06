@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
 import io.github.stream29.kodex.cli.settings.SidebarContent
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 
 /** Shared draft status order, borrowing the exact configuration child; geometry stays in the renderer. */
 @Composable

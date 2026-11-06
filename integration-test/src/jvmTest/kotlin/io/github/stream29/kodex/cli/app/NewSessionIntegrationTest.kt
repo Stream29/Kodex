@@ -362,9 +362,14 @@ val newSessionIntegrationTest by testSuite(compartment = { TestCompartment.RealT
                     assertEquals(if (stage == "createSession") 0 else 1, catalog.size)
                     if (stage == "append-reply") {
                         val index = catalog.single().sessionIndex
-                        val message = assertIs<StableUserMessage>(services.index.get(
-                            index, services.index.getCacheNonce(index), 1,
-                        ))
+                        val message = assertIs<StableUserMessage>(
+                            services.storage.getCommitsIn(
+                                index,
+                                services.storage.getCacheNonce(index),
+                                0..1,
+                                io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.IndexTypes,
+                            ).last().commit,
+                        )
                         assertEquals(listOf(ContentItem.InputText("never replay")), message.content,
                             "A lost append reply is not evidence that append did not happen.")
                     }
@@ -690,9 +695,14 @@ private class IntegrationGate {
 }
 
 private suspend fun BoundaryRoot.firstMessage(session: PersistedSessionViewModel): StableUserMessage =
-    assertIs<StableUserMessage>(services.index.get(
-        session.sessionIndex, services.index.getCacheNonce(session.sessionIndex), 1,
-    ))
+    assertIs<StableUserMessage>(
+        services.storage.getCommitsIn(
+            session.sessionIndex,
+            services.storage.getCacheNonce(session.sessionIndex),
+            0..1,
+            io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.IndexTypes,
+        ).last().commit,
+    )
 
 private suspend fun PersistedSessionViewModel.awaitMockAnswer() {
     val agent = assertNotNull(rootAgent.value)

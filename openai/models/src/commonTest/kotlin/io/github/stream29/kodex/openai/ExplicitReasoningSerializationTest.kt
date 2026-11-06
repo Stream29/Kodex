@@ -53,20 +53,4 @@ val explicitReasoningSerializationTest by testSuite {
             }
         }
     }
-
-    test("legacy settings without reasoning or effort retain medium semantics") {
-        for (source in listOf(
-            """{"model":"test-model"}""",
-            """{"model":"test-model","reasoning":{}}""",
-            """{"model":"test-model","reasoning":{"effort":"low"}}""",
-        )) {
-            val settings = OpenAiJsonCodec.decodeFromString(KodexAgentSettings.serializer(), source)
-            val encoded = OpenAiJsonCodec.encodeToJsonElement(KodexAgentSettings.serializer(), settings)
-            assertEquals(
-                JsonPrimitive(if ("low" in source) "low" else "medium"),
-                encoded.jsonObject["reasoning"]!!.jsonObject["effort"],
-            )
-            assertEquals(settings, OpenAiJsonCodec.decodeFromJsonElement(KodexAgentSettings.serializer(), encoded))
-        }
-    }
 }

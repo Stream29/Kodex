@@ -4,7 +4,7 @@ package io.github.stream29.kodex.agentcontext.prefix.impl
 
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.prefix.contract.AgentContextPrefix
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import kotlinx.coroutines.flow.StateFlow
 
 /**

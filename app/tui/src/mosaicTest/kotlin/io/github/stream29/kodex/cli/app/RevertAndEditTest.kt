@@ -3,6 +3,8 @@ package io.github.stream29.kodex.cli.app
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
@@ -10,7 +12,6 @@ import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.CompletableDeferred
@@ -74,7 +75,7 @@ val revertAndEditTest by testSuite {
             val other = fixture.persistedSession("other")
             val binding = fixture.rpc.views.open(session.sessionIndex).current()
             binding.appendUserMessage(listOf(ContentItem.InputText(text)))
-            val userIndex = fixture.rpc.services.index.getLatestIndex(session.sessionIndex)
+            val userIndex = fixture.rpc.services.storage.getLatestIndex(session.sessionIndex)
             binding.latestIndex.first { it >= userIndex }
             val agent = requireNotNull(session.rootAgent.value)
             val otherAgent = requireNotNull(other.rootAgent.value)
@@ -87,8 +88,8 @@ val revertAndEditTest by testSuite {
                 }
             }
             revertAndEdit(agent, userIndex, generation, text)
-            binding.storage.index.cacheNonce.first { it != generation }
-            assertFalse(userIndex in binding.storage.index.indexesIn(0..userIndex))
+            binding.storage.cacheNonce.first { it != generation }
+            assertFalse(userIndex in binding.storage.indexesIn(0..userIndex, AgentCommitType.IndexTypes))
             assertEquals(text, agent.composer.state.value.text)
             assertEquals(text.length, agent.composer.state.value.cursorOffset)
             assertEquals("other draft", otherAgent.composer.state.value.text)

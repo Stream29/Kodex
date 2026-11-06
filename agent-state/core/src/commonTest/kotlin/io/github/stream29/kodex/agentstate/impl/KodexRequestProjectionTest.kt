@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.serialization.json.JsonPrimitive

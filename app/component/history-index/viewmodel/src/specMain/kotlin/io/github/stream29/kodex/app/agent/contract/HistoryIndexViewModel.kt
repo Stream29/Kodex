@@ -1,9 +1,8 @@
 package io.github.stream29.kodex.app.agent.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
+import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.coroutines.cancellation.CancellationException
@@ -98,9 +97,7 @@ public interface HistoryIndexReadHandle<out T> {
  */
 public interface HistoryIndexDependencies {
     /** Ascending sparse queries and exact reads; no store, mutations, or history commands. */
-    public val timeline: IndexVersioned<CleanIndexEntry>
-    /** Exact Message timestamp reads only; do not floor, substitute current time, or parse URI. */
-    public val timestamp: IndexVersioned<Instant>
+    public val storage: KodexAgentStorage
     /** Index timeline's own latest position; -1 means empty. */
     public val latestIndex: StateFlow<Int>
     /**

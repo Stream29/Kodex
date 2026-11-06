@@ -2,6 +2,8 @@ package io.github.stream29.kodex.backend.host
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.sqlite.ensureSqlitePhaseOneSchema
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
@@ -14,9 +16,8 @@ import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
+import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
-import io.github.stream29.kodex.rpc.contract.IndexTimelineRpc
-import io.github.stream29.kodex.rpc.contract.SettingsTimelineRpc
 import io.github.stream29.kodex.rpc.local.withLocalRpcClient
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
@@ -107,13 +108,18 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                 val client = RestoringRpcClient(connection)
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
-                val index = client.withService<IndexTimelineRpc>()
-                val settings = client.withService<SettingsTimelineRpc>()
+                val storage = client.withService<AgentStorageRpc>()
                 assertEquals("Migrated session", global.getSessionCatalog(false).single().threadName)
                 global.keepSessionAlive(0)
-                assertEquals("Migrated session", settings.get(0, settings.getCacheNonce(0), 0).threadName)
-                assertEquals(listOf(ContentItem.InputText("Migrated history")),
-                    assertIs<StableUserMessage>(index.get(0, index.getCacheNonce(0), 0)).content)
+                val nonce = storage.getCacheNonce(0)
+                assertEquals(
+                    "Migrated session",
+                    (storage.getLastCommitsIn(0, nonce, 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings).threadName,
+                )
+                assertEquals(
+                    listOf(ContentItem.InputText("Migrated history")),
+                    assertIs<StableUserMessage>(storage.getLastCommitsIn(0, nonce, 0, 0, AgentCommitType.IndexTypes, 1).single().commit).content,
+                )
                 val next = runtime.appendUserMessage(0, listOf(ContentItem.InputText("After migration")))
                 runtime.resume(0)
                 val sent = withTimeout(10.seconds) { request.await() }
@@ -152,12 +158,13 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
             withLocalRpcClient(home, endpoint) { connection ->
                 val client = RestoringRpcClient(connection)
                 val global = client.withService<GlobalRpc>()
-                val index = client.withService<IndexTimelineRpc>()
+                val storage = client.withService<AgentStorageRpc>()
                 assertEquals("Auto-migrated session", global.getSessionCatalog(false).single().threadName)
                 global.keepSessionAlive(0)
+                val nonce = storage.getCacheNonce(0)
                 assertEquals(
                     listOf(ContentItem.InputText("From 0.5.2 file")),
-                    assertIs<StableUserMessage>(index.get(0, index.getCacheNonce(0), 0)).content,
+                    assertIs<StableUserMessage>(storage.getLastCommitsIn(0, nonce, 0, 0, AgentCommitType.IndexTypes, 1).single().commit).content,
                 )
             }
         }

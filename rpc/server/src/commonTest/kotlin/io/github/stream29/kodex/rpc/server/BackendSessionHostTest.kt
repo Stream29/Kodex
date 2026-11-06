@@ -10,10 +10,11 @@ import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
@@ -621,7 +622,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
                                     cleanup.complete(Unit)
                                     release.await()
                                     assertTrue(coroutineContext.job.isActive)
-                                    assertEquals(OpenAiModelId("test-model"), runtime.storage.settings[0].model)
+                                    assertEquals(OpenAiModelId("test-model"), runtime.storage.getSettingsAt(0).model)
                                 }
                             }
                         }

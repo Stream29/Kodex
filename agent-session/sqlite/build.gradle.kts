@@ -19,7 +19,7 @@ kotlin {
             implementation(project(":agent-runtime-composition"))
             implementation(project(":openai-json-codec"))
             implementation(project(":agent-state-core"))
-            implementation(project(":agent-storage-filesystem"))
+            implementation(project(":agent-storage-filesystem-layout"))
             implementation(project(":agent-storage-sqlite"))
             implementation(project(":utils-coroutines"))
         }

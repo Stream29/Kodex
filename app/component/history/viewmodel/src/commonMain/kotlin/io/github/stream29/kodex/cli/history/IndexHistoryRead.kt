@@ -1,19 +1,19 @@
 package io.github.stream29.kodex.cli.history
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.indexesDescending
-import io.github.stream29.kodex.agentstorage.contract.indexes
-import io.github.stream29.kodex.agentstorage.contract.valuesDescending
+import io.github.stream29.kodex.agentstorage.contract.ceilToIndex
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.floorToIndex
+import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
 import io.github.stream29.kodex.openai.MessagePhase
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.take
-import kotlinx.coroutines.flow.takeWhile
-import kotlinx.coroutines.flow.toList
 import kotlin.time.Duration
 import kotlin.time.Instant
 
@@ -64,27 +64,35 @@ internal suspend fun KodexAgentStorage.readHistoryChunk(
     }
 
     val result = ArrayList<HistoryProjectionItem>(2)
-    var current = index.floorToIndex(fromInclusive)?.let { entryIndex ->
-        IndexedEntry(
-            index = entryIndex,
-            entry = requireNotNull(index.getExact(entryIndex)) {
-                "Index entry $entryIndex disappeared while reading History."
-            },
-        )
+    var current = floorToIndex(fromInclusive, AgentCommitType.IndexTypes)?.let { entryIndex ->
+        getIndexEntryExact(entryIndex)?.let { entry ->
+            IndexedEntry(
+                index = entryIndex,
+                entry = entry,
+            )
+        }
     }
     var currentRepresentation = current?.representationAt(this, snapshotIndex)
 
     val openLowerBound = current?.normalWorkLowerBound() ?: 0
-    val openIndexes = work.indexesDescending(fromInclusive)
-        .takeWhile { workIndex -> workIndex >= openLowerBound }
-        .take(maxOpenItems + 1)
-        .toList()
-    openIndexes.firstOrNull()?.let {
-        val selected = openIndexes.take(maxOpenItems)
-        val predecessorIndex = openIndexes.getOrNull(selected.size)
+    val openWorkIndexes = if (fromInclusive >= openLowerBound) {
+        indexesIn(
+            range = openLowerBound..fromInclusive,
+            types = AgentCommitType.WorkTypes,
+        )
+    } else {
+        emptyList()
+    }
+    if (openWorkIndexes.isNotEmpty()) {
+        val selectedIndexes = openWorkIndexes.takeLast(maxOpenItems)
+        val predecessorIndex = openWorkIndexes.getOrNull(openWorkIndexes.size - selectedIndexes.size - 1)
             ?: currentRepresentation?.displayIndex
+        val selectedCommits = getCommitsIn(
+            range = selectedIndexes.first()..selectedIndexes.last(),
+            types = AgentCommitType.WorkTypes,
+        ).asReversed()
         result += individualWorkItems(
-            indexesNewestFirst = selected,
+            commitsNewestFirst = selectedCommits,
             oldestPredecessorIndex = predecessorIndex,
         )
         return LoadedHistoryChunk(
@@ -142,18 +150,20 @@ internal suspend fun KodexAgentStorage.readNewerHistoryChunk(
 ): LoadedHistoryChunk? {
     require(maxOpenItems > 0)
     if (afterExclusive >= snapshotIndex) return null
-    val nextIndexAnchor = index.ceilToIndex(afterExclusive + 1)
-        ?.takeIf { it <= snapshotIndex }
+    val nextIndexAnchor = ceilToIndex(
+        index = afterExclusive + 1,
+        types = AgentCommitType.IndexTypes,
+    )?.takeIf { it <= snapshotIndex }
     if (nextIndexAnchor != null) {
         return readHistoryChunk(
             fromInclusive = nextIndexAnchor,
             snapshotIndex = snapshotIndex,
         )
     }
-    val nextOpenWork = work.indexes(afterExclusive + 1)
-        .takeWhile { it <= snapshotIndex }
-        .take(maxOpenItems)
-        .toList()
+    val nextOpenWork = indexesIn(
+        range = (afterExclusive + 1)..snapshotIndex,
+        types = AgentCommitType.WorkTypes,
+    ).take(maxOpenItems)
     val lastOpenIndex = nextOpenWork.lastOrNull() ?: return null
     return readHistoryChunk(
         fromInclusive = lastOpenIndex,
@@ -167,25 +177,15 @@ internal suspend fun KodexAgentStorage.visibleStableIndexAtOrBefore(
     upperInclusive: Int,
 ): Int? {
     if (upperInclusive < 0) return null
-    val workCandidate = work.floorToIndex(upperInclusive)
-    var indexCandidate = index.floorToIndex(upperInclusive)
-    while (indexCandidate != null) {
-        if (index.getExact(indexCandidate) is StableIndexEvent) break
-        indexCandidate = if (indexCandidate == 0) {
-            null
-        } else {
-            index.floorToIndex(indexCandidate - 1)
-        }
-    }
-    return listOfNotNull(workCandidate, indexCandidate).maxOrNull()
+    return floorToIndex(upperInclusive, AgentCommitType.CleanEventTypes)
 }
 
 internal suspend fun KodexAgentStorage.elapsedBetween(
     previousIndex: Int?,
     currentIndex: Int,
 ): Duration {
-    val currentTimestamp = timestamp.getExact(currentIndex) ?: return Duration.ZERO
-    val previousTimestamp = previousIndex?.let { timestamp.getExact(it) }
+    val currentTimestamp = getTimestampExact(currentIndex) ?: return Duration.ZERO
+    val previousTimestamp = previousIndex?.let { getTimestampExact(it) }
         ?: return Duration.ZERO
     return (currentTimestamp - previousTimestamp)
         .takeIf { elapsed -> elapsed >= Duration.ZERO && elapsed.isFinite() }
@@ -200,40 +200,30 @@ internal class HistoryTurnDurationResolver(
     private val storage: KodexAgentStorage,
 ) {
     suspend fun finalDuration(finalIndex: Int): Duration? {
-        var turnStartIndex: Int? = null
-        if (finalIndex > 0) {
-            storage.index.valuesDescending(finalIndex - 1).firstOrNull { (index, entry) ->
-                when {
-                    entry is StableUserMessage -> {
-                        turnStartIndex = index
-                        false
-                    }
-
-                    entry is StableAssistantMessage && entry.isFinal() -> true
-                    else -> false
-                }
-            }
-        }
-        return turnStartIndex?.let { startIndex ->
-            storage.elapsedBetween(startIndex, finalIndex)
-        }
+        if (finalIndex <= 0) return null
+        val turnStartIndex = findTurnStartIndex(finalIndex - 1) ?: return null
+        return storage.elapsedBetween(turnStartIndex, finalIndex)
     }
 
     suspend fun activeTurnStartTimestamp(atIndex: Int): Instant? {
         if (atIndex < 0) return null
-        var turnStartIndex: Int? = null
-        storage.index.valuesDescending(atIndex).firstOrNull { (index, entry) ->
-            when {
-                entry is StableUserMessage -> {
-                    turnStartIndex = index
-                    false
-                }
+        val turnStartIndex = findTurnStartIndex(atIndex) ?: return null
+        return storage.getTimestampExact(turnStartIndex)
+    }
 
-                entry is StableAssistantMessage && entry.isFinal() -> true
-                else -> false
-            }
-        }
-        return turnStartIndex?.let { storage.timestamp.getExact(it) }
+    private suspend fun findTurnStartIndex(upperInclusive: Int): Int? {
+        if (upperInclusive < 0) return null
+        val prevFinalIndex = storage.floorToIndex(
+            index = upperInclusive,
+            types = setOf(AgentCommitType.AssistantMessage, AgentCommitType.AssistantMessageFinal),
+        )
+        val lowerBound = (prevFinalIndex ?: -1) + 1
+        if (lowerBound > upperInclusive) return null
+        return storage.getFirstCommitsIn(
+            range = lowerBound..upperInclusive,
+            types = setOf(AgentCommitType.UserMessage),
+            limit = 1,
+        ).firstOrNull()?.index
     }
 }
 
@@ -252,12 +242,11 @@ private data class IndexedEntry(
 
     suspend fun previous(storage: KodexAgentStorage): IndexedEntry? {
         if (index == 0) return null
-        val previousIndex = storage.index.floorToIndex(index - 1) ?: return null
+        val previousIndex = storage.floorToIndex(index - 1, AgentCommitType.IndexTypes) ?: return null
+        val entry = storage.getIndexEntryExact(previousIndex) ?: return null
         return IndexedEntry(
             index = previousIndex,
-            entry = requireNotNull(storage.index.getExact(previousIndex)) {
-                "Index entry $previousIndex disappeared while reading History."
-            },
+            entry = entry,
         )
     }
 
@@ -271,7 +260,7 @@ private data class IndexedEntry(
             if (
                 index > 0 &&
                 outputIndex <= upperInclusive &&
-                storage.work.indexesIn(outputIndex..outputIndex).singleOrNull() == outputIndex
+                storage.indexesIn(outputIndex..outputIndex, AgentCommitType.WorkTypes).singleOrNull() == outputIndex
             ) {
                 AnchorRepresentation.ContextCompaction(outputIndex)
             } else {
@@ -332,29 +321,25 @@ private suspend fun KodexAgentStorage.sealedWorkIndexes(
     val excludedContextOutput = older
         ?.takeIf { it.entry is CleanCompactionPoint && it.index > 0 }
         ?.let { it.index + 1 }
-    return work.indexesIn(firstIndex..lastIndex).filter { workIndex ->
+    return indexesIn(firstIndex..lastIndex, AgentCommitType.WorkTypes).filter { workIndex ->
         workIndex != excludedContextOutput
     }
 }
 
 private suspend fun KodexAgentStorage.individualWorkItems(
-    indexesNewestFirst: List<Int>,
+    commitsNewestFirst: List<IndexedAgentCommit>,
     oldestPredecessorIndex: Int?,
 ): List<HistoryProjectionItem> {
-    if (indexesNewestFirst.isEmpty()) return emptyList()
-    val valuesByIndex = work.valuesIn(
-        indexesNewestFirst.last()..indexesNewestFirst.first(),
-    ).associate { (index, event) -> index to event }
-    val timestamps = if (indexesNewestFirst.size > 1) {
-        timestamp.valuesIn(
-            (oldestPredecessorIndex ?: indexesNewestFirst.last())..indexesNewestFirst.first(),
-        ).associate { (index, value) -> index to value }
+    if (commitsNewestFirst.isEmpty()) return emptyList()
+    val timestamps = if (commitsNewestFirst.size > 1) {
+        getCommitsIn(
+            (oldestPredecessorIndex ?: commitsNewestFirst.last().index)..commitsNewestFirst.first().index,
+            AgentCommitType.TimestampTypes,
+        ).associate { (index, value) -> index to (value as CommitTimestamp).instant }
     } else null
-    return indexesNewestFirst.mapIndexed { position, index ->
-        val event = requireNotNull(valuesByIndex[index]) {
-            "Work entry $index disappeared while reading History."
-        }
-        val predecessorIndex = indexesNewestFirst.getOrNull(position + 1)
+    return commitsNewestFirst.mapIndexed { position, (index, commit) ->
+        val event = commit as StableWorkEvent
+        val predecessorIndex = commitsNewestFirst.getOrNull(position + 1)?.index
             ?: oldestPredecessorIndex
         HistoryProjectionItem.Stable(
             event.toHistoryItemDescriptor(

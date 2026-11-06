@@ -1,10 +1,15 @@
 package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemViewModel
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.CachedIndexVersioned
+import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.floorToIndex
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
@@ -112,15 +117,15 @@ internal class AgentHistoryViewModelImpl(
             }
         }
         scope.launch {
-            val unstable = agentState.storage.unstable as? CachedIndexVersioned<*>
-            val changes = if (unstable == null) agentState.latestIndex.map { it to null }
-                else combine(agentState.latestIndex, unstable.cacheNonce) { index, nonce -> index to nonce }
+            val observable = agentState.storage as? ObservableKodexAgentStorage
+            val changes = if (observable == null) agentState.latestIndex.map { it to null }
+                else combine(agentState.latestIndex, observable.cacheNonce) { index, nonce -> index to nonce }
             changes.collect { (latestIndex, nonce) ->
                 try {
                     val pending = loadPendingTools(latestIndex)
-                    if (nonce == unstable?.cacheNonce?.value) publishPendingTools(pending)
+                    if (nonce == observable?.cacheNonce?.value) publishPendingTools(pending)
                 } catch (failure: CacheNonceMismatch) {
-                    if (unstable == null) throw failure
+                    if (observable == null) throw failure
                 }
             }
         }
@@ -400,7 +405,7 @@ internal class AgentHistoryViewModelImpl(
         group: HistoryProjectionItem.WorkGroup,
         generation: Long,
     ): List<WorkGroupChildHistoryItemViewModel> = withContext(Dispatchers.Default) {
-        val values = agentState.storage.work.valuesIn(group.indexRange)
+        val values = agentState.storage.getCommitsIn(group.indexRange, AgentCommitType.WorkTypes)
         check(values.size == group.itemCount) {
             "History work group ${group.indexRange} expected ${group.itemCount} values, " +
                 "but storage returned ${values.size}."
@@ -408,7 +413,8 @@ internal class AgentHistoryViewModelImpl(
         var previousIndex = agentState.storage.visibleStableIndexAtOrBefore(
             group.indexRange.first - 1,
         )
-        val descriptors = values.map { (index, event) ->
+        val descriptors = values.map { (index, commit) ->
+            val event = commit as StableWorkEvent
             event.toHistoryItemDescriptor(
                 index = index,
                 source = HistoryItemSource.Work,
@@ -534,7 +540,7 @@ internal class AgentHistoryViewModelImpl(
 
         suspend fun refreshActiveTurnStart(force: Boolean = false) {
             val currentIndexEntry = if (observedLatestIndex >= 0) {
-                agentState.storage.index.floorToIndex(observedLatestIndex)
+                agentState.storage.floorToIndex(observedLatestIndex, AgentCommitType.IndexTypes)
             } else {
                 null
             }
@@ -765,7 +771,7 @@ internal class AgentHistoryViewModelImpl(
             if (!isCurrent(intent)) return
             val snapshotIndex = agentState.latestIndex.value
             val indexEntry = withContext(Dispatchers.Default) {
-                agentState.storage.index.getExact(storageIndex)
+                agentState.storage.getIndexEntryExact(storageIndex)
             }
             if (!isCurrent(intent)) return
             checkNotNull(indexEntry) { "The selected History entry is no longer available." }
@@ -919,11 +925,8 @@ internal class AgentHistoryViewModelImpl(
 
     private suspend fun loadPendingTools(latestIndex: Int): List<UnstableCleanEvent> =
         withContext(Dispatchers.Default) {
-            if (
-                latestIndex >= 0 &&
-                agentState.storage.unstable.floorToIndex(latestIndex) != null
-            ) {
-                agentState.storage.unstable[latestIndex]
+            if (latestIndex >= 0) {
+                agentState.storage.getUnstableAtOrNull(latestIndex).orEmpty()
             } else {
                 emptyList()
             }

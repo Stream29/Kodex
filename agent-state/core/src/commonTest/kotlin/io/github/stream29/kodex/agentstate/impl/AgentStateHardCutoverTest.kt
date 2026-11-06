@@ -3,14 +3,14 @@ package io.github.stream29.kodex.agentstate.impl
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.MessagePhase
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
@@ -43,10 +43,7 @@ val agentStateHardCutoverTest by testSuite {
             )
             val failure = IllegalStateException("injected latest read failure")
             val storage = object : MutableKodexAgentStorage by backing {
-                override val settings =
-                    object : MutableIndexVersioned<KodexAgentSettings> by backing.settings {
-                        override suspend fun latestIndex(): Int = throw failure
-                    }
+                override suspend fun latestIndex(): Int = throw failure
             }
             var clientClosed = false
             val client = object : OpenAiClient by mockOpenAiClient() {
@@ -86,11 +83,13 @@ val agentStateHardCutoverTest by testSuite {
                 )
                 val agent = KodexAgentState(mockOpenAiClient(), storage)
                 agent.appendUserMessage(listOf(ContentItem.InputText("first")))
-                val initialTurn = storage.settings[agent.latestIndex.value].turnId
+                val initialTurn = storage.getSettingsAt(agent.latestIndex.value).turnId
                 agent.modify {
-                    it.index[2] = StableAssistantMessage(
-                        content = listOf(ContentItem.OutputText("answer")),
-                        phase = phase,
+                    it.commit(
+                        StableAssistantMessage(
+                            content = listOf(ContentItem.OutputText("answer")),
+                            phase = phase,
+                        ),
                     )
                 }
                 agent.injectHistory(
@@ -99,10 +98,10 @@ val agentStateHardCutoverTest by testSuite {
                         StableUserMessage(listOf(ContentItem.InputText("third"))),
                     ),
                 )
-                val nextTurn = storage.settings[3].turnId
+                val nextTurn = storage.getSettingsAt(3).turnId
                 if (phase == MessagePhase.FinalAnswer) assertNotEquals(initialTurn, nextTurn)
                 else assertEquals(initialTurn, nextTurn)
-                assertEquals(nextTurn, storage.settings[4].turnId)
+                assertEquals(nextTurn, storage.getSettingsAt(4).turnId)
                 assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             }
         }
@@ -131,14 +130,14 @@ val agentStateHardCutoverTest by testSuite {
             }
             try {
                 entered.await()
-                val current = storage.settings[agent.latestIndex.value]
+                val current = storage.getSettingsAt(agent.latestIndex.value)
                 assertTrue(agent.compareAndSetSettings(current, current.copy(threadName = "during")))
                 val acceptedIndex = agent.latestIndex.value
-                assertEquals("during", storage.settings[acceptedIndex].threadName)
+                assertEquals("during", storage.getSettingsAt(acceptedIndex).threadName)
                 release.complete(Unit)
                 val checkpointIndex = compaction.await()
                 assertTrue(checkpointIndex > acceptedIndex)
-                assertEquals("during", storage.settings[checkpointIndex].threadName)
+                assertEquals("during", storage.getSettingsAt(checkpointIndex).threadName)
                 assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             } finally {
                 release.complete(Unit)

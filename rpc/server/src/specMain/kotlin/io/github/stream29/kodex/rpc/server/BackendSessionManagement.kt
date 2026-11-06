@@ -4,7 +4,7 @@ package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import kotlinx.io.files.Path

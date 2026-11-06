@@ -156,12 +156,7 @@ public actual class BackendServices internal constructor(
     public actual fun register(server: RpcServer) {
         server.registerService(GlobalRpc::class) { global }
         server.registerService(AgentRuntimeRpc::class) { runtime }
-        server.registerService(IndexTimelineRpc::class) { BackendIndexTimelineRpc(host) }
-        server.registerService(WorkTimelineRpc::class) { BackendWorkTimelineRpc(host) }
-        server.registerService(SettingsTimelineRpc::class) { BackendSettingsTimelineRpc(host) }
-        server.registerService(TimestampTimelineRpc::class) { BackendTimestampTimelineRpc(host) }
-        server.registerService(TokenCountTimelineRpc::class) { BackendTokenCountTimelineRpc(host) }
-        server.registerService(UnstableTimelineRpc::class) { BackendUnstableTimelineRpc(host) }
+        server.registerService(AgentStorageRpc::class) { BackendAgentStorageRpc(host) }
     }
 }
 

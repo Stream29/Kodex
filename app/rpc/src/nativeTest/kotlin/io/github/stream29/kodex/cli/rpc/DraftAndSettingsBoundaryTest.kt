@@ -225,9 +225,15 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                 try {
                     val revision = draft.composer.update(text)
                     val view = assertNotNull(draft.submit(revision, views::open))
-                    val message = assertIs<StableUserMessage>(services.index.get(
-                        view.index, services.index.getCacheNonce(view.index), 1,
-                    ))
+                    val message = assertIs<StableUserMessage>(
+                        services.storage.getCommitsIn(
+                            view.index,
+                            services.storage.getCacheNonce(view.index),
+                            0,
+                            1,
+                            io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.IndexTypes,
+                        ).last().commit,
+                    )
                     assertEquals(listOf(ContentItem.InputText(text)), message.content)
                     assertEquals("", draft.composer.state.value.text)
                 } finally { draft.close() }

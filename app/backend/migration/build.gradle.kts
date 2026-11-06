@@ -49,7 +49,6 @@ kotlin {
                 implementation(project(":app-backend-settings"))
                 implementation(project(":agent-storage-clean-models"))
                 implementation(project(":agent-storage-core"))
-                implementation(project(":agent-storage-filesystem"))
                 implementation(project(":openai-json-codec"))
             }
         }

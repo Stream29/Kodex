@@ -286,11 +286,11 @@ private fun resolveCommitType(path: Path, fileName: String, stateIndex: Int, raw
             }
             "token-count" -> {
                 val obj = json.jsonObject
-                when (obj["kind"]?.jsonPrimitive?.takeIf { it.isString }?.content) {
-                    "legacy" -> "token_count_legacy"
-                    "initialization" -> "token_count_initialization"
-                    "compaction" -> "token_count_compaction"
-                    "response" -> "token_count_response"
+                when ((obj["type"] ?: obj["kind"])?.jsonPrimitive?.takeIf { it.isString }?.content) {
+                    "legacy", "token_count_legacy" -> "token_count_legacy"
+                    "initialization", "token_count_initialization" -> "token_count_initialization"
+                    "compaction", "token_count_compaction" -> "token_count_compaction"
+                    "response", "token_count_response" -> "token_count_response"
                     else -> throw IllegalArgumentException()
                 }
             }

@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.agentstate.impl
 
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.CodexResponsesClientMetadata
 import io.github.stream29.kodex.openai.CodexResponsesMetadata
 import io.github.stream29.kodex.openai.ResponseItem

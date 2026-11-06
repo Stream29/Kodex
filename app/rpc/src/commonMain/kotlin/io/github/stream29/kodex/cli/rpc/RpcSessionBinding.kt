@@ -3,18 +3,19 @@
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.CachedIndexVersioned
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getTimestampAtOrNull
+import io.github.stream29.kodex.agentstorage.contract.getTokenCountAtOrNull
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.rpc.client.asSuspendMutableStateFlow
-import io.github.stream29.kodex.rpc.client.rpcCachedIndexVersioned
+import io.github.stream29.kodex.rpc.client.rpcCachedAgentStorage
 import io.github.stream29.kodex.rpc.client.rpcStateIn
 import io.github.stream29.kodex.rpc.contract.SuspendMutableStateFlow
 import io.github.stream29.kodex.rpc.models.AgentStateValue
@@ -82,9 +83,11 @@ public actual class RpcSessionBinding private constructor(
     public actual suspend fun forkHistory(untilExclusive: Int, selectedCacheNonce: Long): Int =
         command { services.global.forkSessionHistory(sessionIndex, untilExclusive, selectedCacheNonce) }
     public actual suspend fun readCreatedAt(): Instant? =
-        storage.timestamp.ceilToIndex(0)?.let { storage.timestamp.getExact(it) }
+        (storage.getFirstCommitsIn(0..Int.MAX_VALUE, AgentCommitType.TimestampTypes, limit = 1)
+            .firstOrNull()
+            ?.commit as? CommitTimestamp)?.instant
     public actual suspend fun readUpdatedAt(): Instant? =
-        storage.timestamp.latestIndex.value.takeIf { it >= 0 }?.let { storage.timestamp.getExact(it) }
+        storage.latestIndexFlow.value.takeIf { it >= 0 }?.let { storage.getTimestampAtOrNull(it) }
 
     internal companion object {
         suspend fun create(
@@ -95,14 +98,10 @@ public actual class RpcSessionBinding private constructor(
         ): RpcSessionBinding {
             val owner = requireNotNull(scope.coroutineContext[Job])
             val runtime = services.runtime
-            val storage = RpcStorage(
+            val storage = scope.rpcCachedAgentStorage(
+                sessionIndex = index,
                 uri = runtime.getStorageUri(index),
-                index = scope.rpcCachedIndexVersioned(index, services.index),
-                work = scope.rpcCachedIndexVersioned(index, services.work),
-                settings = scope.rpcCachedIndexVersioned(index, services.settings),
-                timestamp = scope.rpcCachedIndexVersioned(index, services.timestamp),
-                tokenCount = scope.rpcCachedIndexVersioned(index, services.tokenCount),
-                unstable = scope.rpcCachedIndexVersioned(index, services.unstable),
+                rpc = services.storage,
             )
             val latest = scope.rpcStateIn(
                 { runtime.getLatestIndex(index) }, { runtime.getLatestIndexFlow(index).requiredState() },
@@ -119,9 +118,9 @@ public actual class RpcSessionBinding private constructor(
             val pending = scope.rpcStateIn(
                 { runtime.getPendingSteer(index) }, { runtime.getPendingSteerFlow(index).requiredState() },
             )
-            val settings = scope.visibleValue(storage.settings, latest) { position -> storage.settings.get(position) }
-            val tokenCount = scope.visibleValue(storage.tokenCount, latest) { position ->
-                storage.tokenCount.floorToIndex(position)?.let { storage.tokenCount.getExact(it) }
+            val settings = scope.visibleValue(storage, latest) { position -> storage.getSettingsAt(position) }
+            val tokenCount = scope.visibleValue(storage, latest) { position ->
+                if (position >= 0) storage.getTokenCountAtOrNull(position) else null
             }
             suspend fun <R> compare(action: suspend () -> R): R {
                 owner.ensureActive()
@@ -138,7 +137,7 @@ public actual class RpcSessionBinding private constructor(
             return RpcSessionBinding(
                 index, storage, latest, state, scope.projectOutput(index, runtime, state), running, shell,
                 settings.asSuspendMutableStateFlow { expect, update ->
-                    compare { services.settings.compareAndSet(index, expect, update) }
+                    compare { services.storage.compareAndSetSettings(index, expect, update) }
                 },
                 pending.asSuspendMutableStateFlow { expect, update ->
                     compare { runtime.compareAndSetPendingSteer(index, expect, update) }
@@ -149,16 +148,6 @@ public actual class RpcSessionBinding private constructor(
     }
 }
 
-private data class RpcStorage(
-    override val uri: String,
-    override val index: CachedIndexVersioned<CleanIndexEntry>,
-    override val work: CachedIndexVersioned<StableWorkEvent>,
-    override val settings: CachedIndexVersioned<KodexAgentSettings>,
-    override val timestamp: CachedIndexVersioned<Instant>,
-    override val tokenCount: CachedIndexVersioned<TokenCountSnapshot>,
-    override val unstable: CachedIndexVersioned<List<UnstableCleanEvent>>,
-) : ObservableKodexAgentStorage
-
 private fun <T> Flow<T>.requiredState(): Flow<T> = onCompletion { cause ->
     if (cause == null) error("A required Session state subscription ended.")
 }
@@ -168,23 +157,23 @@ private fun <T> Flow<T>.requiredState(): Flow<T> = onCompletion { cause ->
  * Keep null (absent token usage) distinct from an actual stored zero snapshot.
  */
 private suspend fun <T> CoroutineScope.visibleValue(
-    timeline: CachedIndexVersioned<*>,
+    storage: ObservableKodexAgentStorage,
     latest: StateFlow<Int>,
     read: suspend (Int) -> T,
 ): StateFlow<T> {
     suspend fun load(): T {
         while (true) {
-            val nonce = timeline.cacheNonce.value
+            val nonce = storage.cacheNonce.value
             try {
                 return read(latest.value)
             } catch (_: CacheNonceMismatch) {
-                timeline.cacheNonce.first { it != nonce }
+                storage.cacheNonce.first { it != nonce }
             }
         }
     }
     val value = MutableStateFlow(load())
     launch {
-        combine(latest, timeline.cacheNonce, timeline.latestIndex) { position, nonce, tail ->
+        combine(latest, storage.cacheNonce, storage.latestIndexFlow) { position, nonce, tail ->
             Triple(position, nonce, tail)
         }.collect {
             value.value = load()

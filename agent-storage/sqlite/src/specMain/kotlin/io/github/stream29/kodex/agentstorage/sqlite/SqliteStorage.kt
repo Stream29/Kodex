@@ -2,13 +2,12 @@
 
 package io.github.stream29.kodex.agentstorage.sqlite
 
-import io.github.stream29.kodex.agentstorage.contract.*
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.*
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 import kotlinx.coroutines.sync.Mutex
-import kotlin.time.Instant
 
 public expect class SqliteAgentStorage(
     connection: SqliteConnection,
@@ -18,22 +17,13 @@ public expect class SqliteAgentStorage(
     requireAccess: () -> Unit = {},
 ) : MutableKodexAgentStorage {
     override val uri: String
-    override val index: SqliteIndexVersioned<CleanIndexEntry>
-    override val work: SqliteIndexVersioned<StableWorkEvent>
-    override val settings: SqliteIndexVersioned<KodexAgentSettings>
-    override val timestamp: SqliteIndexVersioned<Instant>
-    override val tokenCount: SqliteIndexVersioned<TokenCountSnapshot>
-    override val unstable: SqliteIndexVersioned<List<UnstableCleanEvent>>
-}
 
-public expect class SqliteIndexVersioned<T> : MutableIndexVersioned<T> {
     override suspend fun latestIndex(): Int
-    override suspend fun get(index: Int): T
-    override suspend fun getExact(index: Int): T?
-    override suspend fun floorToIndex(index: Int): Int?
-    override suspend fun ceilToIndex(index: Int): Int?
-    override suspend fun indexesIn(range: IntRange): List<Int>
-    override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>>
-    override suspend fun set(index: Int, value: T)
+    override suspend fun indexesIn(range: IntRange, types: Set<AgentCommitType>): List<Int>
+    override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit>
+    override suspend fun getCommitsIn(range: IntRange, types: Set<AgentCommitType>): List<IndexedAgentCommit>
+    override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit>
+    override suspend fun getLastCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit>
+    override suspend fun commit(commits: List<AgentCommit>): Int
     override suspend fun revert(untilExclusive: Int)
 }

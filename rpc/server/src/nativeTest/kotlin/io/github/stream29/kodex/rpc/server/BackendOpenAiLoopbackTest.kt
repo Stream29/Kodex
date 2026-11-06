@@ -54,9 +54,16 @@ val backendOpenAiLoopbackTest by testSuite(compartment = { TestCompartment.RealT
                 withLoopback(if (automatic) Scenario.AutoCompact else Scenario.Policy, status) { client, ordinary, compact, _ ->
                     runtimeFixture(client) { host, index, rpc ->
                         if (automatic) {
-                            val settings = BackendSettingsTimelineRpc(host)
-                            val before = settings.get(index, settings.getCacheNonce(index), settings.getLatestIndex(index))
-                            assertTrue(settings.compareAndSet(index, before, before.copy(autoCompactionTokenLimit = 20)))
+                            val storage = BackendAgentStorageRpc(host)
+                            val before = storage.getLastCommitsIn(
+                                index,
+                                storage.getCacheNonce(index),
+                                0,
+                                storage.getLatestIndex(index),
+                                io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.SettingsTypes,
+                                1,
+                            ).single().commit as io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+                            assertTrue(storage.compareAndSetSettings(index, before, before.copy(autoCompactionTokenLimit = 20)))
                         }
                         val events = mutableListOf<Notification>()
                         val collector = launch(start = CoroutineStart.UNDISPATCHED) {

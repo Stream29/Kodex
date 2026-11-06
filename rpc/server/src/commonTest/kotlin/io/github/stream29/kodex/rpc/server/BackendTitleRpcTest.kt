@@ -2,6 +2,9 @@ package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.cli.rpc.RpcGlobalEditor
 import io.github.stream29.kodex.cli.rpc.RpcGlobalSettings
 import io.github.stream29.kodex.cli.rpc.RpcServices
@@ -43,7 +46,7 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
                 val index = services.global.createSession(home)
                 val origin = views.open(index)
                 val other = otherViews.open(index)
-                val nonce = services.settings.getCacheNonce(index)
+                val nonce = services.storage.getCacheNonce(index)
                 assertEquals("Session $index", other.current().settings.value.threadName)
                 assertEquals(1, origin.current().appendUserMessage(listOf(ContentItem.InputText("Name this accepted message"))))
                 entered.await()
@@ -61,13 +64,21 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
                 release.complete(Unit)
                 job.await().join()
                 // This is the actual tab binding's name projection, backed by the existing
-                // SettingsTimelineRpc metadata and value queries, not a test-owned name flow.
+                // AgentStorageRpc metadata and value queries, not a test-owned name flow.
                 val observed = other.current().settings.first { it.threadName == "Keep backend naming alive" }
                 assertEquals("Keep backend naming alive", observed.threadName)
-                val tail = services.settings.getLatestIndexFlow(index).first { position ->
-                    services.settings.get(index, nonce, position).threadName == observed.threadName
+                val tail = services.storage.getLatestIndexFlow(index).first { position ->
+                    val settings = services.storage.getLastCommitsIn(
+                        index, nonce, 0, position, AgentCommitType.SettingsTypes, 1,
+                    ).lastOrNull()?.commit as? KodexAgentSettings
+                    settings?.threadName == observed.threadName
                 }
-                assertEquals(observed, services.settings.get(index, nonce, tail))
+                assertEquals(
+                    observed,
+                    services.storage.getLastCommitsIn(
+                        index, nonce, 0, tail, AgentCommitType.SettingsTypes, 1,
+                    ).last().commit as KodexAgentSettings,
+                )
                 val catalog = services.global.getSessionCatalog(false).single()
                 assertEquals(observed.threadName, catalog.threadName)
                 assertTrue(catalog.isActive)
@@ -106,8 +117,7 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
                 val view = views.open(index)
                 assertEquals(1, view.current().appendUserMessage(listOf(ContentItem.InputText("First text"))))
                 entered.await()
-                val nonce = services.settings.getCacheNonce(index)
-                val old = services.settings.get(index, nonce, services.runtime.getLatestIndex(index))
+                val old = checkNotNull(view.current().storage.getSettingsAt(services.runtime.getLatestIndex(index)))
                 assertTrue(view.current().settings.compareAndSet(old, old.copy(threadName = "Explicit name wins")))
                 release.complete(Unit)
                 job.await().join()
@@ -149,14 +159,13 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
                 val view = views.open(index)
                 assertEquals(1, view.current().appendUserMessage(listOf(ContentItem.InputText("Obsolete text"))))
                 entered.await()
-                val oldNonce = services.index.getCacheNonce(index)
+                val oldNonce = services.storage.getCacheNonce(index)
                 view.current().revertHistory(1, oldNonce)
-                assertNotEquals(oldNonce, services.index.getCacheNonce(index))
+                assertNotEquals(oldNonce, services.storage.getCacheNonce(index))
                 release.complete(Unit)
                 oldJob.await().join()
                 assertEquals(0, services.runtime.getLatestIndex(index))
-                val nonce = services.settings.getCacheNonce(index)
-                assertEquals("Session $index", services.settings.get(index, nonce, 0).threadName)
+                assertEquals("Session $index", checkNotNull(view.current().storage.getSettingsAt(0)).threadName)
                 assertEquals("Session $index", services.global.getSessionCatalog(false).single().threadName)
                 assertEquals(1, view.current().appendUserMessage(listOf(ContentItem.InputText("Replacement text"))))
                 view.current().settings.first { it.threadName == "Name replacement history" }

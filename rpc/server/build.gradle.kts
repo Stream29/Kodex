@@ -39,7 +39,6 @@ kotlin {
             implementation(libs.ktor.utils)
             implementation(project(":utils-logging-backend-scope"))
             implementation(project(":utils-shell-client-system"))
-            implementation(project(":agent-session-filesystem"))
             implementation(project(":agent-session-sqlite"))
             implementation(project(":openai-json-codec"))
             implementation(libs.kaml)
@@ -50,7 +49,6 @@ kotlin {
         commonTest.dependencies {
             implementation(project(":app-rpc-system"))
             implementation(project(":agent-session-in-memory"))
-            implementation(project(":agent-session-filesystem"))
             implementation(project(":agent-session-sqlite"))
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-core"))

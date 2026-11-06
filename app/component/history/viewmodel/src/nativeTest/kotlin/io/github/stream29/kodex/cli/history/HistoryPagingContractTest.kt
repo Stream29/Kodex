@@ -3,12 +3,16 @@ package io.github.stream29.kodex.cli.history
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +26,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 val historyPagingContractTest by testSuite {
     test("peek does not load; access prefetches one page and becomes idle before the edge") {
@@ -88,8 +93,11 @@ private suspend fun withPagingModel(block: suspend (AgentHistoryViewModel) -> Un
     val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
     val runtime = repository.open(repository.create()).runtime
     runtime.modify { storage ->
+        storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
         for (index in 1..1_000) {
-            storage.index[index * 3] = StableUserMessage(listOf(ContentItem.InputText("$index")))
+            storage.commit(CommitTimestamp(Instant.DISTANT_PAST))
+            storage.commit(CommitTimestamp(Instant.DISTANT_PAST))
+            storage.commit(StableUserMessage(listOf(ContentItem.InputText("$index"))))
         }
     }
     val model = createAgentHistoryViewModel(runtime, supervisorChildScope())

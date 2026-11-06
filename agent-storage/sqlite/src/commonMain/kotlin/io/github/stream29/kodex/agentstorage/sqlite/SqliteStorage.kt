@@ -2,106 +2,23 @@
 
 package io.github.stream29.kodex.agentstorage.sqlite
 
-import io.github.stream29.kodex.agentstorage.contract.*
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.*
-import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.MessagePhase
-import io.github.stream29.kodex.utils.sqlite.SqliteConnection
-import kotlinx.coroutines.sync.Mutex
-import kotlin.time.Instant
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.decodePayloadJson
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
+import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.validateCommitBatch
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.serializer
-
-private val SqliteIndexCommitTypes: List<String> = listOf(
-    "user_message",
-    "assistant_message",
-    "assistant_message_commentary",
-    "assistant_message_final",
-    "developer_message",
-    "agent_message",
-    "request_user_input_tool_event",
-    "suggest_subagent_task_tool_event",
-    "plan_update",
-    "compaction_point",
-)
-
-private val SqliteWorkCommitTypes: List<String> = listOf(
-    "reasoning",
-    "context_compaction",
-    "command_execution_tool_event",
-    "patch_tool_event",
-    "mcp_tool_event",
-    "web_search_tool_event",
-    "image_generation_tool_event",
-    "image_view_tool_event",
-    "tool_search_event",
-    "invalid_tool_call",
-    "server_tool_search",
-    "hosted_web_search",
-    "hosted_image_generation",
-    "json_tool_event",
-    "text_tool_event",
-    "custom_tool_event",
-)
-
-private val SqliteTokenCountCommitTypes: List<String> = listOf(
-    "token_count_legacy",
-    "token_count_initialization",
-    "token_count_compaction",
-    "token_count_response",
-)
-
-private fun CleanIndexEntry.toSqliteCommitType(): String = when (this) {
-    is StableUserMessage -> "user_message"
-    is StableAssistantMessage -> when (phase) {
-        MessagePhase.Commentary -> "assistant_message_commentary"
-        MessagePhase.FinalAnswer -> "assistant_message_final"
-        null -> "assistant_message"
-    }
-    is StableDeveloperMessage -> "developer_message"
-    is StableAgentMessage -> "agent_message"
-    is StableRequestUserInputToolEvent -> "request_user_input_tool_event"
-    is StableSuggestSubagentTaskToolEvent -> "suggest_subagent_task_tool_event"
-    is StablePlanUpdate -> "plan_update"
-    CleanCompactionPoint -> "compaction_point"
-}
-
-private fun StableWorkEvent.toSqliteCommitType(): String = when (this) {
-    is StableReasoning -> "reasoning"
-    is StableContextCompaction -> "context_compaction"
-    is StableCommandExecutionToolEvent -> "command_execution_tool_event"
-    is StablePatchToolEvent -> "patch_tool_event"
-    is StableMcpToolEvent -> "mcp_tool_event"
-    is StableWebSearchToolEvent -> "web_search_tool_event"
-    is StableImageGenerationToolEvent -> "image_generation_tool_event"
-    is StableImageViewToolEvent -> "image_view_tool_event"
-    is StableToolSearchEvent -> "tool_search_event"
-    is StableInvalidToolCall -> "invalid_tool_call"
-    is StableServerToolSearch -> "server_tool_search"
-    is StableWebSearchCall -> "hosted_web_search"
-    is StableImageGenerationCall -> "hosted_image_generation"
-    is StableJsonToolEvent -> "json_tool_event"
-    is StableTextToolEvent -> "text_tool_event"
-    is StableCustomToolEvent -> "custom_tool_event"
-}
-
-private fun TokenCountSnapshot.toSqliteCommitType(): String = when (kind) {
-    TokenCountKind.Legacy -> "token_count_legacy"
-    TokenCountKind.Initialization -> "token_count_initialization"
-    TokenCountKind.Compaction -> "token_count_compaction"
-    TokenCountKind.Response -> "token_count_response"
-}
+import kotlinx.coroutines.withContext
 
 public actual class SqliteAgentStorage actual constructor(
     internal val connection: SqliteConnection,
@@ -111,18 +28,6 @@ public actual class SqliteAgentStorage actual constructor(
     private val requireAccess: () -> Unit,
 ) : MutableKodexAgentStorage {
     internal val agentId: Long = agentId.also { require(it >= 0) { "Invalid agent id: $it" } }.toLong()
-    public actual override val index: SqliteIndexVersioned<CleanIndexEntry> =
-        SqliteIndexVersioned(this, SqliteIndexCommitTypes, CleanIndexEntry::toSqliteCommitType, CleanIndexEntry.serializer(), OpenAiJsonCodec)
-    public actual override val work: SqliteIndexVersioned<StableWorkEvent> =
-        SqliteIndexVersioned(this, SqliteWorkCommitTypes, StableWorkEvent::toSqliteCommitType, StableWorkEvent.serializer(), OpenAiJsonCodec)
-    public actual override val settings: SqliteIndexVersioned<KodexAgentSettings> =
-        SqliteIndexVersioned(this, listOf("settings"), { "settings" }, KodexAgentSettings.serializer(), OpenAiJsonCodec)
-    public actual override val timestamp: SqliteIndexVersioned<Instant> =
-        SqliteIndexVersioned(this, listOf("timestamp"), { "timestamp" }, serializer<Instant>(), OpenAiJsonCodec)
-    public actual override val tokenCount: SqliteIndexVersioned<TokenCountSnapshot> =
-        SqliteIndexVersioned(this, SqliteTokenCountCommitTypes, TokenCountSnapshot::toSqliteCommitType, serializer<TokenCountSnapshot>(), OpenAiJsonCodec)
-    public actual override val unstable: SqliteIndexVersioned<List<UnstableCleanEvent>> =
-        SqliteIndexVersioned(this, listOf("unstable"), { "unstable" }, ListSerializer(UnstableCleanEvent.serializer()), OpenAiJsonCodec)
 
     internal suspend fun <T> read(block: () -> T): T {
         currentCoroutineContext().ensureActive()
@@ -142,74 +47,147 @@ public actual class SqliteAgentStorage actual constructor(
             }
         }
     }
+
+    private fun tailUnsafe(): Int =
+        connection.query(
+            """SELECT coalesce(max("index"), -1) FROM agent_commits WHERE agent_id = ?""",
+            listOf(agentId),
+        ).firstOrNull()?.let { (it[0] as Long).toInt() } ?: -1
+
+    public actual override suspend fun latestIndex(): Int = read { tailUnsafe() }
+
+    public actual override suspend fun indexesIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+    ): List<Int> = read {
+        if (range.isEmpty() || types.isEmpty()) return@read emptyList()
+        require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
+        val (clause, params) = typeFilterClause(types)
+        val rows = connection.query(
+            """SELECT DISTINCT "index" FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" ASC""",
+            listOf(agentId, range.first.toLong(), range.last.toLong()) + params,
+        )
+        rows.map { (it[0] as Long).toInt() }
+    }
+
+    public actual override suspend fun getCommitsExact(
+        index: Int,
+        types: Set<AgentCommitType>,
+    ): List<AgentCommit> = read {
+        require(index >= 0) { "Index $index must be non-negative." }
+        if (types.isEmpty()) return@read emptyList()
+        val (clause, params) = typeFilterClause(types)
+        val rows = connection.query(
+            """SELECT type, payload_json FROM agent_commits WHERE agent_id = ? AND "index" = ?$clause""",
+            listOf(agentId, index.toLong()) + params,
+        )
+        rows.map { row ->
+            val type = AgentCommitType.fromWireName(row[0] as String)
+            type.decodePayloadJson(row[1] as String, OpenAiJsonCodec)
+        }.sortedBy { it.commitType.ordinal }
+    }
+
+    public actual override suspend fun getCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+    ): List<IndexedAgentCommit> = read {
+        if (range.isEmpty() || types.isEmpty()) return@read emptyList()
+        require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
+        val (clause, params) = typeFilterClause(types)
+        val rows = connection.query(
+            """SELECT "index", type, payload_json FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" ASC""",
+            listOf(agentId, range.first.toLong(), range.last.toLong()) + params,
+        )
+        decodeIndexedRows(rows)
+    }
+
+    public actual override suspend fun getFirstCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> = read {
+        require(limit >= 0) { "Limit $limit must be non-negative." }
+        if (limit == 0 || range.isEmpty() || types.isEmpty()) return@read emptyList()
+        require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
+        val (clause, params) = typeFilterClause(types)
+        val sqlLimit = boundedIndexScanLimit(limit, types)
+        val rows = connection.query(
+            """SELECT "index", type, payload_json FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" ASC, type ASC LIMIT ?""",
+            listOf(agentId, range.first.toLong(), range.last.toLong()) + params + listOf(sqlLimit),
+        )
+        decodeIndexedRows(rows).take(limit)
+    }
+
+    public actual override suspend fun getLastCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> = read {
+        require(limit >= 0) { "Limit $limit must be non-negative." }
+        if (limit == 0 || range.isEmpty() || types.isEmpty()) return@read emptyList()
+        require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
+        val (clause, params) = typeFilterClause(types)
+        val sqlLimit = boundedIndexScanLimit(limit, types)
+        val rows = connection.query(
+            """SELECT "index", type, payload_json FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" DESC, type DESC LIMIT ?""",
+            listOf(agentId, range.first.toLong(), range.last.toLong()) + params + listOf(sqlLimit),
+        )
+        decodeIndexedRows(rows).takeLast(limit)
+    }
+
+    public actual override suspend fun commit(commits: List<AgentCommit>): Int {
+        validateCommitBatch(commits)
+        val sorted = commits.sortedBy { it.commitType.ordinal }
+        val encoded = sorted.map { commit ->
+            commit.commitType.wireName to commit.encodePayloadJson(OpenAiJsonCodec)
+        }
+        return write {
+            val nextIndex = tailUnsafe() + 1
+            for ((wireType, payloadJson) in encoded) {
+                connection.execute(
+                    "INSERT INTO agent_commits (agent_id, type, \"index\", payload_json) VALUES (?, ?, ?, ?)",
+                    listOf(agentId, wireType, nextIndex.toLong(), payloadJson),
+                )
+            }
+            nextIndex
+        }
+    }
+
+    public actual override suspend fun revert(untilExclusive: Int) {
+        require(untilExclusive >= 0) { "Revert boundary $untilExclusive must be non-negative." }
+        write {
+            connection.execute(
+                """DELETE FROM agent_commits WHERE agent_id = ? AND "index" >= ?""",
+                listOf(agentId, untilExclusive.toLong()),
+            )
+        }
+    }
 }
 
-public actual class SqliteIndexVersioned<T> internal constructor(
-    private val storage: SqliteAgentStorage,
-    private val types: List<String>,
-    private val typeOf: (T) -> String,
-    private val serializer: KSerializer<T>,
-    private val json: Json,
-) : MutableIndexVersioned<T> {
-    private val typeClause: String =
-        if (types.size == 1) "type = ?"
-        else "type IN (${types.joinToString(",") { "?" }})"
+private fun typeFilterClause(types: Set<AgentCommitType>): Pair<String, List<String>> {
+    if (types.size == AgentCommitType.All.size) return "" to emptyList()
+    val wireNames = types.map { it.wireName }
+    return if (wireNames.size == 1) {
+        " AND type = ?" to wireNames
+    } else {
+        " AND type IN (${wireNames.joinToString(",") { "?" }})" to wireNames
+    }
+}
 
-    private fun rows(suffix: String = "", parameters: List<Any?> = emptyList()): List<List<Any?>> =
-        storage.connection.query(
-            """SELECT "index", payload_json FROM agent_commits WHERE agent_id = ? AND $typeClause $suffix""",
-            listOf(storage.agentId) + types + parameters,
-        )
-    private fun tail(): Int = rows("""ORDER BY "index" DESC LIMIT 1""").firstOrNull()?.let { (it[0] as Long).toInt() } ?: -1
-    private fun decode(row: List<Any?>): T = json.decodeFromString(serializer, row[1] as String)
-    public actual override suspend fun latestIndex(): Int = storage.read { tail() }
-    public actual override suspend fun get(index: Int): T = storage.read {
-        require(index >= 0)
-        decode(rows("""AND "index" <= ? ORDER BY "index" DESC LIMIT 1""", listOf(index.toLong())).firstOrNull()
-            ?: throw IllegalArgumentException("No value at index $index"))
+private fun boundedIndexScanLimit(limit: Int, types: Set<AgentCommitType>): Long {
+    // At any single index there is at most one commit per legacyTimelineName category.
+    // Fetching (limit + categoryCount - 1) rows in index order guarantees all matching
+    // rows at the boundary index are present before ordinal sorting and truncation.
+    val categoryCount = types.mapTo(mutableSetOf()) { it.legacyTimelineName }.size.coerceAtLeast(1)
+    return limit.toLong() + (categoryCount - 1).toLong()
+}
+
+private fun decodeIndexedRows(rows: List<List<Any?>>): List<IndexedAgentCommit> {
+    if (rows.isEmpty()) return emptyList()
+    val decoded = rows.map { row ->
+        val index = (row[0] as Long).toInt()
+        val type = AgentCommitType.fromWireName(row[1] as String)
+        IndexedAgentCommit(index, type.decodePayloadJson(row[2] as String, OpenAiJsonCodec))
     }
-    public actual override suspend fun getExact(index: Int): T? = storage.read {
-        require(index >= 0)
-        rows("""AND "index" = ?""", listOf(index.toLong())).firstOrNull()?.let(::decode)
-    }
-    public actual override suspend fun floorToIndex(index: Int): Int? = storage.read {
-        rows("""AND "index" <= ? ORDER BY "index" DESC LIMIT 1""", listOf(index.toLong())).firstOrNull()?.let { (it[0] as Long).toInt() }
-    }
-    public actual override suspend fun ceilToIndex(index: Int): Int? = storage.read {
-        rows("""AND "index" >= ? ORDER BY "index" LIMIT 1""", listOf(index.toLong())).firstOrNull()?.let { (it[0] as Long).toInt() }
-    }
-    public actual override suspend fun indexesIn(range: IntRange): List<Int> = storage.read {
-        if (range.isEmpty()) emptyList() else {
-            require(range.first >= 0)
-            rows("""AND "index" BETWEEN ? AND ? ORDER BY "index"""", listOf(range.first.toLong(), range.last.toLong()))
-                .map { (it[0] as Long).toInt() }
-        }
-    }
-    public actual override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> = storage.read {
-        if (range.isEmpty()) emptyList() else {
-            require(range.first >= 0)
-            rows("""AND "index" BETWEEN ? AND ? ORDER BY "index"""", listOf(range.first.toLong(), range.last.toLong()))
-                .map { (it[0] as Long).toInt() to decode(it) }
-        }
-    }
-    public actual override suspend fun set(index: Int, value: T) {
-        storage.write {
-            require(index >= 0 && index > tail()) { "Timeline append requires an index beyond its tail" }
-            val type = typeOf(value)
-            val payload = json.encodeToString(serializer, value)
-            storage.connection.execute(
-                "INSERT INTO agent_commits VALUES (?, ?, ?, ?)",
-                listOf(storage.agentId, type, index.toLong(), payload),
-            )
-        }
-    }
-    public actual override suspend fun revert(untilExclusive: Int) {
-        storage.write {
-            require(untilExclusive >= 0)
-            storage.connection.execute(
-                """DELETE FROM agent_commits WHERE agent_id = ? AND $typeClause AND "index" >= ?""",
-                listOf(storage.agentId) + types + listOf(untilExclusive.toLong()),
-            )
-        }
-    }
+    return decoded.sortedWith(compareBy<IndexedAgentCommit> { it.index }.thenBy { it.commit.commitType.ordinal })
 }

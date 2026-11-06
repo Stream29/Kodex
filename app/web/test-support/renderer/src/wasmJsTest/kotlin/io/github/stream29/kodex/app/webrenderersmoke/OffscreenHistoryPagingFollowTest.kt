@@ -34,7 +34,7 @@ val offscreenHistoryPagingFollowTest by testSuite {
         test("last newer page completes after the wheel has stopped: $input") { offscreenTest {
             val stored = InMemoryKodexAgentStorage.empty()
             val body = (1..80).joinToString("\n") { "Delayed page line $it" }
-            stored.index[1] = StableUserMessage(listOf(ContentItem.InputText(body)))
+            stored.commit(StableUserMessage(listOf(ContentItem.InputText(body))))
             val owner = CoroutineScope(currentCoroutineContext() + Job(currentCoroutineContext()[Job]))
             val model = createAgentHistoryViewModel(
                 AgentHistorySource(stored, MutableStateFlow(1), MutableStateFlow(KodexAgentStateValue.UserMessage)),

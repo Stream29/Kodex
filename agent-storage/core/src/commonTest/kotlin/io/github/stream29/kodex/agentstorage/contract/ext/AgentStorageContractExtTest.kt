@@ -1,32 +1,26 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
-import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.indexes
-import io.github.stream29.kodex.agentstorage.contract.indexesDescending
-import io.github.stream29.kodex.agentstorage.contract.values
-import io.github.stream29.kodex.agentstorage.contract.valuesDescending
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ResponseItem
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.toList
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import kotlin.time.Instant
 
 private fun storage(): InMemoryKodexAgentStorage =
     InMemoryKodexAgentStorage(
-        io.github.stream29.kodex.openai.KodexAgentSettings(
+        KodexAgentSettings(
             model = OpenAiModelId("test-model"),
         ),
     )
@@ -40,172 +34,66 @@ private fun assistant(text: String): StableAssistantMessage =
 private fun work(status: String): StableWebSearchCall =
     StableWebSearchCall(ResponseItem.WebSearchCall(status = status))
 
-private class CountingTimeline<T>(
-    private val delegate: IndexVersioned<T>,
-) : IndexVersioned<T> {
-    var exactReads: Int = 0
-    val ranges: MutableList<IntRange> = mutableListOf()
-    val valueRanges: MutableList<IntRange> = mutableListOf()
-
-    override suspend fun latestIndex(): Int = delegate.latestIndex()
-
-    override suspend fun get(index: Int): T = delegate[index]
-
-    override suspend fun getExact(index: Int): T? {
-        exactReads += 1
-        return delegate.getExact(index)
-    }
-
-    override suspend fun floorToIndex(index: Int): Int? = delegate.floorToIndex(index)
-
-    override suspend fun ceilToIndex(index: Int): Int? = delegate.ceilToIndex(index)
-
-    override suspend fun indexesIn(range: IntRange): List<Int> = delegate.indexesIn(range)
-        .also { ranges += range }
-
-    override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> = delegate.valuesIn(range)
-        .also { valueRanges += range }
-}
-
 private class CountingStorage(
     private val delegate: KodexAgentStorage,
-) : KodexAgentStorage {
-    val countedIndex = CountingTimeline(delegate.index)
-    val countedWork = CountingTimeline(delegate.work)
+) : KodexAgentStorage by delegate {
+    var totalFetchedCommits: Int = 0
 
-    override val uri: String = delegate.uri
-    override val index: IndexVersioned<io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry>
-        get() = countedIndex
-    override val work: IndexVersioned<io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent>
-        get() = countedWork
-    override val settings: IndexVersioned<io.github.stream29.kodex.openai.KodexAgentSettings>
-        get() = delegate.settings
-    override val timestamp: IndexVersioned<Instant>
-        get() = delegate.timestamp
-    override val tokenCount: IndexVersioned<io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot>
-        get() = delegate.tokenCount
-    override val unstable: IndexVersioned<List<io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent>>
-        get() = delegate.unstable
+    override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> =
+        delegate.getCommitsExact(index, types).also { totalFetchedCommits += it.size }
+
+    override suspend fun getCommitsIn(range: IntRange, types: Set<AgentCommitType>): List<IndexedAgentCommit> =
+        delegate.getCommitsIn(range, types).also { totalFetchedCommits += it.size }
+
+    override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit> =
+        delegate.getFirstCommitsIn(range, types, limit).also { totalFetchedCommits += it.size }
+
+    override suspend fun getLastCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit> =
+        delegate.getLastCommitsIn(range, types, limit).also { totalFetchedCommits += it.size }
 }
 
 val agentStorageContractExtTest by testSuite {
-    test("sparse traversal seeks across gaps without decoding unrelated entries") {
+    test("getFirstCommitsIn and getLastCommitsIn return ascending commits within limit") {
         val mutable = storage()
-        mutable.index[0] = user("zero")
-        mutable.index[5] = user("five")
-        mutable.index[10_000] = user("ten thousand")
-        mutable.index[50_000] = user("fifty thousand")
+        val u1 = user("one")
+        val a2 = assistant("two")
+        val u3 = user("three")
+        mutable.commit(u1) // 1
+        mutable.commit(a2) // 2
+        mutable.commit(u3) // 3
 
-        val descending = CountingTimeline(mutable.index)
-        assertEquals(10_000, descending.indexesDescending(49_999).first())
-        assertTrue(descending.ranges.size <= 1, "descending index seek should not probe the gap")
-
-        val descendingValues = CountingTimeline(mutable.index)
-        assertEquals(10_000, descendingValues.valuesDescending(49_999).first().first)
-        assertTrue(descendingValues.valueRanges.size <= 1, "descending values should not probe the gap")
-        assertTrue(descendingValues.exactReads + descendingValues.valueRanges.size <= 1)
-
-        val ascending = CountingTimeline(mutable.index)
-        assertEquals(10_000, ascending.indexes(6).first())
-        assertTrue(ascending.ranges.size <= 1, "ascending index seek should not probe the gap")
-    }
-
-    test("value traversal batches by stored entries and stops after the matching batch") {
-        val mutable = storage()
-        for (index in 1..200) mutable.index[index] = user("item $index")
-        val counted = CountingTimeline(mutable.index)
-
-        assertEquals(198, counted.valuesDescending(200).first { it.first == 198 }.first)
-        assertEquals(listOf(200..200, 198..199), counted.valueRanges)
-    }
-
-    test("traversal handles empty and maximum index boundaries") {
-        val mutable = storage()
-        val counted = CountingTimeline(mutable.index)
-        assertEquals(emptyList(), counted.indexes().toList())
-        assertEquals(emptyList(), counted.indexesDescending(Int.MAX_VALUE).toList())
-        assertFailsWith<IllegalArgumentException> { counted.indexes(-1).toList() }
-        assertFailsWith<IllegalArgumentException> { counted.valuesDescending(-1).toList() }
-
-        mutable.index[Int.MAX_VALUE] = user("last")
-        assertEquals(listOf(Int.MAX_VALUE), counted.indexes(Int.MAX_VALUE).toList())
-        assertEquals(Int.MAX_VALUE, counted.valuesDescending(Int.MAX_VALUE).first().first)
-    }
-
-    test("in-memory cursor re-seeks after a revert and multiple appends") {
-        val mutable = storage()
-        for (index in listOf(0, 5, 10_000, 50_000)) mutable.index[index] = user("item $index")
-        val observed = mutableListOf<Int>()
-        mutable.index.valuesDescending(50_000).collect { (index, _) ->
-            observed += index
-            if (index == 50_000) {
-                mutable.index.revert(10_000)
-                mutable.index[12_000] = user("replacement")
-                mutable.index[15_000] = user("later replacement")
-            }
-        }
-        assertEquals(listOf(50_000, 15_000, 12_000, 5, 0), observed)
-    }
-
-    test("ascending in-memory cursor re-seeks after a revert and append") {
-        val mutable = storage()
-        for (index in listOf(0, 5, 10_000)) mutable.index[index] = user("item $index")
-        val observed = mutableListOf<Int>()
-        mutable.index.values().collect { (index, _) ->
-            observed += index
-            if (index == 0) {
-                mutable.index.revert(5)
-                mutable.index[4] = user("replacement")
-                mutable.index[8] = user("later replacement")
-            }
-        }
-        assertEquals(listOf(0, 4, 8), observed)
-    }
-
-    test("index flows enumerate sparse indexes in both directions") {
-        val mutable = storage()
-        mutable.index[1] = user("one")
-        mutable.index[3] = assistant("three")
-        val counted = CountingTimeline(mutable.index)
-
-        assertEquals(listOf(1, 3), counted.indexes().toList())
-        assertEquals(listOf(3, 1), counted.indexesDescending(3).toList())
         assertEquals(
-            listOf(1, 3),
-            counted.values().toList().map { (index, _) -> index },
+            listOf(IndexedAgentCommit(1, u1), IndexedAgentCommit(2, a2)),
+            mutable.getFirstCommitsIn(0..3, AgentCommitType.IndexTypes, limit = 2),
         )
         assertEquals(
-            listOf(3, 1),
-            counted.valuesDescending(3).toList().map { (index, _) -> index },
+            listOf(IndexedAgentCommit(2, a2), IndexedAgentCommit(3, u3)),
+            mutable.getLastCommitsIn(0..3, AgentCommitType.IndexTypes, limit = 2),
         )
-        assertEquals(
-            listOf(1, 3),
-            counted.valuesIn(0..3).map { (index, _) -> index },
-        )
-        assertTrue(counted.valueRanges.contains(0..3))
     }
 
-    test("compaction prefix stops fetching after its retained token budget") {
+    test("compaction prefix stops fetching after its retained token budget and skips assistant messages") {
         val mutable = storage()
-        repeat(500) { offset ->
-            mutable.index[offset + 1] = user("x".repeat(1_000))
+        repeat(500) {
+            mutable.commit(user("x".repeat(1_000)))
+            mutable.commit(assistant("y".repeat(1_000)))
         }
         val counted = CountingStorage(mutable)
 
-        val prefix = counted.buildCompactionPrefix(beforeIndex = 501)
+        val prefix = counted.buildCompactionPrefix(beforeIndex = mutable.latestIndex() + 1)
 
         assertTrue(prefix.isNotEmpty())
         assertTrue(prefix.size < 500)
-        assertTrue(counted.countedIndex.exactReads < 500)
+        assertTrue(counted.totalFetchedCommits < 500)
     }
 
     test("active message window retains prefix and preserves post-point events") {
         val mutable = storage()
-        mutable.index[1] = user("retained")
-        mutable.index[2] = CleanCompactionPoint
-        mutable.work[3] = StableContextCompaction(encryptedContent = "encrypted")
-        mutable.index[4] = user("current")
-        mutable.work[5] = work("current-work")
+        mutable.commit(user("retained")) // 1
+        mutable.commit(CleanCompactionPoint) // 2
+        mutable.commit(StableContextCompaction(encryptedContent = "encrypted")) // 3
+        mutable.commit(user("current")) // 4
+        mutable.commit(work("current-work")) // 5
 
         val window = mutable.activeMessageWindowAt(5)
 
@@ -222,8 +110,8 @@ val agentStorageContractExtTest by testSuite {
 
     test("active message window keeps the whole history when no point exists") {
         val mutable = InMemoryKodexAgentStorage.empty()
-        mutable.index[0] = user("first")
-        mutable.work[1] = work("second")
+        mutable.commit(user("first")) // 0
+        mutable.commit(work("second")) // 1
 
         val window = mutable.activeMessageWindowAt(1)
 
@@ -232,5 +120,4 @@ val agentStorageContractExtTest by testSuite {
             window.map { it::class },
         )
     }
-
 }

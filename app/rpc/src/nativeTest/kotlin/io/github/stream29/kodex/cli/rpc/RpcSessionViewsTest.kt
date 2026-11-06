@@ -12,6 +12,7 @@ import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskSubmissionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
@@ -168,13 +169,13 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val view = first.await()
             assertSame(view, second.await())
             assertEquals(SessionViewStatus.Ready, view.status.value)
-            val originalNonce = view.current().storage.index.cacheNonce.value
+            val originalNonce = view.current().storage.cacheNonce.value
             views.release(view)
             assertEquals(SessionViewStatus.Closed, view.status.value)
             assertTrue(services.global.getSessionCatalog(false).single().isActive)
             val reopened = views.open(index)
             assertNotSame(view, reopened)
-            assertEquals(originalNonce, reopened.current().storage.index.cacheNonce.value)
+            assertEquals(originalNonce, reopened.current().storage.cacheNonce.value)
             assertTrue(services.global.getSettings().mcpServers.isEmpty())
         }
     }
@@ -294,7 +295,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             services.global.deleteSession(index)
             view.status.first { it == SessionViewStatus.Missing }
             assertNull(view.binding.value)
-            assertFailsWith<CancellationException> { binding.storage.settings.get(0) }
+            assertFailsWith<CancellationException> { binding.storage.getSettingsAt(0) }
             assertTrue(services.global.getSessionCatalog(true).isEmpty())
             views.release(view)
         }
@@ -310,9 +311,10 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertTrue(binding.settings.compareAndSet(initial, initial.copy(instructions = "edited")))
             binding.settings.first { it.instructions == "edited" }
             assertFalse(binding.settings.compareAndSet(initial, initial.copy(threadName = "stale")))
-            assertEquals("Session ${view.index}", services.settings.get(
-                view.index, binding.storage.settings.cacheNonce.value, binding.latestIndex.value,
-            ).threadName)
+            assertEquals(
+                "Session ${view.index}",
+                checkNotNull(binding.storage.getSettingsAt(binding.latestIndex.value)).threadName,
+            )
         }
     }
 
@@ -323,14 +325,14 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val agent = requireNotNull(view.agent.value)
             val committed = binding.appendUserMessage(listOf(ContentItem.InputText("history")))
             val old = agent.historyIndex.window.first { committed in it.indexes }
-            assertEquals(binding.storage.index.cacheNonce.value, old.generation)
+            assertEquals(binding.storage.cacheNonce.value, old.generation)
             assertTrue(agent.historyIndex.load(old.generation, committed).summary.contains("history"))
             agent.history.historyItems.first { it.size > 0 }
             assertTrue(agent.historyIndex.checkOut(old.generation, committed))
             assertEquals(committed, binding.latestIndex.value) // Check out did not revert history.
             binding.revertHistory(committed, old.generation)
             val changed = agent.historyIndex.window.first { it.generation != old.generation }
-            assertEquals(binding.storage.index.cacheNonce.value, changed.generation)
+            assertEquals(binding.storage.cacheNonce.value, changed.generation)
             assertFalse(agent.historyIndex.contains(old.generation, committed))
             assertFalse(agent.historyIndex.checkOut(old.generation, committed))
             assertFailsWith<CacheNonceMismatch> { binding.forkHistory(1, old.generation) }
@@ -654,7 +656,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertEquals(2, keepalives)
             assertEquals(1, appends)
             assertEquals(AgentStateValue.UserMessage, recovered.state.value)
-            assertFailsWith<CancellationException> { old.storage.settings.get(0) }
+            assertFailsWith<CancellationException> { old.storage.getSettingsAt(0) }
             assertSame(view, views.open(view.index))
         }
     }
@@ -848,10 +850,10 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val index = binding.appendUserMessage(listOf(ContentItem.InputText("one")))
             binding.latestIndex.first { it >= index }
             binding.state.first { it == AgentStateValue.UserMessage }
-            val nonce = binding.storage.index.cacheNonce.value
+            val nonce = binding.storage.cacheNonce.value
             val request = agent.requestHistoryRevert(index, nonce)
             binding.revertHistory(index, nonce)
-            binding.storage.index.cacheNonce.first { it != nonce }
+            binding.storage.cacheNonce.first { it != nonce }
             binding.state.first { it == AgentStateValue.Empty }
             agent.confirmHistoryRevert(request)
             failures.first { it.size == 1 }

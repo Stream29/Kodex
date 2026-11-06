@@ -58,8 +58,10 @@ val agentHistoryBoundedWindowTest by testSuite {
                 val runtime = repository.open(repository.create()).runtime
                 runtime.modify { storage ->
                     repeat(itemCount) { position ->
-                        storage.index[position + 1] = StableUserMessage(
-                            content = listOf(ContentItem.InputText("$position")),
+                        storage.commit(
+                            StableUserMessage(
+                                content = listOf(ContentItem.InputText("$position")),
+                            ),
                         )
                     }
                 }

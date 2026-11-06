@@ -54,8 +54,8 @@ val offscreenGraphicalRootTest by testSuite {
         val secondBase = pageAgent("markdown-second", runtime, owner)
         val firstStorage = InMemoryKodexAgentStorage.empty()
         val secondStorage = InMemoryKodexAgentStorage.empty()
-        firstStorage.index[1] = StableAssistantMessage(listOf(ContentItem.OutputText("# Alpha heading\n\n**Alpha result**")))
-        secondStorage.index[1] = StableAssistantMessage(listOf(ContentItem.OutputText("# Beta heading\n\n**Beta result**")))
+        firstStorage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("# Alpha heading\n\n**Alpha result**"))))
+        secondStorage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("# Beta heading\n\n**Beta result**"))))
         val firstMaximum = MutableStateFlow(1)
         val firstHistory = createAgentHistoryViewModel(
             AgentHistorySource(firstStorage, firstMaximum, MutableStateFlow(KodexAgentStateValue.UserMessage)),
@@ -153,7 +153,7 @@ val offscreenGraphicalRootTest by testSuite {
                 scene.hasText("# User **raw**") && !scene.hasDescription("Streaming assistant message")
             }
             streaming.value = null
-            firstStorage.index[2] = StableAssistantMessage(listOf(ContentItem.OutputText("# Fresh heading\n\n**Fresh result**")))
+            firstStorage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("# Fresh heading\n\n**Fresh result**"))))
             firstMaximum.value = 2
             scene.settle("committed message resets display mode") { scene.hasText("Fresh heading") && scene.hasText("Fresh result") }
             assertFalse(scene.hasText("# Fresh heading\n\n**Fresh result**"))

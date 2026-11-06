@@ -243,7 +243,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             object : RpcClient by delegate {
                 @Suppress("UNCHECKED_CAST")
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "compareAndSet") {
+                    if (call.callableName == "compareAndSetSettings") {
                         calls.value += 1
                         return false as T
                     }

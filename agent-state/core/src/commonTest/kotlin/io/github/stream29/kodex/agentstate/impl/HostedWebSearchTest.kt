@@ -2,10 +2,12 @@ package io.github.stream29.kodex.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
+import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -60,13 +62,13 @@ val hostedWebSearchTest by testSuite {
         agent.requestResponseApi()
 
         assertEquals(1, requests.size)
-        assertEquals(StableWebSearchCall(webSearchCall), storage.work[3])
+        assertEquals(StableWebSearchCall(webSearchCall), storage.getWorkEventAt(2))
         assertEquals(
             StableAssistantMessage(assistantMessage.content),
-            storage.index[4],
+            storage.getIndexEntryAt(3),
         )
         assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
-        assertIs<StableWebSearchCall>(storage.work[3])
+        assertIs<StableWebSearchCall>(storage.getWorkEventAt(2))
     }
     }
 }

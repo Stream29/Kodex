@@ -292,14 +292,33 @@ val offscreenHistoryItemsTest by testSuite {
 
     test("real folded WorkGroup mounts exact children and controlled tool/Patch expansion") { offscreenTest {
         val stored = InMemoryKodexAgentStorage.empty()
-        stored.index[1] = StableUserMessage(listOf(ContentItem.InputText("First message")))
-        stored.work[2] = StableTextToolEvent("demo", name = "demo", arguments = JsonObject(emptyMap()), result = "Full tool output")
-        stored.work[3] = StablePatchToolEvent(
-            "patch", diff = Patch("", listOf(AddFileHunk("new.txt", "line"))),
-            result = StablePatchToolExecutionResult.Failure("cannot apply"),
+        stored.commit(
+            listOf(
+                StableUserMessage(listOf(ContentItem.InputText("First message"))),
+                CommitTimestamp(Instant.fromEpochMilliseconds(1_000L)),
+            ),
         )
-        stored.index[4] = StableUserMessage(listOf(ContentItem.InputText("Latest message")))
-        for (index in 1..4) stored.timestamp[index] = Instant.fromEpochMilliseconds(index * 1_000L)
+        stored.commit(
+            listOf(
+                StableTextToolEvent("demo", name = "demo", arguments = JsonObject(emptyMap()), result = "Full tool output"),
+                CommitTimestamp(Instant.fromEpochMilliseconds(2_000L)),
+            ),
+        )
+        stored.commit(
+            listOf(
+                StablePatchToolEvent(
+                    "patch", diff = Patch("", listOf(AddFileHunk("new.txt", "line"))),
+                    result = StablePatchToolExecutionResult.Failure("cannot apply"),
+                ),
+                CommitTimestamp(Instant.fromEpochMilliseconds(3_000L)),
+            ),
+        )
+        stored.commit(
+            listOf(
+                StableUserMessage(listOf(ContentItem.InputText("Latest message"))),
+                CommitTimestamp(Instant.fromEpochMilliseconds(4_000L)),
+            ),
+        )
         val owner = CoroutineScope(currentCoroutineContext() + Job(currentCoroutineContext()[Job]))
         val model = createAgentHistoryViewModel(
             AgentHistorySource(stored, MutableStateFlow(4), MutableStateFlow(KodexAgentStateValue.UserMessage)),

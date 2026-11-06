@@ -11,6 +11,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
@@ -276,8 +278,12 @@ private class AgentPageProbe {
 
 internal suspend fun pageAgent(name: String, runtime: RuntimeConfigurationViewModel, owner: CoroutineScope): PageTestAgent {
     val stored = InMemoryKodexAgentStorage.empty()
-    stored.index[1] = StableUserMessage(listOf(ContentItem.InputText("History $name")))
-    stored.timestamp[1] = Instant.fromEpochMilliseconds(1_000)
+    stored.commit(
+        listOf(
+            StableUserMessage(listOf(ContentItem.InputText("History $name"))),
+            CommitTimestamp(Instant.fromEpochMilliseconds(1_000)),
+        ),
+    )
     val historyScope = CoroutineScope(owner.coroutineContext + Job(owner.coroutineContext[Job]))
     val history = createAgentHistoryViewModel(
         AgentHistorySource(stored, MutableStateFlow(1), MutableStateFlow(KodexAgentStateValue.UserMessage)),

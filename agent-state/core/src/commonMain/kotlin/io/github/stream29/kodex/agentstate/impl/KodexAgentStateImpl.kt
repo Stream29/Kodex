@@ -12,6 +12,10 @@ import io.github.stream29.kodex.agentstate.contract.canCompact
 import io.github.stream29.kodex.agentstate.contract.canRequestResponseApi
 import io.github.stream29.kodex.agentstate.tool.toPendingToolEvent
 import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
@@ -23,22 +27,20 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGener
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountDiagnostics
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.codexRequestWindowId
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.TokenCountDiagnostics
-import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.ext.appendCompaction
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
-import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.mcp.contract.McpService
-import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.codexRequestWindowId
 import io.github.stream29.kodex.openai.CodexResponsesMetadata
 import io.github.stream29.kodex.openai.CodexResponsesRequestKind
 import io.github.stream29.kodex.openai.CompactionImplementation
@@ -195,7 +197,7 @@ private class KodexAgentStateImpl(
                 }
             }
 
-            val settings = storage.settings[snapshotIndex]
+            val settings = storage.getSettingsAt(snapshotIndex)
             val messageWindow = storage.activeMessageWindowAt(snapshotIndex)
             val durableInput = messageWindow.flatMap(StableCleanEvent::toResponseHistoryItems)
             val planningContext = ResponseItem.Message(
@@ -425,21 +427,23 @@ private class KodexAgentStateImpl(
         ) {
             val timestamp = now()
             val firstIndex = storage.latestIndex() + 1
-            var currentSettings = storage.settings[storage.latestIndex()]
+            var currentSettings = storage.getSettingsAt(storage.latestIndex())
             var previousMessageStartsNewTurn = storage.startsNewTurnBefore(firstIndex)
             var index = storage.latestIndex()
             for (event in events) {
-                index += 1
                 val startsNewTurn = event is StableUserMessage &&
                     previousMessageStartsNewTurn
-                if (startsNewTurn) {
-                    currentSettings = currentSettings.copy(
-                        turnId = Uuid.generateV7().toString(),
-                    )
-                    storage.settings[index] = currentSettings
+                val commits = buildList<AgentCommit> {
+                    if (startsNewTurn) {
+                        currentSettings = currentSettings.copy(
+                            turnId = Uuid.generateV7().toString(),
+                        )
+                        add(currentSettings)
+                    }
+                    add(event)
+                    add(CommitTimestamp(timestamp))
                 }
-                storage.index[index] = event
-                storage.timestamp[index] = timestamp
+                index = storage.commit(commits)
                 previousMessageStartsNewTurn = when (event) {
                     is StableAssistantMessage -> event.startsNewTurn()
                     is StableUserMessage -> false
@@ -458,17 +462,20 @@ private class KodexAgentStateImpl(
             validate = KodexAgentStateValue::requireCanAppendUserMessage,
             inFlight = KodexAgentStateValue.ExternalWrite,
         ) {
-            val firstIndex = storage.latestIndex() + 1
+            val previousLatest = storage.latestIndex()
             val timestamp = now()
             val stableEvent = StableUserMessage(content)
-            val settings = storage.settings[storage.latestIndex()]
-            val settingsForNewTurn = storage.startsNewTurnBefore(firstIndex)
+            val settings = storage.getSettingsAt(previousLatest)
+            val settingsForNewTurn = storage.startsNewTurnBefore(previousLatest + 1)
                 .takeIf { it }
                 ?.let { settings.copy(turnId = Uuid.generateV7().toString()) }
-            storage.index[firstIndex] = stableEvent
-            settingsForNewTurn?.let { value -> storage.settings[firstIndex] = value }
-            storage.timestamp[firstIndex] = timestamp
-            val index = firstIndex
+            val index = storage.commit(
+                buildList {
+                    add(stableEvent)
+                    settingsForNewTurn?.let(::add)
+                    add(CommitTimestamp(timestamp))
+                },
+            )
             latestIndex.value = index
             state.value = storage.stateAt(index)
             index
@@ -488,22 +495,15 @@ private class KodexAgentStateImpl(
             val nextState = toolPendingState(
                 pendingEvents.filterNot { event -> event.callId == output.callId },
             )
-            val index = storage.latestIndex() + 1
-            val remainingPending = storage.unstableWithoutPendingToolCall(index - 1, output.callId)
-            when (completed) {
-                is StableIndexEvent -> {
-                    storage.index[index] = completed
-                    storage.unstable[index] = remainingPending
-                    storage.timestamp[index] = now()
-                }
-
-                is StableWorkEvent -> {
-                    storage.work[index] = completed
-                    storage.unstable[index] = remainingPending
-                    storage.timestamp[index] = now()
-                }
-
-            }
+            val previousLatest = storage.latestIndex()
+            val remainingPending = storage.unstableWithoutPendingToolCall(previousLatest, output.callId)
+            val index = storage.commit(
+                listOf(
+                    completed,
+                    UnstableSnapshot(remainingPending),
+                    CommitTimestamp(now()),
+                ),
+            )
             latestIndex.value = index
             state.value = nextState
             index
@@ -519,7 +519,7 @@ private class KodexAgentStateImpl(
         expect: KodexAgentSettings,
         update: KodexAgentSettings,
     ): Boolean = writeMutex.withLock {
-        val current = storage.settings[storage.latestIndex()]
+        val current = storage.getSettingsAt(storage.latestIndex())
         if (current != expect) return@withLock false
         if (current != update) appendSettings(update)
         true
@@ -527,11 +527,9 @@ private class KodexAgentStateImpl(
 
     /** Caller holds [writeMutex], just as for the unconditional settings write. */
     private suspend fun appendSettings(settings: KodexAgentSettings): Int {
-        val index = storage.latestIndex() + 1
-        require(index > 0) { "Settings updates require an existing state index." }
-        try {
-            storage.settings[index] = settings
-            storage.timestamp[index] = now()
+        require(storage.latestIndex() >= 0) { "Settings updates require an existing state index." }
+        val index = try {
+            storage.commit(listOf(settings, CommitTimestamp(now())))
         } catch (failure: Throwable) {
             // A numbered settings record may already be durable even though a
             // later timestamp or temporary-file cleanup failed. Publish the
@@ -577,19 +575,7 @@ private class KodexAgentStateImpl(
         event: StableCleanEvent,
         timestamp: Instant,
     ): Int {
-        val index = storage.latestIndex() + 1
-        when (event) {
-            is StableIndexEvent -> {
-                storage.index[index] = event
-                storage.timestamp[index] = timestamp
-            }
-
-            is StableWorkEvent -> {
-                storage.work[index] = event
-                storage.timestamp[index] = timestamp
-            }
-
-        }
+        val index = storage.commit(listOf(event, CommitTimestamp(timestamp)))
         latestIndex.value = index
         return index
     }
@@ -598,13 +584,11 @@ private class KodexAgentStateImpl(
         event: PendingToolEvent,
         timestamp: Instant,
     ): Int {
-        val index = storage.latestIndex() + 1
-        val current = storage.unstableEventsAt(index - 1)
+        val current = storage.unstableEventsAt(storage.latestIndex())
         require(current.filterIsInstance<PendingToolEvent>().none { pending -> pending.callId == event.callId }) {
             "Duplicate pending tool call id: ${event.callId}"
         }
-        storage.unstable[index] = current + event
-        storage.timestamp[index] = timestamp
+        val index = storage.commit(listOf(UnstableSnapshot(current + event), CommitTimestamp(timestamp)))
         latestIndex.value = index
         return index
     }
@@ -613,13 +597,16 @@ private class KodexAgentStateImpl(
         call: ResponseItem.ServerToolSearchCall,
         timestamp: Instant,
     ): Int {
-        val index = storage.latestIndex() + 1
-        val current = storage.unstableEventsAt(index - 1)
+        val current = storage.unstableEventsAt(storage.latestIndex())
         require(current.none { event -> event is PendingServerToolSearch }) {
             "A server tool-search call is already waiting for its output."
         }
-        storage.unstable[index] = current + PendingServerToolSearch(call)
-        storage.timestamp[index] = timestamp
+        val index = storage.commit(
+            listOf(
+                UnstableSnapshot(current + PendingServerToolSearch(call)),
+                CommitTimestamp(timestamp),
+            ),
+        )
         latestIndex.value = index
         return index
     }
@@ -628,17 +615,20 @@ private class KodexAgentStateImpl(
         output: ResponseItem.ServerToolSearchOutput,
         timestamp: Instant,
     ): Int {
-        val index = storage.latestIndex() + 1
-        val current = storage.unstableEventsAt(index - 1)
+        val current = storage.unstableEventsAt(storage.latestIndex())
         val pending = current.filterIsInstance<PendingServerToolSearch>().singleOrNull()
             ?: error("Server tool-search output has no preceding call.")
         val remaining = current.toMutableList().also { events -> events.remove(pending) }
-        storage.work[index] = StableServerToolSearch(
-            call = pending.call,
-            output = output,
+        val index = storage.commit(
+            listOf(
+                StableServerToolSearch(
+                    call = pending.call,
+                    output = output,
+                ),
+                UnstableSnapshot(remaining),
+                CommitTimestamp(timestamp),
+            ),
         )
-        storage.unstable[index] = remaining
-        storage.timestamp[index] = timestamp
         latestIndex.value = index
         return index
     }
@@ -648,13 +638,16 @@ private class KodexAgentStateImpl(
         turnState: String,
     ) {
         writeResponseResult {
-            val latestSettings = storage.settings[storage.latestIndex()]
+            val latestSettings = storage.getSettingsAt(storage.latestIndex())
             if (latestSettings.turnId != turnId || latestSettings.turnState != null) {
                 return@writeResponseResult
             }
-            val index = storage.latestIndex() + 1
-            storage.settings[index] = latestSettings.copy(turnState = turnState)
-            storage.timestamp[index] = now()
+            val index = storage.commit(
+                listOf(
+                    latestSettings.copy(turnState = turnState),
+                    CommitTimestamp(now()),
+                ),
+            )
             latestIndex.value = index
         }
     }
@@ -664,30 +657,32 @@ private class KodexAgentStateImpl(
         response: io.github.stream29.kodex.openai.Response,
         responseHeaders: OpenAiResponseHeaders?,
         turnStateSent: Boolean,
-        settings: io.github.stream29.kodex.openai.KodexAgentSettings,
+        settings: KodexAgentSettings,
         requestWindowId: String,
     ) {
-        val index = storage.latestIndex() + 1
-        storage.tokenCount[index] = TokenCountSnapshot(
-            kind = TokenCountKind.Response,
-            totalTokens = usage.totalTokens,
-            usage = usage,
-            diagnostics = TokenCountDiagnostics(
-                turnId = settings.turnId,
-                windowId = requestWindowId,
-                requestedModel = settings.model.value,
-                requestedReasoningEffort = settings.reasoning.effort.wireName,
-                requestedServiceTier = settings.serviceTier.requestValue,
-                responseId = response.id,
-                requestId = responseHeaders?.requestId,
-                model = response.model,
-                serviceTier = response.serviceTier,
-                turnStateSent = turnStateSent,
-                turnStateReceived = responseHeaders?.turnState != null,
-                turnStateAdopted = responseHeaders?.turnState != null && settings.turnState == null,
+        val index = storage.commit(
+            listOf(
+                TokenCountSnapshot.Response(
+                    totalTokens = usage.totalTokens,
+                    usage = usage,
+                    diagnostics = TokenCountDiagnostics(
+                        turnId = settings.turnId,
+                        windowId = requestWindowId,
+                        requestedModel = settings.model.value,
+                        requestedReasoningEffort = settings.reasoning.effort.wireName,
+                        requestedServiceTier = settings.serviceTier.requestValue,
+                        responseId = response.id,
+                        requestId = responseHeaders?.requestId,
+                        model = response.model,
+                        serviceTier = response.serviceTier,
+                        turnStateSent = turnStateSent,
+                        turnStateReceived = responseHeaders?.turnState != null,
+                        turnStateAdopted = responseHeaders?.turnState != null && settings.turnState == null,
+                    ),
+                ),
+                CommitTimestamp(now()),
             ),
         )
-        storage.timestamp[index] = now()
         latestIndex.value = index
     }
 
@@ -725,7 +720,7 @@ private class KodexAgentStateImpl(
             state.value = KodexAgentStateValue.Compacting
             CompactionSnapshot(
                 index = index,
-                settings = storage.settings[index],
+                settings = storage.getSettingsAt(index),
             )
         }
 
@@ -740,7 +735,7 @@ private class KodexAgentStateImpl(
             output = output,
             timestamp = now(),
             nextWindowId = Uuid.generateV7().toString(),
-            previousSettings = storage.settings[storage.latestIndex()],
+            previousSettings = storage.getSettingsAt(storage.latestIndex()),
         )
         latestIndex.value = index
         index
@@ -853,9 +848,33 @@ private fun KodexAgentStateValue.requireToolPending(): KodexAgentStateValue.Tool
     this as? KodexAgentStateValue.ToolPending
         ?: throw KodexAgentStateInvalidTransitionException("complete tool calls", this)
 
+private val StateTransitionCommitTypes: Set<AgentCommitType> = setOf(
+    AgentCommitType.UserMessage,
+    AgentCommitType.AgentMessage,
+    AgentCommitType.AssistantMessage,
+    AgentCommitType.AssistantMessageCommentary,
+    AgentCommitType.AssistantMessageFinal,
+    AgentCommitType.RequestUserInputToolEvent,
+    AgentCommitType.SuggestSubagentTaskToolEvent,
+    AgentCommitType.PlanUpdate,
+    AgentCommitType.CommandExecutionToolEvent,
+    AgentCommitType.PatchToolEvent,
+    AgentCommitType.McpToolEvent,
+    AgentCommitType.WebSearchToolEvent,
+    AgentCommitType.ImageGenerationToolEvent,
+    AgentCommitType.ImageViewToolEvent,
+    AgentCommitType.ToolSearchEvent,
+    AgentCommitType.InvalidToolCall,
+    AgentCommitType.ServerToolSearch,
+    AgentCommitType.HostedWebSearch,
+    AgentCommitType.HostedImageGeneration,
+    AgentCommitType.JsonToolEvent,
+    AgentCommitType.TextToolEvent,
+    AgentCommitType.CustomToolEvent,
+)
+
 /**
- * Derives the state from the independent index/work timelines and unstable
- * pending tail. The two stable timelines are never merged for this scan.
+ * Derives the state from the committed clean events and unstable pending tail.
  */
 private suspend fun KodexAgentStorage.stateAt(index: Int): KodexAgentStateValue {
     if (index < 0) {
@@ -867,20 +886,10 @@ private suspend fun KodexAgentStorage.stateAt(index: Int): KodexAgentStateValue 
         return KodexAgentStateValue.ToolPending(pending)
     }
 
-    val indexCandidate = latestStateCandidate(
-        from = index,
-        floor = { eventIndex -> this.index.floorToIndex(eventIndex) },
-        read = { eventIndex -> this.index.getExact(eventIndex) as? StableCleanEvent },
-    )
-    val workCandidate = latestStateCandidate(
-        from = index,
-        floor = { eventIndex -> work.floorToIndex(eventIndex) },
-        read = { eventIndex -> work.getExact(eventIndex) },
-    )
-    return listOfNotNull(indexCandidate, workCandidate)
-        .maxByOrNull { candidate -> candidate.first }
-        ?.second
-        ?: KodexAgentStateValue.Empty
+    val lastTransition = getLastCommitsIn(0..index, StateTransitionCommitTypes, limit = 1)
+        .lastOrNull()
+        ?.commit as? StableCleanEvent
+    return lastTransition?.toAgentStateValueOrNull() ?: KodexAgentStateValue.Empty
 }
 
 private fun StableCleanEvent.toAgentStateValueOrNull(): KodexAgentStateValue? =
@@ -898,24 +907,6 @@ private fun StableCleanEvent.toAgentStateValueOrNull(): KodexAgentStateValue? =
         else -> null
     }
 
-private suspend fun <T : StableCleanEvent> KodexAgentStorage.latestStateCandidate(
-    from: Int,
-    floor: suspend (Int) -> Int?,
-    read: suspend (Int) -> T?,
-): Pair<Int, KodexAgentStateValue>? {
-    var cursor = from
-    while (cursor >= 0) {
-        val eventIndex = floor(cursor) ?: break
-        val event = read(eventIndex)
-        event?.toAgentStateValueOrNull()?.let { state ->
-            return eventIndex to state
-        }
-        if (eventIndex == 0) break
-        cursor = eventIndex - 1
-    }
-    return null
-}
-
 private fun List<PendingToolEvent>.requireEvent(callId: String): PendingToolEvent =
     firstOrNull { event -> event.callId == callId }
         ?: throw IllegalArgumentException("Tool output does not match a pending call id: $callId")
@@ -932,7 +923,7 @@ private suspend fun KodexAgentStorage.unstableWithoutPendingToolCall(
 }
 
 private suspend fun KodexAgentStorage.unstableEventsAt(index: Int): List<UnstableCleanEvent> =
-    if (unstable.floorToIndex(index) == null) emptyList() else unstable[index]
+    if (index < 0) emptyList() else getUnstableAtOrNull(index).orEmpty()
 
 private suspend fun KodexAgentStorage.pendingToolEventsAt(index: Int): List<PendingToolEvent> =
     unstableEventsAt(index).filterIsInstance<PendingToolEvent>()
@@ -940,15 +931,11 @@ private suspend fun KodexAgentStorage.pendingToolEventsAt(index: Int): List<Pend
 private suspend fun KodexAgentStorage.startsNewTurnBefore(
     index: Int,
 ): Boolean {
-    for (eventIndex in this.index.indexesIn(0 until index).asReversed()) {
-        val event = this.index.getExact(eventIndex)
-        when (event) {
-            is StableAssistantMessage -> return event.startsNewTurn()
-            is StableUserMessage -> return false
-            else -> Unit
-        }
-    }
-    return false
+    if (index <= 0) return false
+    val last = getLastCommitsIn(0 until index, AgentCommitType.TurnStartBoundaryTypes, limit = 1)
+        .lastOrNull()
+        ?.commit
+    return (last as? StableAssistantMessage)?.startsNewTurn() ?: false
 }
 
 private fun StableAssistantMessage.startsNewTurn(): Boolean =

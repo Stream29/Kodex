@@ -40,8 +40,10 @@ val agentHistoryAnchorTest by testSuite {
                 val runtime = repository.open(repository.create()).runtime
                 runtime.modify { storage ->
                     repeat(1_000) { position ->
-                        storage.index[position + 1] = StableUserMessage(
-                            listOf(ContentItem.InputText("$position")),
+                        storage.commit(
+                            StableUserMessage(
+                                listOf(ContentItem.InputText("$position")),
+                            ),
                         )
                     }
                 }

@@ -20,14 +20,9 @@ val rpcServicesDescriptorTest by testSuite {
         val services = RpcServices(client)
         assertNotNull(services.global)
         assertNotNull(services.runtime)
-        assertNotNull(services.index)
-        assertNotNull(services.work)
-        assertNotNull(services.settings)
-        assertNotNull(services.timestamp)
-        assertNotNull(services.tokenCount)
-        assertNotNull(services.unstable)
+        assertNotNull(services.storage)
     }
-    test("timeline facades keep original service names identities arguments and Flow calls") {
+    test("storage facade keeps original service name identity arguments and Flow calls") {
         val calls = mutableListOf<RpcCall>()
         val client = object : RpcClient {
             @Suppress("UNCHECKED_CAST")
@@ -43,24 +38,14 @@ val rpcServicesDescriptorTest by testSuite {
         }
         val services = RpcServices(client)
         assertEquals(0, calls.size)
-        val timelines = listOf(
-            services.index, services.work, services.settings,
-            services.timestamp, services.tokenCount, services.unstable,
+        assertEquals(17L, services.storage.getCacheNonce(41))
+        assertEquals(listOf(17L), services.storage.getCacheNonceFlow(41).toList())
+        assertEquals(calls[0].serviceId, calls[1].serviceId)
+        assertEquals(listOf("getCacheNonce", "getCacheNonceFlow"), calls.map { it.callableName })
+        calls.forEach { assertEquals(listOf(41), it.parameters.toList()) }
+        assertEquals(
+            "AgentStorageRpc",
+            calls[0].descriptor.fqName.removePrefix("io.github.stream29.kodex.rpc.contract."),
         )
-        for (timeline in timelines) {
-            assertEquals(17L, timeline.getCacheNonce(41))
-            assertEquals(listOf(17L), timeline.getCacheNonceFlow(41).toList())
-        }
-        val names = listOf(
-            "IndexTimelineRpc", "WorkTimelineRpc", "SettingsTimelineRpc",
-            "TimestampTimelineRpc", "TokenCountTimelineRpc", "UnstableTimelineRpc",
-        )
-        assertEquals(names, calls.chunked(2).map { pair ->
-            assertEquals(pair[0].serviceId, pair[1].serviceId)
-            assertEquals(listOf("getCacheNonce", "getCacheNonceFlow"), pair.map { it.callableName })
-            pair.forEach { assertEquals(listOf(41), it.parameters.toList()) }
-            pair[0].descriptor.fqName.removePrefix("io.github.stream29.kodex.rpc.contract.")
-        })
-        assertEquals(6, calls.map { it.serviceId }.toSet().size)
     }
 }

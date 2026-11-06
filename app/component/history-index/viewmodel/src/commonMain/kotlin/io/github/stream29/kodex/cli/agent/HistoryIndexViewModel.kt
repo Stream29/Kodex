@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.cli.agent
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
@@ -11,6 +12,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUse
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
@@ -123,7 +126,7 @@ internal class HistoryIndexViewModelImpl(
         withContext(Dispatchers.Default) {
             val revision = readRevision.value
             val isMessage = loadExact(generation, index) { it is StableIndexEvent.Steerable }
-            val value = if (isMessage) dependencies.timestamp.getExact(index) else null
+            val value = if (isMessage) dependencies.storage.getTimestampExact(index) else null
             coroutineContext.ensureActive()
             ensureCurrent(generation, index, revision)
             value
@@ -250,8 +253,12 @@ internal class HistoryIndexViewModelImpl(
     private suspend fun loadVisibleIndexes(fromInclusive: Int, toInclusive: Int): List<Int> =
         withContext(Dispatchers.Default) {
             if (toInclusive < fromInclusive || toInclusive < 0) emptyList()
-            else dependencies.timeline.indexesIn(fromInclusive.coerceAtLeast(0)..toInclusive)
-                .filterNot { index -> index == 0 && dependencies.timeline.getExact(index) == CleanCompactionPoint }
+            else dependencies.storage.indexesIn(
+                fromInclusive.coerceAtLeast(0)..toInclusive,
+                AgentCommitType.IndexTypes,
+            ).filterNot { index ->
+                index == 0 && dependencies.storage.getIndexEntryExact(index) == CleanCompactionPoint
+            }
         }
 
     private suspend fun <T> loadExact(
@@ -262,7 +269,7 @@ internal class HistoryIndexViewModelImpl(
         val revision = readRevision.value
         ensureCurrent(generation, index, revision)
         val entry = try {
-            dependencies.timeline.getExact(index)
+            dependencies.storage.getIndexEntryExact(index)
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (failure: Throwable) {

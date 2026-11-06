@@ -20,6 +20,9 @@ kotlin {
     }
     sourceSets.commonMain.dependencies {
         implementation(project(":app-backend-migration"))
+        implementation(project(":agent-session-sqlite"))
+        implementation(project(":agent-session-test"))
+        implementation(project(":agent-storage-core"))
         implementation(project(":app-backend-host"))
         implementation(project(":app-web-host"))
         implementation(project(":rpc-backend-control-client"))

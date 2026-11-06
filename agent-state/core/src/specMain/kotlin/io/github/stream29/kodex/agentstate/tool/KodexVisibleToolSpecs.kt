@@ -3,7 +3,7 @@ package io.github.stream29.kodex.agentstate.tool
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchDocument

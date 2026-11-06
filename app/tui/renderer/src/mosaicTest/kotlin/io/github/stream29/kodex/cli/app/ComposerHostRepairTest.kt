@@ -248,9 +248,15 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
             }
             withTimeout(5.seconds) { agent.running.first { !it } }
             val index = session.sessionIndex
-            val nonce = services.index.getCacheNonce(index)
+            val nonce = services.storage.getCacheNonce(index)
             val latest = services.runtime.getLatestIndex(index)
-            val messages = (1..latest).map { services.index.get(index, nonce, it) }
+            val messages = services.storage.getCommitsIn(
+                index,
+                nonce,
+                1,
+                latest,
+                io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.IndexTypes,
+            ).map { it.commit }
                 .filterIsInstance<StableUserMessage>()
                 .map { it.content }
             val expected: List<List<ContentItem>> =

@@ -13,14 +13,6 @@ val agentModelsSerializationTest by testSuite {
         assertEquals("\"no_question\"", json.encodeToString(RequestUserInputMode.NoQuestion))
     }
 
-    test("agent settings without request user input mode default to ask user") {
-        val settings = json.decodeFromString<KodexAgentSettings>(
-            """{"model":"test-model"}""",
-        )
-
-        assertEquals(RequestUserInputMode.AskUser, settings.requestUserInputMode)
-    }
-
     test("thread goal uses Rust camel case status and fields") {
         val encoded = json.encodeToString(
             ThreadGoal(

@@ -11,6 +11,8 @@ import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState as createAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
@@ -293,8 +295,8 @@ private suspend fun CoroutineScope.routeOffline(
             logger = KotlinLogging.logger("offline-mcp-routing"),
         )
         runtime.resume()
-        return (storage.index.valuesIn(0..state.latestIndex.value).map { it.second } +
-            storage.work.valuesIn(0..state.latestIndex.value).map { it.second })
+        return storage.getCommitsIn(0..state.latestIndex.value, AgentCommitType.CleanEventTypes)
+            .map { it.commit }
             .filterIsInstance<StableCleanEvent.CompletedTool>()
             .single()
     } finally {

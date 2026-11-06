@@ -1,8 +1,11 @@
 package io.github.stream29.kodex.rpc.client
 
 import io.github.reactivecircus.cache4k.Cache
-import io.github.stream29.kodex.agentstorage.contract.CachedIndexVersioned
-import io.github.stream29.kodex.rpc.contract.TimelineRpc
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import kotlinx.coroutines.CancellationException
@@ -28,21 +31,27 @@ import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
-public actual suspend fun <T : Any> CoroutineScope.rpcCachedIndexVersioned(
+public actual suspend fun CoroutineScope.rpcCachedAgentStorage(
     sessionIndex: Int,
-    rpc: TimelineRpc<T>,
-): CachedIndexVersioned<T> = rpcCachedIndexVersioned(
-    sessionIndex, rpc, valueCacheSize = 1_024, timeSource = TimeSource.Monotonic,
+    uri: String,
+    rpc: AgentStorageRpc,
+): ObservableKodexAgentStorage = rpcCachedAgentStorage(
+    sessionIndex = sessionIndex,
+    uri = uri,
+    rpc = rpc,
+    valueCacheSize = 1_024,
+    timeSource = TimeSource.Monotonic,
 )
 
-internal suspend fun <T : Any> CoroutineScope.rpcCachedIndexVersioned(
+internal suspend fun CoroutineScope.rpcCachedAgentStorage(
     sessionIndex: Int,
-    rpc: TimelineRpc<T>,
+    uri: String,
+    rpc: AgentStorageRpc,
     valueCacheSize: Int,
     timeSource: TimeSource,
-): CachedIndexVersioned<T> {
+): ObservableKodexAgentStorage {
     require(valueCacheSize >= 0)
-    val owner = requireNotNull(coroutineContext[Job]) { "A timeline binding requires an owner Job." }
+    val owner = requireNotNull(coroutineContext[Job]) { "A storage binding requires an owner Job." }
     owner.ensureActive()
     val binding = Job(owner)
     val scope = CoroutineScope(coroutineContext + binding)
@@ -57,8 +66,15 @@ internal suspend fun <T : Any> CoroutineScope.rpcCachedIndexVersioned(
         )
         currentCoroutineContext().ensureActive()
         binding.ensureActive()
-        return RpcCachedIndexVersioned(
-            sessionIndex, rpc, binding, nonce, latest, valueCacheSize, timeSource,
+        return RpcCachedAgentStorage(
+            sessionIndex = sessionIndex,
+            uri = uri,
+            rpc = rpc,
+            binding = binding,
+            cacheNonce = nonce,
+            latestIndexFlow = latest,
+            valueCacheSize = valueCacheSize,
+            timeSource = timeSource,
         ).also { view ->
             binding.invokeOnCompletion { view.clearValues() }
             scope.launch { nonce.collect { view.invalidateOldValues() } }
@@ -76,10 +92,8 @@ internal suspend fun <T : Any> CoroutineScope.rpcCachedIndexVersioned(
 }
 
 private fun <T> Flow<T>.untilBindingEnds(binding: CompletableJob): Flow<T> = onCompletion { cause ->
-    // Ordinary failures already fail the binding's regular Job. A cancelled/finished
-    // metadata producer must also stop the sibling producer, even under a SupervisorJob owner.
     when (cause) {
-        null -> binding.cancel("Timeline metadata stream completed.")
+        null -> binding.cancel("Storage metadata stream completed.")
         is CancellationException -> binding.cancel(cause)
     }
 }
@@ -96,18 +110,34 @@ private suspend fun <R> Job.read(block: suspend () -> R): R = coroutineScope {
     }
 }
 
-private class RpcCachedIndexVersioned<T : Any>(
+private data class ExactCacheKey(
+    val index: Int,
+    val types: Set<AgentCommitType>,
+)
+
+private val SingleCommitCategorySets: Set<Set<AgentCommitType>> = setOf(
+    AgentCommitType.IndexTypes,
+    AgentCommitType.IndexEventTypes,
+    AgentCommitType.WorkTypes,
+    AgentCommitType.SettingsTypes,
+    AgentCommitType.TimestampTypes,
+    AgentCommitType.TokenCountTypes,
+    AgentCommitType.UnstableTypes,
+)
+
+private class RpcCachedAgentStorage(
     private val sessionIndex: Int,
-    private val rpc: TimelineRpc<T>,
+    override val uri: String,
+    private val rpc: AgentStorageRpc,
     private val binding: Job,
     override val cacheNonce: StateFlow<Long>,
-    override val latestIndex: StateFlow<Int>,
+    override val latestIndexFlow: StateFlow<Int>,
     valueCacheSize: Int,
     timeSource: TimeSource,
-) : CachedIndexVersioned<T> {
+) : ObservableKodexAgentStorage {
     private val mutex = Mutex()
     private var valuesNonce: Long? = null
-    private val values = Cache.Builder<Int, T>()
+    private val values = Cache.Builder<ExactCacheKey, List<AgentCommit>>()
         .maximumCacheSize(valueCacheSize.toLong())
         .expireAfterAccess(60.seconds)
         .timeSource(timeSource)
@@ -128,48 +158,91 @@ private class RpcCachedIndexVersioned<T : Any>(
         }
     }
 
-    override suspend fun latestIndex(): Int = cached { latestIndex.value }
+    override suspend fun latestIndex(): Int = cached { latestIndexFlow.value }
 
-    override suspend fun get(index: Int): T = query { rpc.get(sessionIndex, it, index) }
-
-    override suspend fun getExact(index: Int): T? {
-        val (nonce, hit) = cached { it to values.get(index) }
-        if (hit != null) return hit
-        val value = remote { rpc.getExact(sessionIndex, nonce, index) }
-        return cached(nonce) {
-            if (value != null) values.put(index, value)
-            value
-        }
+    override suspend fun indexesIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+    ): List<Int> {
+        val nonce = cached { it }
+        val result = remote { rpc.indexesIn(sessionIndex, nonce, range.first, range.last, types) }
+        return cached(nonce) { result }
     }
 
-    override suspend fun floorToIndex(index: Int): Int? =
-        query { rpc.floorToIndex(sessionIndex, it, index) }
-
-    override suspend fun ceilToIndex(index: Int): Int? =
-        query { rpc.ceilToIndex(sessionIndex, it, index) }
-
-    override suspend fun indexesIn(range: IntRange): List<Int> =
-        query { rpc.indexesIn(sessionIndex, it, range.first, range.last) }
-
-    override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> {
-        val nonce = cached { it }
-        val result = remote { rpc.valuesIn(sessionIndex, nonce, range.first, range.last) }
+    override suspend fun getCommitsExact(
+        index: Int,
+        types: Set<AgentCommitType>,
+    ): List<AgentCommit> {
+        val key = ExactCacheKey(index, types)
+        val (nonce, hit) = cached { it to values.get(key) }
+        if (hit != null) return hit
+        val result = remote { rpc.getCommitsExact(sessionIndex, nonce, index, types) }
         return cached(nonce) {
-            result.forEach { (index, value) -> values.put(index, value) }
+            if (result.isNotEmpty()) {
+                values.put(key, result)
+            }
             result
         }
     }
 
-    private suspend fun <R> query(block: suspend (Long) -> R): R {
+    override suspend fun getCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+    ): List<IndexedAgentCommit> {
         val nonce = cached { it }
-        val result = remote { block(nonce) }
-        return cached(nonce) { result }
+        val result = remote { rpc.getCommitsIn(sessionIndex, nonce, range.first, range.last, types) }
+        return cached(nonce) {
+            result.groupBy({ it.index }, { it.commit }).forEach { (idx, commits) ->
+                if (commits.isNotEmpty()) {
+                    values.put(ExactCacheKey(idx, types), commits)
+                }
+            }
+            result
+        }
+    }
+
+    override suspend fun getFirstCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> {
+        val nonce = cached { it }
+        val result = remote {
+            rpc.getFirstCommitsIn(sessionIndex, nonce, range.first, range.last, types, limit)
+        }
+        return cached(nonce) {
+            if (types in SingleCommitCategorySets) {
+                result.forEach { indexed ->
+                    values.put(ExactCacheKey(indexed.index, types), listOf(indexed.commit))
+                }
+            }
+            result
+        }
+    }
+
+    override suspend fun getLastCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> {
+        val nonce = cached { it }
+        val result = remote {
+            rpc.getLastCommitsIn(sessionIndex, nonce, range.first, range.last, types, limit)
+        }
+        return cached(nonce) {
+            if (types in SingleCommitCategorySets) {
+                result.forEach { indexed ->
+                    values.put(ExactCacheKey(indexed.index, types), listOf(indexed.commit))
+                }
+            }
+            result
+        }
     }
 
     private suspend fun <R> remote(block: suspend () -> R): R = try {
         binding.read(block)
     } catch (failure: SessionNotActive) {
-        binding.cancel(CancellationException("Timeline Session is inactive.", failure))
+        binding.cancel(CancellationException("Storage Session is inactive.", failure))
         throw failure
     }
 

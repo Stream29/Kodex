@@ -2,30 +2,31 @@
 
 package io.github.stream29.kodex.agentstorage.inmemory
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
-import io.github.stream29.kodex.openai.KodexAgentSettings
-import kotlin.time.Instant
 
 /**
  * Process-local mutable storage for tests and transient agent sessions.
  *
- * This implementation keeps all published values in memory. Construction
- * publishes the required snapshot-zero settings, so it can always back a legal
- * empty agent state without a synthetic compaction point.
+ * This implementation keeps all published commits in memory. Construction
+ * publishes the required snapshot-zero settings, timestamp, and token count,
+ * so it can always back a legal empty agent state without a synthetic
+ * compaction point.
  */
 public expect class InMemoryKodexAgentStorage(initialSettings: KodexAgentSettings) : MutableKodexAgentStorage {
     override val uri: String
-    override val index: MutableIndexVersioned<CleanIndexEntry>
-    override val work: MutableIndexVersioned<StableWorkEvent>
-    override val settings: MutableIndexVersioned<KodexAgentSettings>
-    override val timestamp: MutableIndexVersioned<Instant>
-    override val tokenCount: MutableIndexVersioned<TokenCountSnapshot>
-    override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>>
+
+    override suspend fun latestIndex(): Int
+    override suspend fun indexesIn(range: IntRange, types: Set<AgentCommitType>): List<Int>
+    override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit>
+    override suspend fun getCommitsIn(range: IntRange, types: Set<AgentCommitType>): List<IndexedAgentCommit>
+    override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit>
+    override suspend fun getLastCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit>
+    override suspend fun commit(commits: List<AgentCommit>): Int
+    override suspend fun revert(untilExclusive: Int)
 
     public companion object {
         /** Creates the uninitialized storage backing a freshly spawned AgentSession. */

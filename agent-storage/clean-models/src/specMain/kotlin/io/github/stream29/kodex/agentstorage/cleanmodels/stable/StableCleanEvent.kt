@@ -9,7 +9,8 @@ import kotlinx.serialization.Serializable
  * Persistence serializes the timeline-specific sealed unions rather than this
  * shared projection contract.
  */
-public sealed interface StableCleanEvent : CleanOpenAiEvent {
+@Serializable
+public sealed interface StableCleanEvent : CleanOpenAiEvent, AgentCommit {
     /**
      * Completed clean event produced by a tool handler.
      *

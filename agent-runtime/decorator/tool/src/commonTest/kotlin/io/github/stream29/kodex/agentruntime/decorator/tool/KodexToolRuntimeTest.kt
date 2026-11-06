@@ -13,24 +13,25 @@ import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.agentstate.tool.toDeferredToolSearchDocuments
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
-import io.github.stream29.kodex.agentstorage.contract.latestValue
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAt
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
@@ -124,7 +125,7 @@ val kodexToolRuntimeTest by testSuite {
         assertTrue(toolSearchSpec.description.contains("- shared: Tools exposed by shared."))
         assertTrue(toolSearchSpec.description.contains("Kodex local tools").not())
         assertTrue(toolSearchSpec.description.contains("MCP servers").not())
-        assertEquals(listOf(0), storage.settings.indexesIn(0..storage.latestIndex()))
+        assertEquals(listOf(0), storage.indexesIn(0..storage.latestIndex(), AgentCommitType.SettingsTypes))
     }
 
     test("deferred search output and handler use the active catalog") {
@@ -343,12 +344,12 @@ val kodexToolRuntimeTest by testSuite {
                 arguments = JsonObject(emptyMap()),
                 result = mcpTextResult("done"),
             ),
-            storage.work.indexesIn(0..storage.latestIndex())
-                .map { index -> storage.work[index] }
+            storage.getCommitsIn(0..storage.latestIndex(), AgentCommitType.WorkTypes)
+                .map { it.commit }
                 .filterIsInstance<StableMcpToolEvent>()
                 .single(),
         )
-        assertEquals(emptyList(), storage.unstable.latestValue())
+        assertEquals(emptyList(), storage.getUnstableAt(storage.latestIndex()))
     }
 
     test("unowned pending calls stop at the state boundary") {
@@ -762,8 +763,11 @@ val kodexToolRuntimeTest by testSuite {
                 "hook input\n",
                 SystemCoroutineFileSystem.readString(Path(updatedRoot, "hook.txt")),
             )
-            val completed = fixture.state.storage.work.indexesIn(0..fixture.state.latestIndex.value)
-                .map { index -> fixture.state.storage.work[index] }
+            val completed = fixture.state.storage.getCommitsIn(
+                0..fixture.state.latestIndex.value,
+                AgentCommitType.WorkTypes,
+            )
+                .map { it.commit }
                 .filterIsInstance<StablePatchToolEvent>()
                 .single()
             assertIs<StablePatchToolExecutionResult.Success>(completed.result)
@@ -794,8 +798,11 @@ val kodexToolRuntimeTest by testSuite {
         val outputs = fixture.state.storage.stableHistoryItems()
             .filterIsInstance<ResponseItem.ToolCallOutput>()
         assertEquals(listOf("call_exec", "call_write"), outputs.map { it.callId })
-        val completed = fixture.state.storage.work.indexesIn(0..fixture.state.latestIndex.value)
-            .map { fixture.state.storage.work[it] }
+        val completed = fixture.state.storage.getCommitsIn(
+            0..fixture.state.latestIndex.value,
+            AgentCommitType.WorkTypes,
+        )
+            .map { it.commit }
             .filterIsInstance<StableCommandExecutionToolEvent>()
         assertIs<StableCommandExecutionResult.Output>(completed.single { it.callId == "call_exec" }.result)
         assertIs<StableCommandExecutionResult.Failure>(completed.single { it.callId == "call_write" }.result)
@@ -829,8 +836,11 @@ val kodexToolRuntimeTest by testSuite {
             .testToolRuntime(mcpService)
             .resume()
 
-        val workEvents = fixture.state.storage.work.indexesIn(0..fixture.state.latestIndex.value)
-            .map { index -> fixture.state.storage.work[index] }
+        val workEvents = fixture.state.storage.getCommitsIn(
+            0..fixture.state.latestIndex.value,
+            AgentCommitType.WorkTypes,
+        )
+            .map { it.commit }
         assertTrue(workEvents.filterIsInstance<StableCommandExecutionToolEvent>().isEmpty())
         val completed = workEvents.filterIsInstance<StableInvalidToolCall>()
         assertEquals(invalidCalls.map { it.callId }, completed.map { it.callId })
@@ -866,9 +876,12 @@ val kodexToolRuntimeTest by testSuite {
             .testToolRuntime(mcpService)
             .resume()
 
-        assertEquals(plan, fixture.state.storage.settings.latestValue().plan)
-        val completed = fixture.state.storage.index.indexesIn(0..fixture.state.latestIndex.value)
-            .map { index -> fixture.state.storage.index[index] }
+        assertEquals(plan, fixture.state.storage.getSettingsAt(fixture.state.storage.latestIndex()).plan)
+        val completed = fixture.state.storage.getCommitsIn(
+            0..fixture.state.latestIndex.value,
+            AgentCommitType.IndexTypes,
+        )
+            .map { it.commit }
             .filterIsInstance<StablePlanUpdate>()
             .single()
         assertEquals(plan, completed.arguments)
@@ -894,7 +907,7 @@ private class ToolRuntimeTestContext(
             add(
                 ApplyPatchTools.createTool(
                     ApplyPatchToolClient(
-                        workingDirectoryProvider = { storage.settings.latestValue().cwd },
+                        workingDirectoryProvider = { storage.getSettingsAt(storage.latestIndex()).cwd },
                     ),
                 ),
             )
@@ -903,7 +916,7 @@ private class ToolRuntimeTestContext(
                 UnifiedExecTools.createTools(
                     UnifiedExecToolClient(
                         settingsProvider = { TestShellSettings() },
-                        workingDirectoryProvider = { storage.settings.latestValue().cwd },
+                        workingDirectoryProvider = { storage.getSettingsAt(storage.latestIndex()).cwd },
                     ),
                 ),
             )
@@ -1087,13 +1100,8 @@ private fun assistantResponse(responseId: String): Flow<ResponsesStreamEvent> = 
 )
 
 private suspend fun KodexAgentStorage.stableHistoryItems(): List<ResponseItem.HistoryItem> =
-    (index.indexesIn(0..latestIndex()) + work.indexesIn(0..latestIndex()))
-        .distinct()
-        .sorted()
-        .mapNotNull { entryIndex ->
-            (index.getExact(entryIndex) as? StableCleanEvent
-                ?: work.getExact(entryIndex) as? StableCleanEvent)
-        }
+    getCommitsIn(0..latestIndex(), AgentCommitType.CleanEventTypes)
+        .mapNotNull { it.commit as? StableCleanEvent }
         .flatMap(StableCleanEvent::toResponseHistoryItems)
 
 private suspend fun deleteRecursively(path: Path) {

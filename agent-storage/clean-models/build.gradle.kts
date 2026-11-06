@@ -10,9 +10,12 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
+                api(libs.kotlinx.io.core)
                 api(libs.kotlinx.serialization.json)
                 api(libs.kotlinx.schema.json)
+                api(project(":openai-json-codec"))
                 api(project(":openai-models"))
+                api(project(":utils-kotlinx-io-serialization"))
                 api(project(":tool-image-generation-contract"))
                 api(project(":tool-request-user-input"))
                 api(project(":tool-multi-agent"))

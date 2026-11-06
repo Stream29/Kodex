@@ -49,24 +49,6 @@ val serviceTierSerializationTest by testSuite {
         }
     }
 
-    test("agent settings preserve requested tiers across serialization and model copies") {
-        for (codec in codecs) {
-            for ((tier, wireValue) in wireValues) {
-                val settings = KodexAgentSettings(OpenAiModelId("original"), serviceTier = tier)
-                val encoded = codec.encodeToJsonElement(KodexAgentSettings.serializer(), settings)
-                if (tier != ServiceTier.Default) {
-                    assertEquals(JsonPrimitive(wireValue), encoded.jsonObject["serviceTier"])
-                }
-                assertEquals(settings, codec.decodeFromJsonElement(KodexAgentSettings.serializer(), encoded))
-                assertEquals(tier, settings.copy(model = OpenAiModelId("different")).serviceTier)
-            }
-            assertEquals(
-                ServiceTier.Default,
-                codec.decodeFromString<KodexAgentSettings>("""{"model":"legacy"}""").serviceTier,
-            )
-        }
-    }
-
     test("provider reported tiers remain nullable open strings without usage") {
         for (actual in listOf("ultrafast", "default", "priority", "flex", "future-tier")) {
             val response = OpenAiJsonCodec.decodeFromString<Response>(

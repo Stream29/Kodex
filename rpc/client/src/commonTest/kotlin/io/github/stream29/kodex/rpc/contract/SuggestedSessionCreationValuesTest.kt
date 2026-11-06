@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.rpc.contract
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.openai.ReasoningEffort

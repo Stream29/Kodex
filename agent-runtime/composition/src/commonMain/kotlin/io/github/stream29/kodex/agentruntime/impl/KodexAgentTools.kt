@@ -3,11 +3,11 @@ package io.github.stream29.kodex.agentruntime.impl
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.tool.toDeferredToolSearchDocuments
-import io.github.stream29.kodex.agentstorage.contract.latestValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchToolClient
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
@@ -41,7 +41,7 @@ internal fun KodexAgentState.fixedTools(
     dependencies: KodexAgentDependencies,
 ): KodexAgentFixedTools {
     val agentSettingsProvider: suspend () -> KodexAgentSettings = {
-        storage.settings.latestValue()
+        storage.getSettingsAt(storage.latestIndex())
     }
     val workingDirectoryProvider: suspend () -> Path = {
         agentSettingsProvider().cwd

@@ -12,9 +12,6 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.time.Instant
 import io.github.stream29.kodex.agentstorage.sqlite.*
 import io.github.stream29.kodex.agentstorage.contract.*
-import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
-import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorageTimelineDirectories
-import io.github.stream29.kodex.agentstorage.filesystem.ofEmpty
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
@@ -150,15 +147,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
         mirror.enqueue {
             // An index can be reused after deletion; discard any stale mirror first.
             deleteRecursively(fs, target)
-            val storage = FileSystemAgentStorage.ofEmpty(target, fs, mustCreateDirectory = true)
-            for (timeline in FileSystemAgentStorageTimelineDirectories) {
-                val rows = snapshotFiles.filter { it.first == timeline }
-                if (rows.isNotEmpty()) {
-                    val dir = Path(storage.directory, timeline)
-                    rows.forEach { fs.writeString(Path(dir, "${it.second}.json"), it.third) }
-                    storage.timeline(timeline).reconcileLatestIndexUnsafe(rows.maxOf { it.second })
-                }
-            }
+            initializeMirrorDirectory(target, fs, snapshotFiles)
         }
         mutableEntries.value = inventory()
         index
@@ -181,19 +170,14 @@ public actual class SqliteKodexSessionRepository internal constructor(
                     mutex = mutex,
                     requireAccess = { check(sessionScope.isActive) { "Session storage is closed" } },
                 )
-                val tails = mutableMapOf<String, Int>()
-                connection.query(
-                    """SELECT type, max("index") FROM agent_commits WHERE agent_id = ? GROUP BY type""",
-                    listOf(entryIndex.toLong()),
-                ).forEach { row ->
-                    val timeline = mirrorTimelineDirectory(row[0] as String)
-                    val maxIndex = (row[1] as Long).toInt()
-                    val current = tails[timeline]
-                    if (current == null || maxIndex > current) {
-                        tails[timeline] = maxIndex
-                    }
-                }
-                CachedSqliteAgentStorage(sessionScope, storage, targetDirectory, fileSystem, tails, mirror)
+                val initialLatestIndex = (
+                    connection.query(
+                        """SELECT coalesce(max("index"), -1) FROM agent_commits WHERE agent_id = ?""",
+                        listOf(entryIndex.toLong()),
+                    ).single().single() as Long
+                ).toInt()
+                val cached = CachedSqliteAgentStorage(sessionScope, storage, initialLatestIndex)
+                FileMirrorKodexAgentStorage(cached, targetDirectory, fileSystem, mirror)
             }
             val state = sessionScope.KodexAgentState(client = dependencies.client, storage = cache, contextSettings = dependencies.contextSettings, mcpService = dependencies.mcpService)
             val session = SqliteSession(sessionScope, cache, state.buildMasterAgentRuntime(dependencies))

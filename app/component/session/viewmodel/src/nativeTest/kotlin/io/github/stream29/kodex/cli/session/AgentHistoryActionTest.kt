@@ -15,7 +15,7 @@ val agentHistoryActionTest by testSuite {
             val second = create("second")
             val agent = requireNotNull(first.rootAgent.value)
             assertFailsWith<IllegalArgumentException> {
-                second.fork(agent, 1, views.open(first.sessionIndex).current().storage.index.cacheNonce.value)
+                second.fork(agent, 1, views.open(first.sessionIndex).current().storage.cacheNonce.value)
             }
         }
     }
@@ -26,11 +26,11 @@ val agentHistoryActionTest by testSuite {
             binding.appendUserMessage(listOf(ContentItem.InputText("first")))
             binding.resume()
             binding.state.first { it == AgentStateValue.AssistantMessage }
-            val nonce = binding.storage.index.cacheNonce.value
+            val nonce = binding.storage.cacheNonce.value
             val agent = requireNotNull(session.rootAgent.value)
             // Keep initialization, discard all later events.
             agent.revertHistory(1, nonce)
-            binding.storage.index.cacheNonce.first { it != nonce }
+            binding.storage.cacheNonce.first { it != nonce }
             assertFailsWith<CacheNonceMismatch> { session.fork(agent, 1, nonce) }
             assertEquals(1, services.global.getSessionCatalog(true).size)
         }

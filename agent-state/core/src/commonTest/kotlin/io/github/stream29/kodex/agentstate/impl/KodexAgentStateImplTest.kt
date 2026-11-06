@@ -13,30 +13,44 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessag
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.codexRequestWindowId
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
-import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
+import io.github.stream29.kodex.agentstorage.contract.floorToIndex
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getSettingsExact
+import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAt
+import io.github.stream29.kodex.agentstorage.contract.getUnstableExact
+import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
+import io.github.stream29.kodex.agentstorage.contract.getWorkEventExact
+import io.github.stream29.kodex.agentstorage.contract.latestIndexOf
+import io.github.stream29.kodex.agentstorage.contract.latestUnstableIndex
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.AgentMessageInputContent
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.CodexResponsesMetadata
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.codexRequestWindowId
 import io.github.stream29.kodex.openai.FailedResponse
 import io.github.stream29.kodex.openai.IncompleteDetails
 import io.github.stream29.kodex.openai.IncompleteResponse
@@ -173,14 +187,14 @@ val kodexAgentStateImplTest by testSuite {
 
             assertFailsWith<IllegalStateException> {
                 agent.modify { mutable ->
-                    mutable.index[2] = userEvent("persisted")
+                    mutable.commit(userEvent("persisted"))
                     error("stop after write")
                 }
             }
 
-            assertEquals(2, agent.latestIndex.value)
+            assertEquals(1, agent.latestIndex.value)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
-            assertEquals(userEvent("persisted"), storage.index[2])
+            assertEquals(userEvent("persisted"), storage.getIndexEntryExact(1))
         }
 
         test("queued writes are fair and a cancelled waiter never enters its mutation") {
@@ -206,7 +220,7 @@ val kodexAgentStateImplTest by testSuite {
             val cancelled = async(start = CoroutineStart.UNDISPATCHED) {
                 agent.modify {
                     executionOrder += "cancelled"
-                    it.index[2] = userEvent("must not be written")
+                    it.commit(userEvent("must not be written"))
                 }
             }
             val last = async(start = CoroutineStart.UNDISPATCHED) {
@@ -225,46 +239,36 @@ val kodexAgentStateImplTest by testSuite {
 
             assertTrue(cancelled.isCancelled)
             assertEquals(listOf("first", "last"), executionOrder)
-            assertEquals(-1, storage.index.latestIndex())
+            assertEquals(-1, storage.latestIndexOf(AgentCommitType.IndexTypes))
             assertEquals(0, agent.latestIndex.value)
             assertEquals(KodexAgentStateValue.Empty, agent.state.value)
         }
 
         test("sparse state reconstruction skips non-state entries without enumerating timelines") {
             val source = storage().apply {
-                index[2] = userEvent("Question")
-                index[1_000] = StableDeveloperMessage(listOf(ContentItem.InputText("Context")))
-                work[10_000] = StableContextCompaction(encryptedContent = "compact")
+                commit(userEvent("Question"))
+                commit(StableDeveloperMessage(listOf(ContentItem.InputText("Context"))))
+                commit(StableContextCompaction(encryptedContent = "compact"))
             }
             var indexRangeReads = 0
-            var workRangeReads = 0
             val observed = object : MutableKodexAgentStorage by source {
-                override val index = object : MutableIndexVersioned<CleanIndexEntry> by source.index {
-                    override suspend fun indexesIn(range: IntRange): List<Int> {
-                        indexRangeReads++
-                        return source.index.indexesIn(range)
-                    }
-                }
-                override val work = object : MutableIndexVersioned<StableWorkEvent> by source.work {
-                    override suspend fun indexesIn(range: IntRange): List<Int> {
-                        workRangeReads++
-                        return source.work.indexesIn(range)
-                    }
+                override suspend fun indexesIn(range: IntRange, types: Set<AgentCommitType>): List<Int> {
+                    indexRangeReads++
+                    return source.indexesIn(range, types)
                 }
             }
             val agent = KodexAgentState(client = mockOpenAiClient(), storage = observed)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             assertEquals(0, indexRangeReads)
-            assertEquals(0, workRangeReads)
             agent.cancelAndJoin()
         }
 
         test("sparse state reconstruction compares the latest state-bearing timeline entries") {
             val source = storage().apply {
-                index[2] = userEvent("Question")
-                work[5_000] = completedTool(functionCall("lookup", "call-1"), "done")
-                work[10_000] = StableContextCompaction(encryptedContent = "compact")
-                index[20_000] = StableDeveloperMessage(listOf(ContentItem.InputText("Context")))
+                commit(userEvent("Question"))
+                commit(completedTool(functionCall("lookup", "call-1"), "done"))
+                commit(StableContextCompaction(encryptedContent = "compact"))
+                commit(StableDeveloperMessage(listOf(ContentItem.InputText("Context"))))
             }
             val agent = KodexAgentState(client = mockOpenAiClient(), storage = source)
             assertEquals(KodexAgentStateValue.ToolCompleted, agent.state.value)
@@ -273,8 +277,9 @@ val kodexAgentStateImplTest by testSuite {
 
         test("forked clean timelines reconstruct assistant state") {
             val source = storage().apply {
-                index[2] = userEvent("Question")
-                index[3] = assistantEvent("Answer")
+                commit(CommitTimestamp(kotlin.time.Instant.DISTANT_PAST))
+                commit(userEvent("Question"))
+                commit(assistantEvent("Answer"))
             }
             val agent = KodexAgentState(
                 client = mockOpenAiClient(),
@@ -282,9 +287,9 @@ val kodexAgentStateImplTest by testSuite {
             )
 
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
-            assertEquals(listOf(2, 3), source.index.indexesIn(0..3))
-            assertEquals(userEvent("Question"), source.index[2])
-            assertEquals(assistantEvent("Answer"), source.index[3])
+            assertEquals(listOf(2, 3), source.indexesIn(0..3, AgentCommitType.IndexTypes))
+            assertEquals(userEvent("Question"), source.getIndexEntryExact(2))
+            assertEquals(assistantEvent("Answer"), source.getIndexEntryExact(3))
         }
 
         test("user append and clean injection write only stable history") {
@@ -303,9 +308,11 @@ val kodexAgentStateImplTest by testSuite {
 
             assertEquals(
                 listOf(userEvent("Implement."), developer, assistant),
-                storage.index.indexesIn(1..agent.latestIndex.value).map { index -> storage.index[index] },
+                storage.indexesIn(1..agent.latestIndex.value, AgentCommitType.IndexTypes).map { index ->
+                    checkNotNull(storage.getIndexEntryExact(index))
+                },
             )
-            assertEquals(-1, storage.unstable.latestIndex())
+            assertEquals(-1, storage.latestUnstableIndex())
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
         }
 
@@ -366,16 +373,16 @@ val kodexAgentStateImplTest by testSuite {
             agent.requestResponseApi()
 
             assertEquals(listOf(user), requests.single().input.takeLast(1))
-            assertEquals(StableReasoning(reasoningItem), storage.work[3])
+            assertEquals(StableReasoning(reasoningItem), storage.getWorkEventExact(2))
             assertEquals(
                 StableAssistantMessage(
                     content = assistantItem.content,
                     id = assistantItem.id,
                     phase = assistantItem.phase,
                 ),
-                storage.index[4],
+                storage.getIndexEntryExact(3),
             )
-            assertEquals(12L, storage.tokenCount[5].totalTokens)
+            assertEquals(12L, checkNotNull(storage.getTokenCountAt(4)).totalTokens)
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
         }
 
@@ -467,7 +474,7 @@ val kodexAgentStateImplTest by testSuite {
                         arguments = OpenAiJsonCodec.parseToJsonElement(call.arguments),
                     ),
                 ),
-                storage.unstable[3],
+                storage.getUnstableExact(2),
             )
             assertEquals(
                 RequestFinish.Continue,
@@ -478,8 +485,8 @@ val kodexAgentStateImplTest by testSuite {
             val completed = completedTool(call, "hello")
             agent.completeToolCall(completed)
 
-            assertEquals(completed, storage.work[4])
-            assertEquals(emptyList(), storage.unstable[4])
+            assertEquals(completed, storage.getWorkEventExact(3))
+            assertEquals(emptyList(), storage.getUnstableExact(3))
             assertEquals(KodexAgentStateValue.ToolCompleted, agent.state.value)
         }
 
@@ -519,8 +526,8 @@ val kodexAgentStateImplTest by testSuite {
             assertIs<KodexAgentStateValue.ToolPending>(agent.state.value)
             val completedAt = agent.completeToolCall(completed)
 
-            assertEquals(completed, storage.work[completedAt])
-            assertEquals(emptyList(), storage.unstable[completedAt])
+            assertEquals(completed, storage.getWorkEventExact(completedAt))
+            assertEquals(emptyList(), storage.getUnstableExact(completedAt))
             assertEquals(KodexAgentStateValue.ToolCompleted, agent.state.value)
         }
 
@@ -545,10 +552,10 @@ val kodexAgentStateImplTest by testSuite {
             agent.requestResponseApi()
 
             assertEquals(5, agent.clearPending())
-            assertEquals(failedTool(first, "user interrupt"), storage.work[4])
-            assertEquals(listOf(pendingTool(second)), storage.unstable[4])
-            assertEquals(failedTool(second, "user interrupt"), storage.work[5])
-            assertEquals(emptyList(), storage.unstable[5])
+            assertEquals(failedTool(first, "user interrupt"), storage.getWorkEventExact(4))
+            assertEquals(listOf(pendingTool(second)), storage.getUnstableExact(4))
+            assertEquals(failedTool(second, "user interrupt"), storage.getWorkEventExact(5))
+            assertEquals(emptyList(), storage.getUnstableExact(5))
             assertEquals(KodexAgentStateValue.ToolCompleted, agent.state.value)
             assertEquals(5, agent.clearPending())
         }
@@ -577,15 +584,15 @@ val kodexAgentStateImplTest by testSuite {
             agent.completeToolCall(secondCompleted)
             assertEquals(
                 listOf(first.callId),
-                storage.unstable[4].filterIsInstance<PendingToolEvent>().map { it.callId },
+                checkNotNull(storage.getUnstableExact(4)).filterIsInstance<PendingToolEvent>().map { it.callId },
             )
             assertEquals(KodexAgentStateValue.ToolPending(listOf(pendingTool(first))), agent.state.value)
 
             val firstCompleted = completedTool(first, "first result")
             agent.completeToolCall(firstCompleted)
-            assertEquals(emptyList(), storage.unstable[5])
-            assertEquals(secondCompleted, storage.work[4])
-            assertEquals(firstCompleted, storage.work[5])
+            assertEquals(emptyList(), storage.getUnstableExact(5))
+            assertEquals(secondCompleted, storage.getWorkEventExact(4))
+            assertEquals(firstCompleted, storage.getWorkEventExact(5))
             assertEquals(KodexAgentStateValue.ToolCompleted, agent.state.value)
         }
 
@@ -658,10 +665,10 @@ val kodexAgentStateImplTest by testSuite {
             agent.appendUserMessage(userMessage("Search tools.").content)
             agent.requestResponseApi()
 
-            assertEquals(listOf(PendingServerToolSearch(call)), storage.unstable[2])
-            assertEquals(StableServerToolSearch(call, output), storage.work[3])
-            assertEquals(emptyList(), storage.unstable[3])
-            assertEquals(assistantEvent("No tool found."), storage.index[4])
+            assertEquals(listOf(PendingServerToolSearch(call)), storage.getUnstableAt(2))
+            assertEquals(StableServerToolSearch(call, output), storage.getWorkEventAt(3))
+            assertEquals(emptyList(), storage.getUnstableAt(3))
+            assertEquals(assistantEvent("No tool found."), storage.getIndexEntryAt(4))
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
         }
 
@@ -686,8 +693,8 @@ val kodexAgentStateImplTest by testSuite {
             assertFailsWith<IllegalStateException> {
                 agent.requestResponseApi()
             }
-            assertEquals(listOf(1), storage.index.indexesIn(0..storage.latestIndex()))
-            assertEquals(listOf(PendingServerToolSearch(call)), storage.unstable[2])
+            assertEquals(listOf(1), storage.indexesIn(0..storage.latestIndex(), AgentCommitType.IndexTypes))
+            assertEquals(listOf(PendingServerToolSearch(call)), storage.getUnstableAt(2))
         }
 
         test("model input excludes unstable clean events") {
@@ -696,8 +703,8 @@ val kodexAgentStateImplTest by testSuite {
             val call = ResponseItem.ServerToolSearchCall(
                 arguments = buildJsonObject { put("query", "tools") },
             )
-            storage.index[2] = StableUserMessage(user.content)
-            storage.unstable[3] = listOf(PendingServerToolSearch(call))
+            storage.commit(StableUserMessage(user.content))
+            storage.commit(UnstableSnapshot(listOf(PendingServerToolSearch(call))))
             val requests = mutableListOf<ResponsesApiRequest>()
             val responseError = ResponseError(
                 message = "Retryable failure.",
@@ -813,7 +820,7 @@ val kodexAgentStateImplTest by testSuite {
                     createRemoteCompactionV2Response { request ->
                         compactRequests += request
                         assertEquals(
-                            storage.settings[0].codexRequestWindowId(storage.uri.toCodexThreadId()),
+                            storage.getSettingsAt(0).codexRequestWindowId(storage.uri.toCodexThreadId()),
                             request.clientMetadata?.windowId,
                         )
                         RemoteCompactionV2Response(
@@ -842,10 +849,10 @@ val kodexAgentStateImplTest by testSuite {
                     .filterIsInstance<StableUserMessage>()
                     .map { event -> event.toResponseHistoryItems().single() },
             )
-            assertIs<CleanCompactionPoint>(storage.index[compactIndex - 1])
-            assertEquals(stableCompaction, storage.work[compactIndex])
-            assertEquals(0L, storage.tokenCount[compactIndex - 1].totalTokens)
-            assertEquals(compactIndex - 1, storage.tokenCount.latestIndex())
+            assertIs<CleanCompactionPoint>(storage.getIndexEntryAt(compactIndex - 1))
+            assertEquals(stableCompaction, storage.getWorkEventAt(compactIndex))
+            assertEquals(0L, storage.getTokenCountAt(compactIndex - 1).totalTokens)
+            assertEquals(compactIndex - 1, storage.floorToIndex(Int.MAX_VALUE, AgentCommitType.TokenCountTypes))
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             assertEquals(
                 listOf(user, ResponseItem.CompactionTrigger),
@@ -897,8 +904,8 @@ val kodexAgentStateImplTest by testSuite {
             agent.injectHistory(listOf(firstUser))
             agent.forcedCompact()
             agent.modify { mutable ->
-                mutable.index[5] = planUpdate
-                mutable.index[6] = requestUserInput
+                mutable.commit(planUpdate)
+                mutable.commit(requestUserInput)
             }
             val compactIndex = agent.forcedCompact()
 
@@ -910,7 +917,7 @@ val kodexAgentStateImplTest by testSuite {
             )
             assertEquals(
                 StableContextCompaction(encryptedContent = "compact-2"),
-                storage.work[compactIndex],
+                storage.getWorkEventAt(compactIndex),
             )
         }
 
@@ -928,12 +935,12 @@ val kodexAgentStateImplTest by testSuite {
                 storage = storage,
             )
             agent.appendUserMessage(userMessage("Compact without usage.").content)
-            storage.tokenCount[2] = TokenCountSnapshot(TokenCountKind.Response, 90L)
+            storage.commit(TokenCountSnapshot.Response(90L))
 
             val compactIndex = agent.forcedCompact()
 
-            assertEquals(0L, storage.tokenCount[compactIndex].totalTokens)
-            assertEquals(compactIndex - 1, storage.tokenCount.latestIndex())
+            assertEquals(0L, storage.getTokenCountAt(compactIndex).totalTokens)
+            assertEquals(compactIndex - 1, storage.floorToIndex(Int.MAX_VALUE, AgentCommitType.TokenCountTypes))
         }
 
         test("settings updates can commit while remote compaction is in flight") {
@@ -972,10 +979,10 @@ val kodexAgentStateImplTest by testSuite {
                     id = compactionItem.id,
                     encryptedContent = compactionItem.encryptedContent,
                 ),
-                storage.work[compactedAt],
+                storage.getWorkEventAt(compactedAt),
             )
-            assertEquals("After compaction", storage.settings[settingsAt].threadName)
-            assertEquals("After compaction", storage.settings[compactedAt].threadName)
+            assertEquals("After compaction", storage.getSettingsAt(settingsAt).threadName)
+            assertEquals("After compaction", storage.getSettingsAt(compactedAt).threadName)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
         }
 
@@ -1005,7 +1012,7 @@ val kodexAgentStateImplTest by testSuite {
             agent.requestResponseApi()
 
             assertEquals(listOf(user, compaction), requests.single().input.takeLast(2))
-            assertEquals(assistantEvent("After."), storage.index[5])
+            assertEquals(assistantEvent("After."), storage.getIndexEntryAt(5))
         }
 
         test("user message after final assistant rotates the settings turn id") {
@@ -1015,16 +1022,16 @@ val kodexAgentStateImplTest by testSuite {
                 storage = storage,
             )
 
-            val firstTurn = storage.settings[0].turnId
+            val firstTurn = storage.getSettingsAt(0).turnId
             assertEquals(1, agent.appendUserMessage(userMessage("First.").content))
             agent.modify { mutable ->
-                mutable.index[2] = assistantEvent("Final.")
+                mutable.commit(assistantEvent("Final."))
             }
             assertEquals(3, agent.appendUserMessage(userMessage("Second.").content))
 
-            assertEquals(userEvent("First."), storage.index[1])
-            assertEquals(userEvent("Second."), storage.index[3])
-            assertNotEquals(firstTurn, storage.settings[3].turnId)
+            assertEquals(userEvent("First."), storage.getIndexEntryAt(1))
+            assertEquals(userEvent("Second."), storage.getIndexEntryAt(3))
+            assertNotEquals(firstTurn, storage.getSettingsAt(3).turnId)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
         }
 
@@ -1037,14 +1044,14 @@ val kodexAgentStateImplTest by testSuite {
 
             agent.appendUserMessage(userMessage("First.").content)
             agent.modify { mutable ->
-                mutable.index[2] = assistantEvent("Final.")
+                mutable.commit(assistantEvent("Final."))
             }
             agent.appendUserMessage(userMessage("Steer one.").content)
-            val steerTurn = storage.settings[3].turnId
+            val steerTurn = storage.getSettingsAt(3).turnId
             agent.appendUserMessage(userMessage("Steer two.").content)
 
-            assertEquals(steerTurn, storage.settings[4].turnId)
-            assertTrue(storage.settings.getExact(4) == null)
+            assertEquals(steerTurn, storage.getSettingsAt(4).turnId)
+            assertTrue(storage.getSettingsExact(4) == null)
         }
 
         test("active request publishes streaming item state before completion") {
@@ -1126,13 +1133,13 @@ val kodexAgentStateImplTest by testSuite {
             val settingsAt = agent.updateSettings(settings().copy(model = updatedModel))
 
             assertEquals(2, settingsAt)
-            assertEquals(updatedModel, storage.settings[settingsAt].model)
+            assertEquals(updatedModel, storage.getSettingsAt(settingsAt).model)
             assertIs<KodexAgentStateValue.RequestResponse>(agent.state.value)
             assertFalse(first.isCompleted)
 
             releaseFirstRequest.complete(Unit)
             first.await()
-            assertEquals(assistantEvent("First."), storage.index[3])
+            assertEquals(assistantEvent("First."), storage.getIndexEntryAt(3))
 
             agent.requestResponseApi()
 
@@ -1168,7 +1175,7 @@ val kodexAgentStateImplTest by testSuite {
 
             assertTrue(running.isCancelled)
             assertEquals(settingsAt, agent.latestIndex.value)
-            assertEquals("Updated while active", storage.settings[settingsAt].threadName)
+            assertEquals("Updated while active", storage.getSettingsAt(settingsAt).threadName)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
         }
 
@@ -1209,6 +1216,37 @@ val kodexAgentStateImplTest by testSuite {
             first.await()
 
             assertIs<KodexAgentStateValue.ToolPending>(agent.state.value)
+        }
+
+        test("provider completed work tools reconstruct ToolCompleted state") {
+            val completedEvents = listOf(
+                StableServerToolSearch(
+                    call = ResponseItem.ServerToolSearchCall(
+                        id = ResponseItemId("search_call"),
+                        status = "completed",
+                        arguments = buildJsonObject { put("query", "tools") },
+                    ),
+                    output = ResponseItem.ServerToolSearchOutput(
+                        id = ResponseItemId("search_output"),
+                        status = "completed",
+                        tools = emptyList(),
+                    ),
+                ),
+                StableWebSearchCall(ResponseItem.WebSearchCall(status = "completed")),
+                StableImageGenerationCall(
+                    ResponseItem.ImageGenerationCall(id = ResponseItemId("img_1"), status = "completed", result = "b64"),
+                ),
+            )
+            for (completed in completedEvents) {
+                val storage = storage()
+                storage.commit(userEvent("Search or generate."))
+                storage.commit(completed)
+                val reopened = KodexAgentState(
+                    client = mockOpenAiClient {},
+                    storage = storage,
+                )
+                assertEquals(KodexAgentStateValue.ToolCompleted, reopened.state.value)
+            }
         }
     }
 }

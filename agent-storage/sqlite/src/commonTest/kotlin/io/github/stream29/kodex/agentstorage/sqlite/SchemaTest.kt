@@ -1,8 +1,8 @@
 package io.github.stream29.kodex.agentstorage.sqlite
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec

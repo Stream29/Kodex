@@ -1,20 +1,19 @@
 package io.github.stream29.kodex.cli.history
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.assertEquals
@@ -28,10 +27,14 @@ import kotlin.time.TimeSource
 val indexHistoryReadTest by testSuite {
     test("multi-page projection matches structural reads in both directions across sealed groups") {
         val storage = historyStorage()
-        for (position in 1..700) {
-            val index = position * 3
-            if (position == 1 || position % 7 == 0) storage.index[index] = historyUser("$position")
-            else storage.work[index] = historyWork(index)
+        for (index in 1..2_100) {
+            if (index % 3 == 0) {
+                val position = index / 3
+                if (position == 1 || position % 7 == 0) storage.commit(historyUser("$position"))
+                else storage.commit(historyWork(index))
+            } else {
+                storage.commit(CommitTimestamp(Instant.fromEpochSeconds(0)))
+            }
         }
         val expected = storage.readAllHistory(2_100).items
         val backward = mutableListOf<HistoryProjectionItem>()
@@ -56,10 +59,9 @@ val indexHistoryReadTest by testSuite {
 
     test("open work page batches payloads and timestamps without crossing its cursor") {
         val mutable = historyStorage()
-        mutable.index[1] = historyUser("prompt")
+        mutable.commit(historyUser("prompt"))
         for (index in 2..200) {
-            mutable.work[index] = historyWork(index)
-            mutable.timestamp[index] = Instant.fromEpochSeconds(index.toLong())
+            mutable.commit(listOf(historyWork(index), CommitTimestamp(Instant.fromEpochSeconds(index.toLong()))))
         }
         val counted = CountingHistoryStorage(mutable)
         val page = counted.readHistoryPage(fromInclusive = 200, snapshotIndex = 200)
@@ -86,9 +88,9 @@ val indexHistoryReadTest by testSuite {
 
     test("a singleton sealed work interval is still one work group") {
         val mutable = historyStorage()
-        mutable.index[1] = historyUser("prompt")
-        mutable.work[2] = historyWork(2)
-        mutable.index[3] = historyAssistant("done")
+        mutable.commit(historyUser("prompt"))
+        mutable.commit(historyWork(2))
+        mutable.commit(historyAssistant("done"))
 
         val page = mutable.readHistoryChunk(fromInclusive = 3)
 
@@ -101,9 +103,9 @@ val indexHistoryReadTest by testSuite {
 
     test("an anchor and its sealed work group are not split across pages") {
         val mutable = historyStorage()
-        mutable.index[1] = historyUser("prompt")
-        mutable.work[2] = historyWork(2)
-        mutable.index[3] = historyAssistant("done")
+        mutable.commit(historyUser("prompt"))
+        mutable.commit(historyWork(2))
+        mutable.commit(historyAssistant("done"))
 
         val page = mutable.readHistoryChunk(fromInclusive = 3)
 
@@ -115,11 +117,11 @@ val indexHistoryReadTest by testSuite {
 
     test("compaction point and output form one item outside the work group") {
         val mutable = historyStorage()
-        mutable.index[1] = historyUser("prompt")
-        mutable.index[2] = CleanCompactionPoint
-        mutable.work[3] = StableContextCompaction(encryptedContent = "encrypted")
-        mutable.work[4] = historyWork(4)
-        mutable.index[5] = historyAssistant("done")
+        mutable.commit(historyUser("prompt"))
+        mutable.commit(CleanCompactionPoint)
+        mutable.commit(StableContextCompaction(encryptedContent = "encrypted"))
+        mutable.commit(historyWork(4))
+        mutable.commit(historyAssistant("done"))
         val counted = CountingHistoryStorage(mutable)
 
         val page = counted.readAllHistory(fromInclusive = 5)
@@ -145,12 +147,12 @@ val indexHistoryReadTest by testSuite {
     test("one sealed work interval is one top-level item without payload reads") {
         val workCount = 50_000
         val mutable = historyStorage()
-        mutable.index[1] = historyUser("prompt")
+        mutable.commit(historyUser("prompt"))
         repeat(workCount) { offset ->
-            mutable.work[offset + 2] = historyWork(offset)
+            mutable.commit(historyWork(offset))
         }
         val finalIndex = workCount + 2
-        mutable.index[finalIndex] = historyAssistant("done")
+        mutable.commit(historyAssistant("done"))
 
         val counted = CountingHistoryStorage(mutable)
         val started = TimeSource.Monotonic.markNow()
@@ -176,9 +178,9 @@ val indexHistoryReadTest by testSuite {
     test("open work suffix reads one payload per LazyColumn demand") {
         val workCount = 20_000
         val mutable = historyStorage()
-        mutable.index[1] = historyUser("prompt")
+        mutable.commit(historyUser("prompt"))
         repeat(workCount) { offset ->
-            mutable.work[offset + 2] = historyWork(offset)
+            mutable.commit(historyWork(offset))
         }
         val counted = CountingHistoryStorage(mutable)
 
@@ -195,7 +197,7 @@ val indexHistoryReadTest by testSuite {
         val mutable = historyStorage()
         repeat(20_000) { offset ->
             val index = offset + 1
-            mutable.index[index] = historyUser("$index")
+            mutable.commit(historyUser("$index"))
         }
         val counted = CountingHistoryStorage(mutable)
 
@@ -214,12 +216,12 @@ val indexHistoryReadTest by testSuite {
     test("newer seek crosses one large sealed interval without payload reads") {
         val workCount = 50_000
         val mutable = historyStorage()
-        mutable.index[1] = historyUser("prompt")
+        mutable.commit(historyUser("prompt"))
         repeat(workCount) { offset ->
-            mutable.work[offset + 2] = historyWork(offset)
+            mutable.commit(historyWork(offset))
         }
         val finalIndex = workCount + 2
-        mutable.index[finalIndex] = historyAssistant("done")
+        mutable.commit(historyAssistant("done"))
         val counted = CountingHistoryStorage(mutable)
 
         val started = TimeSource.Monotonic.markNow()
@@ -263,48 +265,39 @@ private suspend fun KodexAgentStorage.readAllHistory(
     return LoadedHistoryChunk(items, null)
 }
 
-private class CountingHistoryTimeline<T>(
-    private val delegate: IndexVersioned<T>,
-) : IndexVersioned<T> {
+private class CountingHistoryTimeline {
     var exactReads: Int = 0
     var valuesReturned: Int = 0
     var valueReads: Int = 0
-
-    override suspend fun latestIndex(): Int = delegate.latestIndex()
-
-    override suspend fun get(index: Int): T = delegate[index]
-
-    override suspend fun getExact(index: Int): T? {
-        exactReads += 1
-        return delegate.getExact(index)
-    }
-
-    override suspend fun floorToIndex(index: Int): Int? =
-        delegate.floorToIndex(index)
-
-    override suspend fun ceilToIndex(index: Int): Int? =
-        delegate.ceilToIndex(index)
-
-    override suspend fun indexesIn(range: IntRange): List<Int> =
-        delegate.indexesIn(range)
-
-    override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> =
-        delegate.valuesIn(range).also { values -> valuesReturned += values.size; valueReads++ }
 }
 
 private class CountingHistoryStorage(
-    delegate: KodexAgentStorage,
-) : KodexAgentStorage {
-    val indexTimeline = CountingHistoryTimeline(delegate.index)
-    val workTimeline = CountingHistoryTimeline(delegate.work)
+    private val delegate: KodexAgentStorage,
+) : KodexAgentStorage by delegate {
+    val indexTimeline = CountingHistoryTimeline()
+    val workTimeline = CountingHistoryTimeline()
 
-    override val uri: String = delegate.uri
-    override val index: IndexVersioned<CleanIndexEntry> = indexTimeline
-    override val work: IndexVersioned<StableWorkEvent> = workTimeline
-    override val settings: IndexVersioned<KodexAgentSettings> = delegate.settings
-    override val timestamp: IndexVersioned<Instant> = delegate.timestamp
-    override val tokenCount: IndexVersioned<TokenCountSnapshot> = delegate.tokenCount
-    override val unstable: IndexVersioned<List<UnstableCleanEvent>> = delegate.unstable
+    override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> {
+        when (types) {
+            AgentCommitType.IndexTypes -> indexTimeline.exactReads += 1
+            AgentCommitType.WorkTypes -> workTimeline.exactReads += 1
+        }
+        return delegate.getCommitsExact(index, types)
+    }
+
+    override suspend fun getCommitsIn(range: IntRange, types: Set<AgentCommitType>): List<IndexedAgentCommit> =
+        delegate.getCommitsIn(range, types).also { commits ->
+            when (types) {
+                AgentCommitType.IndexTypes -> {
+                    indexTimeline.valuesReturned += commits.size
+                    indexTimeline.valueReads += 1
+                }
+                AgentCommitType.WorkTypes -> {
+                    workTimeline.valuesReturned += commits.size
+                    workTimeline.valueReads += 1
+                }
+            }
+        }
 }
 
 private fun historyStorage(): InMemoryKodexAgentStorage =

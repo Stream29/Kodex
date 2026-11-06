@@ -4,7 +4,7 @@ package io.github.stream29.kodex.cli.sessiontitle
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import kotlinx.coroutines.CoroutineScope

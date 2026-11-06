@@ -1,6 +1,14 @@
 package io.github.stream29.kodex.rpc.client
 
-import io.github.stream29.kodex.rpc.contract.TimelineRpc
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
@@ -12,33 +20,37 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withTimeout
-import kotlinx.rpc.annotations.Rpc
 import kotlinx.rpc.withService
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
-@Rpc
-internal interface TimelineProbe : TimelineRpc<String> {
-    override suspend fun getCacheNonce(sessionIndex: Int): Long
-    override fun getCacheNonceFlow(sessionIndex: Int): Flow<Long>
-    override suspend fun getLatestIndex(sessionIndex: Int): Int
-    override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int>
-    override suspend fun get(sessionIndex: Int, cacheNonce: Long, index: Int): String
-    override suspend fun getExact(sessionIndex: Int, cacheNonce: Long, index: Int): String?
-    override suspend fun floorToIndex(sessionIndex: Int, cacheNonce: Long, index: Int): Int?
-    override suspend fun ceilToIndex(sessionIndex: Int, cacheNonce: Long, index: Int): Int?
-    override suspend fun indexesIn(
-        sessionIndex: Int, cacheNonce: Long, fromInclusive: Int, toInclusive: Int,
-    ): List<Int>
-    override suspend fun valuesIn(
-        sessionIndex: Int, cacheNonce: Long, fromInclusive: Int, toInclusive: Int,
-    ): List<Pair<Int, String>>
-}
+internal suspend fun CoroutineScope.rpcCachedAgentStorage(
+    sessionIndex: Int,
+    rpc: AgentStorageRpc,
+    valueCacheSize: Int = 1_024,
+    timeSource: TimeSource = TimeSource.Monotonic,
+): ObservableKodexAgentStorage = rpcCachedAgentStorage(
+    sessionIndex = sessionIndex,
+    uri = "kodex://session/$sessionIndex",
+    rpc = rpc,
+    valueCacheSize = valueCacheSize,
+    timeSource = timeSource,
+)
 
-internal class TimelineProbeImpl : TimelineProbe {
+internal fun probeCommit(text: String): CleanIndexEntry =
+    StableUserMessage(listOf(ContentItem.InputText(text)))
+
+internal class TimelineProbeImpl : AgentStorageRpc {
     val nonce = MutableStateFlow(17L)
     val latest = MutableStateFlow(5)
-    val entries = MutableStateFlow(mapOf(0 to "zero", 2 to "two", 5 to "five"))
+    val entries = MutableStateFlow(
+        mapOf(
+            0 to listOf(probeCommit("zero")),
+            2 to listOf(probeCommit("two")),
+            5 to listOf(probeCommit("five")),
+        ),
+    )
     val active = MutableStateFlow(true)
     val metadataFailure = MutableStateFlow<Throwable?>(null)
     val subscriptions = MutableStateFlow(0)
@@ -91,7 +103,10 @@ internal class TimelineProbeImpl : TimelineProbe {
     }
 
     private suspend fun <T> read(
-        method: String, sessionIndex: Int, nonce: Long, block: (Map<Int, String>) -> T,
+        method: String,
+        sessionIndex: Int,
+        nonce: Long,
+        block: (Map<Int, List<AgentCommit>>) -> T,
     ): T {
         called(method, sessionIndex)
         if (!active.value) throw SessionNotActive()
@@ -101,45 +116,97 @@ internal class TimelineProbeImpl : TimelineProbe {
         return result
     }
 
-    override suspend fun get(sessionIndex: Int, cacheNonce: Long, index: Int): String =
-        read("get", sessionIndex, cacheNonce) { snapshot ->
-            val stored = snapshot.keys.filter { it <= index }.maxOrNull()
-                ?: throw IllegalArgumentException("No predecessor")
-            snapshot.getValue(stored)
-        }
-
-    override suspend fun getExact(sessionIndex: Int, cacheNonce: Long, index: Int): String? =
-        read("exact", sessionIndex, cacheNonce) { it[index] }
-
-    override suspend fun floorToIndex(sessionIndex: Int, cacheNonce: Long, index: Int): Int? =
-        read("floor", sessionIndex, cacheNonce) { it.keys.filter { key -> key <= index }.maxOrNull() }
-
-    override suspend fun ceilToIndex(sessionIndex: Int, cacheNonce: Long, index: Int): Int? =
-        read("ceil", sessionIndex, cacheNonce) { it.keys.filter { key -> key >= index }.minOrNull() }
-
     override suspend fun indexesIn(
-        sessionIndex: Int, cacheNonce: Long, fromInclusive: Int, toInclusive: Int,
-    ): List<Int> = read("indexes", sessionIndex, cacheNonce) {
-        it.keys.filter { index -> index in fromInclusive..toInclusive }.sorted()
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType>,
+    ): List<Int> = read("indexes", sessionIndex, cacheNonce) { snapshot ->
+        if (fromInclusive > toInclusive || types.isEmpty()) return@read emptyList()
+        snapshot.entries
+            .filter { (index, commits) -> index in fromInclusive..toInclusive && commits.any { it.commitType in types } }
+            .map { it.key }
+            .sorted()
     }
 
-    override suspend fun valuesIn(
-        sessionIndex: Int, cacheNonce: Long, fromInclusive: Int, toInclusive: Int,
-    ): List<Pair<Int, String>> = read("values", sessionIndex, cacheNonce) { snapshot ->
-        snapshot.keys.filter { index -> index in fromInclusive..toInclusive }
-            .sorted().map { it to snapshot.getValue(it) }
+    override suspend fun getCommitsExact(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        index: Int,
+        types: Set<AgentCommitType>,
+    ): List<AgentCommit> = read("exact", sessionIndex, cacheNonce) { snapshot ->
+        snapshot[index].orEmpty().filter { it.commitType in types }
     }
+
+    override suspend fun getCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType>,
+    ): List<IndexedAgentCommit> = read("values", sessionIndex, cacheNonce) { snapshot ->
+        if (fromInclusive > toInclusive || types.isEmpty()) return@read emptyList()
+        snapshot.entries
+            .filter { it.key in fromInclusive..toInclusive }
+            .sortedBy { it.key }
+            .flatMap { (index, commits) ->
+                commits.filter { it.commitType in types }.map { IndexedAgentCommit(index, it) }
+            }
+    }
+
+    override suspend fun getFirstCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> = read("first", sessionIndex, cacheNonce) { snapshot ->
+        if (fromInclusive > toInclusive || types.isEmpty() || limit <= 0) return@read emptyList()
+        snapshot.entries
+            .filter { it.key in fromInclusive..toInclusive }
+            .sortedBy { it.key }
+            .flatMap { (index, commits) ->
+                commits.filter { it.commitType in types }.map { IndexedAgentCommit(index, it) }
+            }
+            .take(limit)
+    }
+
+    override suspend fun getLastCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> = read("last", sessionIndex, cacheNonce) { snapshot ->
+        if (fromInclusive > toInclusive || types.isEmpty() || limit <= 0) return@read emptyList()
+        snapshot.entries
+            .filter { it.key in fromInclusive..toInclusive }
+            .sortedBy { it.key }
+            .flatMap { (index, commits) ->
+                commits.filter { it.commitType in types }.map { IndexedAgentCommit(index, it) }
+            }
+            .takeLast(limit)
+    }
+
+    override suspend fun compareAndSetSettings(
+        sessionIndex: Int,
+        expect: KodexAgentSettings,
+        update: KodexAgentSettings,
+    ): Boolean = false
 }
 
 internal suspend fun withTimelineProbe(
-    block: suspend CoroutineScope.(TimelineProbe, TimelineProbeImpl) -> Unit,
+    block: suspend CoroutineScope.(AgentStorageRpc, TimelineProbeImpl) -> Unit,
 ) {
     withTimeout(15.seconds) {
         val backend = TimelineProbeImpl()
         withInMemoryRpc(
-            registerServices = { registerService(TimelineProbe::class) { backend } },
+            registerServices = { registerService(AgentStorageRpc::class) { backend } },
         ) { client ->
-            block(RestoringRpcClient(client).withService<TimelineProbe>(), backend)
+            block(RestoringRpcClient(client).withService<AgentStorageRpc>(), backend)
         }
     }
 }

@@ -13,9 +13,10 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSub
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
-import io.github.stream29.kodex.agentstorage.contract.revert
-import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
@@ -23,7 +24,6 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryKind
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.MessagePhase
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.PlanItemArg
@@ -54,20 +54,31 @@ val historyIndexViewModelTest by testSuite {
     test("only exact Message timestamps are exposed and replacement invalidates requests") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test")))
         val time = kotlin.time.Instant.parse("2026-09-08T01:02:03Z")
-        storage.index[1] = StableUserMessage(listOf(ContentItem.InputText("message")))
-        storage.index[2] = CleanCompactionPoint
+        storage.commit(StableUserMessage(listOf(ContentItem.InputText("message"))))
+        storage.commit(CleanCompactionPoint)
         val latest = MutableStateFlow(2)
         val state = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty)
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-        val model = storageIndex(storage.index, storage.timestamp, latest, state, scope)
+        val model = storageIndex(storage, latest, state, scope)
         try {
             val generation = model.awaitIndexes(listOf(1, 2)).generation
             assertEquals(null, model.readMessageTimestamp(generation, 1))
-            storage.timestamp[1] = time + 1.seconds
-            storage.timestamp[2] = time + 2.seconds
+            storage.revert(1)
+            storage.commit(
+                listOf(
+                    StableUserMessage(listOf(ContentItem.InputText("message"))),
+                    CommitTimestamp(time + 1.seconds),
+                ),
+            )
+            storage.commit(
+                listOf(
+                    CleanCompactionPoint,
+                    CommitTimestamp(time + 2.seconds),
+                ),
+            )
             assertEquals(time + 1.seconds, model.readMessageTimestamp(generation, 1))
             assertEquals(null, model.readMessageTimestamp(generation, 2))
-            storage.index.revert(1)
+            storage.revert(1)
             latest.value = 0
             model.awaitIndexes(emptyList())
             kotlin.test.assertFailsWith<HistoryIndexLoadException> {
@@ -80,15 +91,16 @@ val historyIndexViewModelTest by testSuite {
 
     test("suggestions use only the simple sidebar label") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test")))
-        storage.index[1] = StableSuggestSubagentTaskToolEvent(
-            "suggest",
-            arguments = SuggestSubagentTaskArgs(listOf(SuggestedSubagentTask("Hidden name", "Hidden prompt"))),
-            result = StableSuggestSubagentTaskResult.Failure("Hidden reason"),
+        storage.commit(
+            StableSuggestSubagentTaskToolEvent(
+                "suggest",
+                arguments = SuggestSubagentTaskArgs(listOf(SuggestedSubagentTask("Hidden name", "Hidden prompt"))),
+                result = StableSuggestSubagentTaskResult.Failure("Hidden reason"),
+            ),
         )
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
         val model = storageIndex(
-            timeline = storage.index,
-            timestamp = storage.timestamp,
+            storage = storage,
             latestIndex = MutableStateFlow(1),
             agentState = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty),
             scope = scope,
@@ -115,8 +127,7 @@ val historyIndexViewModelTest by testSuite {
             val cacheNonce = MutableStateFlow(11L)
             val childScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
             val viewModel = storageIndex(
-                timeline = storage.index,
-                timestamp = storage.timestamp,
+                storage = storage,
                 latestIndex = latestIndex,
                 agentState = agentState,
                 scope = childScope,
@@ -125,9 +136,13 @@ val historyIndexViewModelTest by testSuite {
             try {
                 assertEquals(emptyList(), viewModel.awaitIndexes(emptyList()).indexes)
 
-                storage.index[2] = StableUserMessage(
-                    content = listOf(ContentItem.InputText("question\nwith   spaces")),
+                storage.commit(CommitTimestamp(kotlin.time.Instant.DISTANT_PAST))
+                storage.commit(
+                    StableUserMessage(
+                        content = listOf(ContentItem.InputText("question\nwith   spaces")),
+                    ),
                 )
+                storage.commit(CommitTimestamp(kotlin.time.Instant.DISTANT_PAST))
                 latestIndex.value = 3
                 val firstWindow = viewModel.awaitIndexes(listOf(2))
                 assertEquals(
@@ -135,9 +150,12 @@ val historyIndexViewModelTest by testSuite {
                     viewModel.load(firstWindow.generation, 2).summary,
                 )
 
-                storage.index[5] = StableAssistantMessage(
-                    content = listOf(ContentItem.OutputText("answer")),
-                    phase = MessagePhase.FinalAnswer,
+                storage.commit(CommitTimestamp(kotlin.time.Instant.DISTANT_PAST))
+                storage.commit(
+                    StableAssistantMessage(
+                        content = listOf(ContentItem.OutputText("answer")),
+                        phase = MessagePhase.FinalAnswer,
+                    ),
                 )
                 latestIndex.value = 5
                 val appended = viewModel.awaitIndexes(listOf(2, 5))
@@ -150,17 +168,20 @@ val historyIndexViewModelTest by testSuite {
                     viewModel.load(appended.generation, 5).kind,
                 )
 
-                storage.revert(5)
+                storage.revert(4)
                 latestIndex.value = 3
                 cacheNonce.value = 12L
                 val reverted = viewModel.awaitGenerationAtLeast(12)
                 assertEquals(12L, reverted.generation)
                 assertEquals(listOf(2), reverted.indexes)
 
-                storage.index.revert(2)
-                storage.index[2] = StableUserMessage(
-                    content = listOf(ContentItem.InputText("rewritten")),
+                storage.revert(2)
+                storage.commit(
+                    StableUserMessage(
+                        content = listOf(ContentItem.InputText("rewritten")),
+                    ),
                 )
+                storage.commit(CommitTimestamp(kotlin.time.Instant.DISTANT_PAST))
                 cacheNonce.value = 13L
                 val refreshed = viewModel.awaitGenerationAtLeast(13)
                 assertEquals(
@@ -180,76 +201,87 @@ val historyIndexViewModelTest by testSuite {
             )
             val latestIndex = MutableStateFlow(8)
             val agentState = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty)
-            storage.index[1] = CleanCompactionPoint
-            storage.index[2] = StableDeveloperMessage(
-                content = listOf(
-                    ContentItem.InputText("developer"),
-                    ContentItem.InputImage("image"),
+            storage.commit(CleanCompactionPoint)
+            storage.commit(
+                StableDeveloperMessage(
+                    content = listOf(
+                        ContentItem.InputText("developer"),
+                        ContentItem.InputImage("image"),
+                    ),
                 ),
             )
-            storage.index[3] = StableAgentMessage(
-                author = "one",
-                recipient = "two",
-                content = listOf(
-                    AgentMessageInputContent.InputText("private"),
-                    AgentMessageInputContent.EncryptedContent("ciphertext"),
+            storage.commit(
+                StableAgentMessage(
+                    author = "one",
+                    recipient = "two",
+                    content = listOf(
+                        AgentMessageInputContent.InputText("private"),
+                        AgentMessageInputContent.EncryptedContent("ciphertext"),
+                    ),
                 ),
             )
-            storage.index[4] = StableRequestUserInputToolEvent(
-                callId = "request",
-                arguments = RequestUserInputArgs(
-                    questions = listOf(
-                        RequestUserInputQuestion(
-                            id = "secret",
-                            header = "Credential",
-                            question = "Enter token",
-                            isSecret = true,
-                            options = listOf(
-                                RequestUserInputQuestionOption(
-                                    label = "Saved",
-                                    description = "Use saved token",
+            storage.commit(
+                StableRequestUserInputToolEvent(
+                    callId = "request",
+                    arguments = RequestUserInputArgs(
+                        questions = listOf(
+                            RequestUserInputQuestion(
+                                id = "secret",
+                                header = "Credential",
+                                question = "Enter token",
+                                isSecret = true,
+                                options = listOf(
+                                    RequestUserInputQuestionOption(
+                                        label = "Saved",
+                                        description = "Use saved token",
+                                    ),
                                 ),
                             ),
                         ),
                     ),
-                ),
-                result = StableRequestUserInputResult.Answered(
-                    RequestUserInputResponse(
-                        answers = mapOf(
-                            "secret" to RequestUserInputAnswer(listOf("do-not-render")),
+                    result = StableRequestUserInputResult.Answered(
+                        RequestUserInputResponse(
+                            answers = mapOf(
+                                "secret" to RequestUserInputAnswer(listOf("do-not-render")),
+                            ),
                         ),
                     ),
                 ),
             )
-            storage.index[5] = StablePlanUpdate(
-                callId = "plan",
-                arguments = UpdatePlanArgs(
-                    explanation = "Updated",
-                    plan = listOf(
-                        PlanItemArg("done", StepStatus.Completed),
-                        PlanItemArg("current", StepStatus.InProgress),
-                        PlanItemArg("later", StepStatus.Pending),
+            storage.commit(
+                StablePlanUpdate(
+                    callId = "plan",
+                    arguments = UpdatePlanArgs(
+                        explanation = "Updated",
+                        plan = listOf(
+                            PlanItemArg("done", StepStatus.Completed),
+                            PlanItemArg("current", StepStatus.InProgress),
+                            PlanItemArg("later", StepStatus.Pending),
+                        ),
                     ),
                 ),
             )
-            storage.index[6] = StablePlanUpdate(
-                callId = "pending-plan",
-                arguments = UpdatePlanArgs(
-                    plan = listOf(
-                        PlanItemArg("first", StepStatus.Pending),
-                        PlanItemArg("second", StepStatus.Pending),
+            storage.commit(
+                StablePlanUpdate(
+                    callId = "pending-plan",
+                    arguments = UpdatePlanArgs(
+                        plan = listOf(
+                            PlanItemArg("first", StepStatus.Pending),
+                            PlanItemArg("second", StepStatus.Pending),
+                        ),
                     ),
                 ),
             )
-            storage.index[7] = StableUserMessage(content = emptyList())
-            storage.index[8] = StableAssistantMessage(
-                content = listOf(ContentItem.OutputText("plain")),
+            storage.commit(StableUserMessage(content = emptyList()))
+            storage.commit(
+                StableAssistantMessage(
+                    content = listOf(ContentItem.OutputText("plain")),
+                ),
             )
 
             val childScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
             val viewModel = storageIndex(
-                timeline = storage.index,
-                timestamp = storage.timestamp,
+                storage = storage,
                 latestIndex = latestIndex,
                 agentState = agentState,
                 scope = childScope,
@@ -310,15 +342,13 @@ private suspend fun HistoryIndexViewModel.awaitGenerationAtLeast(
 
 /** Real in-memory storage with the old local-generation and production-nonce regression modes. */
 private fun storageIndex(
-    timeline: IndexVersioned<CleanIndexEntry>,
-    timestamp: IndexVersioned<kotlin.time.Instant>,
+    storage: KodexAgentStorage,
     latestIndex: StateFlow<Int>,
     agentState: StateFlow<KodexAgentStateValue>,
     scope: CoroutineScope,
     cacheNonce: StateFlow<Long>? = null,
 ): HistoryIndexViewModel = createHistoryIndexViewModel(object : HistoryIndexDependencies {
-    override val timeline = timeline
-    override val timestamp = timestamp
+    override val storage = storage
     override val latestIndex = latestIndex
     override val cacheNonce = cacheNonce
     override val externalWrite = agentState.map { it == KodexAgentStateValue.ExternalWrite }

@@ -10,7 +10,7 @@ import io.github.stream29.kodex.cli.rpc.RpcGlobalSettings
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.cli.rpc.RpcSessionViews
 import io.github.stream29.kodex.cli.session.DefaultPersistedSessionViewModelRegistry
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.CoroutineDispatcher

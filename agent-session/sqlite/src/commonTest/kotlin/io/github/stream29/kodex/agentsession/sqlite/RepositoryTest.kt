@@ -4,6 +4,9 @@ package io.github.stream29.kodex.agentsession.sqlite
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.*
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.sqlite.*
@@ -47,23 +50,28 @@ val sqliteRepositoryTest by testSuite {
                     session.runtime.modify { it.initialize(settings("original")) }
                     val created = repository.readCreatedAt(first)
                     assertNotNull(created)
-                    session.storage.settings[7] = settings("new")
-                    session.storage.timestamp[7] = Instant.fromEpochSeconds(123, 456)
+                    val appendedIndex = session.storage.commit(
+                        listOf(
+                            settings("new"),
+                            CommitTimestamp(Instant.fromEpochSeconds(123, 456)),
+                        ),
+                    )
+                    assertEquals(1, appendedIndex)
                     val observable = session.storage as ObservableKodexAgentStorage
-                    assertEquals(7, observable.settings.latestIndex.value)
-                    val nonce = observable.settings.cacheNonce.value
+                    assertEquals(1, observable.latestIndexFlow.value)
+                    val nonce = observable.cacheNonce.value
                     val second = repository.createFork(first)
                     assertEquals(1, second)
                     val fork = repository.open(second)
                     assertEquals(Path(fs.resolve(root), "sessions", "1").toStorageUri(), fork.storage.uri)
                     assertNotEquals(session.storage.uri, fork.storage.uri)
                     assertEquals("new", repository.getEntry(second).threadName)
-                    fork.storage.revert(7)
+                    fork.storage.revert(1)
                     assertEquals("original", repository.getEntry(second).threadName)
                     assertEquals(created, repository.readUpdatedAt(second))
-                    session.storage.revert(7)
-                    assertNotEquals(nonce, observable.settings.cacheNonce.value)
-                    assertEquals(0, observable.settings.latestIndex.value)
+                    session.storage.revert(1)
+                    assertNotEquals(nonce, observable.cacheNonce.value)
+                    assertEquals(0, observable.latestIndexFlow.value)
                     repository.getEntry(first).archive()
                     assertEquals(listOf(second), repository.listEntries(false).map { it.entryIndex })
                     assertEquals(listOf(first, second), repository.list())
@@ -79,7 +87,7 @@ val sqliteRepositoryTest by testSuite {
                         assertEquals(listOf(0, 1), reopened.list())
                         assertEquals("original", reopened.getEntry(0).threadName)
                         assertEquals(created, reopened.readCreatedAt(1))
-                        assertEquals("original", reopened.open(1).storage.settings[0].threadName)
+                        assertEquals("original", reopened.open(1).storage.getSettingsAt(0).threadName)
                         reopened.delete(0)
                         assertEquals(listOf(1), reopened.entries.value)
                         assertEquals(0, reopened.create())
@@ -101,24 +109,24 @@ val sqliteRepositoryTest by testSuite {
                     SqliteKodexSessionRepository(root, dependencies).use { repository ->
                         val session = repository.open(0)
                         val observable = session.storage as ObservableKodexAgentStorage
-                        val nonce = observable.settings.cacheNonce.value
+                        val nonce = observable.cacheNonce.value
                         db.execute("""CREATE TRIGGER reject_init BEFORE INSERT ON agent_commits WHEN NEW.type = 'timestamp' AND NEW."index" = 0 BEGIN SELECT RAISE(ABORT, 'injected'); END""")
                         assertFailsWith<SqliteFailure> { session.runtime.modify { it.initialize(settings("failed")) } }
-                        assertEquals(-1, observable.settings.latestIndex.value)
-                        assertEquals(nonce, observable.settings.cacheNonce.value)
+                        assertEquals(-1, observable.latestIndexFlow.value)
+                        assertEquals(nonce, observable.cacheNonce.value)
                         assertEquals(-1, session.storage.latestIndex())
                         assertNull(repository.getEntry(0).threadName)
                         db.execute("DROP TRIGGER reject_init")
                         session.runtime.modify { it.initialize(settings("committed")) }
-                        assertEquals(0, observable.settings.latestIndex.value)
+                        assertEquals(0, observable.latestIndexFlow.value)
                         db.execute("""CREATE TRIGGER reject_settings_update BEFORE INSERT ON agent_commits WHEN NEW.type = 'settings' AND NEW."index" > 0 BEGIN SELECT RAISE(ABORT, 'injected'); END""")
                         assertFailsWith<SqliteFailure> { session.runtime.updateSettings(settings("uncommitted")) }
                         assertEquals("committed", repository.getEntry(0).threadName)
-                        assertEquals(0, observable.settings.latestIndex.value)
+                        assertEquals(0, observable.latestIndexFlow.value)
                         db.execute("DROP TRIGGER reject_settings_update")
                         db.execute("CREATE TRIGGER reject_index_insert BEFORE INSERT ON agent_commits WHEN NEW.type = 'user_message' BEGIN SELECT RAISE(ABORT, 'injected'); END")
                         assertFailsWith<SqliteFailure> { session.runtime.appendUserMessage(listOf(ContentItem.InputText("uncommitted"))) }
-                        assertEquals(-1, session.storage.index.latestIndex())
+                        assertNull(session.storage.floorToIndex(Int.MAX_VALUE, AgentCommitType.IndexTypes))
                         assertEquals(0, session.storage.latestIndex())
                         db.execute("DROP TRIGGER reject_index_insert")
                         db.execute("CREATE TRIGGER reject_session BEFORE INSERT ON sessions BEGIN SELECT RAISE(ABORT, 'injected'); END")
@@ -134,7 +142,7 @@ val sqliteRepositoryTest by testSuite {
                         assertFailsWith<SqliteFailure> { repository.delete(0) }
                         assertEquals(listOf(0), repository.entries.value)
                         db.execute("DROP TRIGGER reject_delete")
-                        assertEquals("committed", repository.open(0).storage.settings[0].threadName)
+                        assertEquals("committed", repository.open(0).storage.getSettingsAt(0).threadName)
                     }
                 }
             }
@@ -222,7 +230,7 @@ val sqliteRepositoryTest by testSuite {
                 owner.cancelAndJoin()
                 assertFalse(session.coroutineContext[Job]!!.isActive)
                 assertTrue(fs.exists(Path(root, "sessions", "0", "settings", "0.json")))
-                assertFailsWith<IllegalStateException> { session.storage.settings.latestIndex() }
+                assertFailsWith<IllegalStateException> { session.storage.latestIndex() }
                 assertFailsWith<IllegalStateException> { repository.list() }
             }
         }

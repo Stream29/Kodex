@@ -14,7 +14,7 @@ import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
 import kotlinx.coroutines.flow.StateFlow

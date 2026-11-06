@@ -4,7 +4,8 @@ package io.github.stream29.kodex.cli.sessiontitle
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.updateThreadName
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -41,7 +42,7 @@ public actual class AgentTitleGeneration actual constructor(
 
             val latestIndex = agentState.latestIndex.value
             if (latestIndex < 0) return@withLock false
-            val expectedThreadName = agentState.storage.settings[latestIndex].threadName
+            val expectedThreadName = agentState.storage.getSettingsAt(latestIndex).threadName
             if (!expectedThreadName.isDefaultSessionTitle()) return@withLock false
 
             val attemptId = nextAttemptId++
@@ -124,7 +125,7 @@ public actual class AgentTitleGeneration actual constructor(
         mutex.withLock {
             if (activeAttemptId != attemptId) return
             while (true) {
-                val current = agentState.storage.settings[agentState.latestIndex.value]
+                val current = agentState.storage.getSettingsAt(agentState.latestIndex.value)
                 if (current.threadName != expectedThreadName) return
                 if (agentState.compareAndSetSettings(current, current.copy(threadName = title))) return
                 // Another field may have changed. Retain this generated title,

@@ -18,7 +18,7 @@ import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.cli.agent.createComposerViewModel
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.Reasoning
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow

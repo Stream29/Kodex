@@ -1,28 +1,24 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
-import io.github.stream29.kodex.agentstorage.contract.valuesDescending
-import kotlinx.coroutines.flow.firstOrNull
 
 /**
  * Finds the newest compaction marker in the current storage.
- *
- * Only index-timeline entries are inspected. The flow stops as soon as the
- * first marker is found, so callers do not decode the complete index timeline.
  */
-public actual suspend fun KodexAgentStorage.latestCompactionPointOrNull(): Int? =
-    latestCompactionPointOrNull(latestIndex())
+public actual suspend fun KodexAgentStorage.latestCompactionPointOrNull(): Int? {
+    val latest = latestIndex()
+    if (latest < 0) return null
+    return latestCompactionPointOrNull(latest)
+}
 
 /** Finds the newest compaction marker at or before [at]. */
-private suspend fun KodexAgentStorage.latestCompactionPointOrNull(at: Int): Int? {
+public actual suspend fun KodexAgentStorage.latestCompactionPointOrNull(at: Int): Int? {
     require(at >= 0) { "Index $at must be non-negative." }
-    return index.valuesDescending(at)
-        .firstOrNull { (_, entry) -> entry is CleanCompactionPoint }
-        ?.first
+    return getLastCommitsIn(0..at, setOf(AgentCommitType.CompactionPoint), limit = 1)
+        .lastOrNull()
+        ?.index
 }
 
 /**
@@ -44,26 +40,7 @@ public actual suspend fun KodexAgentStorage.activeMessageWindowAt(
         buildCompactionPrefix(pointIndex)
     }
     val contextStart = pointIndex ?: 0
-    val indexEvents = this.index.valuesIn(contextStart..index)
-    val workEvents = work.valuesIn(contextStart..index)
-
-    val contextWindow = buildList {
-        var indexPosition = 0
-        var workPosition = 0
-        while (indexPosition < indexEvents.size || workPosition < workEvents.size) {
-            val indexEntry = indexEvents.getOrNull(indexPosition)
-            val workEntry = workEvents.getOrNull(workPosition)
-            if (indexEntry != null && (workEntry == null || indexEntry.first <= workEntry.first)) {
-                indexPosition += 1
-                when (val entry = indexEntry.second) {
-                    is StableIndexEvent -> add(entry)
-                    is CleanCompactionPoint -> Unit
-                }
-            } else {
-                workPosition += 1
-                add(requireNotNull(workEntry).second)
-            }
-        }
-    }
+    val contextWindow = getCommitsIn(contextStart..index, AgentCommitType.CleanEventTypes)
+        .map { it.commit as StableCleanEvent }
     return prefix + contextWindow
 }

@@ -4,11 +4,10 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.ModelsResponse
@@ -49,7 +48,7 @@ val contextWindowTokenBudgetTest by testSuite {
                 autoCompactionTokenLimit = 800L,
             ),
         )
-        storage.tokenCount[1] = TokenCountSnapshot(TokenCountKind.Response, 760L)
+        storage.commit(TokenCountSnapshot.Response(760L))
 
         assertEquals(40L, testState(storage).tokensUntilCompaction(testCatalog()))
     }
@@ -61,14 +60,14 @@ val contextWindowTokenBudgetTest by testSuite {
                 autoCompactionTokenLimit = 800L,
             ),
         )
-        storage.tokenCount[1] = TokenCountSnapshot(TokenCountKind.Compaction, 0L)
+        storage.commit(TokenCountSnapshot.Compaction(0L))
 
         assertEquals(800L, testState(storage).tokensUntilCompaction(testCatalog()))
     }
 
     test("reports an unknown budget before OpenAI reports token usage") {
-        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
-        storage.tokenCount.revert(0)
+        val storage = InMemoryKodexAgentStorage.empty()
+        storage.commit(KodexAgentSettings(OpenAiModelId("test-model")))
 
         assertNull(testState(storage).tokensUntilCompaction(testCatalog()))
     }

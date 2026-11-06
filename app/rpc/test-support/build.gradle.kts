@@ -33,7 +33,8 @@ kotlin {
         implementation(project(":rpc-in-memory"))
         implementation(project(":utils-kotlinx-io-coroutines-system"))
         implementation(project(":utils-coroutines"))
-        implementation(project(":agent-session-filesystem"))
+        implementation(project(":agent-session-sqlite"))
+        implementation(project(":utils-sqlite"))
         implementation(project(":agent-session-test"))
         implementation(project(":agent-storage-core"))
     }

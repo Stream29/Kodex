@@ -3,7 +3,7 @@ package io.github.stream29.kodex.cli.app
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import kotlinx.io.files.Path
 import kotlin.time.Duration

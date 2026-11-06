@@ -23,7 +23,7 @@ import io.github.stream29.kodex.cli.components.buttonWidth
 import io.github.stream29.kodex.cli.components.statusBarLayoutPlan
 import io.github.stream29.kodex.cli.components.statusBarWidth
 import io.github.stream29.kodex.cli.components.workingDirectoryStatusLabel
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 
 @Composable

@@ -6,7 +6,7 @@ import io.github.stream29.kodex.cli.agent.AgentRuntimeControl
 import io.github.stream29.kodex.cli.agent.canCompact
 import io.github.stream29.kodex.cli.agent.label
 import io.github.stream29.kodex.cli.agent.runtimeControl
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds

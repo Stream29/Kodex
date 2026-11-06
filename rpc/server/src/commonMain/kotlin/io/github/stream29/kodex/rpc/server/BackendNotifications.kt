@@ -4,6 +4,7 @@ package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
@@ -27,10 +28,15 @@ public actual class BackendNotifications actual constructor() {
     internal suspend fun stopped(index: Int, runtime: AgentRuntime, before: Int) {
         when (val state = runtime.state.value) {
             KodexAgentStateValue.AssistantMessage -> {
-                val message = runtime.storage.index.indexesIn((before + 1)..runtime.latestIndex.value)
-                    .asReversed().firstNotNullOfOrNull {
-                        runtime.storage.index.getExact(it) as? StableAssistantMessage
-                    }
+                val message = runtime.storage.getLastCommitsIn(
+                    (before + 1)..runtime.latestIndex.value,
+                    setOf(
+                        AgentCommitType.AssistantMessage,
+                        AgentCommitType.AssistantMessageCommentary,
+                        AgentCommitType.AssistantMessageFinal,
+                    ),
+                    limit = 1,
+                ).lastOrNull()?.commit as? StableAssistantMessage
                 if (message != null) publish(Notification.Stop.AssistantMessage(index, message))
             }
             is KodexAgentStateValue.ToolPending -> {

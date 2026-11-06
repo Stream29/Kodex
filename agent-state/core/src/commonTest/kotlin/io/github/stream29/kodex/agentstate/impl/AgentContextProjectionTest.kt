@@ -4,18 +4,21 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
+import io.github.stream29.kodex.agentstorage.contract.floorToIndex
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
+import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
@@ -83,8 +86,8 @@ val agentContextProjectionTest by testSuite {
                     ),
                 )
                 assertEquals(user, input.last())
-                assertEquals(StableUserMessage(user.content), storage.index[1])
-                assertEquals(1, storage.index.latestIndex())
+                assertEquals(StableUserMessage(user.content), storage.getIndexEntryAt(1))
+                assertEquals(1, storage.floorToIndex(Int.MAX_VALUE, AgentCommitType.IndexTypes))
                 assertEquals(1, storage.latestIndex())
             } finally {
                 deleteRecursively(fixture.root)
@@ -190,10 +193,10 @@ val agentContextProjectionTest by testSuite {
                 assertTrue(toolSearchSpec.description.contains("- projection: Projection tools."))
                 assertFalse(compactionRequests.single().hasRequestUserInputTool())
                 assertEquals(3, compactIndex)
-                assertEquals(StableUserMessage(user.content), storage.index[1])
+                assertEquals(StableUserMessage(user.content), storage.getIndexEntryAt(1))
                 assertEquals(
                     StableContextCompaction(encryptedContent = "compacted"),
-                    storage.work[compactIndex],
+                    storage.getWorkEventAt(compactIndex),
                 )
             } finally {
                 deleteRecursively(fixture.root)

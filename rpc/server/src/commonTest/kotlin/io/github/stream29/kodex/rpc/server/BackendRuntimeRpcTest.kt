@@ -2,11 +2,10 @@ package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
+import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
 import io.github.stream29.kodex.agentstorage.contract.*
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
@@ -16,7 +15,7 @@ import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
-import io.github.stream29.kodex.rpc.client.rpcCachedIndexVersioned
+import io.github.stream29.kodex.rpc.client.rpcCachedAgentStorage
 import io.github.stream29.kodex.rpc.contract.*
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.models.AgentStateValue
@@ -29,6 +28,7 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.rpc.withService
 import kotlin.random.Random
 import kotlin.test.*
+import kotlin.time.Instant
 import kotlin.time.TestTimeSource
 import kotlin.time.Duration.Companion.seconds
 
@@ -36,57 +36,58 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
     test("six concrete services retain real sparse values and frontend cache semantics") {
         runtimeFixture { host, index, _ ->
             withInMemoryRpc(registerServices = {
-                registerService(IndexTimelineRpc::class) { BackendIndexTimelineRpc(host) }
-                registerService(WorkTimelineRpc::class) { BackendWorkTimelineRpc(host) }
-                registerService(SettingsTimelineRpc::class) { BackendSettingsTimelineRpc(host) }
-                registerService(TimestampTimelineRpc::class) { BackendTimestampTimelineRpc(host) }
-                registerService(TokenCountTimelineRpc::class) { BackendTokenCountTimelineRpc(host) }
-                registerService(UnstableTimelineRpc::class) { BackendUnstableTimelineRpc(host) }
+                registerService(AgentStorageRpc::class) { BackendAgentStorageRpc(host) }
             }) { raw ->
                 val client = RestoringRpcClient(raw)
                 val runtime = host.session(index).session.runtime
                 runtime.appendUserMessage(listOf(ContentItem.InputText("one")))
                 runtime.modify {
-                    val next = it.latestIndex() + 1
-                    it.work[next] = StableReasoning(ResponseItem.Reasoning(encryptedContent = "test-reasoning"))
-                    it.unstable[next] = emptyList()
-                    it.tokenCount[next] = TokenCountSnapshot(
-                        TokenCountKind.Response, 0, TokenUsage(0, 0, 0),
-                        TokenCountDiagnostics(requestId = "test", turnStateReceived = true),
+                    it.commit(
+                        listOf(
+                            StableReasoning(ResponseItem.Reasoning(encryptedContent = "test-reasoning")),
+                            UnstableSnapshot(emptyList()),
+                            TokenCountSnapshot.Response(
+                                0, TokenUsage(0, 0, 0),
+                                TokenCountDiagnostics(requestId = "test", turnStateReceived = true),
+                            ),
+                        ),
                     )
                 }
                 val storage = runtime.storage as ObservableKodexAgentStorage
-                checkTimeline(index, client.withService<IndexTimelineRpc>(), storage.index)
-                checkTimeline(index, client.withService<WorkTimelineRpc>(), storage.work)
-                checkTimeline(index, client.withService<SettingsTimelineRpc>(), storage.settings)
-                checkTimeline(index, client.withService<TimestampTimelineRpc>(), storage.timestamp)
-                checkTimeline(index, client.withService<TokenCountTimelineRpc>(), storage.tokenCount)
-                checkTimeline(index, client.withService<UnstableTimelineRpc>(), storage.unstable)
-                val unstable = client.withService<UnstableTimelineRpc>()
-                val nonce = unstable.getCacheNonce(index)
-                assertEquals(emptyList(), unstable.getExact(index, nonce, runtime.latestIndex.value))
-                assertNull(unstable.getExact(index, nonce, 999))
+                val rpc = client.withService<AgentStorageRpc>()
+                checkTimeline(index, rpc, storage, AgentCommitType.IndexTypes) { it as CleanIndexEntry }
+                checkTimeline(index, rpc, storage, AgentCommitType.WorkTypes) { it as StableWorkEvent }
+                checkTimeline(index, rpc, storage, AgentCommitType.SettingsTypes) { it as KodexAgentSettings }
+                checkTimeline(index, rpc, storage, AgentCommitType.TimestampTypes) { (it as CommitTimestamp).instant }
+                checkTimeline(index, rpc, storage, AgentCommitType.TokenCountTypes) { it as TokenCountSnapshot }
+                checkTimeline(index, rpc, storage, AgentCommitType.UnstableTypes) { (it as UnstableSnapshot).events }
+                val nonce = rpc.getCacheNonce(index)
+                assertEquals(
+                    emptyList(),
+                    (rpc.getCommitsExact(index, nonce, runtime.latestIndex.value, AgentCommitType.UnstableTypes).singleOrNull() as? UnstableSnapshot)?.events,
+                )
+                assertEquals(emptyList(), rpc.getCommitsExact(index, nonce, 999, AgentCommitType.UnstableTypes))
             }
         }
     }
 
     test("settings CAS uses actual current value and equal writes leave the tail unchanged") {
         runtimeFixture { host, index, _ ->
-            val rpc = BackendSettingsTimelineRpc(host)
+            val rpc = BackendAgentStorageRpc(host)
             val nonce = rpc.getCacheNonce(index)
-            val old = rpc.get(index, nonce, rpc.getLatestIndex(index))
+            val old = rpc.getLastCommitsIn(index, nonce, 0, rpc.getLatestIndex(index), AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings
             val tail = rpc.getLatestIndex(index)
-            assertTrue(rpc.compareAndSet(index, old, old))
+            assertTrue(rpc.compareAndSetSettings(index, old, old))
             assertEquals(tail, rpc.getLatestIndex(index))
-            assertTrue(rpc.compareAndSet(index, old, old.copy(threadName = "changed")))
-            assertFalse(rpc.compareAndSet(index, old, old.copy(threadName = "stale")))
+            assertTrue(rpc.compareAndSetSettings(index, old, old.copy(threadName = "changed")))
+            assertFalse(rpc.compareAndSetSettings(index, old, old.copy(threadName = "stale")))
             assertEquals(nonce, rpc.getCacheNonce(index))
         }
     }
 
     test("revert checks nonce at write admission clears steer and invalidates the frontend cache") {
         runtimeFixture { host, index, rpc ->
-            val timelines = BackendIndexTimelineRpc(host)
+            val timelines = BackendAgentStorageRpc(host)
             rpc.appendUserMessage(index, listOf(ContentItem.InputText("old")))
             val nonce = timelines.getCacheNonce(index)
             assertTrue(rpc.compareAndSetPendingSteer(index, emptyList(), listOf(StableUserMessage(listOf(ContentItem.InputText("queued"))))))
@@ -96,9 +97,13 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
             assertEquals(0, rpc.getLatestIndex(index))
             assertEquals(emptyList(), rpc.getPendingSteer(index))
             assertNotEquals(nonce, timelines.getCacheNonce(index))
-            assertFailsWith<CacheNonceMismatch> { timelines.getExact(index, nonce, 1) }
+            assertFailsWith<CacheNonceMismatch> { timelines.getCommitsExact(index, nonce, 1, AgentCommitType.IndexTypes) }
             rpc.appendUserMessage(index, listOf(ContentItem.InputText("replacement")))
-            assertEquals("replacement", (timelines.getExact(index, timelines.getCacheNonce(index), 1) as StableUserMessage).content.filterIsInstance<ContentItem.InputText>().single().text)
+            assertEquals(
+                "replacement",
+                (timelines.getCommitsExact(index, timelines.getCacheNonce(index), 1, AgentCommitType.IndexTypes).single() as StableUserMessage)
+                    .content.filterIsInstance<ContentItem.InputText>().single().text,
+            )
         }
     }
 
@@ -218,30 +223,37 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
         runtimeFixture(client) { host, index, backendRuntime ->
             withInMemoryRpc(registerServices = {
                 registerService(AgentRuntimeRpc::class) { backendRuntime }
-                registerService(SettingsTimelineRpc::class) { BackendSettingsTimelineRpc(host) }
+                registerService(AgentStorageRpc::class) { BackendAgentStorageRpc(host) }
             }) { raw ->
                 val restored = RestoringRpcClient(raw)
                 val runtime = restored.withService<AgentRuntimeRpc>()
-                val settings = restored.withService<SettingsTimelineRpc>()
+                val settings = restored.withService<AgentStorageRpc>()
                 runtime.appendUserMessage(index, listOf(ContentItem.InputText("compact")))
-                val before = settings.get(index, settings.getCacheNonce(index), settings.getLatestIndex(index))
+                val before = settings.getLastCommitsIn(
+                    index, settings.getCacheNonce(index), 0, settings.getLatestIndex(index), AgentCommitType.SettingsTypes, 1,
+                ).single().commit as KodexAgentSettings
                 val operation = async { runtime.forcedCompact(index) }
                 try {
                     entered.await()
                     val first = before.copy(threadName = "accepted-during-compaction")
-                    assertTrue(settings.compareAndSet(index, before, first))
+                    assertTrue(settings.compareAndSetSettings(index, before, first))
                     val latest = first.copy(model = OpenAiModelId("updated-model"))
-                    assertTrue(settings.compareAndSet(index, first, latest))
+                    assertTrue(settings.compareAndSetSettings(index, first, latest))
                     release.complete(Unit)
                     val checkpoint = operation.await()
-                    val published = settings.get(index, settings.getCacheNonce(index), checkpoint)
+                    val published = settings.getLastCommitsIn(
+                        index, settings.getCacheNonce(index), 0, checkpoint, AgentCommitType.SettingsTypes, 1,
+                    ).single().commit as KodexAgentSettings
                     assertEquals(latest.threadName, published.threadName)
                     assertEquals(latest.model, published.model)
                     // The returned index is the compaction output; settings
                     // belong to its immediately preceding compaction point.
-                    assertEquals(checkpoint - 1, settings.getLatestIndexFlow(index).first {
-                        it == checkpoint - 1
-                    })
+                    assertEquals(
+                        checkpoint - 1,
+                        settings.getLastCommitsIn(
+                            index, settings.getCacheNonce(index), 0, checkpoint, AgentCommitType.SettingsTypes, 1,
+                        ).single().index,
+                    )
                     assertEquals(AgentStateValue.UserMessage, runtime.getState(index))
                 } finally {
                     release.complete(Unit)
@@ -304,14 +316,17 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
         }, settings = SessionTitleSettings()) { host, index, rpc ->
             rpc.appendUserMessage(index, listOf(ContentItem.InputText("title")))
             entered.await()
-            val settings = BackendSettingsTimelineRpc(host)
+            val settings = BackendAgentStorageRpc(host)
             val nonce = settings.getCacheNonce(index)
-            val old = settings.get(index, nonce, settings.getLatestIndex(index))
-            assertTrue(settings.compareAndSet(index, old, old.copy(threadName = "manual")))
+            val old = settings.getLastCommitsIn(index, nonce, 0, settings.getLatestIndex(index), AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings
+            assertTrue(settings.compareAndSetSettings(index, old, old.copy(threadName = "manual")))
             release.complete(Unit)
             titleJob.await().join()
             rpc.appendUserMessage(index, listOf(ContentItem.InputText("second")))
-            assertEquals("manual", settings.get(index, nonce, settings.getLatestIndex(index)).threadName)
+            assertEquals(
+                "manual",
+                (settings.getLastCommitsIn(index, nonce, 0, settings.getLatestIndex(index), AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings).threadName,
+            )
             assertEquals(1, calls)
         }
     }
@@ -348,16 +363,19 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
         }, settings = SessionTitleSettings()) { host, index, rpc ->
             rpc.appendUserMessage(index, listOf(ContentItem.InputText("title")))
             entered.await()
-            val settings = BackendSettingsTimelineRpc(host)
+            val settings = BackendAgentStorageRpc(host)
             val nonce = settings.getCacheNonce(index)
-            val old = settings.get(index, nonce, settings.getLatestIndex(index))
+            val old = settings.getLastCommitsIn(index, nonce, 0, settings.getLatestIndex(index), AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings
             val changed = old.copy(instructions = "new instructions")
-            assertTrue(settings.compareAndSet(index, old, changed))
+            assertTrue(settings.compareAndSetSettings(index, old, changed))
             release.complete(Unit)
             settings.getLatestIndexFlow(index).first {
-                settings.get(index, nonce, it).threadName == "automatic"
+                (settings.getLastCommitsIn(index, nonce, 0, it, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings).threadName == "automatic"
             }
-            assertEquals(changed.instructions, settings.get(index, nonce, settings.getLatestIndex(index)).instructions)
+            assertEquals(
+                changed.instructions,
+                (settings.getLastCommitsIn(index, nonce, 0, settings.getLatestIndex(index), AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings).instructions,
+            )
         }
         runtimeFixture(generator = SessionTitleGenerator { _, _, _ -> error("optional title failure") },
             settings = SessionTitleSettings()) { _, index, rpc ->
@@ -368,24 +386,30 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
 }
 
 private suspend fun <T : Any> CoroutineScope.checkTimeline(
-    index: Int, rpc: TimelineRpc<T>, storage: CachedIndexVersioned<T>,
+    index: Int,
+    rpc: AgentStorageRpc,
+    storage: ObservableKodexAgentStorage,
+    types: Set<AgentCommitType>,
+    extract: (AgentCommit) -> T,
 ) {
     val nonce = rpc.getCacheNonce(index)
+    val expectedValues = storage.getCommitsIn(0..100, types).map { it.index to extract(it.commit) }
+    val expectedLatest = expectedValues.lastOrNull()?.first ?: -1
     assertEquals(storage.cacheNonce.value, nonce)
-    assertEquals(storage.latestIndex.value, rpc.getLatestIndex(index))
-    assertEquals(storage.indexesIn(0..100), rpc.indexesIn(index, nonce, 0, 100))
-    assertEquals(storage.valuesIn(0..100), rpc.valuesIn(index, nonce, 0, 100))
-    assertEquals(emptyList(), rpc.valuesIn(index, nonce, 4, 3))
-    assertEquals(storage.floorToIndex(100), rpc.floorToIndex(index, nonce, 100))
-    assertEquals(storage.ceilToIndex(0), rpc.ceilToIndex(index, nonce, 0))
-    assertNull(rpc.getExact(index, nonce, 100))
-    assertFailsWith<CacheNonceMismatch> { rpc.getExact(index, nonce xor 1, 0) }
+    assertEquals(storage.latestIndex(), rpc.getLatestIndex(index))
+    assertEquals(expectedValues.map { it.first }, rpc.indexesIn(index, nonce, 0, 100, types))
+    assertEquals(expectedValues, rpc.getCommitsIn(index, nonce, 0, 100, types).map { it.index to extract(it.commit) })
+    assertEquals(emptyList(), rpc.getCommitsIn(index, nonce, 4, 3, types))
+    assertEquals(expectedLatest.takeIf { it >= 0 }, rpc.getLastCommitsIn(index, nonce, 0, 100, types, 1).lastOrNull()?.index)
+    assertEquals(expectedValues.firstOrNull()?.first, rpc.getFirstCommitsIn(index, nonce, 0, 100, types, 1).firstOrNull()?.index)
+    assertEquals(emptyList(), rpc.getCommitsExact(index, nonce, 100, types))
+    assertFailsWith<CacheNonceMismatch> { rpc.getCommitsExact(index, nonce xor 1, 0, types) }
     val job = Job(coroutineContext[Job])
     try {
-        val cached = CoroutineScope(coroutineContext + job).rpcCachedIndexVersioned(index, rpc)
-        for ((position, value) in storage.valuesIn(0..100)) {
-            assertEquals(value, cached.getExact(position))
-            assertEquals(value, cached[position])
+        val cached = CoroutineScope(coroutineContext + job).rpcCachedAgentStorage(index, storage.uri, rpc)
+        for ((position, value) in expectedValues) {
+            assertEquals(value, extract(cached.getCommitsExact(position, types).single()))
+            assertEquals(value, extract(cached.getLastCommitsIn(0..position, types, 1).single().commit))
         }
     } finally { job.cancelAndJoin() }
 }
@@ -399,7 +423,7 @@ internal suspend fun runtimeFixture(
     val root = Path(SystemTemporaryDirectory, "kodex-rpc-runtime-${Random.nextLong()}")
     try {
         withBackendSessionHost(TestTimeSource(), {
-            FileSystemKodexSessionRepository(root, testKodexAgentDependencies(client))
+            SqliteKodexSessionRepository(root, testKodexAgentDependencies(client))
         }) { host ->
             val index = host.repository().create()
             host.keepSessionAlive(index)

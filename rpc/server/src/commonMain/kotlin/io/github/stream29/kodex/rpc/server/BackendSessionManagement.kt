@@ -3,13 +3,12 @@
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
-import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
@@ -101,23 +100,25 @@ public actual class BackendSessionManagement actual constructor(
                 source.runtime.modify { sourceStorage ->
                     require(source.runtime.runningTurn.value == null) { "Cannot fork a running Agent." }
                     if (nonce != null &&
-                        (source.runtime.storage as ObservableKodexAgentStorage).index.cacheNonce.value != nonce
+                        (source.runtime.storage as ObservableKodexAgentStorage).cacheNonce.value != nonce
                     ) throw CacheNonceMismatch()
                     val latest = sourceStorage.latestIndex()
                     require(latest >= 0) { "Cannot fork an uninitialized Session." }
                     val until = boundary ?: (latest + 1)
                     require(until > 0 && until <= latest + 1) { "Invalid fork boundary." }
-                    val settings = sourceStorage.settings[until - 1]
+                    val settings = sourceStorage.getSettingsAt(until - 1)
                     val targetIndex = host.repository().createFork(sourceIndex)
                     try {
                         val target = host.repository().open(targetIndex)
                         try {
                             target.runtime.modify { storage ->
                                 if (boundary != null) storage.revert(until)
-                                storage.settings[storage.latestIndex() + 1] = settings.copy(
-                                    turnId = Uuid.generateV7().toString(),
-                                    turnState = null,
-                                    threadName = "[fork] ${settings.threadName.trim().ifEmpty { "Session $targetIndex" }}",
+                                storage.commit(
+                                    settings.copy(
+                                        turnId = Uuid.generateV7().toString(),
+                                        turnState = null,
+                                        threadName = "[fork] ${settings.threadName.trim().ifEmpty { "Session $targetIndex" }}",
+                                    ),
                                 )
                             }
                         } finally {

@@ -17,9 +17,11 @@ import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
@@ -499,8 +501,12 @@ val agentHistoryRendererStateTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                for (index in 1..30) storage.index[index] =
-                    StableUserMessage(listOf(ContentItem.InputText("row-$index")))
+                storage.commit(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                for (index in 1..30) {
+                    storage.commit(
+                        StableUserMessage(listOf(ContentItem.InputText("row-$index"))),
+                    )
+                }
             }
             val model = createAgentHistoryViewModel(
                 AgentHistorySource(runtime.storage, runtime.latestIndex, runtime.state),

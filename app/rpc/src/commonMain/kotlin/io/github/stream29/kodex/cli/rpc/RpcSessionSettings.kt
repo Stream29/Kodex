@@ -6,7 +6,7 @@ import io.github.stream29.kodex.app.settings.contract.SessionSettingsConfigurati
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsDataSource
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsDataState
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsSnapshot
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel

@@ -9,10 +9,12 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
-import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.app.history.contract.*
@@ -33,16 +35,20 @@ val offscreenHistoryTest by testSuite {
     test("real History owner pages around a raster viewport and acknowledges exact item and Latest effects") { offscreenTest {
         val stored = InMemoryKodexAgentStorage.empty()
         for (index in 1..640) {
-            stored.index[index] = StableUserMessage(listOf(ContentItem.InputText("Offscreen history $index")))
-            stored.timestamp[index] = Instant.fromEpochMilliseconds(index * 1_000L)
+            stored.commit(
+                listOf(
+                    StableUserMessage(listOf(ContentItem.InputText("Offscreen history $index"))),
+                    CommitTimestamp(Instant.fromEpochMilliseconds(index * 1_000L)),
+                ),
+            )
         }
         val reads = mutableListOf<Int>()
         val source = object : KodexAgentStorage by stored {
-            override val index = object : IndexVersioned<CleanIndexEntry> by stored.index {
-                override suspend fun getExact(index: Int): CleanIndexEntry? {
+            override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> {
+                if (types == AgentCommitType.IndexTypes) {
                     reads += index
-                    return stored.index.getExact(index)
                 }
+                return stored.getCommitsExact(index, types)
             }
         }
         val owner = CoroutineScope(currentCoroutineContext() + Job(currentCoroutineContext()[Job]))
@@ -142,8 +148,12 @@ val offscreenHistoryTest by testSuite {
 
     test("product list shares transient order, exact prefixed scroll and destructive empty-window replacement") { offscreenTest {
         val stored = InMemoryKodexAgentStorage.empty()
-        stored.index[1] = StableUserMessage(listOf(ContentItem.InputText("Committed row")))
-        stored.timestamp[1] = Instant.fromEpochMilliseconds(1_000)
+        stored.commit(
+            listOf(
+                StableUserMessage(listOf(ContentItem.InputText("Committed row"))),
+                CommitTimestamp(Instant.fromEpochMilliseconds(1_000)),
+            ),
+        )
         val latest = MutableStateFlow(1)
         val owner = CoroutineScope(currentCoroutineContext() + Job(currentCoroutineContext()[Job]))
         val model = createAgentHistoryViewModel(
@@ -179,8 +189,7 @@ val offscreenHistoryTest by testSuite {
             streaming.value = null
             scene.settle { !scene.hasText("Starting response…") && !scene.hasDescription("History tool: Running first") }
             val generation = model.historyItems.value.generation
-            stored.index.revert(1)
-            stored.timestamp.revert(1)
+            stored.revert(1)
             latest.value = 0
             scene.settle("replacement uses a new bounded window") {
                 model.loadState.value == AgentHistoryLoadState.Ready && model.historyItems.value.generation > generation &&

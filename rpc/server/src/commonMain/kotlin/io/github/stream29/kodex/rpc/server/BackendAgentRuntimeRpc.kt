@@ -8,12 +8,11 @@ import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
-import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.cli.sessiontitle.AgentTitleGeneration
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
@@ -147,13 +146,16 @@ public actual class BackendAgentRuntimeRpc actual constructor(
                 title.replaceHistory {
                     runtime.modify { storage ->
                         require(runtime.runningTurn.value == null) { "Cannot replace running Agent history." }
-                        val index = (runtime.storage as ObservableKodexAgentStorage).index
-                        if (index.cacheNonce.value != expectedCacheNonce) throw CacheNonceMismatch()
+                        val observable = runtime.storage as ObservableKodexAgentStorage
+                        if (observable.cacheNonce.value != expectedCacheNonce) throw CacheNonceMismatch()
                         require(untilExclusive > 0 && untilExclusive <= storage.latestIndex() + 1) {
                             "History boundary must retain initialization and lie within storage."
                         }
-                        val retainsText = storage.index.indexesIn(0 until untilExclusive).any {
-                            (storage.index.getExact(it) as? StableUserMessage)?.content?.any { item ->
+                        val retainsText = storage.getCommitsIn(
+                            0 until untilExclusive,
+                            setOf(AgentCommitType.UserMessage),
+                        ).any {
+                            (it.commit as? StableUserMessage)?.content?.any { item ->
                                 item is ContentItem.InputText && item.text.isNotBlank()
                             } == true
                         }

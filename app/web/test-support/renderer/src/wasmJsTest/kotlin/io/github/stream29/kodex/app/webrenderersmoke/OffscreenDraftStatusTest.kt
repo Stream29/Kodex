@@ -1,9 +1,9 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.app.ui.compose.rememberComposeAgentStatusRenderer
 import io.github.stream29.kodex.cli.app.ApplicationDraftStatusContent
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import kotlinx.io.files.Path
 import kotlin.test.*

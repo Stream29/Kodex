@@ -25,6 +25,9 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
+import io.github.stream29.kodex.agentstorage.contract.getWorkEventExact
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
 import kotlinx.coroutines.CoroutineScope
@@ -130,8 +133,8 @@ internal class HistoryItemLoadContext(
     suspend fun read(descriptor: HistoryItemDescriptor): StableCleanEvent =
         withContext(Dispatchers.Default) {
             (when (descriptor.source) {
-                HistoryItemSource.Index -> agentState.storage.index.getExact(descriptor.index)
-                HistoryItemSource.Work -> agentState.storage.work.getExact(descriptor.index)
+                HistoryItemSource.Index -> agentState.storage.getIndexEntryExact(descriptor.index)
+                HistoryItemSource.Work -> agentState.storage.getWorkEventExact(descriptor.index)
             } as? StableCleanEvent) ?: error(
                 "History item ${descriptor.source} entry ${descriptor.index} is missing.",
             )
@@ -140,7 +143,7 @@ internal class HistoryItemLoadContext(
     /** @return null when this exact index has no timestamp. */
     suspend fun readTimestamp(index: Int): kotlin.time.Instant? = withContext(Dispatchers.Default) {
         check(isCurrent()) { "History generation is no longer current." }
-        val timestamp = agentState.storage.timestamp.getExact(index)
+        val timestamp = agentState.storage.getTimestampExact(index)
         check(isCurrent()) { "History generation is no longer current." }
         timestamp
     }

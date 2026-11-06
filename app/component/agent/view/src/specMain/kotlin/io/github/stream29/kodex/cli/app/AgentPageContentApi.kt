@@ -5,7 +5,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.cli.settings.NewLineKey
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 
 /** Frozen inputs for this frame's measurement, not a retained execution or editable state owner. */

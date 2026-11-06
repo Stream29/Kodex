@@ -11,7 +11,7 @@ import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort

@@ -1,17 +1,21 @@
 package io.github.stream29.kodex.agentstorage.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.openai.KodexAgentSettings
-import kotlin.time.Instant
+import kotlinx.coroutines.flow.StateFlow
 
-/** Read-only storage view exposing each timeline's own cache metadata. */
+/**
+ * Read-only storage view exposing observable backend cache metadata.
+ *
+ * Backend and frontend implementations have separate caches. The backend owns
+ * [cacheNonce]; the frontend observes it to invalidate its cache and old read bindings.
+ */
 public interface ObservableKodexAgentStorage : KodexAgentStorage {
-    public override val index: CachedIndexVersioned<CleanIndexEntry>
-    public override val work: CachedIndexVersioned<StableWorkEvent>
-    public override val settings: CachedIndexVersioned<KodexAgentSettings>
-    public override val timestamp: CachedIndexVersioned<Instant>
-    public override val tokenCount: CachedIndexVersioned<TokenCountSnapshot>
-    public override val unstable: CachedIndexVersioned<List<UnstableCleanEvent>>
+    /**
+     * Backend-issued in-memory cache identity, replaced on backend owner reconstruction
+     * or destructive changes (`revert`). Appends and value eviction preserve it.
+     * Compare for equality, not ordering.
+     */
+    public val cacheNonce: StateFlow<Long>
+
+    /** Published tail of this storage, or `-1` when empty. */
+    public val latestIndexFlow: StateFlow<Int>
 }

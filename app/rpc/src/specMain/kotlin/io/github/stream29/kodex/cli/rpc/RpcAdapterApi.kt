@@ -3,10 +3,11 @@
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.app.accountusage.AccountUsageViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
@@ -42,7 +43,6 @@ import io.github.stream29.kodex.mcp.contract.McpManagedServerState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpServerDraft
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -50,14 +50,9 @@ import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.rpc.client.FrontendSettingsAccess
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
+import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
-import io.github.stream29.kodex.rpc.contract.IndexTimelineRpc
-import io.github.stream29.kodex.rpc.contract.SettingsTimelineRpc
 import io.github.stream29.kodex.rpc.contract.SuspendMutableStateFlow
-import io.github.stream29.kodex.rpc.contract.TimestampTimelineRpc
-import io.github.stream29.kodex.rpc.contract.TokenCountTimelineRpc
-import io.github.stream29.kodex.rpc.contract.UnstableTimelineRpc
-import io.github.stream29.kodex.rpc.contract.WorkTimelineRpc
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
@@ -125,12 +120,7 @@ public expect suspend fun startRpcOAuth(
 public expect class RpcServices(client: RpcClient) {
     public val global: GlobalRpc
     public val runtime: AgentRuntimeRpc
-    public val index: IndexTimelineRpc
-    public val work: WorkTimelineRpc
-    public val settings: SettingsTimelineRpc
-    public val timestamp: TimestampTimelineRpc
-    public val tokenCount: TokenCountTimelineRpc
-    public val unstable: UnstableTimelineRpc
+    public val storage: AgentStorageRpc
 }
 
 /** Independent backend observations, not a locally writable combined settings snapshot. */

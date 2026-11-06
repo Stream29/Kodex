@@ -2,293 +2,185 @@
 
 package io.github.stream29.kodex.agentstorage.inmemory
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
-import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.contract.validateCommitBatch
 import io.github.stream29.kodex.utils.ReadWriteMutex
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Clock
-import kotlin.time.Instant
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
  * Process-local mutable storage for tests and transient agent sessions.
- *
- * This implementation keeps all published values in memory. Construction
- * publishes the required snapshot-zero settings, so it can always back a legal
- * empty agent state without a synthetic compaction point.
  */
 @OptIn(ExperimentalUuidApi::class)
 public actual class InMemoryKodexAgentStorage private constructor(
-    initialIndex: MutableList<IndexedValue<CleanIndexEntry>>,
-    initialSettings: MutableList<IndexedValue<KodexAgentSettings>>,
-    initialTimestamp: MutableList<IndexedValue<Instant>>,
-    initialTokenCount: MutableList<IndexedValue<TokenCountSnapshot>>,
+    initialRows: MutableList<List<AgentCommit>>,
 ) : MutableKodexAgentStorage {
     private val identity: Any = Any()
-
-    private constructor(initialState: InitialStorageState) : this(
-        initialIndex = initialState.index,
-        initialSettings = initialState.settings,
-        initialTimestamp = initialState.timestamp,
-        initialTokenCount = initialState.tokenCount,
-    )
+    private val mutex = ReadWriteMutex()
+    private val rowsByIndex: MutableList<List<AgentCommit>> = initialRows
 
     public actual constructor(initialSettings: KodexAgentSettings) : this(
-        initialStorageState(initialSettings),
+        initialRows(initialSettings),
     )
 
     public actual override val uri: String = "memory:${identity.hashCode().toUInt().toString(16)}"
-    public actual override val index: MutableIndexVersioned<CleanIndexEntry> =
-        InMemoryIndexVersioned(initialIndex)
-    public actual override val work: MutableIndexVersioned<StableWorkEvent> =
-        InMemoryIndexVersioned()
-    public actual override val settings: MutableIndexVersioned<KodexAgentSettings> =
-        InMemoryIndexVersioned(initialSettings)
-    public actual override val timestamp: MutableIndexVersioned<Instant> =
-        InMemoryIndexVersioned(initialTimestamp)
-    public actual override val tokenCount: MutableIndexVersioned<TokenCountSnapshot> =
-        InMemoryIndexVersioned(initialTokenCount)
-    public actual override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>> =
-        InMemoryIndexVersioned()
+
+    public actual override suspend fun latestIndex(): Int = mutex.reader.withLock {
+        rowsByIndex.lastIndex
+    }
+
+    public actual override suspend fun indexesIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+    ): List<Int> {
+        if (range.isEmpty() || types.isEmpty()) return emptyList()
+        require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
+        return mutex.reader.withLock {
+            if (rowsByIndex.isEmpty() || range.first > rowsByIndex.lastIndex) return@withLock emptyList()
+            val endInclusive = minOf(range.last, rowsByIndex.lastIndex)
+            buildList {
+                for (idx in range.first..endInclusive) {
+                    if (rowsByIndex[idx].any { it.commitType in types }) {
+                        add(idx)
+                    }
+                }
+            }
+        }
+    }
+
+    public actual override suspend fun getCommitsExact(
+        index: Int,
+        types: Set<AgentCommitType>,
+    ): List<AgentCommit> {
+        require(index >= 0) { "Index $index must be non-negative." }
+        if (types.isEmpty()) return emptyList()
+        return mutex.reader.withLock {
+            val row = rowsByIndex.getOrNull(index) ?: return@withLock emptyList()
+            row.filter { it.commitType in types }
+        }
+    }
+
+    public actual override suspend fun getCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+    ): List<IndexedAgentCommit> {
+        if (range.isEmpty() || types.isEmpty()) return emptyList()
+        require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
+        return mutex.reader.withLock {
+            if (rowsByIndex.isEmpty() || range.first > rowsByIndex.lastIndex) return@withLock emptyList()
+            val endInclusive = minOf(range.last, rowsByIndex.lastIndex)
+            buildList {
+                for (idx in range.first..endInclusive) {
+                    for (commit in rowsByIndex[idx]) {
+                        if (commit.commitType in types) {
+                            add(IndexedAgentCommit(idx, commit))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public actual override suspend fun getFirstCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> {
+        require(limit >= 0) { "Limit $limit must be non-negative." }
+        if (limit == 0 || range.isEmpty() || types.isEmpty()) return emptyList()
+        require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
+        return mutex.reader.withLock {
+            if (rowsByIndex.isEmpty() || range.first > rowsByIndex.lastIndex) return@withLock emptyList()
+            val endInclusive = minOf(range.last, rowsByIndex.lastIndex)
+            buildList(minOf(limit, 64)) {
+                for (idx in range.first..endInclusive) {
+                    for (commit in rowsByIndex[idx]) {
+                        if (commit.commitType in types) {
+                            add(IndexedAgentCommit(idx, commit))
+                            if (size == limit) return@buildList
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public actual override suspend fun getLastCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> {
+        require(limit >= 0) { "Limit $limit must be non-negative." }
+        if (limit == 0 || range.isEmpty() || types.isEmpty()) return emptyList()
+        require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
+        return mutex.reader.withLock {
+            if (rowsByIndex.isEmpty() || range.first > rowsByIndex.lastIndex) return@withLock emptyList()
+            val endInclusive = minOf(range.last, rowsByIndex.lastIndex)
+            val reversed = ArrayList<IndexedAgentCommit>(minOf(limit, 64))
+            outer@ for (idx in endInclusive downTo range.first) {
+                val commitsAtIdx = rowsByIndex[idx]
+                for (i in commitsAtIdx.indices.reversed()) {
+                    val commit = commitsAtIdx[i]
+                    if (commit.commitType in types) {
+                        reversed.add(IndexedAgentCommit(idx, commit))
+                        if (reversed.size == limit) break@outer
+                    }
+                }
+            }
+            reversed.asReversed()
+        }
+    }
+
+    public actual override suspend fun commit(commits: List<AgentCommit>): Int {
+        validateCommitBatch(commits)
+        val sorted = commits.sortedBy { it.commitType.ordinal }
+        return mutex.writer.withLock {
+            val nextIndex = rowsByIndex.size
+            rowsByIndex.add(sorted)
+            nextIndex
+        }
+    }
+
+    public actual override suspend fun revert(untilExclusive: Int) {
+        require(untilExclusive >= 0) { "Revert boundary $untilExclusive must be non-negative." }
+        mutex.writer.withLock {
+            if (untilExclusive < rowsByIndex.size) {
+                rowsByIndex.subList(untilExclusive, rowsByIndex.size).clear()
+            }
+        }
+    }
 
     public actual companion object {
         /** Creates the uninitialized storage backing a freshly spawned AgentSession. */
         public actual fun empty(): InMemoryKodexAgentStorage =
-            InMemoryKodexAgentStorage(
-                initialIndex = mutableListOf(),
-                initialSettings = mutableListOf(),
-                initialTimestamp = mutableListOf(),
-                initialTokenCount = mutableListOf(),
-            )
+            InMemoryKodexAgentStorage(mutableListOf())
     }
 }
 
 @OptIn(ExperimentalUuidApi::class)
-private fun initialStorageState(
-    initialSettings: KodexAgentSettings,
-): InitialStorageState {
+private fun initialRows(initialSettings: KodexAgentSettings): MutableList<List<AgentCommit>> {
     val windowId = Uuid.generateV7().toString()
-    return InitialStorageState(
-        index = mutableListOf(),
-        settings = mutableListOf(
-            IndexedValue(
-                0,
-                initialSettings.withGeneratedTurnId().copy(
-                    windowNumber = 0,
-                    firstWindowId = windowId,
-                    previousWindowId = null,
-                    windowId = windowId,
-                ),
-            ),
-        ),
-        timestamp = initializedTimestamps(),
-        tokenCount = mutableListOf(
-            IndexedValue(0, TokenCountSnapshot(TokenCountKind.Initialization, 0L)),
-        ),
-    )
-}
-
-private data class InitialStorageState(
-    val index: MutableList<IndexedValue<CleanIndexEntry>>,
-    val settings: MutableList<IndexedValue<KodexAgentSettings>>,
-    val timestamp: MutableList<IndexedValue<Instant>>,
-    val tokenCount: MutableList<IndexedValue<TokenCountSnapshot>>,
-)
-
-@OptIn(ExperimentalUuidApi::class)
-private fun KodexAgentSettings.withGeneratedTurnId(): KodexAgentSettings =
-    if (turnId.isNotEmpty()) this else copy(turnId = Uuid.generateV7().toString())
-
-private fun initializedTimestamps(): MutableList<IndexedValue<Instant>> {
+    val turnId = initialSettings.turnId.ifEmpty { Uuid.generateV7().toString() }
     val timestamp = Clock.System.now()
-    return mutableListOf(
-        IndexedValue(0, timestamp),
+    val settings = initialSettings.copy(
+        turnId = turnId,
+        windowNumber = 0,
+        firstWindowId = windowId,
+        previousWindowId = null,
+        windowId = windowId,
     )
-}
-
-private class InMemoryIndexVersioned<T>(
-    private val entries: MutableList<IndexedValue<T>> = mutableListOf(),
-) : MutableIndexVersioned<T> {
-    private val mutex = ReadWriteMutex()
-    private var indexRevision = 0L
-
-    override fun indexes(from: Int): Flow<Int> = flow {
-        require(from >= 0) { "Index lower bound $from must be non-negative." }
-        val latest = latestIndex()
-        var cursor = from
-        var nextPosition = 0
-        var knownRevision: Long? = null
-        while (cursor <= latest) {
-            val step = mutex.reader.withLock {
-                val position = if (knownRevision == indexRevision) nextPosition else entries.ceilingEntryIndex(cursor)
-                val entry = entries.getOrNull(position) ?: return@withLock null
-                if (entry.index > latest) return@withLock null
-                Triple(entry.index, position, indexRevision)
-            } ?: break
-            emit(step.first)
-            if (step.first == Int.MAX_VALUE) break
-            cursor = step.first + 1
-            nextPosition = step.second + 1
-            knownRevision = step.third
-        }
-    }
-
-    override fun indexesDescending(from: Int): Flow<Int> = flow {
-        require(from >= 0) { "Index upper bound $from must be non-negative." }
-        var cursor = minOf(from, latestIndex())
-        var nextPosition = 0
-        var knownRevision: Long? = null
-        while (cursor >= 0) {
-            val step = mutex.reader.withLock {
-                val position = if (knownRevision == indexRevision) nextPosition else entries.floorEntryIndex(cursor)
-                val entry = entries.getOrNull(position) ?: return@withLock null
-                Triple(entry.index, position, indexRevision)
-            } ?: break
-            emit(step.first)
-            if (step.first == 0) break
-            cursor = step.first - 1
-            nextPosition = step.second - 1
-            knownRevision = step.third
-        }
-    }
-
-    override fun values(from: Int): Flow<Pair<Int, T>> = flow {
-        indexes(from).collect { index ->
-            valuesIn(index..index).singleOrNull()?.let { emit(it) }
-        }
-    }
-
-    override fun valuesDescending(from: Int): Flow<Pair<Int, T>> = flow {
-        indexesDescending(from).collect { index ->
-            valuesIn(index..index).singleOrNull()?.let { emit(it) }
-        }
-    }
-
-    override suspend fun latestIndex(): Int = mutex.reader.withLock {
-        entries.lastOrNull()?.index ?: -1
-    }
-
-    override suspend fun get(index: Int): T = mutex.reader.withLock {
-        require(index >= 0) { "Index $index must be non-negative." }
-        val entryIndex = entries.floorEntryIndex(index)
-        require(entryIndex >= 0) { "No value is visible at index $index." }
-        entries[entryIndex].value
-    }
-
-    override suspend fun getExact(index: Int): T? = mutex.reader.withLock {
-        require(index >= 0) { "Index $index must be non-negative." }
-        val entryIndex = entries.exactEntryIndex(index)
-        entries.getOrNull(entryIndex)?.value
-    }
-
-    override suspend fun floorToIndex(index: Int): Int? = mutex.reader.withLock {
-        val entryIndex = entries.floorEntryIndex(index)
-        if (entryIndex >= 0) entries[entryIndex].index else null
-    }
-
-    override suspend fun ceilToIndex(index: Int): Int? = mutex.reader.withLock {
-        val entryIndex = entries.ceilingEntryIndex(index)
-        if (entryIndex >= 0) entries[entryIndex].index else null
-    }
-
-    override suspend fun indexesIn(range: IntRange): List<Int> {
-        if (range.isEmpty()) return emptyList()
-        require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
-        return mutex.reader.withLock {
-            val first = entries.ceilingEntryIndex(range.first)
-            if (first < 0) return@withLock emptyList()
-            val lastExclusive = entries.ceilingEntryIndexAfter(range.last)
-            val end = if (lastExclusive < 0) entries.size else lastExclusive
-            entries.subList(first, end).map(IndexedValue<T>::index)
-        }
-    }
-
-    override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> {
-        if (range.isEmpty()) return emptyList()
-        require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
-        return mutex.reader.withLock {
-            val first = entries.ceilingEntryIndex(range.first)
-            if (first < 0) return@withLock emptyList()
-            val lastExclusive = entries.ceilingEntryIndexAfter(range.last)
-            val end = if (lastExclusive < 0) entries.size else lastExclusive
-            entries.subList(first, end).map { entry -> entry.index to entry.value }
-        }
-    }
-
-    override suspend fun set(index: Int, value: T) {
-        require(index >= 0) { "Index $index must be non-negative." }
-        mutex.writer.withLock {
-            val latestIndex = entries.lastOrNull()?.index ?: -1
-            require(index > latestIndex) {
-                "Sparse append-only timeline requires index greater than $latestIndex, got $index."
-            }
-            entries += IndexedValue(index, value)
-            indexRevision++
-        }
-    }
-
-    override suspend fun revert(untilExclusive: Int) {
-        require(untilExclusive >= 0) {
-            "Revert boundary $untilExclusive must be non-negative."
-        }
-        mutex.writer.withLock {
-            val suffixStart = entries.ceilingEntryIndex(untilExclusive)
-            if (suffixStart >= 0) {
-                entries.subList(suffixStart, entries.size).clear()
-                indexRevision++
-            }
-        }
-    }
-}
-
-private fun <T> List<IndexedValue<T>>.floorEntryIndex(index: Int): Int {
-    var low = 0
-    var high = lastIndex
-    var result = -1
-    while (low <= high) {
-        val middle = (low + high) ushr 1
-        if (this[middle].index <= index) {
-            result = middle
-            low = middle + 1
-        } else {
-            high = middle - 1
-        }
-    }
-    return result
-}
-
-private fun <T> List<IndexedValue<T>>.ceilingEntryIndex(index: Int): Int {
-    var low = 0
-    var high = lastIndex
-    var result = -1
-    while (low <= high) {
-        val middle = (low + high) ushr 1
-        if (this[middle].index >= index) {
-            result = middle
-            high = middle - 1
-        } else {
-            low = middle + 1
-        }
-    }
-    return result
-}
-
-private fun <T> List<IndexedValue<T>>.ceilingEntryIndexAfter(index: Int): Int {
-    if (index == Int.MAX_VALUE) return -1
-    return ceilingEntryIndex(index + 1)
-}
-
-private fun <T> List<IndexedValue<T>>.exactEntryIndex(index: Int): Int {
-    val position = binarySearchBy(index) { entry -> entry.index }
-    return position.takeIf { it >= 0 } ?: -1
+    val commits = listOf<AgentCommit>(
+        settings,
+        CommitTimestamp(timestamp),
+        TokenCountSnapshot.Initialization(0L),
+    ).sortedBy { it.commitType.ordinal }
+    return mutableListOf(commits)
 }

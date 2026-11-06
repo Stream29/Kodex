@@ -86,9 +86,15 @@ val exactTargetCommandTest by testSuite(compartment = { TestCompartment.RealTime
         test("Application submits nonzero $label text unchanged through real RPC") {
             withCommandApplication {
                 val persisted = assertNotNull(application.submitNewSession(input(text)))
-                val message = assertIs<StableUserMessage>(backend.services.index.get(
-                    persisted.sessionIndex, backend.services.index.getCacheNonce(persisted.sessionIndex), 1,
-                ))
+                val message = assertIs<StableUserMessage>(
+                    backend.services.storage.getCommitsIn(
+                        persisted.sessionIndex,
+                        backend.services.storage.getCacheNonce(persisted.sessionIndex),
+                        0,
+                        1,
+                        io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.IndexTypes,
+                    ).last().commit,
+                )
                 assertEquals(listOf(ContentItem.InputText(text)), message.content)
                 assertEquals("", first.composer.state.value.text)
                 assertSame(persisted, application.navigation.value.selectedSession)
@@ -114,9 +120,15 @@ val exactTargetCommandTest by testSuite(compartment = { TestCompartment.RealTime
             assertEquals("later text", first.composer.state.value.text)
             assertEquals(later, first.composer.state.value.revision)
             first.settings.first { it.cwd == SystemTemporaryDirectory }
-            val message = assertIs<StableUserMessage>(backend.services.index.get(
-                persisted.sessionIndex, backend.services.index.getCacheNonce(persisted.sessionIndex), 1,
-            ))
+            val message = assertIs<StableUserMessage>(
+                backend.services.storage.getCommitsIn(
+                    persisted.sessionIndex,
+                    backend.services.storage.getCacheNonce(persisted.sessionIndex),
+                    0,
+                    1,
+                    io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.IndexTypes,
+                ).last().commit,
+            )
             assertEquals(listOf(ContentItem.InputText("captured text")), message.content)
             assertNull(application.submitNewSession(original))
             assertNotNull(application.submitNewSession(later))

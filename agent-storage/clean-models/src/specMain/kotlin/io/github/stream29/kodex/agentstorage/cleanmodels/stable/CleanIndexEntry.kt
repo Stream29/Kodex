@@ -9,4 +9,4 @@ import kotlinx.serialization.Serializable
  * Compaction points are storage metadata and are not OpenAI history events.
  */
 @Serializable
-public sealed interface CleanIndexEntry
+public sealed interface CleanIndexEntry : AgentCommit

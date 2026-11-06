@@ -15,8 +15,8 @@ import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Row
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.cli.components.TuiPopupHost
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelServiceTier
 import io.github.stream29.kodex.openai.OpenAiModelId

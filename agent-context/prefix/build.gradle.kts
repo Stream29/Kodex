@@ -10,6 +10,7 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(project(":agent-context-settings"))
+                api(project(":agent-storage-clean-models"))
                 api(project(":openai-models"))
                 api(libs.kotlinx.coroutines.core)
                 api(project(":agent-context-agents-md"))

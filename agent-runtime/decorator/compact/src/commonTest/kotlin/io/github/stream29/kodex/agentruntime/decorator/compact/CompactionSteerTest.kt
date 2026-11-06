@@ -11,22 +11,24 @@ import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
-import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.MessagePhase
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.ModelsResponse
@@ -74,14 +76,14 @@ val compactionSteerTest by testSuite {
             withSteerRuntime {
                 val input = listOf(user("first"), user("same"), user("same"))
                 queue.value = input
-                val turnId = storage.settings[storage.latestIndex()].turnId
+                val turnId = storage.getSettingsAt(storage.latestIndex()).turnId
 
                 runtime.resume()
                 runtime.resume()
 
                 assertEquals(input, userHistory())
                 assertEquals(input.map { it.toResponseHistoryItems().single() }, requests.first().input.takeLast(3))
-                assertEquals(turnId, storage.settings[storage.latestIndex()].turnId)
+                assertEquals(turnId, storage.getSettingsAt(storage.latestIndex()).turnId)
                 assertTrue(queue.value.isEmpty())
             }
         }
@@ -91,13 +93,13 @@ val compactionSteerTest by testSuite {
         runTest {
             withSteerRuntime {
                 state.injectHistory(listOf(StableAssistantMessage(content("finished"))))
-                val turnId = storage.settings[storage.latestIndex()].turnId
+                val turnId = storage.getSettingsAt(storage.latestIndex()).turnId
                 queue.value = listOf(user("continue"))
 
                 runtime.resume()
 
                 assertEquals(listOf(user("continue")), userHistory())
-                assertNotEquals(turnId, storage.settings[storage.latestIndex()].turnId)
+                assertNotEquals(turnId, storage.getSettingsAt(storage.latestIndex()).turnId)
             }
         }
     }
@@ -114,7 +116,7 @@ val compactionSteerTest by testSuite {
 
                 runtime.resume()
 
-                assertEquals(input, storage.index[1])
+                assertEquals(input, storage.getIndexEntryAt(1))
                 assertTrue(userHistory().isEmpty())
                 assertTrue(queue.value.isEmpty())
             }
@@ -203,13 +205,13 @@ val compactionSteerTest by testSuite {
                 },
             ) {
                 state.appendUserMessage(content("initial"))
-                val turnId = storage.settings[storage.latestIndex()].turnId
+                val turnId = storage.getSettingsAt(storage.latestIndex()).turnId
 
                 runtime.resume()
 
                 assertEquals(2, requests.size)
                 assertEquals(listOf("initial", "late"), requests[1].userTexts())
-                assertNotEquals(turnId, storage.settings[storage.latestIndex()].turnId)
+                assertNotEquals(turnId, storage.getSettingsAt(storage.latestIndex()).turnId)
             }
         }
     }
@@ -233,7 +235,7 @@ val compactionSteerTest by testSuite {
                 } else completedFlow()
             }) {
                 state.appendUserMessage(content("initial"))
-                val turnId = storage.settings[storage.latestIndex()].turnId
+                val turnId = storage.getSettingsAt(storage.latestIndex()).turnId
                 val running = async { runtime.resume() }
                 generating.await()
                 queue.value = listOf(user("first"))
@@ -252,9 +254,12 @@ val compactionSteerTest by testSuite {
                 assertEquals(2, requests.size)
                 assertEquals(listOf("initial", "first", "second", "second"), requests[1].userTexts())
                 assertFalse(requests[1].input.any { it is ResponseItem.ToolCall })
-                assertEquals(1, storage.index.indexesIn(0..storage.latestIndex())
-                    .count { storage.index[it] is StableAssistantMessage })
-                assertEquals(turnId, storage.settings[storage.latestIndex()].turnId)
+                assertEquals(
+                    1,
+                    storage.getCommitsIn(0..storage.latestIndex(), AgentCommitType.IndexTypes)
+                        .count { it.commit is StableAssistantMessage },
+                )
+                assertEquals(turnId, storage.getSettingsAt(storage.latestIndex()).turnId)
                 assertTrue(queue.value.isEmpty())
                 assertEquals(KodexAgentStateValue.UserMessage, state.state.value)
             }
@@ -307,11 +312,15 @@ val compactionSteerTest by testSuite {
             withSteerRuntime {
                 state.appendUserMessage(content("initial"))
                 state.modify { storage ->
-                    storage.unstable[storage.latestIndex() + 1] = listOf(
-                        PendingFunctionToolEvent(
-                            name = "test_tool",
-                            arguments = JsonObject(emptyMap()),
-                            callId = "pending",
+                    storage.commit(
+                        UnstableSnapshot(
+                            listOf(
+                                PendingFunctionToolEvent(
+                                    name = "test_tool",
+                                    arguments = JsonObject(emptyMap()),
+                                    callId = "pending",
+                                ),
+                            ),
                         ),
                     )
                 }
@@ -493,7 +502,7 @@ val compactionSteerTest by testSuite {
                 },
             ) {
                 state.appendUserMessage(content("initial"))
-                storage.tokenCount[state.latestIndex.value] = TokenCountSnapshot(TokenCountKind.Response, 20L)
+                storage.commit(TokenCountSnapshot.Response(20L))
                 val running = async { runtime.resume() }
                 compacting.await()
                 queue.value = listOf(user("during compact"))
@@ -725,8 +734,8 @@ private class SteerFixture(
     val compactRequests: List<ResponsesApiRequest>,
 ) {
     suspend fun userHistory(): List<StableUserMessage> =
-        storage.index.indexesIn(0..storage.latestIndex())
-            .mapNotNull { storage.index[it] as? StableUserMessage }
+        storage.getCommitsIn(0..storage.latestIndex(), AgentCommitType.IndexTypes)
+            .mapNotNull { it.commit as? StableUserMessage }
 }
 
 private suspend fun CoroutineScope.withSteerRuntime(

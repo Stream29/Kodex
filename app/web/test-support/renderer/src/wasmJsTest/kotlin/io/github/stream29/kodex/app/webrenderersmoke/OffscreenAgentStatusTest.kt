@@ -11,11 +11,11 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
 import io.github.stream29.kodex.app.ui.compose.*
 import io.github.stream29.kodex.cli.app.*
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion

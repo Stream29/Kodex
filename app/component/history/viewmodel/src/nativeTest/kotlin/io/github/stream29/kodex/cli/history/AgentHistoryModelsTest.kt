@@ -4,13 +4,16 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
-import io.github.stream29.kodex.agentstorage.contract.revert
+import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
@@ -32,7 +35,6 @@ import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewMod
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -62,8 +64,8 @@ val agentHistoryModelsTest by testSuite {
             try {
                 val session = repository.open(repository.create())
                 val time = Instant.parse("2026-09-08T01:02:03Z")
-                session.storage.timestamp[0] = time
-                session.storage.index[1] = StableUserMessage(listOf(ContentItem.InputText("readable")))
+                session.storage.commit(CommitTimestamp(time))
+                session.storage.commit(StableUserMessage(listOf(ContentItem.InputText("readable"))))
                 var current = true
                 val context = HistoryItemLoadContext(
                     AgentHistorySource(session.storage, session.runtime.latestIndex, session.runtime.state),
@@ -77,7 +79,13 @@ val agentHistoryModelsTest by testSuite {
                 val ready = awaitState(item.state) { it !is MessageHistoryItemState.Loading }
                 assertIs<MessageHistoryItemState.Ready>(ready)
                 assertEquals(null, item.readTimestamp())
-                session.storage.timestamp[1] = time + 1.seconds
+                session.storage.revert(1)
+                session.storage.commit(
+                    listOf(
+                        StableUserMessage(listOf(ContentItem.InputText("readable"))),
+                        CommitTimestamp(time + 1.seconds),
+                    ),
+                )
                 assertEquals(time + 1.seconds, item.readTimestamp())
                 current = false
                 kotlin.test.assertFailsWith<IllegalStateException> { item.readTimestamp() }
@@ -128,11 +136,11 @@ val agentHistoryModelsTest by testSuite {
                     ) as StableSuggestSubagentTaskToolEvent
                     runtime.modify { storage ->
                         storage.initialize(KodexAgentSettings(OpenAiModelId("test")))
-                        storage.index[1] = userMessage("Start")
-                        storage.work[2] = textTool("before")
-                        storage.index[3] = event
-                        storage.work[4] = textTool("after")
-                        storage.index[5] = userMessage("End")
+                        storage.commit(userMessage("Start"))
+                        storage.commit(textTool("before"))
+                        storage.commit(event)
+                        storage.commit(textTool("after"))
+                        storage.commit(userMessage("End"))
                     }
                     val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
                     try {
@@ -159,9 +167,15 @@ val agentHistoryModelsTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                storage.index[1] = userMessage("one")
-                storage.index[4] = userMessage("four")
-                storage.index[9] = userMessage("nine")
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                for (i in 1..9) {
+                    when (i) {
+                        1 -> storage.commit(userMessage("one"))
+                        4 -> storage.commit(userMessage("four"))
+                        9 -> storage.commit(userMessage("nine"))
+                        else -> storage.commit(CommitTimestamp(Instant.fromEpochSeconds(0)))
+                    }
+                }
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -192,9 +206,10 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.work[2] = textTool("older")
-                storage.work[3] = textTool("newer")
-                storage.index[4] = userMessage("breaker")
+                storage.commit(CommitTimestamp(Instant.fromEpochSeconds(0)))
+                storage.commit(textTool("older"))
+                storage.commit(textTool("newer"))
+                storage.commit(userMessage("breaker"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -248,9 +263,9 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.index[1] = userMessage("prompt")
-                storage.work[2] = textTool("only")
-                storage.index[3] = userMessage("breaker")
+                storage.commit(userMessage("prompt"))
+                storage.commit(textTool("only"))
+                storage.commit(userMessage("breaker"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -278,8 +293,9 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.work[2] = textTool("older")
-                storage.work[3] = textTool("newer")
+                storage.commit(CommitTimestamp(Instant.fromEpochSeconds(0)))
+                storage.commit(textTool("older"))
+                storage.commit(textTool("newer"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -296,7 +312,7 @@ val agentHistoryModelsTest by testSuite {
                 )
 
                 runtime.modify { storage ->
-                    storage.index[4] = userMessage("breaker")
+                    storage.commit(userMessage("breaker"))
                 }
                 val sealedWindow = model.awaitHistoryItems { window ->
                     window.size == 2 &&
@@ -329,9 +345,9 @@ val agentHistoryModelsTest by testSuite {
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 repeat(workCount) { position ->
-                    storage.work[position + 1] = textTool("work-$position")
+                    storage.commit(textTool("work-$position"))
                 }
-                storage.index[workCount + 1] = userMessage("previous")
+                storage.commit(userMessage("previous"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -339,7 +355,7 @@ val agentHistoryModelsTest by testSuite {
 
                 val newIndex = workCount + 2
                 runtime.modify { storage ->
-                    storage.index[newIndex] = userMessage("new")
+                    storage.commit(userMessage("new"))
                 }
 
                 val window = model.awaitHistoryItems { history ->
@@ -367,7 +383,7 @@ val agentHistoryModelsTest by testSuite {
                 repeat(300) { position ->
                     val index = position + 1
                     runtime.modify { storage ->
-                        storage.index[index] = userMessage("$index")
+                        storage.commit(userMessage("$index"))
                     }
                     val window = model.awaitHistoryItems { history ->
                         history.size > 0 && history.peek(0).storageIndex == index
@@ -388,14 +404,14 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.index[1] = userMessage("previous")
+                storage.commit(userMessage("previous"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
                 model.awaitReady(itemCount = 1, hasOlder = false)
 
                 runtime.modify { storage ->
-                    storage.work[2] = textTool("new")
+                    storage.commit(textTool("new"))
                 }
 
                 val window = model.awaitHistoryItems { history ->
@@ -415,13 +431,14 @@ val agentHistoryModelsTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                for (index in 1..20) storage.index[index] = userMessage("$index")
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                for (index in 1..20) storage.commit(userMessage("$index"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
                 model.awaitReady(20, hasOlder = false)
                 runtime.modify { storage ->
-                    for (index in 21..400) storage.index[index] = userMessage("$index")
+                    for (index in 21..400) storage.commit(userMessage("$index"))
                 }
                 val window = model.awaitHistoryItems { it.size > 0 && it.peek(0).storageIndex == 400 }
                 assertEquals(HistoryPaging.InitialLoadSize, window.size)
@@ -448,12 +465,13 @@ val agentHistoryModelsTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                storage.index[1] = userMessage("one")
-                storage.timestamp[1] = Instant.fromEpochSeconds(100)
-                storage.index[4] = userMessage("four")
-                storage.timestamp[4] = Instant.fromEpochSeconds(111)
-                storage.index[9] = userMessage("nine")
-                storage.timestamp[9] = Instant.fromEpochSeconds(125)
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                storage.commit(listOf(userMessage("one"), CommitTimestamp(Instant.fromEpochSeconds(100))))
+                storage.commit(CommitTimestamp(Instant.fromEpochSeconds(101)))
+                storage.commit(CommitTimestamp(Instant.fromEpochSeconds(102)))
+                storage.commit(listOf(userMessage("four"), CommitTimestamp(Instant.fromEpochSeconds(111))))
+                for (i in 5..8) storage.commit(CommitTimestamp(Instant.fromEpochSeconds(111)))
+                storage.commit(listOf(userMessage("nine"), CommitTimestamp(Instant.fromEpochSeconds(125))))
             }
             val model = createAgentHistoryViewModel(
                 agentState = runtime,
@@ -486,20 +504,25 @@ val agentHistoryModelsTest by testSuite {
                     model = OpenAiModelId("test-model"),
                 )
                 storage.initialize(firstTurn)
-                val turnStart = storage.timestamp[0]
-                storage.timestamp[1] = turnStart + 10.seconds
-                storage.index[1] = userMessage("first")
-                storage.timestamp[2] = turnStart + 30.seconds
-                storage.work[2] = textTool("first-tool")
-                storage.timestamp[3] = turnStart + 40.seconds
-                storage.index[3] = StableAssistantMessage(
-                    content = listOf(ContentItem.OutputText("first answer")),
+                val turnStart = storage.getTimestampExact(0)!!
+                storage.commit(listOf(CommitTimestamp(turnStart + 10.seconds), userMessage("first")))
+                storage.commit(listOf(CommitTimestamp(turnStart + 30.seconds), textTool("first-tool")))
+                storage.commit(
+                    listOf(
+                        CommitTimestamp(turnStart + 40.seconds),
+                        StableAssistantMessage(
+                            content = listOf(ContentItem.OutputText("first answer")),
+                        ),
+                    ),
                 )
-                storage.timestamp[4] = turnStart + 50.seconds
-                storage.index[4] = userMessage("second")
-                storage.timestamp[5] = turnStart + 60.seconds
-                storage.index[5] = StableAssistantMessage(
-                    content = listOf(ContentItem.OutputText("second answer")),
+                storage.commit(listOf(CommitTimestamp(turnStart + 50.seconds), userMessage("second")))
+                storage.commit(
+                    listOf(
+                        CommitTimestamp(turnStart + 60.seconds),
+                        StableAssistantMessage(
+                            content = listOf(ContentItem.OutputText("second answer")),
+                        ),
+                    ),
                 )
             }
             val model = createAgentHistoryViewModel(
@@ -530,19 +553,26 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.index[1] = userMessage("first")
-                storage.index[2] = StableAssistantMessage(
-                    content = listOf(ContentItem.OutputText("final")),
+                val turnStart = storage.getTimestampExact(0)!!
+                storage.commit(listOf(CommitTimestamp(turnStart + 1.seconds), userMessage("first")))
+                storage.commit(
+                    listOf(
+                        CommitTimestamp(turnStart + 2.seconds),
+                        StableAssistantMessage(
+                            content = listOf(ContentItem.OutputText("final")),
+                        ),
+                    ),
                 )
-                storage.index[3] = userMessage("steer one")
-                storage.index[4] = userMessage("steer two")
-                storage.index[5] = StableAssistantMessage(
-                    content = listOf(ContentItem.OutputText("next final")),
+                storage.commit(listOf(CommitTimestamp(turnStart + 3.seconds), userMessage("steer one")))
+                storage.commit(listOf(CommitTimestamp(turnStart + 4.seconds), userMessage("steer two")))
+                storage.commit(
+                    listOf(
+                        CommitTimestamp(turnStart + 5.seconds),
+                        StableAssistantMessage(
+                            content = listOf(ContentItem.OutputText("next final")),
+                        ),
+                    ),
                 )
-                val turnStart = storage.timestamp[0]
-                for (index in 1..5) {
-                    storage.timestamp[index] = turnStart + index.toLong().seconds
-                }
             }
             val model = createAgentHistoryViewModel(
                 agentState = runtime,
@@ -575,8 +605,9 @@ val agentHistoryModelsTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 repeat(20) { position ->
-                    storage.index[position + 1] = userMessage("$position")
+                    storage.commit(userMessage("$position"))
                 }
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
@@ -610,8 +641,9 @@ val agentHistoryModelsTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 repeat(itemCount) { position ->
-                    storage.index[position + 1] = userMessage("$position")
+                    storage.commit(userMessage("$position"))
                 }
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
@@ -650,8 +682,8 @@ val agentHistoryModelsTest by testSuite {
             runtime.modify { storage ->
                 val settings = KodexAgentSettings(model = OpenAiModelId("test-model"))
                 storage.initialize(settings)
-                storage.unstable[1] = listOf(pending)
-                storage.settings[2] = settings.copy(threadName = "updated")
+                storage.commit(UnstableSnapshot(listOf(pending)))
+                storage.commit(settings.copy(threadName = "updated"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -693,9 +725,10 @@ val agentHistoryModelsTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                storage.index[1] = userMessage("one")
-                storage.index[2] = userMessage("two")
-                storage.index[3] = userMessage("three")
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                storage.commit(userMessage("one"))
+                storage.commit(userMessage("two"))
+                storage.commit(userMessage("three"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -712,7 +745,7 @@ val agentHistoryModelsTest by testSuite {
                 assertEquals(1, older.peek(0).storageIndex)
 
                 runtime.modify { storage ->
-                    storage.index[4] = userMessage("four")
+                    storage.commit(userMessage("four"))
                 }
                 model.awaitHistoryItems { window -> window.hasNewer }
                 assertEquals(1, model.historyItems.value.peek(0).storageIndex)
@@ -737,10 +770,11 @@ val agentHistoryModelsTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                storage.index[1] = userMessage("prompt")
-                storage.index[2] = CleanCompactionPoint
-                storage.work[3] = StableContextCompaction(encryptedContent = "encrypted")
-                storage.index[4] = userMessage("after")
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                storage.commit(userMessage("prompt"))
+                storage.commit(CleanCompactionPoint)
+                storage.commit(StableContextCompaction(encryptedContent = "encrypted"))
+                storage.commit(userMessage("after"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {

@@ -6,8 +6,14 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.reactivecircus.cache4k.FakeTimeSource
-import io.github.stream29.kodex.agentstorage.contract.CachedIndexVersioned
-import io.github.stream29.kodex.rpc.contract.TimelineRpc
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.ceilToIndex
+import io.github.stream29.kodex.agentstorage.contract.floorToIndex
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import kotlinx.coroutines.CancellationException
@@ -19,9 +25,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
@@ -36,12 +42,12 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("metadata is shared and latestIndex reads never poll the initial Get") {
         runTest {
             val backend = TimelineProbeImpl()
-            val view = backgroundScope.rpcCachedIndexVersioned(7, backend)
+            val view = backgroundScope.rpcCachedAgentStorage(7, backend)
             assertEquals(17L, view.cacheNonce.value)
             assertEquals(5, view.latestIndex())
             runCurrent()
-            val observerA = launch { view.latestIndex.collect() }
-            val observerB = launch { view.latestIndex.collect() }
+            val observerA = launch { view.latestIndexFlow.collect() }
+            val observerB = launch { view.latestIndexFlow.collect() }
             runCurrent()
             observerA.cancelAndJoin()
             observerB.cancelAndJoin()
@@ -58,37 +64,40 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("all six sparse queries preserve their meanings and inclusive ranges") {
         runTest {
             val backend = TimelineProbeImpl()
-            val view = backgroundScope.rpcCachedIndexVersioned(7, backend)
-            assertEquals("two", view[4])
-            assertEquals(null, view.getExact(4))
-            assertEquals(2, view.floorToIndex(4))
-            assertEquals(5, view.ceilToIndex(4))
-            assertEquals(null, view.floorToIndex(-1))
-            assertEquals(null, view.ceilToIndex(6))
-            assertEquals(listOf(2, 5), view.indexesIn(1..5))
-            assertEquals(listOf(2 to "two", 5 to "five"), view.valuesIn(1..5))
-            assertEquals(emptyList(), view.indexesIn(5..4))
-            assertEquals(emptyList(), view.valuesIn(5..4))
-            assertFailsWith<IllegalArgumentException> { view[-1] }
-            assertEquals("zero", view.getExact(0))
+            val view = backgroundScope.rpcCachedAgentStorage(7, backend)
+            assertEquals(probeCommit("two"), view.getIndexEntryAt(4))
+            assertEquals(null, view.getIndexEntryExact(4))
+            assertEquals(2, view.floorToIndex(4, AgentCommitType.IndexTypes))
+            assertEquals(5, view.ceilToIndex(4, AgentCommitType.IndexTypes))
+            assertEquals(null, view.floorToIndex(-1, AgentCommitType.IndexTypes))
+            assertEquals(null, view.ceilToIndex(6, AgentCommitType.IndexTypes))
+            assertEquals(listOf(2, 5), view.indexesIn(1..5, AgentCommitType.IndexTypes))
+            assertEquals(
+                listOf(IndexedAgentCommit(2, probeCommit("two")), IndexedAgentCommit(5, probeCommit("five"))),
+                view.getCommitsIn(1..5, AgentCommitType.IndexTypes),
+            )
+            assertEquals(emptyList(), view.indexesIn(5..4, AgentCommitType.IndexTypes))
+            assertEquals(emptyList(), view.getCommitsIn(5..4, AgentCommitType.IndexTypes))
+            assertFailsWith<IllegalArgumentException> { view.getIndexEntryAt(-1) }
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
         }
     }
 
     test("existing exact values are cached but absent entries remain queryable after an append") {
         runTest {
             val backend = TimelineProbeImpl()
-            val view = backgroundScope.rpcCachedIndexVersioned(7, backend)
-            assertEquals("five", view.getExact(5))
-            assertEquals("five", view.getExact(5))
+            val view = backgroundScope.rpcCachedAgentStorage(7, backend)
+            assertEquals(probeCommit("five"), view.getIndexEntryExact(5))
+            assertEquals(probeCommit("five"), view.getIndexEntryExact(5))
             assertEquals(1, backend.count("exact"))
-            assertEquals(null, view.getExact(9))
-            assertEquals(null, view.getExact(9))
+            assertEquals(null, view.getIndexEntryExact(9))
+            assertEquals(null, view.getIndexEntryExact(9))
             assertEquals(3, backend.count("exact"))
-            backend.entries.value += 9 to "nine"
+            backend.entries.value += 9 to listOf(probeCommit("nine"))
             backend.latest.value = 9
             runCurrent()
-            assertEquals("nine", view.getExact(9))
-            assertEquals("five", view.getExact(5))
+            assertEquals(probeCommit("nine"), view.getIndexEntryExact(9))
+            assertEquals(probeCommit("five"), view.getIndexEntryExact(5))
             assertEquals(4, backend.count("exact"))
             assertEquals(17L, view.cacheNonce.value)
         }
@@ -97,34 +106,25 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("visible values are not cached under the requested index and future queries see appends") {
         runTest {
             val backend = TimelineProbeImpl()
-            val view = backgroundScope.rpcCachedIndexVersioned(7, backend)
-            assertEquals("five", view[10])
-            assertEquals(null, view.getExact(10))
-            assertEquals(5, view.floorToIndex(10))
-            assertEquals(null, view.ceilToIndex(6))
-            assertEquals(emptyList(), view.indexesIn(6..10))
-            assertEquals(emptyList(), view.valuesIn(6..10))
-            backend.entries.value += 8 to "eight"
+            val view = backgroundScope.rpcCachedAgentStorage(7, backend)
+            assertEquals(probeCommit("five"), view.getIndexEntryAt(10))
+            assertEquals(null, view.getIndexEntryExact(10))
+            assertEquals(5, view.floorToIndex(10, AgentCommitType.IndexTypes))
+            assertEquals(null, view.ceilToIndex(6, AgentCommitType.IndexTypes))
+            assertEquals(emptyList(), view.indexesIn(6..10, AgentCommitType.IndexTypes))
+            assertEquals(emptyList(), view.getCommitsIn(6..10, AgentCommitType.IndexTypes))
+            backend.entries.value += 8 to listOf(probeCommit("eight"))
             backend.latest.value = 8
             runCurrent()
-            assertEquals("eight", view[10])
-            assertEquals(8, view.floorToIndex(10))
-            assertEquals(8, view.ceilToIndex(6))
-            assertEquals(listOf(8), view.indexesIn(6..10))
-            assertEquals(listOf(8 to "eight"), view.valuesIn(6..10))
-            assertEquals(2, backend.count("get"))
-            assertEquals(2, backend.count("values"))
-        }
-    }
-
-    test("range values populate exact cache but do not cache the range query itself") {
-        runTest {
-            val backend = TimelineProbeImpl()
-            val view = backgroundScope.rpcCachedIndexVersioned(7, backend)
-            repeat(2) { assertEquals(listOf(2 to "two", 5 to "five"), view.valuesIn(2..5)) }
-            assertEquals("two", view.getExact(2))
-            assertEquals("five", view.getExact(5))
-            assertEquals(0, backend.count("exact"))
+            assertEquals(probeCommit("eight"), view.getIndexEntryAt(10))
+            assertEquals(8, view.floorToIndex(10, AgentCommitType.IndexTypes))
+            assertEquals(8, view.ceilToIndex(6, AgentCommitType.IndexTypes))
+            assertEquals(listOf(8), view.indexesIn(6..10, AgentCommitType.IndexTypes))
+            assertEquals(
+                listOf(IndexedAgentCommit(8, probeCommit("eight"))),
+                view.getCommitsIn(6..10, AgentCommitType.IndexTypes),
+            )
+            assertEquals(4, backend.count("last"))
             assertEquals(2, backend.count("values"))
         }
     }
@@ -132,23 +132,23 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("new nonce invalidates populated values even when the tail stays the same") {
         runTest {
             val backend = TimelineProbeImpl()
-            val view = backgroundScope.rpcCachedIndexVersioned(7, backend)
-            assertEquals("zero", view.getExact(0))
-            backend.entries.value += 0 to "replacement"
+            val view = backgroundScope.rpcCachedAgentStorage(7, backend)
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
+            backend.entries.value += 0 to listOf(probeCommit("replacement"))
             backend.nonce.value = 18
             runCurrent()
             assertEquals(5, view.latestIndex())
             assertEquals(18L, view.cacheNonce.value)
-            assertEquals("replacement", view.getExact(0))
+            assertEquals(probeCommit("replacement"), view.getIndexEntryExact(0))
             assertEquals(2, backend.count("exact"))
         }
     }
 
-    for (method in listOf("exact", "values", "get", "floor", "ceil", "indexes")) {
+    for (method in listOf("exact", "values", "first", "last", "indexes")) {
         test("late $method result is rejected without repopulating the new nonce cache") {
             runTest {
                 val backend = TimelineProbeImpl()
-                val view = backgroundScope.rpcCachedIndexVersioned(7, backend)
+                val view = backgroundScope.rpcCachedAgentStorage(7, backend)
                 val started = CompletableDeferred<Unit>()
                 val finish = CompletableDeferred<Unit>()
                 backend.beforeReturn = {
@@ -160,15 +160,15 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
                 supervisorScope {
                     val oldRead = async { view.readUsing(method) }
                     started.await()
-                    backend.entries.value += 0 to "new"
+                    backend.entries.value += 0 to listOf(probeCommit("new"))
                     backend.nonce.value = 18
                     runCurrent()
                     backend.beforeReturn = {}
-                    assertEquals("new", view.getExact(0))
+                    assertEquals(probeCommit("new"), view.getIndexEntryExact(0))
                     finish.complete(Unit)
                     assertFailsWith<CacheNonceMismatch> { oldRead.await() }
                     val reads = backend.count("exact")
-                    assertEquals("new", view.getExact(0))
+                    assertEquals(probeCommit("new"), view.getIndexEntryExact(0))
                     assertEquals(reads, backend.count("exact"))
                 }
             }
@@ -178,15 +178,14 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("a nonce mismatch is not retried or used to refetch metadata") {
         runTest {
             val backend = TimelineProbeImpl()
-            val view = backgroundScope.rpcCachedIndexVersioned(7, backend)
+            val view = backgroundScope.rpcCachedAgentStorage(7, backend)
             runCurrent()
             backend.nonce.value = 18
-            // The remote value has changed, but the frontend collector has not run yet.
-            assertFailsWith<CacheNonceMismatch> { view.getExact(0) }
+            assertFailsWith<CacheNonceMismatch> { view.getIndexEntryExact(0) }
             assertEquals(1, backend.count("exact"))
             assertEquals(1, backend.count("nonce"))
             runCurrent()
-            assertEquals("zero", view.getExact(0))
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
             assertEquals(2, backend.count("exact"))
         }
     }
@@ -195,18 +194,18 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
         runTest {
             val backend = TimelineProbeImpl()
             val clock = FakeTimeSource()
-            val view = backgroundScope.rpcCachedIndexVersioned(7, backend, 1, clock)
-            assertEquals("zero", view.getExact(0))
+            val view = backgroundScope.rpcCachedAgentStorage(7, backend, 1, clock)
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
             clock += 50.seconds
-            assertEquals("zero", view.getExact(0))
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
             clock += 50.seconds
-            assertEquals("zero", view.getExact(0))
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
             assertEquals(1, backend.count("exact"))
-            assertEquals("two", view.getExact(2))
-            assertEquals("zero", view.getExact(0))
+            assertEquals(probeCommit("two"), view.getIndexEntryExact(2))
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
             assertEquals(3, backend.count("exact"))
             clock += 61.seconds
-            assertEquals("zero", view.getExact(0))
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
             assertEquals(4, backend.count("exact"))
             assertEquals(17L, view.cacheNonce.value)
         }
@@ -218,7 +217,7 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
                 val backend = TimelineProbeImpl()
                 backend.beforeGet = { if (it == method) throw IllegalArgumentException("failed Get") }
                 assertFailsWith<IllegalArgumentException> {
-                    backgroundScope.rpcCachedIndexVersioned(7, backend)
+                    backgroundScope.rpcCachedAgentStorage(7, backend)
                 }
                 runCurrent()
                 assertEquals(0, backend.subscriptions.value)
@@ -242,7 +241,7 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
                     }
                 }
             }
-            val initialization = launch { backgroundScope.rpcCachedIndexVersioned(7, backend) }
+            val initialization = launch { backgroundScope.rpcCachedAgentStorage(7, backend) }
             started.await()
             runCurrent()
             initialization.cancelAndJoin()
@@ -254,12 +253,12 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("immediate second Flow creation failure releases the first subscription") {
         runTest {
             val backend = TimelineProbeImpl()
-            val rpc = object : TimelineRpc<String> by backend {
+            val rpc = object : AgentStorageRpc by backend {
                 override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int> =
                     throw IllegalArgumentException("cannot create Flow")
             }
             assertFailsWith<IllegalArgumentException> {
-                backgroundScope.rpcCachedIndexVersioned(7, rpc)
+                backgroundScope.rpcCachedAgentStorage(7, rpc)
             }
             runCurrent()
             assertEquals(0, backend.subscriptions.value)
@@ -283,7 +282,7 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
                     }
                 }
             }
-            val initialization = async { owner.rpcCachedIndexVersioned(7, backend) }
+            val initialization = async { owner.rpcCachedAgentStorage(7, backend) }
             started.await()
             ownerJob.cancelAndJoin()
             assertFailsWith<CancellationException> { initialization.await() }
@@ -295,13 +294,13 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("ordinary query failure preserves the binding and does not replace cached entries") {
         runTest {
             val backend = TimelineProbeImpl()
-            val view = backgroundScope.rpcCachedIndexVersioned(7, backend)
-            assertEquals("zero", view.getExact(0))
+            val view = backgroundScope.rpcCachedAgentStorage(7, backend)
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
             backend.beforeReturn = { throw IllegalArgumentException("query failed") }
-            assertFailsWith<IllegalArgumentException> { view.getExact(2) }
+            assertFailsWith<IllegalArgumentException> { view.getIndexEntryExact(2) }
             backend.beforeReturn = {}
-            assertEquals("zero", view.getExact(0))
-            assertEquals("two", view.getExact(2))
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
+            assertEquals(probeCommit("two"), view.getIndexEntryExact(2))
             assertEquals(3, backend.count("exact"))
             runCurrent()
             assertEquals(2, backend.subscriptions.value)
@@ -314,11 +313,11 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
             val ownerJob = SupervisorJob(backgroundScope.coroutineContext[Job])
             try {
                 val owner = CoroutineScope(backgroundScope.coroutineContext + ownerJob)
-                val view = owner.rpcCachedIndexVersioned(7, backend)
-                assertEquals("zero", view.getExact(0))
+                val view = owner.rpcCachedAgentStorage(7, backend)
+                assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
                 backend.metadataFailure.value = CancellationException("remote collection cancelled")
                 runCurrent()
-                assertFailsWith<CancellationException> { view.getExact(0) }
+                assertFailsWith<CancellationException> { view.getIndexEntryExact(0) }
                 assertEquals(0, backend.subscriptions.value)
                 assertTrue(ownerJob.isActive)
             } finally {
@@ -330,10 +329,10 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("completed metadata does not leave a usable view with a permanently frozen nonce") {
         runTest {
             val backend = TimelineProbeImpl()
-            val rpc = object : TimelineRpc<String> by backend {
+            val rpc = object : AgentStorageRpc by backend {
                 override fun getCacheNonceFlow(sessionIndex: Int): Flow<Long> = flowOf(17L)
             }
-            val view = backgroundScope.rpcCachedIndexVersioned(7, rpc)
+            val view = backgroundScope.rpcCachedAgentStorage(7, rpc)
             runCurrent()
             assertFailsWith<CancellationException> { view.latestIndex() }
             assertEquals(0, backend.subscriptions.value)
@@ -343,7 +342,7 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("query cancellation does not close the view or retry the query") {
         runTest {
             val backend = TimelineProbeImpl()
-            val view = backgroundScope.rpcCachedIndexVersioned(7, backend)
+            val view = backgroundScope.rpcCachedAgentStorage(7, backend)
             val started = CompletableDeferred<Unit>()
             val released = CompletableDeferred<Unit>()
             backend.beforeReturn = {
@@ -354,12 +353,12 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
                     released.complete(Unit)
                 }
             }
-            val read = launch { view.getExact(0) }
+            val read = launch { view.getIndexEntryExact(0) }
             started.await()
             read.cancelAndJoin()
             released.await()
             backend.beforeReturn = {}
-            assertEquals("zero", view.getExact(0))
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
             assertEquals(2, backend.count("exact"))
         }
     }
@@ -369,8 +368,8 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
             val backend = TimelineProbeImpl()
             val ownerJob = Job(backgroundScope.coroutineContext[Job])
             val owner = CoroutineScope(backgroundScope.coroutineContext + ownerJob)
-            val view = owner.rpcCachedIndexVersioned(7, backend)
-            assertEquals("zero", view.getExact(0))
+            val view = owner.rpcCachedAgentStorage(7, backend)
+            assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
             val started = CompletableDeferred<Unit>()
             val released = CompletableDeferred<Unit>()
             backend.beforeReturn = {
@@ -381,13 +380,13 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
                     released.complete(Unit)
                 }
             }
-            val read = async { view.getExact(2) }
+            val read = async { view.getIndexEntryExact(2) }
             started.await()
             ownerJob.cancelAndJoin()
             assertFailsWith<CancellationException> { read.await() }
             released.await()
             assertEquals(0, backend.subscriptions.value)
-            assertFailsWith<CancellationException> { view.getExact(0) }
+            assertFailsWith<CancellationException> { view.getIndexEntryExact(0) }
             assertFailsWith<CancellationException> { view.latestIndex() }
         }
     }
@@ -398,12 +397,12 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
             val ownerJob = SupervisorJob(backgroundScope.coroutineContext[Job])
             try {
                 val owner = CoroutineScope(backgroundScope.coroutineContext + ownerJob)
-                val view = owner.rpcCachedIndexVersioned(7, backend)
-                assertEquals("zero", view.getExact(0))
+                val view = owner.rpcCachedAgentStorage(7, backend)
+                assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
                 backend.beforeReturn = { throw SessionNotActive() }
-                assertFailsWith<SessionNotActive> { view.getExact(2) }
+                assertFailsWith<SessionNotActive> { view.getIndexEntryExact(2) }
                 runCurrent()
-                assertFailsWith<CancellationException> { view.getExact(0) }
+                assertFailsWith<CancellationException> { view.getIndexEntryExact(0) }
                 assertTrue(ownerJob.isActive)
                 assertEquals(0, backend.subscriptions.value)
             } finally {
@@ -417,20 +416,20 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
             runTest {
                 val backend = TimelineProbeImpl()
                 supervisorScope {
-                    val ready = CompletableDeferred<CachedIndexVersioned<String>>()
+                    val ready = CompletableDeferred<ObservableKodexAgentStorage>()
                     val owner = async {
                         coroutineScope {
-                            ready.complete(rpcCachedIndexVersioned(7, backend))
+                            ready.complete(rpcCachedAgentStorage(7, backend))
                             awaitCancellation()
                         }
                     }
                     val view = ready.await()
-                    assertEquals("zero", view.getExact(0))
+                    assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
                     backend.metadataFailure.value = failure
                     val actual = assertFailsWith<Throwable> { owner.await() }
                     assertEquals(failure::class, actual::class)
                     assertEquals(0, backend.subscriptions.value)
-                    assertFailsWith<CancellationException> { view.getExact(0) }
+                    assertFailsWith<CancellationException> { view.getIndexEntryExact(0) }
                 }
             }
         }
@@ -441,10 +440,10 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
             val ownerJob = Job(coroutineContext[Job])
             val owner = CoroutineScope(coroutineContext + ownerJob)
             try {
-                val view = owner.rpcCachedIndexVersioned(7, rpc)
+                val view = owner.rpcCachedAgentStorage(7, rpc)
                 backend.subscriptions.first { it == 2 }
-                assertEquals("zero", view.getExact(0))
-                assertEquals("zero", view.getExact(0))
+                assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
+                assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
                 assertEquals(1, backend.count("exact"))
                 val started = CompletableDeferred<Unit>()
                 val finish = CompletableDeferred<Unit>()
@@ -452,20 +451,20 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
                     if (it == "exact") { started.complete(Unit); finish.await() }
                 }
                 supervisorScope {
-                    val old = async { view.getExact(2) }
+                    val old = async { view.getIndexEntryExact(2) }
                     started.await()
-                    backend.entries.value += 2 to "new"
+                    backend.entries.value += 2 to listOf(probeCommit("new"))
                     backend.nonce.value = 18
                     view.cacheNonce.first { it == 18L }
                     finish.complete(Unit)
                     assertFailsWith<CacheNonceMismatch> { old.await() }
                     backend.beforeReturn = {}
-                    assertEquals("new", view.getExact(2))
+                    assertEquals(probeCommit("new"), view.getIndexEntryExact(2))
                 }
                 ownerJob.cancelAndJoin()
                 backend.subscriptions.first { it == 0 }
-                assertFailsWith<CancellationException> { view.getExact(0) }
-                assertEquals("new", rpc.getExact(7, 18, 2))
+                assertFailsWith<CancellationException> { view.getIndexEntryExact(0) }
+                assertEquals(listOf(probeCommit("new")), rpc.getCommitsExact(7, 18, 2, AgentCommitType.IndexTypes))
             } finally {
                 ownerJob.cancelAndJoin()
             }
@@ -475,20 +474,20 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("real RPC SessionNotActive fails the binding owner without closing the shared connection") {
         withTimelineProbe { rpc, backend ->
             supervisorScope {
-                val ready = CompletableDeferred<CachedIndexVersioned<String>>()
+                val ready = CompletableDeferred<ObservableKodexAgentStorage>()
                 val owner = async {
                     coroutineScope {
-                        ready.complete(rpcCachedIndexVersioned(7, rpc))
+                        ready.complete(rpcCachedAgentStorage(7, rpc))
                         awaitCancellation()
                     }
                 }
                 val view = ready.await()
                 backend.subscriptions.first { it == 2 }
-                assertEquals("zero", view.getExact(0))
+                assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
                 backend.active.value = false
                 assertFailsWith<SessionNotActive> { owner.await() }
                 backend.subscriptions.first { it == 0 }
-                assertFailsWith<CancellationException> { view.getExact(0) }
+                assertFailsWith<CancellationException> { view.getIndexEntryExact(0) }
                 backend.active.value = true
                 assertEquals(17L, rpc.getCacheNonce(7))
                 assertEquals(0, backend.subscriptions.value)
@@ -497,12 +496,11 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     }
 }
 
-private suspend fun CachedIndexVersioned<String>.readUsing(method: String): Any? = when (method) {
-    "exact" -> getExact(0)
-    "values" -> valuesIn(0..5)
-    "get" -> get(1)
-    "floor" -> floorToIndex(1)
-    "ceil" -> ceilToIndex(1)
+private suspend fun ObservableKodexAgentStorage.readUsing(method: String): Any? = when (method) {
+    "exact" -> getCommitsExact(0)
+    "values" -> getCommitsIn(0..5)
+    "first" -> getFirstCommitsIn(0..5, limit = 1)
+    "last" -> getLastCommitsIn(0..5, limit = 1)
     "indexes" -> indexesIn(0..5)
     else -> error("Unexpected method")
 }

@@ -3,13 +3,14 @@ package io.github.stream29.kodex.app.webbackendfixture
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.test.seedTestHistory
 import io.github.stream29.kodex.app.test.testSettings
-import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
+import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.*
@@ -40,17 +41,21 @@ internal suspend fun CoroutineScope.seedHistoryProductFixture(home: Path) {
     )
     events[1269] = StableAssistantMessage(listOf(ContentItem.OutputText("HISTORY_MANY_LATEST")))
     seedTestHistory(home, "History many fixture", events)
-    val repository = FileSystemKodexSessionRepository(home, testKodexAgentDependencies())
+    val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies())
     try {
         val session = repository.create()
         repository.open(session).runtime.modify { storage ->
             storage.initialize(testSettings("History disclosure fixture", home))
-            storage.index[2] = StableUserMessage(listOf(ContentItem.InputText("HISTORY_TOOL_OLD")))
+            storage.commit(UnstableSnapshot(emptyList()))
+            storage.commit(StableUserMessage(listOf(ContentItem.InputText("HISTORY_TOOL_OLD"))))
             val output = (0 until 100).joinToString("\n") { "HISTORY_TOOL_OUTPUT_$it" }
-            storage.work[3] = Json.decodeFromString<StableWorkEvent>(
-                """{"type":"command_execution_tool_event","call_id":"history-tool","action":{"type":"exec_command","arguments":{"cmd":"history-fixture-not-executed","yield_time_ms":1000,"max_output_tokens":10000}},"result":{"type":"output","value":{"chunk_id":"history","wall_time_seconds":0.12,"exit_code":0,"original_token_count":100,"output":${Json.encodeToString(output)}}}}""",
+            storage.commit(
+                Json.decodeFromString<StableWorkEvent>(
+                    """{"type":"command_execution_tool_event","call_id":"history-tool","action":{"type":"exec_command","arguments":{"cmd":"history-fixture-not-executed","yield_time_ms":1000,"max_output_tokens":10000}},"result":{"type":"output","value":{"chunk_id":"history","wall_time_seconds":0.12,"exit_code":0,"original_token_count":100,"output":${Json.encodeToString(output)}}}}""",
+                ),
             )
-            storage.index[5] = StableAssistantMessage(listOf(ContentItem.OutputText("HISTORY_TOOL_LATEST")))
+            storage.commit(UnstableSnapshot(emptyList()))
+            storage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("HISTORY_TOOL_LATEST"))))
         }
     } finally { withContext(NonCancellable) { repository.cancelAndJoin() } }
 }

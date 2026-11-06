@@ -6,12 +6,14 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.revert
+import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
@@ -22,6 +24,7 @@ import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemView
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.Dispatchers
@@ -57,21 +60,20 @@ val historyViewportAndScrollEffectTest by testSuite {
                 val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
                 val runtime = repository.open(repository.create()).runtime
                 runtime.modify { storage ->
-                    for (index in 1..20) storage.index[index] = navigationMessage("$index")
+                    storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                    for (index in 1..20) storage.commit(navigationMessage("$index"))
                 }
                 val entered = CompletableDeferred<Unit>()
                 val release = CompletableDeferred<Unit>()
                 val armed = MutableStateFlow(false)
                 val original = runtime.storage
                 val storage = object : KodexAgentStorage by original {
-                    override val index = object : IndexVersioned<CleanIndexEntry> by original.index {
-                        override suspend fun getExact(index: Int): CleanIndexEntry? {
-                            if (index == 7 && armed.compareAndSet(true, false)) {
-                                entered.complete(Unit)
-                                release.await()
-                            }
-                            return original.index.getExact(index)
+                    override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> {
+                        if (index == 7 && types == AgentCommitType.IndexTypes && armed.compareAndSet(true, false)) {
+                            entered.complete(Unit)
+                            release.await()
                         }
+                        return original.getCommitsExact(index, types)
                     }
                 }
                 val model = createAgentHistoryViewModel(
@@ -115,23 +117,22 @@ val historyViewportAndScrollEffectTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                for (index in 1..20) storage.index[index] = navigationMessage("$index")
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 // UpdateLatestTurn's duration is a FIFO barrier after Invalidate, not a transient effect probe.
-                storage.timestamp[1] = Clock.System.now()
+                storage.commit(listOf(navigationMessage("1"), CommitTimestamp(Clock.System.now())))
+                for (index in 2..20) storage.commit(navigationMessage("$index"))
             }
             val entered = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
             val armed = MutableStateFlow(false)
             val original = runtime.storage
             val storage = object : KodexAgentStorage by original {
-                override val index = object : IndexVersioned<CleanIndexEntry> by original.index {
-                    override suspend fun getExact(index: Int): CleanIndexEntry? {
-                        if (index == 7 && armed.compareAndSet(true, false)) {
-                            entered.complete(Unit)
-                            release.await()
-                        }
-                        return original.index.getExact(index)
+                override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> {
+                    if (index == 7 && types == AgentCommitType.IndexTypes && armed.compareAndSet(true, false)) {
+                        entered.complete(Unit)
+                        release.await()
                     }
+                    return original.getCommitsExact(index, types)
                 }
             }
             val nonce = MutableStateFlow(40L)
@@ -216,22 +217,21 @@ val historyViewportAndScrollEffectTest by testSuite {
                     val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
                     val runtime = repository.open(repository.create()).runtime
                     runtime.modify { storage ->
-                        for (index in 1..20) storage.index[index] = navigationMessage("$index")
-                        storage.timestamp[1] = Clock.System.now()
+                        storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                        storage.commit(listOf(navigationMessage("1"), CommitTimestamp(Clock.System.now())))
+                        for (index in 2..20) storage.commit(navigationMessage("$index"))
                     }
                     val entered = CompletableDeferred<Unit>()
                     val release = CompletableDeferred<Unit>()
                     val armed = MutableStateFlow(false)
                     val original = runtime.storage
                     val storage = object : KodexAgentStorage by original {
-                        override val index = object : IndexVersioned<CleanIndexEntry> by original.index {
-                            override suspend fun getExact(index: Int): CleanIndexEntry? {
-                                if (index == 7 && armed.compareAndSet(true, false)) {
-                                    entered.complete(Unit)
-                                    release.await()
-                                }
-                                return original.index.getExact(index)
+                        override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> {
+                            if (index == 7 && types == AgentCommitType.IndexTypes && armed.compareAndSet(true, false)) {
+                                entered.complete(Unit)
+                                release.await()
                             }
+                            return original.getCommitsExact(index, types)
                         }
                     }
                     // Control delivery, not History behavior: real storage/runtime mutation below,
@@ -274,7 +274,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                         val endIndex = if (rewrite) 20 else 3
                         runtime.modify {
                             it.revert(endIndex)
-                            it.index[endIndex] = navigationMessage("replacement")
+                            it.commit(navigationMessage("replacement"))
                         }
                         assertEquals(endIndex, runtime.latestIndex.value)
                         latest.value = endIndex
@@ -283,7 +283,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                         state.value = KodexAgentStateValue.UserMessage
                         scheduler.runCurrent() // Actual state collector queues ExternalWriteFinished.
                         if (appendAfterCompletion) {
-                            runtime.modify { it.index[endIndex + 1] = navigationMessage("appended") }
+                            runtime.modify { it.commit(navigationMessage("appended")) }
                             latest.value = endIndex + 1
                             scheduler.runCurrent() // Completion's end is now stale, nonce is still 41.
                         }
@@ -351,8 +351,9 @@ val historyViewportAndScrollEffectTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify {
-                for (index in 1..8) it.index[index] = navigationMessage("$index")
-                it.timestamp[1] = Clock.System.now()
+                it.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                it.commit(listOf(navigationMessage("1"), CommitTimestamp(Clock.System.now())))
+                for (index in 2..8) it.commit(navigationMessage("$index"))
             }
             val latest = MutableStateFlow(8)
             val state = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.UserMessage)
@@ -381,7 +382,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                 scheduler.runCurrent()
                 runtime.modify {
                     it.revert(8)
-                    it.index[8] = navigationMessage("rewritten without nonce")
+                    it.commit(navigationMessage("rewritten without nonce"))
                 }
                 assertEquals(8, runtime.latestIndex.value)
                 // No cursor/nonce notification can perform this invalidation for the completion.
@@ -431,7 +432,11 @@ val historyViewportAndScrollEffectTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                for (index in listOf(3, 9, 20)) storage.index[index] = navigationMessage("$index")
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                for (index in 1..20) {
+                    if (index in setOf(3, 9, 20)) storage.commit(navigationMessage("$index"))
+                    else storage.commit(CommitTimestamp(Clock.System.now()))
+                }
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -481,7 +486,8 @@ val historyViewportAndScrollEffectTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                for (index in 1..8) storage.index[index] = navigationMessage("$index")
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                for (index in 1..8) storage.commit(navigationMessage("$index"))
             }
             val nonce = MutableStateFlow(40L)
             val model = createAgentHistoryViewModel(
@@ -537,7 +543,8 @@ val historyViewportAndScrollEffectTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                for (index in 1..8) storage.index[index] = navigationMessage("$index")
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                for (index in 1..8) storage.commit(navigationMessage("$index"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -566,7 +573,11 @@ val historyViewportAndScrollEffectTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                for (index in 1..400) storage.index[index * 3] = navigationMessage("$index")
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                for (i in 1..1_200) {
+                    if (i % 3 == 0) storage.commit(navigationMessage("${i / 3}"))
+                    else storage.commit(CommitTimestamp(Clock.System.now()))
+                }
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -613,13 +624,14 @@ val historyViewportAndScrollEffectTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                storage.index[1] = navigationMessage("one")
-                for (index in 2..20) storage.work[index] = StableTextToolEvent(
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                storage.commit(navigationMessage("one"))
+                for (index in 2..20) storage.commit(StableTextToolEvent(
                     callId = "call-$index", name = "tool-$index",
                     arguments = JsonObject(emptyMap()), result = "done", success = true,
-                )
-                storage.index[21] = navigationMessage("seal")
-                for (index in 22..30) storage.index[index] = navigationMessage("$index")
+                ))
+                storage.commit(navigationMessage("seal"))
+                for (index in 22..30) storage.commit(navigationMessage("$index"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {

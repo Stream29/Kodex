@@ -1,29 +1,31 @@
 package io.github.stream29.kodex.agentsession.inmemory
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
-import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
-import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
+import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
+import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.RequestFinish
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.agentstate.impl.KodexAgentStateInvalidTransitionException
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
+import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
 import io.github.stream29.kodex.openai.Response
@@ -125,17 +127,17 @@ val agentRuntimeRunningTurnTest by testSuite {
             })
             val runtime = root.runtime
             runtime.appendUserMessage(listOf(ContentItem.InputText("first")))
-            val firstTurn = root.storage.settings[runtime.latestIndex.value].turnId
+            val firstTurn = root.storage.getSettingsAt(runtime.latestIndex.value).turnId
             runtime.resume()
             assertEquals(1, requests)
             assertEquals(KodexAgentStateValue.AssistantMessage, runtime.state.value)
             assertNull(runtime.runningTurn.value)
             runtime.appendUserMessage(listOf(ContentItem.InputText("second")))
-            val secondTurn = root.storage.settings[runtime.latestIndex.value].turnId
+            val secondTurn = root.storage.getSettingsAt(runtime.latestIndex.value).turnId
             assertTrue(firstTurn != secondTurn)
             runtime.resume()
-            val history = root.storage.index.indexesIn(0..runtime.latestIndex.value)
-                .map { root.storage.index[it] }
+            val history = root.storage.getCommitsIn(0..runtime.latestIndex.value, AgentCommitType.IndexTypes)
+                .map { it.commit }
             assertEquals(2, requests)
             assertEquals(
                 listOf("first", "second"),
@@ -145,7 +147,7 @@ val agentRuntimeRunningTurnTest by testSuite {
             )
             assertEquals(2, history.filterIsInstance<StableAssistantMessage>().size)
             assertEquals(emptyList(), history.filterIsInstance<StableDeveloperMessage>())
-            assertEquals(secondTurn, root.storage.settings[runtime.latestIndex.value].turnId)
+            assertEquals(secondTurn, root.storage.getSettingsAt(runtime.latestIndex.value).turnId)
             assertNull(runtime.runningTurn.value)
         }
 
@@ -238,7 +240,7 @@ val agentRuntimeRunningTurnTest by testSuite {
             )
             val runtime = root.runtime
             runtime.appendUserMessage(listOf(ContentItem.InputText("Compact this.")))
-            val before = root.storage.settings[runtime.latestIndex.value]
+            val before = root.storage.getSettingsAt(runtime.latestIndex.value)
             val queued = listOf(StableUserMessage(listOf(ContentItem.InputText("Keep queued."))))
             runtime.pendingSteer.value = queued
 
@@ -252,9 +254,9 @@ val agentRuntimeRunningTurnTest by testSuite {
 
                 assertEquals(index, runtime.latestIndex.value)
                 assertEquals(index, root.storage.latestIndex())
-                assertEquals(StableContextCompaction(encryptedContent = "compacted"), root.storage.work[index])
-                assertEquals(0L, root.storage.tokenCount[index].totalTokens)
-                val after = root.storage.settings[index]
+                assertEquals(StableContextCompaction(encryptedContent = "compacted"), root.storage.getWorkEventAt(index))
+                assertEquals(0L, root.storage.getTokenCountAt(index).totalTokens)
+                val after = root.storage.getSettingsAt(index)
                 assertEquals(before.turnId, after.turnId)
                 assertEquals(before.windowNumber + 1, after.windowNumber)
                 assertTrue(metadata.single().contains("\"trigger\":\"manual\""))
@@ -424,11 +426,12 @@ val agentRuntimeRunningTurnTest by testSuite {
                     KodexAgentSettings(OpenAiModelId("test-model"), autoCompactionTokenLimit = 20),
                 )
                 val runtime = root.runtime
-                val index = runtime.appendUserMessage(listOf(ContentItem.InputText("Continue.")))
+                runtime.appendUserMessage(listOf(ContentItem.InputText("Continue.")))
                 runtime.modify {
-                    it.tokenCount[index] = TokenCountSnapshot(
-                        kind = TokenCountKind.Response,
-                        totalTokens = if (preTurn) 90L else 1L,
+                    it.commit(
+                        TokenCountSnapshot.Response(
+                            totalTokens = if (preTurn) 90L else 1L,
+                        ),
                     )
                 }
                 val turn = async(start = CoroutineStart.UNDISPATCHED) { runtime.resume() }

@@ -3,10 +3,13 @@ package io.github.stream29.kodex.cli.history
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.Dispatchers
@@ -28,9 +31,12 @@ val historyPagingReadinessTest by testSuite {
                 val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
                 val runtime = repository.open(repository.create()).runtime
                 runtime.modify { storage ->
+                    storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                     repeat(itemCount) { position ->
-                        storage.index[position + 1] = StableUserMessage(
-                            listOf(ContentItem.InputText("$position")),
+                        storage.commit(
+                            StableUserMessage(
+                                listOf(ContentItem.InputText("$position")),
+                            ),
                         )
                     }
                 }

@@ -1,9 +1,11 @@
 package io.github.stream29.kodex.rpc.client
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
@@ -49,6 +51,8 @@ public actual val RpcWireSerializers: SerializersModule = SerializersModule {
     contextual(AgentStateValue::class, AgentStateValue.serializer())
     contextual(ContentItem::class, ContentItem.serializer())
     contextual(ResponsesStreamEvent::class, ResponsesStreamEvent.serializer())
+    contextual(AgentCommit::class, AgentCommit.serializer())
+    contextual(TokenCountSnapshot::class, TokenCountSnapshot.serializer())
     contextual(StableCleanEvent.CompletedTool::class, StableCleanEvent.CompletedTool.serializer())
     contextual(StableIndexEvent.Steerable::class, StableIndexEvent.Steerable.serializer())
     contextual(CleanIndexEntry::class, CleanIndexEntry.serializer())

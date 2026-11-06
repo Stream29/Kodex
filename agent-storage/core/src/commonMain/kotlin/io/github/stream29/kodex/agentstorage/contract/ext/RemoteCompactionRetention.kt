@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
@@ -8,32 +9,24 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSub
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.valuesDescending
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.UpdatePlanArgs
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskResponse
+import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskResponse
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.mapNotNull
-import kotlinx.coroutines.flow.takeWhile
 
 private const val RemoteCompactionV2RetainedItemTokenBudget: Int = 64_000
 private const val ApproximateCharactersPerToken: Int = 4
 
 /**
  * Reads the bounded retained prefix before [beforeIndex].
- *
- * Indexes are fetched through the timeline flow in exponentially growing
- * ranges. Once the token budget is exhausted, collection is cancelled and no
- * older payloads are decoded.
  */
 public actual suspend fun KodexAgentStorage.buildCompactionPrefix(
     beforeIndex: Int,
@@ -43,19 +36,30 @@ public actual suspend fun KodexAgentStorage.buildCompactionPrefix(
 
     var usedTokens = 0L
     val retainedReversed = mutableListOf<CompactionRetainedItem>()
-    index.valuesDescending(beforeIndex - 1)
-        .mapNotNull { (_, entry) -> entry as? CompactionRetainedItem }
-        .takeWhile { item ->
-            retainedReversed += item
+    var upperBound = beforeIndex - 1
+    var batchSize = 32
+    while (upperBound >= 0) {
+        val page = getLastCommitsIn(
+            range = 0..upperBound,
+            types = AgentCommitType.CompactionRetainedTypes,
+            limit = batchSize,
+        )
+        if (page.isEmpty()) break
+        for (i in page.indices.reversed()) {
+            val item = page[i].commit as CompactionRetainedItem
             usedTokens += item.approximateTokenCount().coerceAtLeast(1)
             if (usedTokens <= RemoteCompactionV2RetainedItemTokenBudget) {
-                true
+                retainedReversed += item
             } else {
-                retainedReversed.removeLast()
-                false
+                retainedReversed.reverse()
+                return retainedReversed
             }
         }
-        .collect()
+        val oldestFetchedIndex = page.first().index
+        if (oldestFetchedIndex <= 0) break
+        upperBound = oldestFetchedIndex - 1
+        if (batchSize < 512) batchSize *= 2
+    }
     retainedReversed.reverse()
     return retainedReversed
 }

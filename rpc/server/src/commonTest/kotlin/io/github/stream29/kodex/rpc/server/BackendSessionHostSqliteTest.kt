@@ -7,9 +7,11 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
@@ -85,7 +87,7 @@ val backendSessionHostSqliteTest by testSuite(testConfig = TestConfig.testScope(
                             SqliteKodexSessionRepository(root, testKodexAgentDependencies())
                         }) { host ->
                             host.keepSessionAlive(index)
-                            assertEquals(OpenAiModelId("persisted-cleanup"), host.session(index).session.storage.settings[0].model)
+                            assertEquals(OpenAiModelId("persisted-cleanup"), host.session(index).session.storage.getSettingsAt(0).model)
                         }
                     }.await()
                 } finally { deleteTestTree(root) }
@@ -137,8 +139,8 @@ val backendSessionHostSqliteTest by testSuite(testConfig = TestConfig.testScope(
                             runtime.appendUserMessage(listOf(ContentItem.InputText("Persisted SQLite history")))
                         }
                         val old = host.session(index)
-                        val settings = old.session.storage.settings[0]
-                        val history = old.session.storage.index[1]
+                        val settings = old.session.storage.getSettingsAt(0)
+                        val history = old.session.storage.getIndexEntryAt(1)
                         clock += 60.seconds
                         advanceTimeBy(60_000)
                         runCurrent()
@@ -155,8 +157,8 @@ val backendSessionHostSqliteTest by testSuite(testConfig = TestConfig.testScope(
                         host.keepSessionAlive(index)
                         val fresh = host.session(index)
                         assertNotSame(old.session, fresh.session)
-                        assertEquals(settings, fresh.session.storage.settings[0])
-                        assertEquals(history, fresh.session.storage.index[1])
+                        assertEquals(settings, fresh.session.storage.getSettingsAt(0))
+                        assertEquals(history, fresh.session.storage.getIndexEntryAt(1))
                         assertTrue(host.deleteSession(index))
                         assertTrue(fresh.inactive.isCompleted)
                         assertEquals(emptyList(), host.repository().entries.value)

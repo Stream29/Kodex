@@ -7,7 +7,7 @@ import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.rpc.models.BackendSettings

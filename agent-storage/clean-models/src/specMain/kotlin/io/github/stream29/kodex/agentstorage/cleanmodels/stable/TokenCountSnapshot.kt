@@ -1,31 +1,42 @@
-package io.github.stream29.kodex.agentstorage.contract
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import io.github.stream29.kodex.openai.TokenUsage
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-public data class TokenCountSnapshot(
-    public val kind: TokenCountKind,
-    @SerialName("total_tokens")
-    public val totalTokens: Long,
-    public val usage: TokenUsage? = null,
-    public val diagnostics: TokenCountDiagnostics? = null,
-)
+public sealed interface TokenCountSnapshot : AgentCommit {
+    public val totalTokens: Long
 
-@Serializable
-public enum class TokenCountKind {
-    @SerialName("legacy")
-    Legacy,
+    @Serializable
+    @SerialName("token_count_legacy")
+    public data class Legacy(
+        @SerialName("total_tokens")
+        override val totalTokens: Long,
+    ) : TokenCountSnapshot
 
-    @SerialName("initialization")
-    Initialization,
+    @Serializable
+    @SerialName("token_count_initialization")
+    public data class Initialization(
+        @SerialName("total_tokens")
+        override val totalTokens: Long = 0L,
+    ) : TokenCountSnapshot
 
-    @SerialName("compaction")
-    Compaction,
+    @Serializable
+    @SerialName("token_count_compaction")
+    public data class Compaction(
+        @SerialName("total_tokens")
+        override val totalTokens: Long = 0L,
+    ) : TokenCountSnapshot
 
-    @SerialName("response")
-    Response,
+    @Serializable
+    @SerialName("token_count_response")
+    public data class Response(
+        @SerialName("total_tokens")
+        override val totalTokens: Long,
+        public val usage: TokenUsage? = null,
+        public val diagnostics: TokenCountDiagnostics? = null,
+    ) : TokenCountSnapshot
 }
 
 @Serializable

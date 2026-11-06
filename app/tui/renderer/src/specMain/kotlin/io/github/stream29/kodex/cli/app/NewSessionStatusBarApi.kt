@@ -3,7 +3,7 @@ package io.github.stream29.kodex.cli.app
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
 import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDropdowns
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 
 /** Native status geometry; borrows the draft's configuration child without owning its state. */
 @Composable

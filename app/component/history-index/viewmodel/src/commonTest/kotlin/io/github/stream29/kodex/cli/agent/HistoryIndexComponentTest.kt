@@ -2,15 +2,19 @@ package io.github.stream29.kodex.cli.agent
 
 import de.infix.testBalloon.framework.core.testSuite
 import de.infix.testBalloon.framework.core.TestCompartment
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
+import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadHandle
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadState
@@ -394,8 +398,29 @@ val historyIndexComponentTest by testSuite(compartment = { TestCompartment.RealT
 private fun message(text: String): CleanIndexEntry = StableUserMessage(listOf(ContentItem.InputText(text)))
 
 private class IndexPorts(production: Boolean = true) : HistoryIndexDependencies {
-    override val timeline = FakeTimeline<CleanIndexEntry>()
-    override val timestamp = FakeTimeline<Instant>()
+    val timeline = FakeTimeline<CleanIndexEntry>()
+    val timestamp = FakeTimeline<Instant>()
+    override val storage: KodexAgentStorage = object : KodexAgentStorage {
+        override val uri: String = "kodex://test"
+        override suspend fun latestIndex(): Int = latestIndex.value
+        override suspend fun indexesIn(range: IntRange, types: Set<AgentCommitType>): List<Int> =
+            when (types) {
+                AgentCommitType.IndexTypes -> timeline.indexesIn(range)
+                else -> emptyList()
+            }
+        override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> =
+            when (types) {
+                AgentCommitType.IndexTypes -> listOfNotNull(timeline.getExact(index))
+                AgentCommitType.TimestampTypes -> listOfNotNull(timestamp.getExact(index)?.let(::CommitTimestamp))
+                else -> emptyList()
+            }
+        override suspend fun getCommitsIn(range: IntRange, types: Set<AgentCommitType>): List<IndexedAgentCommit> =
+            emptyList()
+        override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit> =
+            emptyList()
+        override suspend fun getLastCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit> =
+            emptyList()
+    }
     override val latestIndex = MutableStateFlow(-1)
     override val cacheNonce = if (production) MutableStateFlow(11L) else null
     override val externalWrite = MutableStateFlow(false)
@@ -403,26 +428,21 @@ private class IndexPorts(production: Boolean = true) : HistoryIndexDependencies 
     override fun requestScrollToStorageIndex(index: Int) { scrolled += index }
 }
 
-private class FakeTimeline<T> : IndexVersioned<T> {
+private class FakeTimeline<T> {
     val values = mutableMapOf<Int, T>()
     val ranges = MutableStateFlow<List<IntRange>>(emptyList())
     val exacts = MutableStateFlow<List<Int>>(emptyList())
     var exactRead: (suspend (Int) -> T?)? = null
     var rangeRead: (suspend (IntRange) -> List<Int>)? = null
-    override suspend fun latestIndex() = values.keys.maxOrNull() ?: -1
-    override suspend fun get(index: Int): T = values.getValue(requireNotNull(floorToIndex(index)))
-    override suspend fun getExact(index: Int): T? {
+    suspend fun getExact(index: Int): T? {
         exacts.update { it + index }
         val read = exactRead
         return if (read != null) read(index) else values[index]
     }
-    override suspend fun floorToIndex(index: Int) = values.keys.filter { it <= index }.maxOrNull()
-    override suspend fun ceilToIndex(index: Int) = values.keys.filter { it >= index }.minOrNull()
-    override suspend fun indexesIn(range: IntRange): List<Int> {
+    suspend fun indexesIn(range: IntRange): List<Int> {
         ranges.update { it + listOf(range) }
         return rangeRead?.invoke(range) ?: values.keys.filter { it in range }.sorted()
     }
-    override suspend fun valuesIn(range: IntRange) = indexesIn(range).map { it to values.getValue(it) }
 }
 
 private suspend fun withIndex(deps: IndexPorts, block: suspend (HistoryIndexViewModel) -> Unit) {

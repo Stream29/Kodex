@@ -4,15 +4,21 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.codexRequestWindowId
+import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getSettingsExact
+import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
+import io.github.stream29.kodex.agentstorage.contract.getWorkEventExact
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.Reasoning
@@ -22,7 +28,6 @@ import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ServiceTier
-import io.github.stream29.kodex.openai.codexRequestWindowId
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -69,7 +74,7 @@ val compactionSettingsConsistencyTest by testSuite {
                 val content = listOf(ContentItem.InputText("compact this"))
                 agent.appendUserMessage(content)
                 val snapshotIndex = agent.latestIndex.value
-                val initial = storage.settings[snapshotIndex]
+                val initial = storage.getSettingsAt(snapshotIndex)
                 val running = async(start = CoroutineStart.UNDISPATCHED) {
                     if (forced) agent.forcedCompact()
                     else agent.compact(
@@ -101,14 +106,14 @@ val compactionSettingsConsistencyTest by testSuite {
                     assertFalse(agent.compareAndSetSettings(initial, initial.copy(threadName = "stale")))
                     assertEquals(acceptedIndex, agent.latestIndex.value)
                     assertEquals(KodexAgentStateValue.Compacting, agent.state.value)
-                    assertEquals(initial, storage.settings[snapshotIndex])
-                    assertEquals(latest, storage.settings.getExact(acceptedIndex))
+                    assertEquals(initial, storage.getSettingsAt(snapshotIndex))
+                    assertEquals(latest, storage.getSettingsExact(acceptedIndex))
                     release.complete(Unit)
                     val checkpoint = running.await()
 
                     assertEquals(acceptedIndex + 2, checkpoint)
                     assertEquals(storage.latestIndex(), agent.latestIndex.value)
-                    val committed = storage.settings[checkpoint]
+                    val committed = storage.getSettingsAt(checkpoint)
                     assertNotEquals(initial.windowId, committed.windowId)
                     assertEquals(latest.copy(
                         windowNumber = latest.windowNumber + 1,
@@ -116,12 +121,12 @@ val compactionSettingsConsistencyTest by testSuite {
                         windowId = committed.windowId,
                     ), committed)
                     assertEquals(listOf(snapshotIndex + 1, snapshotIndex + 2, acceptedIndex, checkpoint - 1),
-                        storage.settings.indexesIn((snapshotIndex + 1)..checkpoint))
+                        storage.indexesIn((snapshotIndex + 1)..checkpoint, AgentCommitType.SettingsTypes))
                     assertEquals(listOf(snapshotIndex + 1, snapshotIndex + 2, acceptedIndex, checkpoint),
-                        storage.timestamp.indexesIn((snapshotIndex + 1)..checkpoint))
-                    assertIs<CleanCompactionPoint>(storage.index.getExact(checkpoint - 1))
-                    assertIs<StableContextCompaction>(storage.work.getExact(checkpoint))
-                    assertEquals(0L, storage.tokenCount[checkpoint].totalTokens)
+                        storage.indexesIn((snapshotIndex + 1)..checkpoint, AgentCommitType.TimestampTypes))
+                    assertIs<CleanCompactionPoint>(storage.getIndexEntryExact(checkpoint - 1))
+                    assertIs<StableContextCompaction>(storage.getWorkEventExact(checkpoint))
+                    assertEquals(0L, storage.getTokenCountAt(checkpoint).totalTokens)
                     assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
                     val request = requests.single()
                     assertEquals(initial.model, request.model)
@@ -140,8 +145,8 @@ val compactionSettingsConsistencyTest by testSuite {
                     val after = committed.copy(threadName = "after")
                     assertTrue(agent.compareAndSetSettings(committed, after))
                     assertEquals(checkpoint + 1, agent.latestIndex.value)
-                    assertEquals(latest, storage.settings.getExact(acceptedIndex))
-                    assertEquals(committed, storage.settings.getExact(checkpoint - 1))
+                    assertEquals(latest, storage.getSettingsExact(acceptedIndex))
+                    assertEquals(committed, storage.getSettingsExact(checkpoint - 1))
                 } finally {
                     release.complete(Unit)
                     running.cancelAndJoin()
@@ -163,7 +168,7 @@ val compactionSettingsConsistencyTest by testSuite {
                     }
                 }, storage)
                 agent.appendUserMessage(listOf(ContentItem.InputText("compact")))
-                val before = storage.settings[agent.latestIndex.value]
+                val before = storage.getSettingsAt(agent.latestIndex.value)
                 // Catch within the child so an injected failure cannot cancel the test owner.
                 val running = async(start = CoroutineStart.UNDISPATCHED) {
                     runCatching { agent.forcedCompact() }.exceptionOrNull()
@@ -183,8 +188,8 @@ val compactionSettingsConsistencyTest by testSuite {
                     }
                     assertEquals(acceptedIndex, storage.latestIndex())
                     assertEquals(acceptedIndex, agent.latestIndex.value)
-                    assertEquals(latest, storage.settings[acceptedIndex])
-                    assertEquals(emptyList(), storage.work.indexesIn(0..Int.MAX_VALUE))
+                    assertEquals(latest, storage.getSettingsAt(acceptedIndex))
+                    assertEquals(emptyList(), storage.indexesIn(0..Int.MAX_VALUE, AgentCommitType.WorkTypes))
                     assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
                     assertTrue(agent.compareAndSetSettings(latest, latest.copy(threadName = "next")))
                 } finally {
