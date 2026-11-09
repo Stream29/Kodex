@@ -43,10 +43,10 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                 db.transaction {
                     db.execute("INSERT INTO sessions(session_id) VALUES (0)")
                     db.execute("INSERT INTO agents(agent_id, session_id) VALUES (0, 0)")
-                    db.execute("INSERT INTO agent_commits VALUES (0, 'settings', 0, ?)",
+                    db.execute("INSERT INTO agent_commits VALUES (0, 'settings', 0, ?, '2026-01-01T00:00:00Z')",
                         listOf("""{"model":"fixture","threadName":"Synthetic history"}"""))
                     repeat(240) { index ->
-                        db.execute("INSERT INTO agent_commits VALUES (0, 'user_message', ?, ?)", listOf(index.toLong(),
+                        db.execute("INSERT INTO agent_commits VALUES (0, 'user_message', ?, ?, '2026-01-01T00:00:00Z')", listOf(index.toLong(),
                             """{"type":"user_message","content":[{"type":"input_text","text":"Fixture $index"}]}"""))
                     }
                 }
@@ -89,11 +89,11 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                     db.execute("INSERT INTO sessions(session_id, archived) VALUES (0, 0)")
                     db.execute("INSERT INTO agents(agent_id, session_id, parent_agent_id) VALUES (0, 0, NULL)")
                     db.execute(
-                        "INSERT INTO agent_commits VALUES (0, 'settings', 0, ?)",
+                        "INSERT INTO agent_commits VALUES (0, 'settings', 0, ?, '2026-01-01T00:00:00Z')",
                         listOf("""{"model":"fixture","threadName":"Migrated session"}"""),
                     )
                     db.execute(
-                        "INSERT INTO agent_commits VALUES (0, 'user_message', 0, ?)",
+                        "INSERT INTO agent_commits VALUES (0, 'user_message', 0, ?, '2026-01-01T00:00:00Z')",
                         listOf("""{"type":"user_message","content":[{"type":"input_text","text":"Migrated history"}]}"""),
                     )
                 }

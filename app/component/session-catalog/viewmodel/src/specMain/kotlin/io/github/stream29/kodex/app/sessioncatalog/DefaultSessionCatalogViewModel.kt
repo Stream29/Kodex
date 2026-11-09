@@ -26,8 +26,6 @@ public expect class DefaultSessionCatalogViewModel(
     override fun dismiss(): Unit
     override suspend fun refresh(): Unit
     override suspend fun setShowArchived(showArchived: Boolean): Unit
-    override suspend fun readCreatedAt(sessionIndex: Int): Instant?
-    override suspend fun readUpdatedAt(sessionIndex: Int): Instant?
     override suspend fun archive(sessionIndex: Int): Unit
     override suspend fun unarchive(sessionIndex: Int): Unit
     override suspend fun fork(sessionIndex: Int): Int

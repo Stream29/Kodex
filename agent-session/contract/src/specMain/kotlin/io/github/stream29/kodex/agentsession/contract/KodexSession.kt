@@ -38,6 +38,9 @@ public interface KodexSessionEntry {
     /** The latest thread name, or `null` while the entry is uninitialized. */
     public val threadName: String?
 
+    /** Exact timestamp zero for this entry, or `null` when timestamp zero is absent. */
+    public val createdAt: Instant?
+
     /** Latest recorded entry activity, or `null` when no timestamp has been persisted. */
     public val lastActivityAt: Instant?
 }
@@ -121,18 +124,6 @@ public interface KodexRootSessionRepository : KodexSessionRepository {
 
     /** Reads one exact root Session as an actionable entry without scanning other metadata. */
     public suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry
-
-    /**
-     * Reads exact timestamp zero without opening a runtime or searching later records.
-     * @return null when timestamp zero is absent.
-     */
-    public suspend fun readCreatedAt(entryIndex: Int): Instant?
-
-    /**
-     * Reads the latest timestamp independently of the catalog snapshot.
-     * @return null when no timestamp has been persisted.
-     */
-    public suspend fun readUpdatedAt(entryIndex: Int): Instant?
 
     /**
      * Lists root Session catalog metadata.

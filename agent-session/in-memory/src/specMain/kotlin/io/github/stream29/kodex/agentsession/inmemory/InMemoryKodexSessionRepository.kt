@@ -9,7 +9,6 @@ import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.coroutines.CoroutineContext
-import kotlin.time.Instant
 
 /** Process-local root session repository for tests and transient hosts. */
 public expect class InMemoryKodexSessionRepository : KodexRootSessionRepository {
@@ -19,8 +18,6 @@ public expect class InMemoryKodexSessionRepository : KodexRootSessionRepository 
     override suspend fun listEntries(): List<KodexRootSessionEntry>
     override suspend fun listEntries(includeArchived: Boolean): List<KodexRootSessionEntry>
     override suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry
-    override suspend fun readCreatedAt(entryIndex: Int): Instant?
-    override suspend fun readUpdatedAt(entryIndex: Int): Instant?
     override suspend fun create(): Int
     override suspend fun createFork(sourceEntryIndex: Int): Int
     override suspend fun open(entryIndex: Int): KodexAgentSession

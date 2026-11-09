@@ -1,11 +1,9 @@
 package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemHeader
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemViewModel
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,57 +13,42 @@ internal class PatchHistoryItemViewModelImpl(
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
 ) : PatchHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
+    private val patchEvent: StablePatchToolEvent?
+    private val header: PatchHistoryItemHeader?
     private val mutableState: MutableStateFlow<PatchHistoryItemState>
-    private val initialLoadingJob: Job
 
     init {
-        initialLoadingJob = context.launch(start = CoroutineStart.LAZY) {
-            try {
-                val event = context.read(descriptor) as? StablePatchToolEvent
-                    ?: error("History item $index is not a patch tool.")
-                if (context.isCurrent()) {
-                    mutableState.value = PatchHistoryItemState.Collapsed(
-                        header = event.toHistoryHeader(descriptor.elapsed),
-                    )
-                }
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (_: Throwable) {
-                if (context.isCurrent()) mutableState.value = PatchHistoryItemState.Failed
-            }
+        var resolvedEvent: StablePatchToolEvent? = null
+        var resolvedHeader: PatchHistoryItemHeader? = null
+        val initialState = try {
+            val event = descriptor.event as? StablePatchToolEvent
+                ?: error("History item $index is not a patch tool.")
+            val itemHeader = event.toHistoryHeader(descriptor.elapsed)
+            resolvedEvent = event
+            resolvedHeader = itemHeader
+            PatchHistoryItemState.Collapsed(header = itemHeader)
+        } catch (failure: Throwable) {
+            context.logFailure(descriptor, failure)
+            PatchHistoryItemState.Failed
         }
-        mutableState = MutableStateFlow(PatchHistoryItemState.Loading(initialLoadingJob))
+        patchEvent = resolvedEvent
+        header = resolvedHeader
+        mutableState = MutableStateFlow(initialState)
     }
 
     override val state: StateFlow<PatchHistoryItemState> = mutableState.asStateFlow()
 
-    override fun ensureLoaded() {
-        initialLoadingJob.start()
-    }
+    override fun ensureLoaded() = Unit
 
     override fun expand() {
         val collapsed = mutableState.value as? PatchHistoryItemState.Collapsed ?: return
-        lateinit var loadingJob: Job
-        loadingJob = context.launch(start = CoroutineStart.LAZY) {
-            try {
-                val event = context.read(descriptor) as? StablePatchToolEvent
-                    ?: error("History item $index is not a patch tool.")
-                if (context.isCurrent() && mutableState.value.isExpanding(loadingJob)) {
-                    mutableState.value = PatchHistoryItemState.Expanded(
-                        header = collapsed.header,
-                        event = event,
-                    )
-                }
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (_: Throwable) {
-                if (context.isCurrent() && mutableState.value.isExpanding(loadingJob)) {
-                    mutableState.value = PatchHistoryItemState.Failed
-                }
-            }
+        val resolvedEvent = patchEvent ?: return
+        if (context.isCurrent()) {
+            mutableState.value = PatchHistoryItemState.Expanded(
+                header = collapsed.header,
+                event = resolvedEvent,
+            )
         }
-        mutableState.value = PatchHistoryItemState.Expanding(collapsed.header, loadingJob)
-        loadingJob.start()
     }
 
     override fun collapse() {
@@ -83,10 +66,6 @@ internal class PatchHistoryItemViewModelImpl(
     }
 
     override fun release() {
-        initialLoadingJob.cancel()
         collapse()
     }
-
-    private fun PatchHistoryItemState.isExpanding(job: Job): Boolean =
-        this is PatchHistoryItemState.Expanding && loadingJob === job
 }

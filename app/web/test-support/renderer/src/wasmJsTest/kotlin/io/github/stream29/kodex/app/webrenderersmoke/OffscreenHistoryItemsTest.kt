@@ -293,31 +293,23 @@ val offscreenHistoryItemsTest by testSuite {
     test("real folded WorkGroup mounts exact children and controlled tool/Patch expansion") { offscreenTest {
         val stored = InMemoryKodexAgentStorage.empty()
         stored.commit(
-            listOf(
-                StableUserMessage(listOf(ContentItem.InputText("First message"))),
-                CommitTimestamp(Instant.fromEpochMilliseconds(1_000L)),
-            ),
+            StableUserMessage(listOf(ContentItem.InputText("First message"))),
+            timestamp = Instant.fromEpochMilliseconds(1_000L),
         )
         stored.commit(
-            listOf(
-                StableTextToolEvent("demo", name = "demo", arguments = JsonObject(emptyMap()), result = "Full tool output"),
-                CommitTimestamp(Instant.fromEpochMilliseconds(2_000L)),
-            ),
+            StableTextToolEvent("demo", name = "demo", arguments = JsonObject(emptyMap()), result = "Full tool output"),
+            timestamp = Instant.fromEpochMilliseconds(2_000L),
         )
         stored.commit(
-            listOf(
-                StablePatchToolEvent(
-                    "patch", diff = Patch("", listOf(AddFileHunk("new.txt", "line"))),
-                    result = StablePatchToolExecutionResult.Failure("cannot apply"),
-                ),
-                CommitTimestamp(Instant.fromEpochMilliseconds(3_000L)),
+            StablePatchToolEvent(
+                "patch", diff = Patch("", listOf(AddFileHunk("new.txt", "line"))),
+                result = StablePatchToolExecutionResult.Failure("cannot apply"),
             ),
+            timestamp = Instant.fromEpochMilliseconds(3_000L),
         )
         stored.commit(
-            listOf(
-                StableUserMessage(listOf(ContentItem.InputText("Latest message"))),
-                CommitTimestamp(Instant.fromEpochMilliseconds(4_000L)),
-            ),
+            StableUserMessage(listOf(ContentItem.InputText("Latest message"))),
+            timestamp = Instant.fromEpochMilliseconds(4_000L),
         )
         val owner = CoroutineScope(currentCoroutineContext() + Job(currentCoroutineContext()[Job]))
         val model = createAgentHistoryViewModel(

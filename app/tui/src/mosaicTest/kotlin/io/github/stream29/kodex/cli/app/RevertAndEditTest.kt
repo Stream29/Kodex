@@ -89,7 +89,7 @@ val revertAndEditTest by testSuite {
             }
             revertAndEdit(agent, userIndex, generation, text)
             binding.storage.cacheNonce.first { it != generation }
-            assertFalse(userIndex in binding.storage.indexesIn(0..userIndex, AgentCommitType.IndexTypes))
+            assertEquals(0, binding.storage.countCommitsIn(userIndex..userIndex, AgentCommitType.IndexTypes))
             assertEquals(text, agent.composer.state.value.text)
             assertEquals(text.length, agent.composer.state.value.cursorOffset)
             assertEquals("other draft", otherAgent.composer.state.value.text)

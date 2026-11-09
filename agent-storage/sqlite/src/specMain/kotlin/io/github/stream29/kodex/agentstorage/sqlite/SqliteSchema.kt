@@ -12,6 +12,8 @@ CREATE TABLE sessions (
     archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1))
 ) STRICT;
 
+CREATE INDEX idx_sessions_archived ON sessions(archived, session_id);
+
 CREATE TABLE agents (
     agent_id INTEGER PRIMARY KEY CHECK (agent_id BETWEEN 0 AND 2147483647),
     session_id INTEGER NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -50,6 +52,10 @@ CREATE TABLE agent_commits (
             'custom_tool_event',
             'settings',
             'timestamp',
+            'llm_request_meta_legacy',
+            'llm_request_meta_initialization',
+            'llm_request_meta_compaction',
+            'llm_request_meta_response',
             'token_count_legacy',
             'token_count_initialization',
             'token_count_compaction',
@@ -59,6 +65,7 @@ CREATE TABLE agent_commits (
     ),
     "index" INTEGER NOT NULL CHECK ("index" BETWEEN 0 AND 2147483647),
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+    created_at TEXT NOT NULL,
     PRIMARY KEY (agent_id, type, "index")
 ) STRICT, WITHOUT ROWID;
 
@@ -76,23 +83,14 @@ SELECT s.session_id, s.archived,
         ELSE coalesce(json_extract(st.payload_json, '$.threadName'), '') END,
     CASE WHEN st.agent_id IS NULL THEN NULL
         ELSE coalesce(json_extract(st.payload_json, '$.cwd'), '.') END,
-    json_extract(ct.payload_json, '$'),
-    json_extract(ut.payload_json, '$')
+    (SELECT c.created_at FROM agent_commits AS c WHERE c.agent_id = s.session_id AND c."index" = 0 LIMIT 1),
+    (SELECT c.created_at FROM agent_commits AS c WHERE c.agent_id = s.session_id ORDER BY c."index" DESC LIMIT 1)
 FROM sessions AS s
 LEFT JOIN agent_commits AS st
     ON st.agent_id = s.session_id AND st.type = 'settings'
     AND st."index" = (
         SELECT max("index") FROM agent_commits
         WHERE agent_id = s.session_id AND type = 'settings'
-    )
-LEFT JOIN agent_commits AS ct
-    ON ct.agent_id = s.session_id AND ct.type = 'timestamp'
-    AND ct."index" = 0
-LEFT JOIN agent_commits AS ut
-    ON ut.agent_id = s.session_id AND ut.type = 'timestamp'
-    AND ut."index" = (
-        SELECT max("index") FROM agent_commits
-        WHERE agent_id = s.session_id AND type = 'timestamp'
     );
 """
 

@@ -15,18 +15,18 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
-import io.github.stream29.kodex.agentstorage.contract.getUnstableAt
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
@@ -209,9 +209,9 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertRequestHistory(requests[1], user, assistantMessage("Preparing the answer."))
         assertEquals(
             StableAssistantMessage(assistantMessage("Done.").content),
-            storage.getIndexEntryAt(storage.latestIndex()),
+            storage.getCommitAtOrBefore(storage.latestIndex(), AgentCommitType.IndexTypes)?.commit,
         )
-        assertEquals(13L, storage.getTokenCountAt(storage.latestIndex()).totalTokens)
+        assertEquals(13L, storage.getLlmRequestMetaAtOrNull(storage.latestIndex())!!.totalTokens)
         assertEquals(KodexAgentStateValue.AssistantMessage, state.state.value)
     }
 
@@ -425,9 +425,9 @@ val kodexAgentCompactionRuntimeTest by testSuite {
                 id = compaction.id,
                 encryptedContent = compaction.encryptedContent,
             ),
-            storage.getWorkEventAt(storage.latestIndex()),
+            storage.getCommitAtOrBefore(storage.latestIndex(), setOf(AgentCommitType.ContextCompaction))?.commit,
         )
-        assertEquals(StableAssistantMessage(final.content), storage.getIndexEntryAt(storage.latestIndex()))
+        assertEquals(StableAssistantMessage(final.content), storage.getCommitAtOrBefore(storage.latestIndex(), AgentCommitType.IndexTypes)?.commit)
         assertEquals(initialWindowNumber + 1, storage.getSettingsAt(storage.latestIndex()).windowNumber)
         assertEquals(persistedTurnId, storage.getSettingsAt(storage.latestIndex()).turnId)
     }
@@ -472,7 +472,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertEquals(persistedTurnId, storage.getSettingsAt(compactedIndex).turnId)
         assertEquals(
             StableContextCompaction(encryptedContent = "committed"),
-            storage.getWorkEventAt(compactedIndex),
+            storage.getCommitAtOrBefore(compactedIndex, AgentCommitType.IndexTypes)?.commit,
         )
     }
 
@@ -565,7 +565,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         )
         runtime.resume()
 
-        assertEquals(0L, storage.getTokenCountAt(compactIndex).totalTokens)
+        assertEquals(0L, storage.getLlmRequestMetaAtOrNull(compactIndex)!!.totalTokens)
         assertEquals(1, compactRequests.size)
         assertEquals(1, responseRequests.size)
     }
@@ -636,7 +636,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         )
         assertTrue(compactRequests.single().turnMetadata.contains("\"phase\":\"mid_turn\""))
         assertRequestHistory(responseRequests[1], user, compaction)
-        assertEquals(StableAssistantMessage(final.content), storage.getIndexEntryAt(storage.latestIndex()))
+        assertEquals(StableAssistantMessage(final.content), storage.getCommitAtOrBefore(storage.latestIndex(), AgentCommitType.IndexTypes)?.commit)
     }
 
     test("loop stops at pending tool call without issuing another request") {
@@ -680,7 +680,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
 
         assertEquals(1, requests.size)
         assertEquals(KodexAgentStateValue.ToolPending(listOf(pending)), state.state.value)
-        assertEquals(pending, storage.getUnstableAt(storage.latestIndex()).single())
+        assertEquals(pending, storage.getUnstableAtOrNull(storage.latestIndex())!!.single())
     }
     }
 }
@@ -747,7 +747,7 @@ private suspend fun KodexAgentStateContract.appendUserMessage(
     require(message.role == MessageRole.User)
     return appendUserMessage(message.content).also {
         if (tokenCount != null) {
-            (storage as MutableKodexAgentStorage).commit(TokenCountSnapshot.Response(tokenCount))
+            (storage as MutableKodexAgentStorage).commit(LlmRequestMeta.Response(tokenCount))
         }
     }
 }

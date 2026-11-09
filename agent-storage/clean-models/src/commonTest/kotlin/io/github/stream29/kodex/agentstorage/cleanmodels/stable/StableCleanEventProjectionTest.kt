@@ -95,9 +95,9 @@ val stableCleanEventProjectionTest by testSuite {
         )
     }
 
-    test("context compaction remains a provider-facing work event") {
+    test("context compaction is a provider-facing index event") {
         val compaction = ResponseItem.Compaction(encryptedContent = "compact")
-        val contextCompaction: StableWorkEvent = StableContextCompaction(
+        val contextCompaction: StableIndexEvent = StableContextCompaction(
             id = compaction.id,
             encryptedContent = compaction.encryptedContent,
         )

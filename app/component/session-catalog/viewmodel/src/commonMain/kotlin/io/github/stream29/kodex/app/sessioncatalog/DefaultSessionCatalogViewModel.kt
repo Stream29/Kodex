@@ -92,12 +92,6 @@ public actual class DefaultSessionCatalogViewModel actual constructor(
     actual override suspend fun setShowArchived(showArchived: Boolean): Unit = operation {
         if (state.value.showArchived != showArchived) reload(showArchived)
     }
-    actual override suspend fun readCreatedAt(sessionIndex: Int): Instant? = operation {
-        state.value.sessions.first { it.sessionIndex == sessionIndex }.createdAt
-    }
-    actual override suspend fun readUpdatedAt(sessionIndex: Int): Instant? = operation {
-        state.value.sessions.first { it.sessionIndex == sessionIndex }.updatedAt
-    }
     actual override suspend fun archive(sessionIndex: Int): Unit = operation {
         dependencies.archive(sessionIndex)
         reload(state.value.showArchived)

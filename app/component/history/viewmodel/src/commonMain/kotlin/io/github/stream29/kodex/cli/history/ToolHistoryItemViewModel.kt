@@ -1,12 +1,10 @@
 package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.app.history.contract.item.isOrdinaryHistoryToolEvent
+import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Job
+import io.github.stream29.kodex.app.history.contract.item.isOrdinaryHistoryToolEvent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,67 +14,45 @@ internal class ToolHistoryItemViewModelImpl(
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
 ) : ToolHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
+    private val tool: StableCleanEvent.CompletedTool?
+    private val header: ToolHistoryItemHeader?
     private val mutableState: MutableStateFlow<ToolHistoryItemState>
-    private val initialLoadingJob: Job
 
     init {
-        initialLoadingJob = context.launch(start = CoroutineStart.LAZY) {
-            try {
-                val event = context.read(descriptor)
-                val tool = event as? StableCleanEvent.CompletedTool
-                    ?: error("History item $index is not a completed tool.")
-                check(tool.isOrdinaryHistoryTool()) {
-                    "History item $index is not an ordinary tool."
-                }
-                if (context.isCurrent()) {
-                    mutableState.value = ToolHistoryItemState.Collapsed(
-                        header = tool.toHistoryHeader(descriptor.elapsed),
-                    )
-                }
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (failure: Throwable) {
-                context.logFailure(descriptor, failure)
-                if (context.isCurrent()) mutableState.value = ToolHistoryItemState.Failed
+        var resolvedTool: StableCleanEvent.CompletedTool? = null
+        var resolvedHeader: ToolHistoryItemHeader? = null
+        val initialState = try {
+            val completed = descriptor.event as? StableCleanEvent.CompletedTool
+                ?: error("History item $index is not a completed tool.")
+            check(completed.isOrdinaryHistoryTool()) {
+                "History item $index is not an ordinary tool."
             }
+            val itemHeader = completed.toHistoryHeader(descriptor.elapsed)
+            resolvedTool = completed
+            resolvedHeader = itemHeader
+            ToolHistoryItemState.Collapsed(header = itemHeader)
+        } catch (failure: Throwable) {
+            context.logFailure(descriptor, failure)
+            ToolHistoryItemState.Failed
         }
-        mutableState = MutableStateFlow(ToolHistoryItemState.Loading(initialLoadingJob))
+        tool = resolvedTool
+        header = resolvedHeader
+        mutableState = MutableStateFlow(initialState)
     }
 
     override val state: StateFlow<ToolHistoryItemState> = mutableState.asStateFlow()
 
-    override fun ensureLoaded() {
-        initialLoadingJob.start()
-    }
+    override fun ensureLoaded() = Unit
 
     override fun expand() {
         val collapsed = mutableState.value as? ToolHistoryItemState.Collapsed ?: return
-        lateinit var loadingJob: Job
-        loadingJob = context.launch(start = CoroutineStart.LAZY) {
-            try {
-                val event = context.read(descriptor)
-                val tool = event as? StableCleanEvent.CompletedTool
-                    ?: error("History item $index is not a completed tool.")
-                check(tool.isOrdinaryHistoryTool()) {
-                    "History item $index is not an ordinary tool."
-                }
-                if (context.isCurrent() && mutableState.value.isExpanding(loadingJob)) {
-                    mutableState.value = ToolHistoryItemState.Expanded(
-                        header = collapsed.header,
-                        event = tool,
-                    )
-                }
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (failure: Throwable) {
-                context.logFailure(descriptor, failure)
-                if (context.isCurrent() && mutableState.value.isExpanding(loadingJob)) {
-                    mutableState.value = ToolHistoryItemState.Failed
-                }
-            }
+        val resolvedTool = tool ?: return
+        if (context.isCurrent()) {
+            mutableState.value = ToolHistoryItemState.Expanded(
+                header = collapsed.header,
+                event = resolvedTool,
+            )
         }
-        mutableState.value = ToolHistoryItemState.Expanding(collapsed.header, loadingJob)
-        loadingJob.start()
     }
 
     override fun collapse() {
@@ -94,12 +70,8 @@ internal class ToolHistoryItemViewModelImpl(
     }
 
     override fun release() {
-        initialLoadingJob.cancel()
         collapse()
     }
-
-    private fun ToolHistoryItemState.isExpanding(job: Job): Boolean =
-        this is ToolHistoryItemState.Expanding && loadingJob === job
 }
 
 internal fun StableCleanEvent.CompletedTool.isOrdinaryHistoryTool(): Boolean = isOrdinaryHistoryToolEvent

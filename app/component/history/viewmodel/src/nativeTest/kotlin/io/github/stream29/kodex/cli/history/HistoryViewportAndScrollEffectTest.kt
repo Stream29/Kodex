@@ -1,4 +1,5 @@
 @file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+@file:Suppress("DEPRECATION")
 
 package io.github.stream29.kodex.cli.history
 
@@ -6,9 +7,9 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
@@ -68,12 +69,16 @@ val historyViewportAndScrollEffectTest by testSuite {
                 val armed = MutableStateFlow(false)
                 val original = runtime.storage
                 val storage = object : KodexAgentStorage by original {
-                    override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> {
-                        if (index == 7 && types == AgentCommitType.IndexTypes && armed.compareAndSet(true, false)) {
+                    override suspend fun getFirstCommitsIn(
+                        range: IntRange,
+                        types: Set<AgentCommitType>,
+                        limit: Int,
+                    ): List<IndexedAgentCommit> {
+                        if (range == 7..7 && types == AgentCommitType.IndexTypes && armed.compareAndSet(true, false)) {
                             entered.complete(Unit)
                             release.await()
                         }
-                        return original.getCommitsExact(index, types)
+                        return original.getFirstCommitsIn(range, types, limit)
                     }
                 }
                 val model = createAgentHistoryViewModel(
@@ -127,12 +132,16 @@ val historyViewportAndScrollEffectTest by testSuite {
             val armed = MutableStateFlow(false)
             val original = runtime.storage
             val storage = object : KodexAgentStorage by original {
-                override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> {
-                    if (index == 7 && types == AgentCommitType.IndexTypes && armed.compareAndSet(true, false)) {
+                override suspend fun getFirstCommitsIn(
+                    range: IntRange,
+                    types: Set<AgentCommitType>,
+                    limit: Int,
+                ): List<IndexedAgentCommit> {
+                    if (range == 7..7 && types == AgentCommitType.IndexTypes && armed.compareAndSet(true, false)) {
                         entered.complete(Unit)
                         release.await()
                     }
-                    return original.getCommitsExact(index, types)
+                    return original.getFirstCommitsIn(range, types, limit)
                 }
             }
             val nonce = MutableStateFlow(40L)
@@ -156,7 +165,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                 val stale = model.pendingScrollEffect.value!!
                 val old = model.historyItems.value
                 val oldChild = assertIs<MessageHistoryItemViewModel>(old.peek(0))
-                val oldLoading = assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob
+                assertIs<MessageHistoryItemState.Ready>(oldChild.state.value)
                 armed.value = true
                 model.requestScrollToStorageIndex(7)
                 settleUntil { entered.isCompleted }
@@ -187,9 +196,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                 assertEquals(HistoryScrollTarget.Latest, finalEffect.target)
                 assertTrue(model.followsLatest.value)
                 assertFalse(model.contains(old.generation, 20))
-                assertTrue(oldLoading.isCancelled, "Old-generation lazy payload was released, not reused.")
-                old[0] // Late access must not restart the released child.
-                assertSame(oldLoading, assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob)
+                old[0]
                 assertFailsWith<IllegalStateException> { oldChild.readTimestamp() }
                 for (index in 0 until finalWindow.size) assertNotSame(oldChild, finalWindow.peek(index))
                 finalWindow[0]
@@ -226,12 +233,16 @@ val historyViewportAndScrollEffectTest by testSuite {
                     val armed = MutableStateFlow(false)
                     val original = runtime.storage
                     val storage = object : KodexAgentStorage by original {
-                        override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> {
-                            if (index == 7 && types == AgentCommitType.IndexTypes && armed.compareAndSet(true, false)) {
+                        override suspend fun getFirstCommitsIn(
+                            range: IntRange,
+                            types: Set<AgentCommitType>,
+                            limit: Int,
+                        ): List<IndexedAgentCommit> {
+                            if (range == 7..7 && types == AgentCommitType.IndexTypes && armed.compareAndSet(true, false)) {
                                 entered.complete(Unit)
                                 release.await()
                             }
-                            return original.getCommitsExact(index, types)
+                            return original.getFirstCommitsIn(range, types, limit)
                         }
                     }
                     // Control delivery, not History behavior: real storage/runtime mutation below,
@@ -261,7 +272,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                         val stale = model.pendingScrollEffect.value!!
                         val old = model.historyItems.value
                         val oldChild = assertIs<MessageHistoryItemViewModel>(old.peek(0))
-                        val oldLoading = assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob
+                        assertIs<MessageHistoryItemState.Ready>(oldChild.state.value)
                         armed.value = true
                         model.requestScrollToStorageIndex(7)
                         settleUntil { entered.isCompleted }
@@ -313,10 +324,8 @@ val historyViewportAndScrollEffectTest by testSuite {
                         assertFalse(window.hasNewer, "Captured end must not regress the actual latest cursor.")
                         assertTrue(model.followsLatest.value)
                         assertEquals(AgentHistoryLoadState.Ready, model.loadState.value)
-                        assertTrue(oldLoading.isCancelled)
                         assertFalse(model.contains(old.generation, 20))
                         old[0]
-                        assertSame(oldLoading, assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob)
                         assertFailsWith<IllegalStateException> { oldChild.readTimestamp() }
                         assertNotSame(oldChild, child)
                         window[0]
@@ -377,7 +386,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                 val effect = model.pendingScrollEffect.value!!
                 val old = model.historyItems.value
                 val oldChild = assertIs<MessageHistoryItemViewModel>(assertIs<HistoryScrollTarget.Item>(effect.target).item)
-                val oldLoading = assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob
+                assertIs<MessageHistoryItemState.Ready>(oldChild.state.value)
                 state.value = KodexAgentStateValue.ExternalWrite
                 scheduler.runCurrent()
                 runtime.modify {
@@ -397,9 +406,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                 assertNull(model.pendingScrollEffect.value)
                 model.acknowledgeScrollEffect(effect)
                 assertNull(model.pendingScrollEffect.value)
-                assertTrue(oldLoading.isCancelled)
                 old[0]
-                assertSame(oldLoading, assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob)
                 assertFailsWith<IllegalStateException> { oldChild.readTimestamp() }
                 assertFalse(model.contains(old.generation, 8))
                 val child = assertIs<MessageHistoryItemViewModel>(window[0])

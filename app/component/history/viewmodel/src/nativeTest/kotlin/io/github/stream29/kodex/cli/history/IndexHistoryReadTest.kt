@@ -1,9 +1,9 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.cli.history
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -69,7 +69,7 @@ val indexHistoryReadTest by testSuite {
         assertEquals(200, page.items.first().newestStorageIndex)
         assertEquals(137, page.items.last().oldestStorageIndex)
         assertEquals(136, page.nextOlderIndex)
-        assertEquals(HistoryPaging.PageSize, counted.workTimeline.valuesReturned)
+        assertEquals(HistoryPaging.PageSize + 1, counted.workTimeline.valuesReturned)
         assertEquals(1, counted.workTimeline.valueReads)
         assertEquals(0, counted.workTimeline.exactReads)
         page.items.forEach { assertEquals(1.seconds, assertIs<HistoryProjectionItem.Stable>(it).descriptor.elapsed) }
@@ -115,20 +115,19 @@ val indexHistoryReadTest by testSuite {
         assertEquals(1, page.nextOlderIndex)
     }
 
-    test("compaction point and output form one item outside the work group") {
+    test("compaction commit forms one index item outside the work group") {
         val mutable = historyStorage()
         mutable.commit(historyUser("prompt"))
-        mutable.commit(CleanCompactionPoint)
         mutable.commit(StableContextCompaction(encryptedContent = "encrypted"))
-        mutable.commit(historyWork(4))
+        mutable.commit(historyWork(3))
         mutable.commit(historyAssistant("done"))
         val counted = CountingHistoryStorage(mutable)
 
-        val page = counted.readAllHistory(fromInclusive = 5)
+        val page = counted.readAllHistory(fromInclusive = 4)
 
         assertEquals(4, page.items.size)
         assertEquals(
-            listOf(5, 4, 3, 1),
+            listOf(4, 3, 2, 1),
             page.items.map { item ->
                 when (item) {
                     is HistoryProjectionItem.Stable -> item.descriptor.index
@@ -136,12 +135,12 @@ val indexHistoryReadTest by testSuite {
                 }
             },
         )
-        assertEquals(4..4, assertIs<HistoryProjectionItem.WorkGroup>(page.items[1]).indexRange)
+        assertEquals(3..3, assertIs<HistoryProjectionItem.WorkGroup>(page.items[1]).indexRange)
         assertEquals(
             HistoryItemKind.ContextCompaction,
             assertIs<HistoryProjectionItem.Stable>(page.items[2]).descriptor.kind,
         )
-        assertEquals(0, counted.workTimeline.valuesReturned)
+        assertEquals(1, counted.workTimeline.valuesReturned)
     }
 
     test("one sealed work interval is one top-level item without payload reads") {
@@ -167,7 +166,7 @@ val indexHistoryReadTest by testSuite {
         assertEquals(workCount, group.itemCount)
         assertIs<HistoryProjectionItem.Stable>(page.items[2])
         assertEquals(0, counted.workTimeline.exactReads)
-        assertEquals(0, counted.workTimeline.valuesReturned)
+        assertEquals(2, counted.workTimeline.valuesReturned)
         assertTrue(
             elapsed < 5.seconds,
             "Index-only projection of $workCount work items took $elapsed.",
@@ -190,7 +189,7 @@ val indexHistoryReadTest by testSuite {
         assertNotNull(page.nextOlderIndex)
         assertTrue(page.items.all { item -> item is HistoryProjectionItem.Stable })
         assertEquals(0, counted.workTimeline.exactReads)
-        assertEquals(1, counted.workTimeline.valuesReturned)
+        assertEquals(2, counted.workTimeline.valuesReturned)
     }
 
     test("random index seek reads one structural chunk") {
@@ -243,7 +242,7 @@ val indexHistoryReadTest by testSuite {
             assertIs<HistoryProjectionItem.WorkGroup>(chunk.items[1]).indexRange,
         )
         assertEquals(0, counted.workTimeline.exactReads)
-        assertEquals(0, counted.workTimeline.valuesReturned)
+        assertEquals(2, counted.workTimeline.valuesReturned)
         assertTrue(
             elapsed < 5.seconds,
             "Forward index projection of $workCount sealed work items took $elapsed.",
@@ -277,27 +276,37 @@ private class CountingHistoryStorage(
     val indexTimeline = CountingHistoryTimeline()
     val workTimeline = CountingHistoryTimeline()
 
-    override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> {
-        when (types) {
-            AgentCommitType.IndexTypes -> indexTimeline.exactReads += 1
-            AgentCommitType.WorkTypes -> workTimeline.exactReads += 1
+    override suspend fun getFirstCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> =
+        delegate.getFirstCommitsIn(range, types, limit).also { commits ->
+            record(range, types, limit, commits.size)
         }
-        return delegate.getCommitsExact(index, types)
-    }
 
-    override suspend fun getCommitsIn(range: IntRange, types: Set<AgentCommitType>): List<IndexedAgentCommit> =
-        delegate.getCommitsIn(range, types).also { commits ->
-            when (types) {
-                AgentCommitType.IndexTypes -> {
-                    indexTimeline.valuesReturned += commits.size
-                    indexTimeline.valueReads += 1
-                }
-                AgentCommitType.WorkTypes -> {
-                    workTimeline.valuesReturned += commits.size
-                    workTimeline.valueReads += 1
-                }
-            }
+    override suspend fun getLastCommitsIn(
+        range: IntRange,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> =
+        delegate.getLastCommitsIn(range, types, limit).also { commits ->
+            record(range, types, limit, commits.size)
         }
+
+    private fun record(range: IntRange, types: Set<AgentCommitType>, limit: Int, count: Int) {
+        val timeline = when (types) {
+            AgentCommitType.IndexTypes -> indexTimeline
+            AgentCommitType.WorkTypes -> workTimeline
+            else -> return
+        }
+        if (range.first == range.last && limit == Int.MAX_VALUE) {
+            timeline.exactReads += 1
+        } else {
+            timeline.valueReads += 1
+            timeline.valuesReturned += count
+        }
+    }
 }
 
 private fun historyStorage(): InMemoryKodexAgentStorage =

@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
@@ -136,7 +138,7 @@ val agentCommitSerializationTest by testSuite {
             StableAssistantMessage(listOf(ContentItem.OutputText("plan")), phase = MessagePhase.Commentary),
             StableAssistantMessage(listOf(ContentItem.OutputText("done")), phase = MessagePhase.FinalAnswer),
             StableAssistantMessage(listOf(ContentItem.OutputText("legacy")), phase = null),
-            CleanCompactionPoint,
+            StableContextCompaction(encryptedContent = "compacted"),
             StableReasoning(ResponseItem.Reasoning(ResponseItemId("r1"), emptyList())),
             KodexAgentSettings(model = OpenAiModelId("gpt-5")),
             CommitTimestamp(Instant.parse("2026-11-05T12:00:00Z")),

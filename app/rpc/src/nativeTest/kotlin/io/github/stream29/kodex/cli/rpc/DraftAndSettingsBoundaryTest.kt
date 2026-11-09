@@ -226,7 +226,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                     val revision = draft.composer.update(text)
                     val view = assertNotNull(draft.submit(revision, views::open))
                     val message = assertIs<StableUserMessage>(
-                        services.storage.getCommitsIn(
+                        services.storage.getFirstCommitsIn(
                             view.index,
                             services.storage.getCacheNonce(view.index),
                             0,

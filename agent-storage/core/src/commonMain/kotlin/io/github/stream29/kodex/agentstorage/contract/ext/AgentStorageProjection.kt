@@ -3,6 +3,7 @@ package io.github.stream29.kodex.agentstorage.contract.ext
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 
 /**
  * Finds the newest compaction marker in the current storage.
@@ -16,7 +17,7 @@ public actual suspend fun KodexAgentStorage.latestCompactionPointOrNull(): Int? 
 /** Finds the newest compaction marker at or before [at]. */
 public actual suspend fun KodexAgentStorage.latestCompactionPointOrNull(at: Int): Int? {
     require(at >= 0) { "Index $at must be non-negative." }
-    return getLastCommitsIn(0..at, setOf(AgentCommitType.CompactionPoint), limit = 1)
+    return getLastCommitsIn(0..at, setOf(AgentCommitType.ContextCompaction), limit = 1)
         .lastOrNull()
         ?.index
 }

@@ -2,14 +2,12 @@ package io.github.stream29.kodex.agentstorage.contract
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import kotlin.time.Clock
 import kotlin.time.Instant
 
 /**
@@ -27,31 +25,13 @@ public interface KodexAgentStorage {
     public suspend fun latestIndex(): Int
 
     /**
-     * Returns all distinct commit indexes stored in [range] that contain at least one commit in [types],
-     * ordered ascending by index without decoding commit payloads.
+     * Returns the number of commits stored in [range] whose type is in [types],
+     * without decoding commit payloads.
      */
-    public suspend fun indexesIn(
+    public suspend fun countCommitsIn(
         range: IntRange,
         types: Set<AgentCommitType> = AgentCommitType.All,
-    ): List<Int>
-
-    /**
-     * Returns all commits stored at exact [index] whose type is in [types],
-     * ordered by [AgentCommitType] ordinal.
-     */
-    public suspend fun getCommitsExact(
-        index: Int,
-        types: Set<AgentCommitType> = AgentCommitType.All,
-    ): List<AgentCommit>
-
-    /**
-     * Returns all commits stored in [range] whose type is in [types],
-     * ordered ascending by index and [AgentCommitType] ordinal.
-     */
-    public suspend fun getCommitsIn(
-        range: IntRange,
-        types: Set<AgentCommitType> = AgentCommitType.All,
-    ): List<IndexedAgentCommit>
+    ): Int
 
     /**
      * Returns the earliest [limit] commits in [range] whose type is in [types],
@@ -60,7 +40,7 @@ public interface KodexAgentStorage {
     public suspend fun getFirstCommitsIn(
         range: IntRange,
         types: Set<AgentCommitType> = AgentCommitType.All,
-        limit: Int,
+        limit: Int = Int.MAX_VALUE,
     ): List<IndexedAgentCommit>
 
     /**
@@ -70,20 +50,37 @@ public interface KodexAgentStorage {
     public suspend fun getLastCommitsIn(
         range: IntRange,
         types: Set<AgentCommitType> = AgentCommitType.All,
-        limit: Int,
+        limit: Int = Int.MAX_VALUE,
     ): List<IndexedAgentCommit>
 }
 
 /** Mutable form of [KodexAgentStorage]. */
 public interface MutableKodexAgentStorage : KodexAgentStorage {
     /** Allocates the next state index (`latestIndex() + 1`) and atomically persists [commit]. */
-    public suspend fun commit(commit: AgentCommit): Int = commit(listOf(commit))
+    public suspend fun commit(commit: AgentCommit): Int =
+        commit(listOf(commit), Clock.System.now())
+
+    /** Allocates the next state index (`latestIndex() + 1`) and atomically persists [commit] with creation [timestamp]. */
+    public suspend fun commit(
+        commit: AgentCommit,
+        timestamp: Instant,
+    ): Int = commit(listOf(commit), timestamp)
 
     /**
      * Allocates the next state index (`latestIndex() + 1`) and atomically persists
-     * all [commits] at that shared index.
+     * all [commits] at that shared index with the current clock timestamp.
      */
-    public suspend fun commit(commits: List<AgentCommit>): Int
+    public suspend fun commit(commits: List<AgentCommit>): Int =
+        commit(commits, Clock.System.now())
+
+    /**
+     * Allocates the next state index (`latestIndex() + 1`) and atomically persists
+     * all [commits] at that shared index with creation [timestamp].
+     */
+    public suspend fun commit(
+        commits: List<AgentCommit>,
+        timestamp: Instant,
+    ): Int
 
     /** Removes every commit across all types at or after [untilExclusive]. */
     public suspend fun revert(untilExclusive: Int)
@@ -101,120 +98,64 @@ public fun validateCommitBatch(commits: List<AgentCommit>) {
     }
 }
 
-/** Returns the greatest index `<= [index]` containing at least one commit in [types], or `null`. */
-public suspend fun KodexAgentStorage.floorToIndex(
-    index: Int,
+/**
+ * Returns all commits stored in [range] whose type is in [types],
+ * ordered ascending by index and [AgentCommitType] ordinal.
+ */
+public suspend fun KodexAgentStorage.getCommitsIn(
+    range: IntRange,
     types: Set<AgentCommitType> = AgentCommitType.All,
-): Int? {
-    if (index < 0 || types.isEmpty()) return null
-    return getLastCommitsIn(0..index, types, limit = 1).lastOrNull()?.index
-}
+): List<IndexedAgentCommit> = getFirstCommitsIn(range, types, limit = Int.MAX_VALUE)
 
-/** Returns the smallest index `>= [index]` containing at least one commit in [types], or `null`. */
-public suspend fun KodexAgentStorage.ceilToIndex(
+/**
+ * Returns the first [IndexedAgentCommit] stored at exact [index] whose type is in [types], or `null`.
+ */
+public suspend fun KodexAgentStorage.getCommitExact(
     index: Int,
     types: Set<AgentCommitType> = AgentCommitType.All,
-): Int? {
+): IndexedAgentCommit? {
+    require(index >= 0) { "Index $index must be non-negative." }
     if (types.isEmpty()) return null
-    val latest = latestIndex()
+    return getFirstCommitsIn(index..index, types, limit = 1).firstOrNull()
+}
+
+/**
+ * Returns the latest [IndexedAgentCommit] with index `<= [index]` matching [types], or `null`.
+ */
+public suspend fun KodexAgentStorage.getCommitAtOrBefore(
+    index: Int,
+    types: Set<AgentCommitType> = AgentCommitType.All,
+): IndexedAgentCommit? {
+    if (index < 0 || types.isEmpty()) return null
+    return getLastCommitsIn(0..index, types, limit = 1).lastOrNull()
+}
+
+/**
+ * Returns the earliest [IndexedAgentCommit] with index `>= [index]` matching [types], or `null`.
+ */
+public suspend fun KodexAgentStorage.getCommitAtOrAfter(
+    index: Int,
+    types: Set<AgentCommitType> = AgentCommitType.All,
+): IndexedAgentCommit? {
+    if (types.isEmpty()) return null
     val start = index.coerceAtLeast(0)
-    if (latest < start) return null
-    return getFirstCommitsIn(start..latest, types, limit = 1).firstOrNull()?.index
-}
-
-public suspend fun KodexAgentStorage.getIndexEntryExact(index: Int): CleanIndexEntry? {
-    require(index >= 0) { "Index $index must be non-negative." }
-    return getCommitsExact(index, AgentCommitType.IndexTypes).singleOrNull() as? CleanIndexEntry
-}
-
-public suspend fun KodexAgentStorage.getIndexEntryAtOrNull(index: Int): CleanIndexEntry? {
-    require(index >= 0) { "Index $index must be non-negative." }
-    return getLastCommitsIn(0..index, AgentCommitType.IndexTypes, limit = 1)
-        .lastOrNull()
-        ?.commit as? CleanIndexEntry
-}
-
-public suspend fun KodexAgentStorage.getIndexEntryAt(index: Int): CleanIndexEntry =
-    requireNotNull(getIndexEntryAtOrNull(index)) { "No index entry is visible at index $index." }
-
-public suspend fun KodexAgentStorage.getWorkEventExact(index: Int): StableWorkEvent? {
-    require(index >= 0) { "Index $index must be non-negative." }
-    return getCommitsExact(index, AgentCommitType.WorkTypes).singleOrNull() as? StableWorkEvent
-}
-
-public suspend fun KodexAgentStorage.getWorkEventAtOrNull(index: Int): StableWorkEvent? {
-    require(index >= 0) { "Index $index must be non-negative." }
-    return getLastCommitsIn(0..index, AgentCommitType.WorkTypes, limit = 1)
-        .lastOrNull()
-        ?.commit as? StableWorkEvent
-}
-
-public suspend fun KodexAgentStorage.getWorkEventAt(index: Int): StableWorkEvent =
-    requireNotNull(getWorkEventAtOrNull(index)) { "No work event is visible at index $index." }
-
-public suspend fun KodexAgentStorage.getSettingsExact(index: Int): KodexAgentSettings? {
-    require(index >= 0) { "Index $index must be non-negative." }
-    return getCommitsExact(index, AgentCommitType.SettingsTypes).singleOrNull() as? KodexAgentSettings
+    return getFirstCommitsIn(start..Int.MAX_VALUE, types, limit = 1).firstOrNull()
 }
 
 public suspend fun KodexAgentStorage.getSettingsAtOrNull(index: Int): KodexAgentSettings? {
     require(index >= 0) { "Index $index must be non-negative." }
-    return getLastCommitsIn(0..index, AgentCommitType.SettingsTypes, limit = 1)
-        .lastOrNull()
-        ?.commit as? KodexAgentSettings
+    return getCommitAtOrBefore(index, AgentCommitType.SettingsTypes)?.commit as? KodexAgentSettings
 }
 
 public suspend fun KodexAgentStorage.getSettingsAt(index: Int): KodexAgentSettings =
     requireNotNull(getSettingsAtOrNull(index)) { "No settings are visible at index $index." }
 
-public suspend fun KodexAgentStorage.getTimestampExact(index: Int): Instant? {
+public suspend fun KodexAgentStorage.getLlmRequestMetaAtOrNull(index: Int): LlmRequestMeta? {
     require(index >= 0) { "Index $index must be non-negative." }
-    return (getCommitsExact(index, AgentCommitType.TimestampTypes).singleOrNull() as? CommitTimestamp)?.instant
-}
-
-public suspend fun KodexAgentStorage.getTimestampAtOrNull(index: Int): Instant? {
-    require(index >= 0) { "Index $index must be non-negative." }
-    return (getLastCommitsIn(0..index, AgentCommitType.TimestampTypes, limit = 1)
-        .lastOrNull()
-        ?.commit as? CommitTimestamp)?.instant
-}
-
-public suspend fun KodexAgentStorage.getTimestampAt(index: Int): Instant =
-    requireNotNull(getTimestampAtOrNull(index)) { "No timestamp is visible at index $index." }
-
-public suspend fun KodexAgentStorage.getTokenCountExact(index: Int): TokenCountSnapshot? {
-    require(index >= 0) { "Index $index must be non-negative." }
-    return getCommitsExact(index, AgentCommitType.TokenCountTypes).singleOrNull() as? TokenCountSnapshot
-}
-
-public suspend fun KodexAgentStorage.getTokenCountAtOrNull(index: Int): TokenCountSnapshot? {
-    require(index >= 0) { "Index $index must be non-negative." }
-    return getLastCommitsIn(0..index, AgentCommitType.TokenCountTypes, limit = 1)
-        .lastOrNull()
-        ?.commit as? TokenCountSnapshot
-}
-
-public suspend fun KodexAgentStorage.getTokenCountAt(index: Int): TokenCountSnapshot =
-    requireNotNull(getTokenCountAtOrNull(index)) { "No token count snapshot is visible at index $index." }
-
-public suspend fun KodexAgentStorage.getUnstableExact(index: Int): List<UnstableCleanEvent>? {
-    require(index >= 0) { "Index $index must be non-negative." }
-    return (getCommitsExact(index, AgentCommitType.UnstableTypes).singleOrNull() as? UnstableSnapshot)?.events
+    return getCommitAtOrBefore(index, AgentCommitType.LlmRequestMetaTypes)?.commit as? LlmRequestMeta
 }
 
 public suspend fun KodexAgentStorage.getUnstableAtOrNull(index: Int): List<UnstableCleanEvent>? {
     require(index >= 0) { "Index $index must be non-negative." }
-    return (getLastCommitsIn(0..index, AgentCommitType.UnstableTypes, limit = 1)
-        .lastOrNull()
-        ?.commit as? UnstableSnapshot)?.events
+    return (getCommitAtOrBefore(index, AgentCommitType.UnstableTypes)?.commit as? UnstableSnapshot)?.events
 }
-
-public suspend fun KodexAgentStorage.getUnstableAt(index: Int): List<UnstableCleanEvent> =
-    requireNotNull(getUnstableAtOrNull(index)) { "No unstable snapshot is visible at index $index." }
-
-public suspend fun KodexAgentStorage.latestIndexOf(
-    types: Set<AgentCommitType> = AgentCommitType.All,
-): Int = floorToIndex(latestIndex(), types) ?: -1
-
-public suspend fun KodexAgentStorage.latestUnstableIndex(): Int =
-    latestIndexOf(AgentCommitType.UnstableTypes)

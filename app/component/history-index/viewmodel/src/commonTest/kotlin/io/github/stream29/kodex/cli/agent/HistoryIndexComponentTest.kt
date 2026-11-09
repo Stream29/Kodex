@@ -2,22 +2,19 @@ package io.github.stream29.kodex.cli.agent
 
 import de.infix.testBalloon.framework.core.testSuite
 import de.infix.testBalloon.framework.core.TestCompartment
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadHandle
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadState
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
@@ -29,43 +26,39 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.test.*
 import kotlin.time.Instant
 
 val historyIndexComponentTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("local sparse scan skips only initial compaction and appends incrementally oldest first") {
+    test("local sparse scan appends incrementally oldest first and invalidates on revert") {
         val deps = IndexPorts(production = false)
-        deps.timeline.values.putAll(mapOf(0 to CleanCompactionPoint, 2 to message("question\nwith   spaces")))
+        deps.timeline.values[2] = message("question\nwith   spaces")
         deps.latestIndex.value = 3
         withIndex(deps) { vm ->
             val initial = vm.awaitWindow { it.indexes == listOf(2) }
             assertEquals(0L, initial.generation)
-            assertEquals("question with spaces", vm.load(initial.generation, 2).summary)
-            deps.timeline.values[5] = CleanCompactionPoint
+            assertEquals("question with spaces", assertNotNull(initial.entryAtOrNull(2)).summary)
+            deps.timeline.values[5] = StableContextCompaction(encryptedContent = "enc")
             deps.latestIndex.value = 5
             val append = vm.awaitWindow { it.indexes == listOf(2, 5) }
             assertEquals(initial.generation, append.generation)
+            assertEquals("Context compacted", assertNotNull(append.entryAtOrNull(5)).summary)
             assertEquals(listOf(0..3, 4..5), deps.timeline.ranges.value)
             deps.timeline.values.remove(5)
             deps.latestIndex.value = 3
             val reverted = vm.awaitWindow { it.generation == 1L }
             assertEquals(listOf(2), reverted.indexes)
             assertFalse(vm.contains(initial.generation, 2))
-            assertFailsWith<HistoryIndexLoadException> { vm.load(initial.generation, 2) }
         }
     }
 
@@ -76,18 +69,13 @@ val historyIndexComponentTest by testSuite(compartment = { TestCompartment.RealT
             deps.latestIndex.value = 2
             withIndex(deps) { vm ->
                 val initial = vm.awaitInitial(production)
-                val row = vm.acquireRow(initial.generation, 2)
-                row.awaitReady()
+                assertEquals("before", assertNotNull(initial.entryAtOrNull(2)).summary)
                 deps.externalWrite.value = true
                 deps.timeline.values[2] = message("after")
                 deps.externalWrite.value = false
                 val refreshed = vm.awaitWindow { it.revision > initial.revision }
                 assertEquals(if (production) 11L else initial.generation + 1, refreshed.generation)
-                assertEquals(HistoryIndexReadState.Closed, row.state.value)
-                assertEquals("after", vm.load(refreshed.generation, 2).summary)
-                val next = vm.acquireRow(refreshed.generation, 2)
-                assertEquals("after", next.awaitReady().summary)
-                next.release()
+                assertEquals("after", assertNotNull(refreshed.entryAtOrNull(2)).summary)
             }
         }
     }
@@ -98,13 +86,11 @@ val historyIndexComponentTest by testSuite(compartment = { TestCompartment.RealT
         deps.latestIndex.value = 2
         withIndex(deps) { vm ->
             val old = vm.awaitInitial(true)
-            val detail = vm.acquireDetail(old.generation, 2)
-            detail.awaitReady()
             deps.timeline.values[2] = message("replaced")
             deps.cacheNonce!!.value = -75
             val next = vm.awaitWindow { it.generation == -75L }
             assertEquals(listOf(2), next.indexes)
-            assertEquals(HistoryIndexReadState.Closed, detail.state.value)
+            assertEquals("replaced", assertNotNull(next.entryAtOrNull(2)).summary)
             assertFalse(vm.checkOut(old.generation, 2))
             assertTrue(vm.checkOut(next.generation, 2))
             assertEquals(listOf(2), deps.scrolled)
@@ -139,204 +125,30 @@ val historyIndexComponentTest by testSuite(compartment = { TestCompartment.RealT
         }
     }
 
-    test("independent row and detail handles suppress noncooperative late results after release") {
-        for (detail in listOf(false, true)) {
-            val deps = IndexPorts(production = false)
-            deps.timeline.values[2] = message("late")
-            deps.latestIndex.value = 2
-            withIndex(deps) { vm ->
-                val window = vm.awaitInitial(false)
-                val started = CompletableDeferred<Unit>()
-                val finish = CompletableDeferred<Unit>()
-                val returned = CompletableDeferred<Unit>()
-                deps.timeline.exactRead = { index ->
-                    withContext(NonCancellable) {
-                        started.complete(Unit)
-                        finish.await()
-                        returned.complete(Unit)
-                        deps.timeline.values[index]
-                    }
-                }
-                try {
-                    val handle: HistoryIndexReadHandle<*> = if (detail) vm.acquireDetail(window.generation, 2)
-                        else vm.acquireRow(window.generation, 2)
-                    withTimeout(5_000) { started.await() }
-                    handle.release()
-                    assertEquals(HistoryIndexReadState.Closed, handle.state.value)
-                    finish.complete(Unit)
-                    withTimeout(5_000) { returned.await() }
-                    assertEquals(HistoryIndexReadState.Closed, handle.state.value)
-                    assertTrue(vm.contains(window.generation, 2))
-                } finally {
-                    finish.complete(Unit)
-                }
-            }
-        }
-    }
-
-    test("two sidebars own separate reads while sharing one sparse window") {
+    test("closing view model deactivates checkOut") {
         val deps = IndexPorts(production = false)
         deps.timeline.values[2] = message("shared")
         deps.latestIndex.value = 2
         withIndex(deps) { vm ->
             val window = vm.awaitInitial(false)
-            val left = vm.acquireRow(window.generation, 2)
-            val right = vm.acquireRow(window.generation, 2)
-            assertNotSame(left, right)
-            left.awaitReady()
-            right.awaitReady()
-            left.release()
-            assertEquals("shared", right.awaitReady().summary)
-            assertEquals(HistoryIndexReadState.Closed, left.state.value)
+            assertEquals("shared", assertNotNull(window.entryAtOrNull(2)).summary)
             vm.close()
-            assertEquals(HistoryIndexReadState.Closed, right.state.value)
             assertFalse(vm.isActive)
             assertFalse(vm.checkOut(window.generation, 2))
-            assertEquals(HistoryIndexReadState.Closed, vm.acquireDetail(window.generation, 2).state.value)
         }
     }
 
-    test("nonce invalidation suppresses late row detail and timestamp results at the same index") {
-        for (kind in listOf("row", "detail", "timestamp")) {
-            val deps = IndexPorts()
-            deps.timeline.values[2] = message("before")
-            deps.latestIndex.value = 2
-            withIndex(deps) { vm ->
-                val generation = vm.awaitInitial(true).generation
-                val started = CompletableDeferred<Unit>()
-                val finish = CompletableDeferred<Unit>()
-                val returned = CompletableDeferred<Unit>()
-                if (kind == "timestamp") {
-                    deps.timestamp.exactRead = {
-                        withContext(NonCancellable) {
-                            started.complete(Unit)
-                            finish.await()
-                            returned.complete(Unit)
-                            Instant.parse("2026-10-03T01:02:03Z")
-                        }
-                    }
-                } else {
-                    deps.timeline.exactRead = {
-                        withContext(NonCancellable) {
-                            started.complete(Unit)
-                            finish.await()
-                            returned.complete(Unit)
-                            message("late old result")
-                        }
-                    }
-                }
-                try {
-                    val handle: HistoryIndexReadHandle<*> = when (kind) {
-                        "row" -> vm.acquireRow(generation, 2)
-                        "detail" -> vm.acquireDetail(generation, 2)
-                        else -> vm.acquireTimestamp(generation, 2)
-                    }
-                    withTimeout(5_000) { started.await() }
-                    deps.cacheNonce!!.value = 22
-                    vm.awaitWindow { it.generation == 22L }
-                    assertEquals(HistoryIndexReadState.Closed, handle.state.value)
-                    finish.complete(Unit)
-                    withTimeout(5_000) { returned.await() }
-                    assertEquals(HistoryIndexReadState.Closed, handle.state.value)
-                    assertFalse(vm.contains(generation, 2))
-                } finally {
-                    finish.complete(Unit)
-                }
-            }
-        }
-    }
-
-    test("ordinary read failure is safe Failed but cancellation closes without Failed") {
-        val deps = IndexPorts(production = false)
-        deps.timeline.values[2] = message("base")
-        deps.latestIndex.value = 2
-        withIndex(deps) { vm ->
-            val generation = vm.awaitInitial(false).generation
-            deps.timeline.exactRead = { throw IllegalStateException("raw secret diagnostic") }
-            assertFailsWith<HistoryIndexLoadException> { vm.load(generation, 2) }
-            val failed = vm.acquireRow(generation, 2)
-            assertEquals(HistoryIndexReadState.Failed, withTimeout(5_000) {
-                failed.state.first { it != HistoryIndexReadState.Loading }
-            })
-            deps.timeline.exactRead = { throw CancellationException("cancel") }
-            val cancelled = vm.acquireDetail(generation, 2)
-            assertEquals(HistoryIndexReadState.Closed, withTimeout(5_000) {
-                cancelled.state.first { it != HistoryIndexReadState.Loading }
-            })
-            assertTrue(vm.isActive)
-            failed.release()
-        }
-    }
-
-    test("timestamp reads are exact Message only and late menu timestamp cannot revive release") {
+    test("timestamp is populated on Message entries only") {
         val deps = IndexPorts(production = false)
         val time = Instant.parse("2026-10-03T01:02:03Z")
-        deps.timeline.values.putAll(mapOf(2 to message("message"), 5 to CleanCompactionPoint))
-        deps.timestamp.values.putAll(mapOf(1 to time, 5 to time))
+        deps.timeline.values.putAll(mapOf(2 to message("message"), 5 to StableContextCompaction(encryptedContent = "enc")))
+        deps.timestamp.values.putAll(mapOf(2 to time, 5 to time))
         deps.latestIndex.value = 5
         withIndex(deps) { vm ->
-            val generation = vm.awaitWindow { it.indexes == listOf(2, 5) }.generation
-            assertNull(vm.readMessageTimestamp(generation, 2)) // No preceding timestamp fallback.
-            assertNull(vm.readMessageTimestamp(generation, 5)) // No non-Message timestamp.
-            assertEquals(listOf(2), deps.timestamp.exacts.value)
-            deps.timestamp.values[2] = time
-            assertEquals(time, vm.readMessageTimestamp(generation, 2))
-            val started = CompletableDeferred<Unit>()
-            val finish = CompletableDeferred<Unit>()
-            deps.timestamp.exactRead = {
-                withContext(NonCancellable) {
-                    started.complete(Unit)
-                    finish.await()
-                    time
-                }
-            }
-            try {
-                val menu = vm.acquireTimestamp(generation, 2)
-                withTimeout(5_000) { started.await() }
-                menu.release()
-                finish.complete(Unit)
-                assertEquals(HistoryIndexReadState.Closed, menu.state.value)
-            } finally {
-                finish.complete(Unit)
-            }
+            val window = vm.awaitWindow { it.indexes == listOf(2, 5) }
+            assertEquals(time, assertNotNull(window.entryAtOrNull(2)).messageTimestamp)
+            assertNull(assertNotNull(window.entryAtOrNull(5)).messageTimestamp)
         }
-    }
-
-    test("raw caller cancellation and owner cancellation do not publish late reads") {
-        val deps = IndexPorts(production = false)
-        deps.timeline.values[2] = message("base")
-        deps.latestIndex.value = 2
-        withIndex(deps) { vm ->
-            val generation = vm.awaitInitial(false).generation
-            val started = CompletableDeferred<Unit>()
-            val finish = CompletableDeferred<Unit>()
-            deps.timeline.exactRead = {
-                withContext(NonCancellable) { started.complete(Unit); finish.await(); message("late") }
-            }
-            val callerOwner = SupervisorJob()
-            val caller = CoroutineScope(Dispatchers.Default + callerOwner).async { vm.load(generation, 2) }
-            try {
-                withTimeout(5_000) { started.await() }
-                caller.cancel()
-                finish.complete(Unit)
-                assertFailsWith<CancellationException> { caller.await() }
-            } finally {
-                finish.complete(Unit)
-                caller.cancelAndJoin()
-                callerOwner.cancelAndJoin()
-            }
-        }
-        val owner = SupervisorJob()
-        val vm = createHistoryIndexViewModel(deps, CoroutineScope(Dispatchers.Unconfined + owner))
-        try {
-            deps.timeline.exactRead = null
-            val generation = vm.awaitInitial(false).generation
-            val row = vm.acquireRow(generation, 2)
-            row.awaitReady()
-            owner.cancelAndJoin()
-            assertFalse(vm.isActive)
-            assertEquals(HistoryIndexReadState.Closed, row.state.value)
-        } finally { vm.close(); owner.cancelAndJoin() }
     }
 
     test("ordinary scan failure reaches owner handler rather than publishing success") {
@@ -381,16 +193,38 @@ val historyIndexComponentTest by testSuite(compartment = { TestCompartment.RealT
         ))
         deps.latestIndex.value = 5
         withIndex(deps) { vm ->
-            val generation = vm.awaitWindow { it.indexes == (1..5).toList() }.generation
-            assertEquals("developer[image]", vm.load(generation, 1).summary)
-            assertEquals("Author: one\nRecipient: two\n\nprivate[encrypted content]", vm.loadDetail(generation, 2).content)
-            val secret = vm.loadDetail(generation, 3).content
+            val window = vm.awaitWindow { it.indexes == (1..5).toList() }
+            assertEquals("developer[image]", assertNotNull(window.entryAtOrNull(1)).summary)
+            assertEquals("Author: one\nRecipient: two\n\nprivate[encrypted content]", assertNotNull(window.entryAtOrNull(2)).detail.content)
+            val secret = assertNotNull(window.entryAtOrNull(3)).detail.content
             assertTrue("[hidden]" in secret)
             assertFalse("never-display-secret" in secret)
-            val plan = vm.loadDetail(generation, 4)
+            val plan = assertNotNull(window.entryAtOrNull(4)).detail
             assertEquals("Updated\n\n[x] done\n[>] current\n[ ] later", plan.content)
             assertEquals(listOf("done", "current", "later"), assertNotNull(plan.plan).arguments.plan.map { it.step })
-            assertEquals("[empty]", vm.load(generation, 5).summary)
+            assertEquals("[empty]", assertNotNull(window.entryAtOrNull(5)).summary)
+        }
+    }
+
+    test("initial scan loads only latest page and lazily prepends older pages on top row visibility") {
+        val deps = IndexPorts(production = false)
+        for (i in 1..150) {
+            deps.timeline.values[i] = message("msg $i")
+        }
+        deps.latestIndex.value = 150
+        withIndex(deps) { vm ->
+            val firstPage = vm.awaitWindow { it.indexes == (87..150).toList() }
+            assertEquals(listOf(0..150), deps.timeline.ranges.value)
+            assertEquals("msg 90", assertNotNull(firstPage.entryAtOrNull(90)).summary)
+            vm.onRowVisible(firstPage.generation, 90)
+            val secondPage = vm.awaitWindow { it.indexes == (23..150).toList() }
+            assertEquals(firstPage.generation, secondPage.generation)
+            assertEquals(firstPage.revision, secondPage.revision)
+            assertEquals("msg 25", assertNotNull(secondPage.entryAtOrNull(25)).summary)
+            vm.onRowVisible(secondPage.generation, 25)
+            val fullWindow = vm.awaitWindow { it.indexes == (1..150).toList() }
+            assertEquals(listOf(0..150, 0..86, 0..22), deps.timeline.ranges.value)
+            assertEquals("msg 1", assertNotNull(fullWindow.entryAtOrNull(1)).summary)
         }
     }
 }
@@ -403,23 +237,30 @@ private class IndexPorts(production: Boolean = true) : HistoryIndexDependencies 
     override val storage: KodexAgentStorage = object : KodexAgentStorage {
         override val uri: String = "kodex://test"
         override suspend fun latestIndex(): Int = latestIndex.value
-        override suspend fun indexesIn(range: IntRange, types: Set<AgentCommitType>): List<Int> =
+        override suspend fun countCommitsIn(range: IntRange, types: Set<AgentCommitType>): Int = 0
+        override suspend fun getFirstCommitsIn(
+            range: IntRange,
+            types: Set<AgentCommitType>,
+            limit: Int,
+        ): List<IndexedAgentCommit> = emptyList()
+        override suspend fun getLastCommitsIn(
+            range: IntRange,
+            types: Set<AgentCommitType>,
+            limit: Int,
+        ): List<IndexedAgentCommit> =
             when (types) {
-                AgentCommitType.IndexTypes -> timeline.indexesIn(range)
+                AgentCommitType.IndexTypes -> timeline.indexesIn(range).mapNotNull { idx ->
+                    timeline.values[idx]?.let { entry ->
+                        val createdAt = if (entry is StableIndexEvent.Steerable) {
+                            timestamp.values[idx] ?: Instant.DISTANT_PAST
+                        } else {
+                            Instant.DISTANT_PAST
+                        }
+                        IndexedAgentCommit(idx, entry, createdAt)
+                    }
+                }.takeLast(limit)
                 else -> emptyList()
             }
-        override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> =
-            when (types) {
-                AgentCommitType.IndexTypes -> listOfNotNull(timeline.getExact(index))
-                AgentCommitType.TimestampTypes -> listOfNotNull(timestamp.getExact(index)?.let(::CommitTimestamp))
-                else -> emptyList()
-            }
-        override suspend fun getCommitsIn(range: IntRange, types: Set<AgentCommitType>): List<IndexedAgentCommit> =
-            emptyList()
-        override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit> =
-            emptyList()
-        override suspend fun getLastCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit> =
-            emptyList()
     }
     override val latestIndex = MutableStateFlow(-1)
     override val cacheNonce = if (production) MutableStateFlow(11L) else null
@@ -431,14 +272,7 @@ private class IndexPorts(production: Boolean = true) : HistoryIndexDependencies 
 private class FakeTimeline<T> {
     val values = mutableMapOf<Int, T>()
     val ranges = MutableStateFlow<List<IntRange>>(emptyList())
-    val exacts = MutableStateFlow<List<Int>>(emptyList())
-    var exactRead: (suspend (Int) -> T?)? = null
     var rangeRead: (suspend (IntRange) -> List<Int>)? = null
-    suspend fun getExact(index: Int): T? {
-        exacts.update { it + index }
-        val read = exactRead
-        return if (read != null) read(index) else values[index]
-    }
     suspend fun indexesIn(range: IntRange): List<Int> {
         ranges.update { it + listOf(range) }
         return rangeRead?.invoke(range) ?: values.keys.filter { it in range }.sorted()
@@ -457,7 +291,3 @@ private suspend fun HistoryIndexViewModel.awaitWindow(
 
 private suspend fun HistoryIndexViewModel.awaitInitial(production: Boolean) =
     awaitWindow { it.indexes == listOf(2) && (!production || it.revision > 0) }
-
-private suspend fun <T> HistoryIndexReadHandle<T>.awaitReady(): T = withTimeout(5_000) {
-    (state.first { it is HistoryIndexReadState.Ready } as HistoryIndexReadState.Ready).value
-}

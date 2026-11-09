@@ -14,8 +14,8 @@ import io.github.stream29.kodex.agentstate.tool.toPendingToolEvent
 import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
@@ -28,7 +28,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountDiagnostics
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.codexRequestWindowId
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
@@ -164,6 +163,7 @@ private class KodexAgentStateImpl(
         mutate(
             validate = {},
             inFlight = KodexAgentStateValue.ExternalWrite,
+            resyncOnSuccess = true,
         ) {
             block(storage)
         }
@@ -441,9 +441,8 @@ private class KodexAgentStateImpl(
                         add(currentSettings)
                     }
                     add(event)
-                    add(CommitTimestamp(timestamp))
                 }
-                index = storage.commit(commits)
+                index = storage.commit(commits, timestamp)
                 previousMessageStartsNewTurn = when (event) {
                     is StableAssistantMessage -> event.startsNewTurn()
                     is StableUserMessage -> false
@@ -473,11 +472,11 @@ private class KodexAgentStateImpl(
                 buildList {
                     add(stableEvent)
                     settingsForNewTurn?.let(::add)
-                    add(CommitTimestamp(timestamp))
                 },
+                timestamp,
             )
             latestIndex.value = index
-            state.value = storage.stateAt(index)
+            state.value = KodexAgentStateValue.UserMessage
             index
         }
 
@@ -501,8 +500,8 @@ private class KodexAgentStateImpl(
                 listOf(
                     completed,
                     UnstableSnapshot(remainingPending),
-                    CommitTimestamp(now()),
                 ),
+                now(),
             )
             latestIndex.value = index
             state.value = nextState
@@ -528,26 +527,7 @@ private class KodexAgentStateImpl(
     /** Caller holds [writeMutex], just as for the unconditional settings write. */
     private suspend fun appendSettings(settings: KodexAgentSettings): Int {
         require(storage.latestIndex() >= 0) { "Settings updates require an existing state index." }
-        val index = try {
-            storage.commit(listOf(settings, CommitTimestamp(now())))
-        } catch (failure: Throwable) {
-            // A numbered settings record may already be durable even though a
-            // later timestamp or temporary-file cleanup failed. Publish the
-            // actual tail without reporting success or changing the phase.
-            val resync = withContext(NonCancellable) {
-                withContext(Dispatchers.Default) {
-                    try {
-                        withTimeout(30.seconds) {
-                            runCatching { latestIndex.value = storage.latestIndex() }
-                        }
-                    } catch (secondary: Throwable) {
-                        Result.failure<Unit>(secondary)
-                    }
-                }
-            }.exceptionOrNull()
-            if (resync != null && resync !== failure) failure.addSuppressed(resync)
-            throw failure
-        }
+        val index = storage.commit(listOf(settings), now())
         latestIndex.value = index
         return index
     }
@@ -575,7 +555,7 @@ private class KodexAgentStateImpl(
         event: StableCleanEvent,
         timestamp: Instant,
     ): Int {
-        val index = storage.commit(listOf(event, CommitTimestamp(timestamp)))
+        val index = storage.commit(listOf(event), timestamp)
         latestIndex.value = index
         return index
     }
@@ -588,7 +568,7 @@ private class KodexAgentStateImpl(
         require(current.filterIsInstance<PendingToolEvent>().none { pending -> pending.callId == event.callId }) {
             "Duplicate pending tool call id: ${event.callId}"
         }
-        val index = storage.commit(listOf(UnstableSnapshot(current + event), CommitTimestamp(timestamp)))
+        val index = storage.commit(listOf(UnstableSnapshot(current + event)), timestamp)
         latestIndex.value = index
         return index
     }
@@ -604,8 +584,8 @@ private class KodexAgentStateImpl(
         val index = storage.commit(
             listOf(
                 UnstableSnapshot(current + PendingServerToolSearch(call)),
-                CommitTimestamp(timestamp),
             ),
+            timestamp,
         )
         latestIndex.value = index
         return index
@@ -626,8 +606,8 @@ private class KodexAgentStateImpl(
                     output = output,
                 ),
                 UnstableSnapshot(remaining),
-                CommitTimestamp(timestamp),
             ),
+            timestamp,
         )
         latestIndex.value = index
         return index
@@ -645,8 +625,8 @@ private class KodexAgentStateImpl(
             val index = storage.commit(
                 listOf(
                     latestSettings.copy(turnState = turnState),
-                    CommitTimestamp(now()),
                 ),
+                now(),
             )
             latestIndex.value = index
         }
@@ -662,7 +642,7 @@ private class KodexAgentStateImpl(
     ) {
         val index = storage.commit(
             listOf(
-                TokenCountSnapshot.Response(
+                LlmRequestMeta.Response(
                     totalTokens = usage.totalTokens,
                     usage = usage,
                     diagnostics = TokenCountDiagnostics(
@@ -680,8 +660,8 @@ private class KodexAgentStateImpl(
                         turnStateAdopted = responseHeaders?.turnState != null && settings.turnState == null,
                     ),
                 ),
-                CommitTimestamp(now()),
             ),
+            now(),
         )
         latestIndex.value = index
     }
@@ -786,6 +766,7 @@ private class KodexAgentStateImpl(
     private suspend inline fun <T> mutate(
         validate: (KodexAgentStateValue) -> Unit,
         inFlight: KodexAgentStateValue,
+        resyncOnSuccess: Boolean = false,
         block: () -> T,
     ): T {
         writeMutex.lock()
@@ -796,13 +777,16 @@ private class KodexAgentStateImpl(
             }
             validate(currentState)
             state.value = inFlight
+            var succeeded = false
             try {
-                return block()
+                return block().also { succeeded = true }
             } finally {
-                withContext(NonCancellable) {
-                    val index = storage.latestIndex()
-                    latestIndex.value = index
-                    state.value = storage.stateAt(index)
+                if (!succeeded || resyncOnSuccess) {
+                    withContext(NonCancellable) {
+                        val index = storage.latestIndex()
+                        latestIndex.value = index
+                        state.value = storage.stateAt(index)
+                    }
                 }
             }
         } finally {

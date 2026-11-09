@@ -265,7 +265,7 @@ val offscreenSidebarTest by testSuite {
             assertTrue(assertNotNull(row.config.getOrNull(SemanticsActions.RequestFocus)?.action).invoke())
             scene.key(Key.Menu)
             scene.settle { scene.hasText("Check out") }
-            index.window.value = index.window.value.copy(generation = 8, indexes = emptyList())
+            index.window.value = index.window.value.copy(generation = 8, entries = emptyList())
             scene.settle { opening == null && !scene.hasDescription("History index 1") && scene.nodes().any {
                 it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Sidebar content left") == true &&
                     it.config.getOrNull(SemanticsProperties.Focused) == true
@@ -311,7 +311,6 @@ val offscreenSidebarTest by testSuite {
             scene.settle { scene.hasText("None") }
             scene.click("None")
             scene.settle { !scene.hasText("Row 3") }
-            assertTrue(index.rows.all { it.state.value == HistoryIndexReadState.Closed })
             assertEquals(SessionSidebarSide.Left to SidebarContent.None, choices.last())
             scene.clickDescription("Collapse left sidebar")
             assertEquals(1, collapses)

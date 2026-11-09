@@ -10,9 +10,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.contract.floorToIndex
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientState
@@ -87,7 +85,7 @@ val agentContextProjectionTest by testSuite {
                 )
                 assertEquals(user, input.last())
                 assertEquals(StableUserMessage(user.content), storage.getIndexEntryAt(1))
-                assertEquals(1, storage.floorToIndex(Int.MAX_VALUE, AgentCommitType.IndexTypes))
+                assertEquals(1, storage.getCommitAtOrBefore(Int.MAX_VALUE, AgentCommitType.IndexTypes)?.index)
                 assertEquals(1, storage.latestIndex())
             } finally {
                 deleteRecursively(fixture.root)
@@ -192,11 +190,11 @@ val agentContextProjectionTest by testSuite {
                     assertIs<ToolSpec.ToolSearch>(compactionRequests.single().tools.last())
                 assertTrue(toolSearchSpec.description.contains("- projection: Projection tools."))
                 assertFalse(compactionRequests.single().hasRequestUserInputTool())
-                assertEquals(3, compactIndex)
+                assertEquals(2, compactIndex)
                 assertEquals(StableUserMessage(user.content), storage.getIndexEntryAt(1))
                 assertEquals(
                     StableContextCompaction(encryptedContent = "compacted"),
-                    storage.getWorkEventAt(compactIndex),
+                    storage.getIndexEntryAt(compactIndex),
                 )
             } finally {
                 deleteRecursively(fixture.root)

@@ -250,7 +250,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
             val index = session.sessionIndex
             val nonce = services.storage.getCacheNonce(index)
             val latest = services.runtime.getLatestIndex(index)
-            val messages = services.storage.getCommitsIn(
+            val messages = services.storage.getFirstCommitsIn(
                 index,
                 nonce,
                 1,

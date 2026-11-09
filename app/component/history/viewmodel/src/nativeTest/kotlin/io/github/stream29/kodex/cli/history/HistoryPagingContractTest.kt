@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.cli.history
 
 import de.infix.testBalloon.framework.core.testSuite

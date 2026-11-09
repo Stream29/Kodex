@@ -86,6 +86,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
             override val entryIndex = index
             override val archived = row[1] == 1L
             override val threadName = row[2] as String?
+            override val createdAt = instant(row[4])
             override val lastActivityAt = instant(row[5])
             override val isActive = owner != null
             override val running = owner?.runtime?.runningTurn?.value != null
@@ -105,13 +106,6 @@ public actual class SqliteKodexSessionRepository internal constructor(
             if (value) fs.writeString(marker, "") else fs.delete(marker, mustExist = false)
         }
     }
-    private suspend fun readTime(index: Int, created: Boolean): Instant? = withDbLock {
-        requireOpen(); requireEntry(index)
-        val row = connection.query("SELECT * FROM session_catalog WHERE session_id = ?", listOf(index.toLong())).single()
-        instant(row[if (created) 4 else 5])
-    }
-    public actual override suspend fun readCreatedAt(entryIndex: Int): Instant? = readTime(entryIndex, true)
-    public actual override suspend fun readUpdatedAt(entryIndex: Int): Instant? = readTime(entryIndex, false)
     public actual override suspend fun create(): Int = createCopy(null)
     public actual override suspend fun createFork(sourceEntryIndex: Int): Int = createCopy(sourceEntryIndex)
     private suspend fun createCopy(source: Int?): Int = withDbLock {
@@ -127,7 +121,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
                 listOf(candidate, candidate))
             if (source != null) {
                 connection.execute(
-                    """INSERT INTO agent_commits SELECT ?, type, "index", payload_json FROM agent_commits WHERE agent_id = ?""",
+                    """INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at) SELECT ?, type, "index", payload_json, created_at FROM agent_commits WHERE agent_id = ?""",
                     listOf(candidate, source.toLong()),
                 )
                 val snapshot = connection.query(

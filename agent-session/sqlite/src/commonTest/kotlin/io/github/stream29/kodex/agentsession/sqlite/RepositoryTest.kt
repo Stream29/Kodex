@@ -5,7 +5,6 @@ package io.github.stream29.kodex.agentsession.sqlite
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.*
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
@@ -48,13 +47,13 @@ val sqliteRepositoryTest by testSuite {
                     val session = repository.open(first)
                     assertSame(session, repository.open(first))
                     session.runtime.modify { it.initialize(settings("original")) }
-                    val created = repository.readCreatedAt(first)
+                    val created = repository.getEntry(first).createdAt
                     assertNotNull(created)
                     val appendedIndex = session.storage.commit(
                         listOf(
                             settings("new"),
-                            CommitTimestamp(Instant.fromEpochSeconds(123, 456)),
                         ),
+                        Instant.fromEpochSeconds(123, 456),
                     )
                     assertEquals(1, appendedIndex)
                     val observable = session.storage as ObservableKodexAgentStorage
@@ -68,7 +67,7 @@ val sqliteRepositoryTest by testSuite {
                     assertEquals("new", repository.getEntry(second).threadName)
                     fork.storage.revert(1)
                     assertEquals("original", repository.getEntry(second).threadName)
-                    assertEquals(created, repository.readUpdatedAt(second))
+                    assertEquals(created, repository.getEntry(second).lastActivityAt)
                     session.storage.revert(1)
                     assertNotEquals(nonce, observable.cacheNonce.value)
                     assertEquals(0, observable.latestIndexFlow.value)
@@ -79,14 +78,14 @@ val sqliteRepositoryTest by testSuite {
                     repository.closeAndJoin()
                     assertEquals("0", fs.readString(Path(root, "sessions", "0", "settings", "latest.json")))
                     assertEquals("-1", fs.readString(Path(root, "sessions", "0", "index", "latest.json")))
-                    assertEquals("\"$created\"", fs.readString(Path(root, "sessions", "0", "timestamp", "0.json")))
+                    assertEquals("0", fs.readString(Path(root, "sessions", "0", "llm-request-meta", "latest.json")))
                     fs.writeString(Path(root, "sessions", "0", "settings", "latest.json"), "corrupted")
                     fs.writeString(Path(root, "sessions", "0", "lock.json"), "corrupted")
                     removeTree(Path(root, "sessions", "1"))
                     SqliteKodexSessionRepository(root, dependencies).use { reopened ->
                         assertEquals(listOf(0, 1), reopened.list())
                         assertEquals("original", reopened.getEntry(0).threadName)
-                        assertEquals(created, reopened.readCreatedAt(1))
+                        assertEquals(created, reopened.getEntry(1).createdAt)
                         assertEquals("original", reopened.open(1).storage.getSettingsAt(0).threadName)
                         reopened.delete(0)
                         assertEquals(listOf(1), reopened.entries.value)
@@ -110,7 +109,7 @@ val sqliteRepositoryTest by testSuite {
                         val session = repository.open(0)
                         val observable = session.storage as ObservableKodexAgentStorage
                         val nonce = observable.cacheNonce.value
-                        db.execute("""CREATE TRIGGER reject_init BEFORE INSERT ON agent_commits WHEN NEW.type = 'timestamp' AND NEW."index" = 0 BEGIN SELECT RAISE(ABORT, 'injected'); END""")
+                        db.execute("""CREATE TRIGGER reject_init BEFORE INSERT ON agent_commits WHEN NEW.type = 'llm_request_meta_initialization' AND NEW."index" = 0 BEGIN SELECT RAISE(ABORT, 'injected'); END""")
                         assertFailsWith<SqliteFailure> { session.runtime.modify { it.initialize(settings("failed")) } }
                         assertEquals(-1, observable.latestIndexFlow.value)
                         assertEquals(nonce, observable.cacheNonce.value)
@@ -126,7 +125,7 @@ val sqliteRepositoryTest by testSuite {
                         db.execute("DROP TRIGGER reject_settings_update")
                         db.execute("CREATE TRIGGER reject_index_insert BEFORE INSERT ON agent_commits WHEN NEW.type = 'user_message' BEGIN SELECT RAISE(ABORT, 'injected'); END")
                         assertFailsWith<SqliteFailure> { session.runtime.appendUserMessage(listOf(ContentItem.InputText("uncommitted"))) }
-                        assertNull(session.storage.floorToIndex(Int.MAX_VALUE, AgentCommitType.IndexTypes))
+                        assertNull(session.storage.getCommitAtOrBefore(Int.MAX_VALUE, AgentCommitType.IndexTypes))
                         assertEquals(0, session.storage.latestIndex())
                         db.execute("DROP TRIGGER reject_index_insert")
                         db.execute("CREATE TRIGGER reject_session BEFORE INSERT ON sessions BEGIN SELECT RAISE(ABORT, 'injected'); END")

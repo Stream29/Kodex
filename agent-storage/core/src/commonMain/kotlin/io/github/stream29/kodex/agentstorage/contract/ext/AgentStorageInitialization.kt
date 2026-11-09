@@ -1,8 +1,7 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
@@ -17,7 +16,6 @@ public actual suspend fun MutableKodexAgentStorage.initialize(initialSettings: K
     val initialTimestamp = Clock.System.now()
     val committedIndex = commit(
         listOf(
-            CommitTimestamp(initialTimestamp),
             initialSettings.copy(
                 turnId = turnId,
                 windowNumber = 0,
@@ -25,8 +23,9 @@ public actual suspend fun MutableKodexAgentStorage.initialize(initialSettings: K
                 previousWindowId = null,
                 windowId = windowId,
             ),
-            TokenCountSnapshot.Initialization(0L),
+            LlmRequestMeta.Initialization(0L),
         ),
+        initialTimestamp,
     )
     check(committedIndex == 0) { "Initialized storage must start at index 0, got $committedIndex." }
 }

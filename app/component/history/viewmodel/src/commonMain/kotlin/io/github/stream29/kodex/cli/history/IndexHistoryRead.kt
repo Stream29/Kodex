@@ -1,18 +1,15 @@
 package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.ceilToIndex
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
-import io.github.stream29.kodex.agentstorage.contract.floorToIndex
-import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrAfter
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.openai.MessagePhase
 import kotlin.time.Duration
 import kotlin.time.Instant
@@ -63,77 +60,146 @@ internal suspend fun KodexAgentStorage.readHistoryChunk(
         "History snapshot $snapshotIndex cannot precede cursor $fromInclusive."
     }
 
-    val result = ArrayList<HistoryProjectionItem>(2)
-    var current = floorToIndex(fromInclusive, AgentCommitType.IndexTypes)?.let { entryIndex ->
-        getIndexEntryExact(entryIndex)?.let { entry ->
-            IndexedEntry(
-                index = entryIndex,
-                entry = entry,
-            )
-        }
-    }
-    var currentRepresentation = current?.representationAt(this, snapshotIndex)
-
+    val current = getCommitAtOrBefore(fromInclusive, AgentCommitType.IndexTypes)?.toIndexedEntry()
     val openLowerBound = current?.normalWorkLowerBound() ?: 0
-    val openWorkIndexes = if (fromInclusive >= openLowerBound) {
-        indexesIn(
+    val openWorkCommits = if (fromInclusive >= openLowerBound) {
+        getLastCommitsIn(
             range = openLowerBound..fromInclusive,
             types = AgentCommitType.WorkTypes,
+            limit = maxOpenItems + 1,
         )
     } else {
         emptyList()
     }
-    if (openWorkIndexes.isNotEmpty()) {
-        val selectedIndexes = openWorkIndexes.takeLast(maxOpenItems)
-        val predecessorIndex = openWorkIndexes.getOrNull(openWorkIndexes.size - selectedIndexes.size - 1)
-            ?: currentRepresentation?.displayIndex
-        val selectedCommits = getCommitsIn(
-            range = selectedIndexes.first()..selectedIndexes.last(),
-            types = AgentCommitType.WorkTypes,
-        ).asReversed()
-        result += individualWorkItems(
-            commitsNewestFirst = selectedCommits,
-            oldestPredecessorIndex = predecessorIndex,
-        )
+    if (openWorkCommits.isNotEmpty()) {
+        val hasMoreOpenWork = openWorkCommits.size > maxOpenItems
+        val predecessorCommit = if (hasMoreOpenWork) openWorkCommits.first() else null
+        val selectedCommits = (if (hasMoreOpenWork) openWorkCommits.drop(1) else openWorkCommits).asReversed()
+        val predecessorIndex = predecessorCommit?.index ?: current?.index
+        val predecessorTimestamp = predecessorCommit?.createdAt ?: current?.createdAt
         return LoadedHistoryChunk(
-            items = result,
-            nextOlderIndex = predecessorIndex
-                ?: current?.cursorIndex(currentRepresentation),
+            items = individualWorkItems(
+                commitsNewestFirst = selectedCommits,
+                oldestPredecessorTimestamp = predecessorTimestamp,
+            ),
+            nextOlderIndex = predecessorIndex,
         )
     }
 
-    while (current != null) {
-        val older = current.previous(this)
-        val olderRepresentation = older?.representationAt(this, Int.MAX_VALUE)
-        val sealedWorkIndexes = sealedWorkIndexes(
+    if (current == null) return LoadedHistoryChunk(emptyList(), null)
+    val older = current.previous(this)
+    val result = ArrayList<HistoryProjectionItem>(2)
+    projectAnchoredInterval(
+        current = current,
+        older = older,
+        anchorsAscending = listOfNotNull(older, current),
+        anchorPosition = if (older != null) 1 else 0,
+        turnDurationResolver = HistoryTurnDurationResolver(this),
+        destination = result,
+    )
+    return LoadedHistoryChunk(
+        items = result,
+        nextOlderIndex = older?.index,
+    )
+}
+
+/**
+ * Reads a full backward page at or before [fromInclusive] by batching index anchors in a single
+ * query and reusing the in-memory anchor sequence across consecutive intervals and turn-duration
+ * lookbacks.
+ */
+internal suspend fun KodexAgentStorage.readHistoryPage(
+    fromInclusive: Int,
+    snapshotIndex: Int,
+    size: Int = HistoryPaging.PageSize,
+    newerThan: Int? = null,
+): LoadedHistoryChunk {
+    require(size > 0)
+    if (fromInclusive < 0 || (newerThan != null && fromInclusive <= newerThan)) {
+        return LoadedHistoryChunk(emptyList(), null)
+    }
+    require(snapshotIndex >= fromInclusive) {
+        "History snapshot $snapshotIndex cannot precede cursor $fromInclusive."
+    }
+
+    val items = ArrayList<HistoryProjectionItem>(size + 1)
+    var cursor: Int = fromInclusive
+    val lowerBound = (newerThan ?: -1) + 1
+    val fetchedAnchors = if (cursor >= lowerBound) {
+        getLastCommitsIn(
+            range = lowerBound..cursor,
+            types = AgentCommitType.IndexTypes,
+            limit = size + 1,
+        ).mapNotNull(IndexedAgentCommit::toIndexedEntry)
+    } else {
+        emptyList()
+    }
+    val predecessorBeforeRange = when {
+        fetchedAnchors.isEmpty() ->
+            if (lowerBound > 0) getCommitAtOrBefore(lowerBound - 1, AgentCommitType.IndexTypes)?.toIndexedEntry() else null
+        fetchedAnchors.size <= size && fetchedAnchors.first().index > 0 ->
+            getCommitAtOrBefore(fetchedAnchors.first().index - 1, AgentCommitType.IndexTypes)?.toIndexedEntry()
+        else -> null
+    }
+    val anchorsAscending = buildList(fetchedAnchors.size + 1) {
+        if (predecessorBeforeRange != null) add(predecessorBeforeRange)
+        addAll(fetchedAnchors)
+    }
+
+    val latestAnchor = anchorsAscending.lastOrNull()
+    val openLowerBound = latestAnchor?.normalWorkLowerBound() ?: 0
+    val openStart = maxOf(openLowerBound, lowerBound)
+    if (cursor >= openStart) {
+        val maxOpenItems = if (newerThan == null) size else minOf(size, cursor - newerThan)
+        val openWorkCommits = getLastCommitsIn(
+            range = openLowerBound..cursor,
+            types = AgentCommitType.WorkTypes,
+            limit = maxOpenItems + 1,
+        )
+        if (openWorkCommits.isNotEmpty()) {
+            val hasMoreOpenWork = openWorkCommits.size > maxOpenItems
+            val predecessorCommit = if (hasMoreOpenWork) openWorkCommits.first() else null
+            val selectedCommits = (if (hasMoreOpenWork) openWorkCommits.drop(1) else openWorkCommits).asReversed()
+            val predecessorIndex = predecessorCommit?.index ?: latestAnchor?.index
+            val predecessorTimestamp = predecessorCommit?.createdAt ?: latestAnchor?.createdAt
+            items += individualWorkItems(
+                commitsNewestFirst = selectedCommits,
+                oldestPredecessorTimestamp = predecessorTimestamp,
+            )
+            val nextOlder = predecessorIndex
+            if (items.size >= size || nextOlder == null || (newerThan != null && nextOlder <= newerThan)) {
+                return LoadedHistoryChunk(items, nextOlder)
+            }
+            cursor = nextOlder
+        }
+    }
+
+    val turnDurationResolver = HistoryTurnDurationResolver(this)
+    var position = anchorsAscending.indexOfLast { it.index <= cursor }
+    val minPosition = if (predecessorBeforeRange != null) 1 else 0
+    while (position >= minPosition && items.size < size) {
+        val current = anchorsAscending[position]
+        if (newerThan != null && current.index <= newerThan) break
+        val older = if (position > 0) anchorsAscending[position - 1] else null
+        projectAnchoredInterval(
+            current = current,
             older = older,
-            newerIndex = current.index,
+            anchorsAscending = anchorsAscending,
+            anchorPosition = position,
+            turnDurationResolver = turnDurationResolver,
+            destination = items,
         )
-        val predecessorIndex = sealedWorkIndexes.lastOrNull()
-            ?: olderRepresentation?.displayIndex
-
-        currentRepresentation?.toProjection(this, predecessorIndex)?.let(result::add)
-        if (sealedWorkIndexes.isNotEmpty()) {
-            result += HistoryProjectionItem.WorkGroup(
-                indexRange = sealedWorkIndexes.first()..sealedWorkIndexes.last(),
-                itemCount = sealedWorkIndexes.size,
-                elapsed = elapsedBetween(
-                    previousIndex = olderRepresentation?.displayIndex,
-                    currentIndex = sealedWorkIndexes.last(),
-                ),
-            )
+        if (items.size >= size) {
+            return LoadedHistoryChunk(items, older?.index)
         }
-
-        if (result.isNotEmpty()) {
-            return LoadedHistoryChunk(
-                items = result,
-                nextOlderIndex = older?.cursorIndex(olderRepresentation),
-            )
-        }
-        current = older
-        currentRepresentation = olderRepresentation
+        position -= 1
     }
-    return LoadedHistoryChunk(result, null)
+    val nextOlder = if (position >= minPosition) {
+        anchorsAscending[position].index
+    } else {
+        predecessorBeforeRange?.index
+    }
+    return LoadedHistoryChunk(items, nextOlder)
 }
 
 /**
@@ -150,44 +216,224 @@ internal suspend fun KodexAgentStorage.readNewerHistoryChunk(
 ): LoadedHistoryChunk? {
     require(maxOpenItems > 0)
     if (afterExclusive >= snapshotIndex) return null
-    val nextIndexAnchor = ceilToIndex(
+    val nextIndexAnchor = getCommitAtOrAfter(
         index = afterExclusive + 1,
         types = AgentCommitType.IndexTypes,
-    )?.takeIf { it <= snapshotIndex }
+    )?.index?.takeIf { it <= snapshotIndex }
     if (nextIndexAnchor != null) {
         return readHistoryChunk(
             fromInclusive = nextIndexAnchor,
             snapshotIndex = snapshotIndex,
         )
     }
-    val nextOpenWork = indexesIn(
-        range = (afterExclusive + 1)..snapshotIndex,
-        types = AgentCommitType.WorkTypes,
-    ).take(maxOpenItems)
-    val lastOpenIndex = nextOpenWork.lastOrNull() ?: return null
-    return readHistoryChunk(
-        fromInclusive = lastOpenIndex,
+    val current = getCommitAtOrBefore(afterExclusive, AgentCommitType.IndexTypes)?.toIndexedEntry()
+    return readNewerOpenWorkChunk(
+        afterExclusive = afterExclusive,
         snapshotIndex = snapshotIndex,
-        maxOpenItems = nextOpenWork.size,
+        maxOpenItems = maxOpenItems,
+        current = current,
     )
 }
 
-/** Returns the newest visible stable event index at or before [upperInclusive]. */
-internal suspend fun KodexAgentStorage.visibleStableIndexAtOrBefore(
-    upperInclusive: Int,
-): Int? {
-    if (upperInclusive < 0) return null
-    return floorToIndex(upperInclusive, AgentCommitType.CleanEventTypes)
+/**
+ * Reads a full forward page after [afterExclusive] by batching forward index anchors in a single
+ * query and reusing the in-memory anchor sequence across consecutive intervals.
+ */
+internal suspend fun KodexAgentStorage.readNewerHistoryPage(
+    afterExclusive: Int,
+    snapshotIndex: Int,
+): LoadedHistoryChunk? {
+    if (afterExclusive >= snapshotIndex) return null
+    val forwardAnchors = getFirstCommitsIn(
+        range = (afterExclusive + 1)..snapshotIndex,
+        types = AgentCommitType.IndexTypes,
+        limit = HistoryPaging.PageSize,
+    ).mapNotNull(IndexedAgentCommit::toIndexedEntry)
+    val predecessor = if (afterExclusive >= 0) {
+        getCommitAtOrBefore(afterExclusive, AgentCommitType.IndexTypes)?.toIndexedEntry()
+    } else {
+        null
+    }
+
+    if (forwardAnchors.isEmpty()) {
+        return readNewerOpenWorkChunk(
+            afterExclusive = afterExclusive,
+            snapshotIndex = snapshotIndex,
+            maxOpenItems = HistoryPaging.PageSize,
+            current = predecessor,
+        )
+    }
+
+    val anchorsAscending = buildList(forwardAnchors.size + 1) {
+        if (predecessor != null) add(predecessor)
+        addAll(forwardAnchors)
+    }
+    val turnDurationResolver = HistoryTurnDurationResolver(this)
+    val chunksChronological = ArrayList<List<HistoryProjectionItem>>(forwardAnchors.size + 1)
+    var totalItems = 0
+    val startPosition = if (predecessor != null) 1 else 0
+    var lastConsumedPosition = startPosition - 1
+    for (position in startPosition..anchorsAscending.lastIndex) {
+        if (totalItems >= HistoryPaging.PageSize) break
+        val current = anchorsAscending[position]
+        val older = if (position > 0) anchorsAscending[position - 1] else null
+        val pairItems = ArrayList<HistoryProjectionItem>(2)
+        projectAnchoredInterval(
+            current = current,
+            older = older,
+            anchorsAscending = anchorsAscending,
+            anchorPosition = position,
+            turnDurationResolver = turnDurationResolver,
+            destination = pairItems,
+        )
+        chunksChronological += pairItems
+        totalItems += pairItems.size
+        lastConsumedPosition = position
+    }
+
+    if (totalItems < HistoryPaging.PageSize && lastConsumedPosition == anchorsAscending.lastIndex) {
+        val lastAnchor = anchorsAscending.last()
+        val openChunk = readNewerOpenWorkChunk(
+            afterExclusive = lastAnchor.index,
+            snapshotIndex = snapshotIndex,
+            maxOpenItems = HistoryPaging.PageSize - totalItems,
+            current = lastAnchor,
+        )
+        if (openChunk != null && openChunk.items.isNotEmpty()) {
+            chunksChronological += openChunk.items
+            totalItems += openChunk.items.size
+        }
+    }
+
+    if (chunksChronological.isEmpty()) return null
+    val combinedItems = ArrayList<HistoryProjectionItem>(totalItems)
+    for (index in chunksChronological.lastIndex downTo 0) {
+        combinedItems += chunksChronological[index]
+    }
+    return LoadedHistoryChunk(
+        items = combinedItems,
+        nextOlderIndex = predecessor?.index,
+    )
 }
 
-internal suspend fun KodexAgentStorage.elapsedBetween(
-    previousIndex: Int?,
-    currentIndex: Int,
+private suspend fun KodexAgentStorage.readNewerOpenWorkChunk(
+    afterExclusive: Int,
+    snapshotIndex: Int,
+    maxOpenItems: Int,
+    current: IndexedEntry?,
+): LoadedHistoryChunk? {
+    val openLowerBound = current?.normalWorkLowerBound() ?: 0
+    if (snapshotIndex < openLowerBound) return null
+    val (predecessorCommit, selectedCommits) = if (afterExclusive >= openLowerBound) {
+        val fetched = getFirstCommitsIn(
+            range = afterExclusive..snapshotIndex,
+            types = AgentCommitType.WorkTypes,
+            limit = maxOpenItems + 1,
+        )
+        if (fetched.firstOrNull()?.index == afterExclusive) {
+            fetched.first() to fetched.drop(1)
+        } else {
+            val pred = if (afterExclusive > openLowerBound) {
+                getCommitAtOrBefore(afterExclusive - 1, AgentCommitType.WorkTypes)
+                    ?.takeIf { it.index >= openLowerBound }
+            } else {
+                null
+            }
+            pred to fetched.take(maxOpenItems)
+        }
+    } else {
+        null to getFirstCommitsIn(
+            range = openLowerBound..snapshotIndex,
+            types = AgentCommitType.WorkTypes,
+            limit = maxOpenItems,
+        )
+    }
+    if (selectedCommits.isEmpty()) return null
+    val predecessorIndex = predecessorCommit?.index ?: current?.index
+    val predecessorTimestamp = predecessorCommit?.createdAt ?: current?.createdAt
+    return LoadedHistoryChunk(
+        items = individualWorkItems(
+            commitsNewestFirst = selectedCommits.asReversed(),
+            oldestPredecessorTimestamp = predecessorTimestamp,
+        ),
+        nextOlderIndex = predecessorIndex,
+    )
+}
+
+private suspend fun KodexAgentStorage.projectAnchoredInterval(
+    current: IndexedEntry,
+    older: IndexedEntry?,
+    anchorsAscending: List<IndexedEntry>,
+    anchorPosition: Int,
+    turnDurationResolver: HistoryTurnDurationResolver,
+    destination: MutableList<HistoryProjectionItem>,
+) {
+    val sealedWork = sealedWorkSummary(
+        older = older,
+        newerIndex = current.index,
+    )
+    val predecessorTimestamp = sealedWork?.lastTimestamp ?: older?.createdAt
+    val turnDuration = (current.entry as? StableAssistantMessage)
+        ?.takeIf(StableAssistantMessage::isFinal)
+        ?.let {
+            resolveTurnDurationInMemoryOrStorage(
+                anchorsAscending = anchorsAscending,
+                finalPosition = anchorPosition,
+                turnDurationResolver = turnDurationResolver,
+            )
+        }
+    destination += HistoryProjectionItem.Stable(
+        current.entry.toHistoryItemDescriptor(
+            index = current.index,
+            source = HistoryItemSource.Index,
+            elapsed = elapsedBetween(predecessorTimestamp, current.createdAt),
+            createdAt = current.createdAt,
+            turnDuration = turnDuration,
+        ),
+    )
+    if (sealedWork != null) {
+        destination += HistoryProjectionItem.WorkGroup(
+            indexRange = sealedWork.indexRange,
+            itemCount = sealedWork.itemCount,
+            elapsed = elapsedBetween(
+                previousTimestamp = older?.createdAt,
+                currentTimestamp = sealedWork.lastTimestamp,
+            ),
+        )
+    }
+}
+
+private suspend fun resolveTurnDurationInMemoryOrStorage(
+    anchorsAscending: List<IndexedEntry>,
+    finalPosition: Int,
+    turnDurationResolver: HistoryTurnDurationResolver,
+): Duration? {
+    val finalEntry = anchorsAscending[finalPosition]
+    if (finalEntry.index <= 0) return null
+    var firstUserInTurn: IndexedEntry? = null
+    for (pos in (finalPosition - 1) downTo 0) {
+        val entry = anchorsAscending[pos]
+        val event = entry.entry
+        if (event is StableAssistantMessage && event.isFinal()) {
+            return firstUserInTurn?.let { elapsedBetween(it.createdAt, finalEntry.createdAt) }
+        }
+        if (event is StableUserMessage) {
+            firstUserInTurn = entry
+        }
+    }
+    if (anchorsAscending.first().index == 0) {
+        return firstUserInTurn?.let { elapsedBetween(it.createdAt, finalEntry.createdAt) }
+    }
+    return turnDurationResolver.finalDuration(finalEntry.index, finalEntry.createdAt)
+}
+
+internal fun elapsedBetween(
+    previousTimestamp: Instant?,
+    currentTimestamp: Instant?,
 ): Duration {
-    val currentTimestamp = getTimestampExact(currentIndex) ?: return Duration.ZERO
-    val previousTimestamp = previousIndex?.let { getTimestampExact(it) }
-        ?: return Duration.ZERO
-    return (currentTimestamp - previousTimestamp)
+    val current = currentTimestamp?.takeIf { it != Instant.DISTANT_PAST } ?: return Duration.ZERO
+    val previous = previousTimestamp?.takeIf { it != Instant.DISTANT_PAST } ?: return Duration.ZERO
+    return (current - previous)
         .takeIf { elapsed -> elapsed >= Duration.ZERO && elapsed.isFinite() }
         ?: Duration.ZERO
 }
@@ -199,31 +445,32 @@ internal suspend fun KodexAgentStorage.elapsedBetween(
 internal class HistoryTurnDurationResolver(
     private val storage: KodexAgentStorage,
 ) {
-    suspend fun finalDuration(finalIndex: Int): Duration? {
+    suspend fun finalDuration(finalIndex: Int, finalCreatedAt: Instant? = null): Duration? {
         if (finalIndex <= 0) return null
-        val turnStartIndex = findTurnStartIndex(finalIndex - 1) ?: return null
-        return storage.elapsedBetween(turnStartIndex, finalIndex)
+        val turnStartCommit = findTurnStartCommit(finalIndex - 1) ?: return null
+        val endTimestamp = finalCreatedAt ?: storage.getCommitExact(finalIndex)?.createdAt ?: return null
+        return elapsedBetween(turnStartCommit.createdAt, endTimestamp)
     }
 
     suspend fun activeTurnStartTimestamp(atIndex: Int): Instant? {
         if (atIndex < 0) return null
-        val turnStartIndex = findTurnStartIndex(atIndex) ?: return null
-        return storage.getTimestampExact(turnStartIndex)
+        return findTurnStartCommit(atIndex)?.createdAt?.takeIf { it != Instant.DISTANT_PAST }
     }
 
-    private suspend fun findTurnStartIndex(upperInclusive: Int): Int? {
+    private suspend fun findTurnStartCommit(upperInclusive: Int): IndexedAgentCommit? {
         if (upperInclusive < 0) return null
-        val prevFinalIndex = storage.floorToIndex(
-            index = upperInclusive,
+        val prevFinalIndex = storage.getLastCommitsIn(
+            range = 0..upperInclusive,
             types = setOf(AgentCommitType.AssistantMessage, AgentCommitType.AssistantMessageFinal),
-        )
+            limit = 1,
+        ).lastOrNull()?.index
         val lowerBound = (prevFinalIndex ?: -1) + 1
         if (lowerBound > upperInclusive) return null
         return storage.getFirstCommitsIn(
             range = lowerBound..upperInclusive,
             types = setOf(AgentCommitType.UserMessage),
             limit = 1,
-        ).firstOrNull()?.index
+        ).firstOrNull()
     }
 }
 
@@ -233,124 +480,65 @@ internal fun StableAssistantMessage.isFinal(): Boolean =
 private data class IndexedEntry(
     val index: Int,
     val entry: CleanIndexEntry,
+    val createdAt: Instant,
 ) {
-    fun normalWorkLowerBound(): Int =
-        index + if (entry is CleanCompactionPoint && index > 0) 2 else 1
-
-    fun cursorIndex(representation: AnchorRepresentation?): Int =
-        representation?.displayIndex ?: index
+    fun normalWorkLowerBound(): Int = index + 1
 
     suspend fun previous(storage: KodexAgentStorage): IndexedEntry? {
-        if (index == 0) return null
-        val previousIndex = storage.floorToIndex(index - 1, AgentCommitType.IndexTypes) ?: return null
-        val entry = storage.getIndexEntryExact(previousIndex) ?: return null
-        return IndexedEntry(
-            index = previousIndex,
-            entry = entry,
-        )
-    }
-
-    suspend fun representationAt(
-        storage: KodexAgentStorage,
-        upperInclusive: Int,
-    ): AnchorRepresentation? = when (val value = entry) {
-        is StableIndexEvent -> AnchorRepresentation.IndexEvent(index, value)
-        is CleanCompactionPoint -> {
-            val outputIndex = index + 1
-            if (
-                index > 0 &&
-                outputIndex <= upperInclusive &&
-                storage.indexesIn(outputIndex..outputIndex, AgentCommitType.WorkTypes).singleOrNull() == outputIndex
-            ) {
-                AnchorRepresentation.ContextCompaction(outputIndex)
-            } else {
-                null
-            }
-        }
+        if (index <= 0) return null
+        return storage.getCommitAtOrBefore(index - 1, AgentCommitType.IndexTypes)?.toIndexedEntry()
     }
 }
 
-private sealed interface AnchorRepresentation {
-    val displayIndex: Int
+private fun IndexedAgentCommit.toIndexedEntry(): IndexedEntry? =
+    (commit as? CleanIndexEntry)?.let { IndexedEntry(index, it, createdAt) }
 
-    suspend fun toProjection(
-        storage: KodexAgentStorage,
-        predecessorIndex: Int?,
-    ): HistoryProjectionItem
+private data class SealedWorkSummary(
+    val indexRange: IntRange,
+    val itemCount: Int,
+    val lastTimestamp: Instant,
+)
 
-    data class IndexEvent(
-        override val displayIndex: Int,
-        val event: StableIndexEvent,
-    ) : AnchorRepresentation {
-        override suspend fun toProjection(
-            storage: KodexAgentStorage,
-            predecessorIndex: Int?,
-        ): HistoryProjectionItem = HistoryProjectionItem.Stable(
-            event.toHistoryItemDescriptor(
-                index = displayIndex,
-                source = HistoryItemSource.Index,
-                elapsed = storage.elapsedBetween(predecessorIndex, displayIndex),
-            ),
-        )
-    }
-
-    data class ContextCompaction(
-        override val displayIndex: Int,
-    ) : AnchorRepresentation {
-        override suspend fun toProjection(
-            storage: KodexAgentStorage,
-            predecessorIndex: Int?,
-        ): HistoryProjectionItem = HistoryProjectionItem.Stable(
-            HistoryItemDescriptor(
-                index = displayIndex,
-                source = HistoryItemSource.Work,
-                kind = HistoryItemKind.ContextCompaction,
-                elapsed = storage.elapsedBetween(predecessorIndex, displayIndex),
-            ),
-        )
-    }
-}
-
-private suspend fun KodexAgentStorage.sealedWorkIndexes(
+private suspend fun KodexAgentStorage.sealedWorkSummary(
     older: IndexedEntry?,
     newerIndex: Int,
-): List<Int> {
-    val firstIndex = (older?.index ?: -1) + 1
+): SealedWorkSummary? {
+    val firstIndex = older?.normalWorkLowerBound() ?: 0
     val lastIndex = newerIndex - 1
-    if (firstIndex > lastIndex) return emptyList()
-    val excludedContextOutput = older
-        ?.takeIf { it.entry is CleanCompactionPoint && it.index > 0 }
-        ?.let { it.index + 1 }
-    return indexesIn(firstIndex..lastIndex, AgentCommitType.WorkTypes).filter { workIndex ->
-        workIndex != excludedContextOutput
+    if (firstIndex > lastIndex) return null
+    val count = countCommitsIn(firstIndex..lastIndex, AgentCommitType.WorkTypes)
+    if (count <= 0) return null
+    val firstWork = getFirstCommitsIn(firstIndex..lastIndex, AgentCommitType.WorkTypes, limit = 1).firstOrNull()
+        ?: return null
+    val lastWork = if (count == 1) {
+        firstWork
+    } else {
+        getLastCommitsIn(firstIndex..lastIndex, AgentCommitType.WorkTypes, limit = 1).lastOrNull() ?: return null
     }
+    return SealedWorkSummary(
+        indexRange = firstWork.index..lastWork.index,
+        itemCount = count,
+        lastTimestamp = lastWork.createdAt,
+    )
 }
 
-private suspend fun KodexAgentStorage.individualWorkItems(
+private fun individualWorkItems(
     commitsNewestFirst: List<IndexedAgentCommit>,
-    oldestPredecessorIndex: Int?,
+    oldestPredecessorTimestamp: Instant? = null,
 ): List<HistoryProjectionItem> {
     if (commitsNewestFirst.isEmpty()) return emptyList()
-    val timestamps = if (commitsNewestFirst.size > 1) {
-        getCommitsIn(
-            (oldestPredecessorIndex ?: commitsNewestFirst.last().index)..commitsNewestFirst.first().index,
-            AgentCommitType.TimestampTypes,
-        ).associate { (index, value) -> index to (value as CommitTimestamp).instant }
-    } else null
-    return commitsNewestFirst.mapIndexed { position, (index, commit) ->
+    return commitsNewestFirst.mapIndexed { position, (index, commit, createdAt) ->
         val event = commit as StableWorkEvent
-        val predecessorIndex = commitsNewestFirst.getOrNull(position + 1)?.index
-            ?: oldestPredecessorIndex
+        val predecessorCommit = commitsNewestFirst.getOrNull(position + 1)
+        val predecessorTimestamp = predecessorCommit?.createdAt
+            ?.takeIf { it != Instant.DISTANT_PAST }
+            ?: oldestPredecessorTimestamp
         HistoryProjectionItem.Stable(
             event.toHistoryItemDescriptor(
                 index = index,
                 source = HistoryItemSource.Work,
-                elapsed = if (timestamps == null) elapsedBetween(predecessorIndex, index) else {
-                    val current = timestamps[index]
-                    val previous = timestamps[predecessorIndex]
-                    if (current == null || previous == null) Duration.ZERO
-                    else (current - previous).takeIf { it >= Duration.ZERO && it.isFinite() } ?: Duration.ZERO
-                },
+                elapsed = elapsedBetween(predecessorTimestamp, createdAt),
+                createdAt = createdAt,
             ),
         )
     }

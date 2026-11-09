@@ -15,9 +15,10 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAtOrNull
-import io.github.stream29.kodex.agentstorage.contract.getTimestampAtOrNull
-import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -87,18 +88,6 @@ public actual class InMemoryKodexSessionRepository internal constructor(
                 },
             )
         }
-
-    actual override suspend fun readCreatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
-        requireOpen()
-        requireSession(entryIndex).storage.getTimestampExact(0)
-    }
-
-    actual override suspend fun readUpdatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
-        requireOpen()
-        val storage = requireSession(entryIndex).storage
-        val latest = storage.latestIndex()
-        if (latest < 0) null else storage.getTimestampAtOrNull(latest)
-    }
 
     private suspend fun updateArchived(
         entryIndex: Int,
@@ -220,6 +209,7 @@ private class SessionNode(
 private data class InMemorySessionEntry(
     override val entryIndex: Int,
     override val threadName: String?,
+    override val createdAt: Instant?,
     override val lastActivityAt: Instant?,
 ) : KodexSessionEntry
 
@@ -242,7 +232,8 @@ private suspend fun SessionNode.entry(entryIndex: Int): KodexSessionEntry {
     return InMemorySessionEntry(
         entryIndex = entryIndex,
         threadName = if (latest >= 0) storage.getSettingsAtOrNull(latest)?.threadName else null,
-        lastActivityAt = if (latest >= 0) storage.getTimestampAtOrNull(latest) else null,
+        createdAt = if (latest >= 0) storage.getCommitExact(0)?.createdAt?.takeIf { it != Instant.DISTANT_PAST } else null,
+        lastActivityAt = if (latest >= 0) storage.getCommitAtOrBefore(latest)?.createdAt?.takeIf { it != Instant.DISTANT_PAST } else null,
     )
 }
 
@@ -276,28 +267,12 @@ private class SessionAgentStorage(
         return delegate.latestIndex()
     }
 
-    override suspend fun indexesIn(
+    override suspend fun countCommitsIn(
         range: IntRange,
         types: Set<AgentCommitType>,
-    ): List<Int> {
+    ): Int {
         requireActive()
-        return delegate.indexesIn(range, types)
-    }
-
-    override suspend fun getCommitsExact(
-        index: Int,
-        types: Set<AgentCommitType>,
-    ): List<AgentCommit> {
-        requireActive()
-        return delegate.getCommitsExact(index, types)
-    }
-
-    override suspend fun getCommitsIn(
-        range: IntRange,
-        types: Set<AgentCommitType>,
-    ): List<IndexedAgentCommit> {
-        requireActive()
-        return delegate.getCommitsIn(range, types)
+        return delegate.countCommitsIn(range, types)
     }
 
     override suspend fun getFirstCommitsIn(
@@ -323,9 +298,19 @@ private class SessionAgentStorage(
         return delegate.commit(commit)
     }
 
+    override suspend fun commit(commit: AgentCommit, timestamp: Instant): Int {
+        requireActive()
+        return delegate.commit(commit, timestamp)
+    }
+
     override suspend fun commit(commits: List<AgentCommit>): Int {
         requireActive()
         return delegate.commit(commits)
+    }
+
+    override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int {
+        requireActive()
+        return delegate.commit(commits, timestamp)
     }
 
     override suspend fun revert(untilExclusive: Int) {

@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.agentstorage.sqlite
 
 import de.infix.testBalloon.framework.core.testSuite
@@ -23,41 +25,49 @@ private suspend fun checkSparseFamily(
 ) {
     storage.revert(0)
     assertEquals(-1, storage.latestIndex())
-    assertTrue(storage.getCommitsExact(0, types).isEmpty())
-    assertNull(storage.floorToIndex(8, types))
-    assertNull(storage.ceilToIndex(0, types))
+    assertNull(storage.getCommitExact(0, types))
+    assertEquals(0, storage.countCommitsIn(0..8, types))
+    assertNull(storage.getCommitAtOrBefore(8, types))
+    assertNull(storage.getCommitAtOrAfter(0, types))
 
-    storage.commit(CommitTimestamp(Instant.fromEpochSeconds(0))) // 0
-    storage.commit(CommitTimestamp(Instant.fromEpochSeconds(1))) // 1
-    val firstIndex = storage.commit(first) // 2
+    val t0 = Instant.fromEpochSeconds(0)
+    val t1 = Instant.fromEpochSeconds(1)
+    val t2 = Instant.fromEpochSeconds(2)
+    val t9 = Instant.fromEpochSeconds(9)
+    storage.commit(listOf(CommitTimestamp(t0)), t0) // 0
+    storage.commit(listOf(CommitTimestamp(t1)), t1) // 1
+    val firstIndex = storage.commit(listOf(first), t2) // 2
     repeat(6) { step ->
-        storage.commit(CommitTimestamp(Instant.fromEpochSeconds(3L + step)))
+        val t = Instant.fromEpochSeconds(3L + step)
+        storage.commit(listOf(CommitTimestamp(t)), t)
     }
-    val secondIndex = storage.commit(second) // 9
+    val secondIndex = storage.commit(listOf(second), t9) // 9
 
     assertEquals(2, firstIndex)
     assertEquals(9, secondIndex)
     assertEquals(9, storage.latestIndex())
-    assertEquals(listOf(first), storage.getCommitsExact(2, types))
-    assertTrue(storage.getCommitsExact(8, types).isEmpty())
-    assertEquals(2, storage.floorToIndex(8, types))
-    assertEquals(9, storage.ceilToIndex(8, types))
+    assertEquals(IndexedAgentCommit(2, first, t2), storage.getCommitExact(2, types))
+    assertNull(storage.getCommitExact(8, types))
+    assertEquals(1, storage.countCommitsIn(0..8, types))
+    assertEquals(2, storage.countCommitsIn(0..99, types))
+    assertEquals(IndexedAgentCommit(2, first, t2), storage.getCommitAtOrBefore(8, types))
+    assertEquals(IndexedAgentCommit(9, second, t9), storage.getCommitAtOrAfter(8, types))
     assertEquals(
-        listOf(IndexedAgentCommit(2, first), IndexedAgentCommit(9, second)),
+        listOf(IndexedAgentCommit(2, first, t2), IndexedAgentCommit(9, second, t9)),
         storage.getCommitsIn(0..99, types),
     )
     assertEquals(
-        listOf(IndexedAgentCommit(2, first)),
+        listOf(IndexedAgentCommit(2, first, t2)),
         storage.getFirstCommitsIn(0..99, types, limit = 1),
     )
     assertEquals(
-        listOf(IndexedAgentCommit(9, second)),
+        listOf(IndexedAgentCommit(9, second, t9)),
         storage.getLastCommitsIn(0..99, types, limit = 1),
     )
     assertTrue(storage.getCommitsIn(8..3, types).isEmpty())
     storage.revert(9)
     assertEquals(8, storage.latestIndex())
-    assertEquals(2, storage.floorToIndex(8, types))
+    assertEquals(IndexedAgentCommit(2, first, t2), storage.getCommitAtOrBefore(8, types))
     storage.revert(0)
     assertEquals(-1, storage.latestIndex())
 }
@@ -109,13 +119,13 @@ val sqliteStorageTest by testSuite {
 
             assertEquals(
                 listOf(
-                    listOf(0L, "token_count_legacy"),
+                    listOf(0L, "llm_request_meta_legacy"),
                     listOf(1L, "user_message"),
-                    listOf(2L, "token_count_initialization"),
+                    listOf(2L, "llm_request_meta_initialization"),
                     listOf(3L, "assistant_message_commentary"),
-                    listOf(4L, "token_count_compaction"),
+                    listOf(4L, "llm_request_meta_compaction"),
                     listOf(5L, "assistant_message_final"),
-                    listOf(6L, "token_count_response"),
+                    listOf(6L, "llm_request_meta_response"),
                     listOf(7L, "assistant_message"),
                 ),
                 db.query("""SELECT "index", type FROM agent_commits WHERE agent_id = 0 ORDER BY "index", type"""),
@@ -126,11 +136,11 @@ val sqliteStorageTest by testSuite {
     test("injected SQLite failure rolls back entire multi-commit batch and revert") {
         seeded().use { db ->
             val storage = SqliteAgentStorage(db, 0)
-            db.execute("CREATE TRIGGER reject_token BEFORE INSERT ON agent_commits WHEN NEW.type = 'token_count_initialization' BEGIN SELECT RAISE(ABORT, 'injected'); END")
+            db.execute("CREATE TRIGGER reject_token BEFORE INSERT ON agent_commits WHEN NEW.type = 'llm_request_meta_initialization' BEGIN SELECT RAISE(ABORT, 'injected'); END")
             assertFailsWith<SqliteFailure> {
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test")))
             }
-            // Neither settings nor timestamp should remain if token_count_initialization failed in the batch!
+            // Neither settings nor token count should remain if initialization failed in the batch!
             assertEquals(-1, storage.latestIndex())
             assertTrue(db.query("SELECT * FROM agent_commits WHERE agent_id = 0").isEmpty())
 
@@ -138,10 +148,9 @@ val sqliteStorageTest by testSuite {
             storage.initialize(KodexAgentSettings(model = OpenAiModelId("test")))
             assertEquals(0, storage.latestIndex())
 
-            db.execute("CREATE TRIGGER reject_revert BEFORE DELETE ON agent_commits WHEN OLD.type = 'timestamp' BEGIN SELECT RAISE(ABORT, 'injected'); END")
+            db.execute("CREATE TRIGGER reject_revert BEFORE DELETE ON agent_commits WHEN OLD.type = 'settings' BEGIN SELECT RAISE(ABORT, 'injected'); END")
             assertFailsWith<SqliteFailure> { storage.revert(0) }
-            assertNotNull(storage.getTimestampExact(0))
-            assertNotNull(storage.getSettingsExact(0))
+            assertNotNull(storage.getCommitExact(0, AgentCommitType.SettingsTypes))
         }
     }
 
@@ -151,11 +160,11 @@ val sqliteStorageTest by testSuite {
                 val storage = SqliteAgentStorage(db, 0)
                 db.setAuthorizer { _, operation, _, _, _ -> operation != "COMMIT" }
                 assertFailsWith<SqliteFailure> {
-                    storage.commit(CommitTimestamp(Instant.fromEpochSeconds(1)))
+                    storage.commit(listOf(KodexAgentSettings(model = OpenAiModelId("test"))))
                 }
                 db.setAuthorizer(null)
                 assertEquals(-1, storage.latestIndex())
-                storage.commit(CommitTimestamp(Instant.fromEpochSeconds(2)))
+                storage.commit(listOf(KodexAgentSettings(model = OpenAiModelId("test"))))
                 assertEquals(0, storage.latestIndex())
             } finally {
                 db.setAuthorizer(null)
@@ -178,16 +187,17 @@ val sqliteStorageTest by testSuite {
         seeded().use { db ->
             val storage = SqliteAgentStorage(db, 0)
             val message = StableUserMessage(listOf(ContentItem.InputText("hello")))
-            val timestamp = CommitTimestamp(Instant.fromEpochSeconds(10))
-            val index = storage.commit(listOf(timestamp, message))
+            val settings = KodexAgentSettings(model = OpenAiModelId("test"))
+            val t10 = Instant.fromEpochSeconds(10)
+            val index = storage.commit(listOf(settings, message), t10)
             assertEquals(0, index)
             assertEquals(
-                listOf(IndexedAgentCommit(0, message)),
-                storage.getFirstCommitsIn(0..0, setOf(AgentCommitType.UserMessage, AgentCommitType.Timestamp), limit = 1),
+                listOf(IndexedAgentCommit(0, message, t10)),
+                storage.getFirstCommitsIn(0..0, setOf(AgentCommitType.UserMessage, AgentCommitType.Settings), limit = 1),
             )
             assertEquals(
-                listOf(IndexedAgentCommit(0, timestamp)),
-                storage.getLastCommitsIn(0..0, setOf(AgentCommitType.UserMessage, AgentCommitType.Timestamp), limit = 1),
+                listOf(IndexedAgentCommit(0, settings, t10)),
+                storage.getLastCommitsIn(0..0, setOf(AgentCommitType.UserMessage, AgentCommitType.Settings), limit = 1),
             )
         }
     }

@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.agentstorage.sqlite
 
 import de.infix.testBalloon.framework.core.testSuite
@@ -25,12 +27,13 @@ private fun SqliteConnection.session(id: Int, archived: Boolean = false) {
     execute("INSERT INTO agents(agent_id, session_id, parent_agent_id) VALUES(?, ?, NULL)", listOf(id.toLong(), id.toLong()))
 }
 
-private fun SqliteConnection.put(agent: Int, type: String, index: Int, payload: String) {
-    execute("INSERT INTO agent_commits VALUES(?,?,?,?)", listOf(agent.toLong(), type, index.toLong(), payload))
+private fun SqliteConnection.put(agent: Int, type: String, index: Int, payload: String, createdAt: Instant = Instant.DISTANT_PAST) {
+    execute("INSERT INTO agent_commits VALUES(?,?,?,?,?)", listOf(agent.toLong(), type, index.toLong(), payload, createdAt.toString()))
 }
 
 private fun SqliteConnection.timestamp(agent: Int, index: Int, seconds: Long, nanos: Int = 0) {
-    put(agent, "timestamp", index, OpenAiJsonCodec.encodeToString(Instant.fromEpochSeconds(seconds, nanos)))
+    val inst = Instant.fromEpochSeconds(seconds, nanos)
+    put(agent, "timestamp", index, OpenAiJsonCodec.encodeToString(inst), createdAt = inst)
 }
 
 private fun settingsPayload(name: String, cwd: String): String = OpenAiJsonCodec.encodeToString(
@@ -64,17 +67,16 @@ val sqliteSchemaTest by testSuite {
         assertEquals(listOf(0L, 0L, null, null, null, null), db.catalog(0))
         val defaultPayload = """{"model":"synthetic"}"""
         OpenAiJsonCodec.decodeFromString(KodexAgentSettings.serializer(), defaultPayload)
-        db.put(0, "settings", 3, defaultPayload)
-        assertEquals(listOf("", "."), db.catalog(0).subList(2,4))
         val t2 = Instant.fromEpochSeconds(-1, 999_999_998)
-        db.timestamp(0, 2, -1, 999_999_998)
+        db.put(0, "settings", 2, defaultPayload, createdAt = t2)
+        assertEquals(listOf("", "."), db.catalog(0).subList(2,4))
         assertNull(db.catalog(0)[4]) // created_at requires exact index 0, never the first later timestamp.
         assertEquals(t2.toString(), db.catalog(0)[5])
         val t0 = Instant.fromEpochSeconds(-2, 999_999_999)
         val t15 = Instant.fromEpochSeconds(0, 1)
-        db.timestamp(0, 0, -2, 999_999_999)
-        db.put(0, "settings", 12, settingsPayload("new", "/new"))
-        db.timestamp(0, 15, 0, 1)
+        db.put(0, "user_message", 0, "{}", createdAt = t0)
+        db.put(0, "settings", 12, settingsPayload("new", "/new"), createdAt = t2)
+        db.put(0, "user_message", 15, "{}", createdAt = t15)
         db.execute("UPDATE sessions SET archived=1 WHERE session_id=0")
         assertEquals(listOf(0L,1L,"new","/new",t0.toString(),t15.toString()), db.catalog(0))
         assertTrue(db.query("SELECT * FROM session_catalog WHERE cwd='/old'").isEmpty())
@@ -87,10 +89,11 @@ val sqliteSchemaTest by testSuite {
     } }
     test("fork strict until, sparse boundaries and deleted index reuse") { withSchema { db ->
         db.session(0)
-        db.put(0, "settings", 0, settingsPayload("original", "/old"))
-        db.put(0, "settings", 4, settingsPayload("forkable", "/kept"))
-        db.put(0, "settings", 9, settingsPayload("excluded", "/excluded"))
         val t0 = Instant.fromEpochSeconds(10, 7)
+        val t9 = Instant.fromEpochSeconds(11, 9)
+        db.put(0, "settings", 0, settingsPayload("original", "/old"), createdAt = t0)
+        db.put(0, "settings", 4, settingsPayload("forkable", "/kept"), createdAt = t0)
+        db.put(0, "settings", 9, settingsPayload("excluded", "/excluded"), createdAt = t9)
         db.timestamp(0, 0, 10, 7)
         db.timestamp(0, 9, 11, 9)
         assertEquals(listOf(0L, 0L, null), db.query("SELECT agent_id, session_id, parent_agent_id FROM agents WHERE agent_id=0").single())
@@ -99,7 +102,7 @@ val sqliteSchemaTest by testSuite {
         assertTrue(db.query("""SELECT * FROM agent_commits WHERE agent_id=0 AND type='settings' AND "index"=7""").isEmpty())
         db.transaction {
             db.session(1)
-            db.execute("""INSERT INTO agent_commits SELECT 1,type,"index",payload_json FROM agent_commits WHERE agent_id=0 AND "index"<9""")
+            db.execute("""INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at) SELECT 1,type,"index",payload_json,created_at FROM agent_commits WHERE agent_id=0 AND "index"<9""")
         }
         assertEquals(listOf("forkable","/kept",t0.toString(),t0.toString()), db.catalog(1).subList(2,6))
         db.execute("DELETE FROM sessions WHERE session_id=0")
@@ -131,7 +134,7 @@ val sqliteSchemaTest by testSuite {
             val elapsed = mark.elapsedNow()
             val plan = db.query("EXPLAIN QUERY PLAN SELECT * FROM session_catalog WHERE archived=0 AND cwd='/cwd/3' ORDER BY session_id DESC").map { it.last().toString() }
             assertTrue(plan.any { "SEARCH st USING PRIMARY KEY" in it }, plan.toString())
-            assertTrue(plan.any { "SEARCH ut USING PRIMARY KEY" in it }, plan.toString())
+            assertTrue(plan.any { "SEARCH c USING" in it }, plan.toString())
             assertTrue(plan.none { "SCAN agent_commits" in it }, plan.toString())
             val historyPlan = db.query("EXPLAIN QUERY PLAN SELECT agent_id FROM agent_commits WHERE type='settings' AND json_extract(payload_json,'$.cwd')='/cwd/1'").joinToString()
             assertTrue("commits_settings_cwd" in historyPlan, historyPlan)

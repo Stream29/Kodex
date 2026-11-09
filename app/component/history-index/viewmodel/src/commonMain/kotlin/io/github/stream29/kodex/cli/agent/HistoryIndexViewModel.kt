@@ -1,10 +1,11 @@
 package io.github.stream29.kodex.cli.agent
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
@@ -12,14 +13,10 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUse
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
-import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryKind
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadHandle
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadState
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModelFactory
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexWindow
@@ -28,14 +25,12 @@ import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessagePhase
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,7 +39,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.coroutineContext
 import kotlin.time.Instant
 
 public actual val historyIndexViewModelFactory: HistoryIndexViewModelFactory =
@@ -55,6 +49,9 @@ public actual fun createHistoryIndexViewModel(
     ownerScope: CoroutineScope,
 ): HistoryIndexViewModel = HistoryIndexViewModelImpl(dependencies, ownerScope)
 
+internal const val HistoryIndexPageSize = 64
+internal const val HistoryIndexPrefetchDistance = 16
+
 internal class HistoryIndexViewModelImpl(
     private val dependencies: HistoryIndexDependencies,
     ownerScope: CoroutineScope,
@@ -63,9 +60,10 @@ internal class HistoryIndexViewModelImpl(
     private val scope = CoroutineScope(ownerScope.coroutineContext + job)
     private val scanMutex = Mutex()
     private var scannedThrough = -1
+    private var oldestScannedFrom = 0
+    private val olderScanInProgress = MutableStateFlow(false)
     // Local invalidation guard, never sent as or substituted for a backend cache nonce.
     private val readRevision = MutableStateFlow(0L)
-    private val handles = MutableStateFlow<Set<ReadHandle<*>>>(emptySet())
     private val mutableWindow = MutableStateFlow(
         HistoryIndexWindow(dependencies.cacheNonce?.value ?: 0, emptyList()),
     )
@@ -74,9 +72,8 @@ internal class HistoryIndexViewModelImpl(
     override val isActive: Boolean get() = job.isActive
 
     init {
-        // Cancellation cleanup must not wait for a non-cooperative sibling read to complete.
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            try { awaitCancellation() } finally { releaseHandles() }
+            try { awaitCancellation() } finally { advanceRevision() }
         }
         dependencies.cacheNonce?.let { nonce ->
             scope.launch { nonce.collect { sync(dependencies.latestIndex.value, forceInvalidate = true) } }
@@ -107,39 +104,15 @@ internal class HistoryIndexViewModelImpl(
             current.indexes.binarySearch(index) >= 0
     }
 
-    override suspend fun load(generation: Long, index: Int): HistoryIndexEntry =
-        loadExact(generation, index) { entry ->
-            HistoryIndexEntry(index, entry.toHistoryIndexEntryKind(), entry.toHistoryIndexSummary())
+    override fun onRowVisible(generation: Long, index: Int) {
+        val current = mutableWindow.value
+        if (oldestScannedFrom > 0 && current.generation == generation) {
+            val position = current.indexes.binarySearch(index)
+            if (position in 0 until HistoryIndexPrefetchDistance) {
+                requestOlder(generation)
+            }
         }
-
-    override suspend fun loadDetail(generation: Long, index: Int): HistoryIndexEntryDetail =
-        loadExact(generation, index) { entry ->
-            HistoryIndexEntryDetail(
-                entry.toHistoryIndexEntryKind(),
-                entry.toHistoryIndexDetail(),
-                entry as? StableRequestUserInputToolEvent,
-                entry as? StablePlanUpdate,
-            )
-        }
-
-    override suspend fun readMessageTimestamp(generation: Long, index: Int): Instant? =
-        withContext(Dispatchers.Default) {
-            val revision = readRevision.value
-            val isMessage = loadExact(generation, index) { it is StableIndexEvent.Steerable }
-            val value = if (isMessage) dependencies.storage.getTimestampExact(index) else null
-            coroutineContext.ensureActive()
-            ensureCurrent(generation, index, revision)
-            value
-        }
-
-    override fun acquireRow(generation: Long, index: Int): HistoryIndexReadHandle<HistoryIndexEntry> =
-        acquire(generation, index) { load(generation, index) }
-
-    override fun acquireDetail(generation: Long, index: Int): HistoryIndexReadHandle<HistoryIndexEntryDetail> =
-        acquire(generation, index) { loadDetail(generation, index) }
-
-    override fun acquireTimestamp(generation: Long, index: Int): HistoryIndexReadHandle<Instant?> =
-        acquire(generation, index) { readMessageTimestamp(generation, index) }
+    }
 
     override fun checkOut(generation: Long, index: Int): Boolean {
         if (!contains(generation, index)) return false
@@ -148,73 +121,12 @@ internal class HistoryIndexViewModelImpl(
     }
 
     override fun close() {
-        releaseHandles()
+        advanceRevision()
         job.cancel()
     }
 
-    private fun releaseHandles() {
+    private fun advanceRevision() {
         readRevision.update { it + 1 }
-        var current: Set<ReadHandle<*>>
-        do {
-            current = handles.value
-        } while (!handles.compareAndSet(current, emptySet()))
-        current.forEach { it.release() }
-    }
-
-    private fun <T> acquire(generation: Long, index: Int, read: suspend () -> T): ReadHandle<T> {
-        val handle = ReadHandle<T>(generation, index)
-        if (!contains(generation, index)) {
-            handle.release()
-            return handle
-        }
-        val revision = readRevision.value
-        handles.update { it + handle }
-        handle.start(revision, read)
-        return handle
-    }
-
-    private inner class ReadHandle<T>(
-        override val generation: Long,
-        override val index: Int,
-    ) : HistoryIndexReadHandle<T> {
-        private val mutableState = MutableStateFlow<HistoryIndexReadState<T>>(HistoryIndexReadState.Loading)
-        private val readJob = Job(job)
-        override val state = mutableState.asStateFlow()
-
-        fun start(revision: Long, read: suspend () -> T) {
-            val readScope = CoroutineScope(scope.coroutineContext + readJob)
-            readScope.launch {
-                try {
-                    val value = read()
-                    coroutineContext.ensureActive()
-                    if (contains(generation, index) && readRevision.value == revision) {
-                        mutableState.compareAndSet(HistoryIndexReadState.Loading, HistoryIndexReadState.Ready(value))
-                    } else {
-                        release()
-                    }
-                } catch (cancelled: CancellationException) {
-                    release()
-                    throw cancelled
-                } catch (_: Throwable) {
-                    if (contains(generation, index) && readRevision.value == revision && readJob.isActive) {
-                        mutableState.compareAndSet(HistoryIndexReadState.Loading, HistoryIndexReadState.Failed)
-                    } else {
-                        release()
-                    }
-                } finally {
-                    // A completed read keeps its immutable value until release/invalidation, but
-                    // does not keep a live Job attached to the component owner.
-                    readJob.complete()
-                }
-            }
-            readJob.invokeOnCompletion { cause -> if (cause != null) release() }
-        }
-
-        override fun release() {
-            mutableState.value = HistoryIndexReadState.Closed
-            handles.update { it - this }
-            readJob.cancel()
-        }
     }
 
     private suspend fun sync(latest: Int, forceInvalidate: Boolean) {
@@ -225,20 +137,31 @@ internal class HistoryIndexViewModelImpl(
             try {
                 when {
                     forceInvalidate || target < scannedThrough || (nonce != null && nonce != current.generation) -> {
-                        releaseHandles()
-                        val replacement = loadVisibleIndexes(0, target)
+                        advanceRevision()
+                        val page = loadLatestPage(target)
                         if (nonce != dependencies.cacheNonce?.value) return
+                        oldestScannedFrom = page.oldestScannedFrom
                         mutableWindow.value = HistoryIndexWindow(
                             generation = nonce ?: (current.generation + 1),
-                            indexes = replacement,
+                            entries = page.entries,
                             revision = readRevision.value,
                         )
                     }
                     target > scannedThrough -> {
-                        val appended = loadVisibleIndexes(scannedThrough + 1, target)
-                        if (nonce != dependencies.cacheNonce?.value) return
-                        if (appended.isNotEmpty()) {
-                            mutableWindow.value = current.copy(indexes = current.indexes + appended)
+                        if (scannedThrough < 0) {
+                            val page = loadLatestPage(target)
+                            if (nonce != dependencies.cacheNonce?.value) return
+                            oldestScannedFrom = page.oldestScannedFrom
+                            if (page.entries.isNotEmpty()) {
+                                mutableWindow.value = current.copy(entries = page.entries)
+                            }
+                        } else {
+                            val appended = loadAppendedEntries(scannedThrough + 1, target)
+                            if (nonce != dependencies.cacheNonce?.value) return
+                            if (appended.isNotEmpty()) {
+                                val latestWindow = mutableWindow.value
+                                mutableWindow.value = latestWindow.copy(entries = latestWindow.entries + appended)
+                            }
                         }
                     }
                 }
@@ -250,47 +173,115 @@ internal class HistoryIndexViewModelImpl(
         }
     }
 
-    private suspend fun loadVisibleIndexes(fromInclusive: Int, toInclusive: Int): List<Int> =
+    private fun requestOlder(generation: Long) {
+        if (!isActive || oldestScannedFrom <= 0) return
+        if (!olderScanInProgress.compareAndSet(expect = false, update = true)) return
+        scope.launch {
+            try {
+                loadOlder(generation)
+            } finally {
+                olderScanInProgress.value = false
+            }
+        }
+    }
+
+    private suspend fun loadOlder(expectedGeneration: Long) {
+        scanMutex.withLock {
+            val current = mutableWindow.value
+            val nonce = dependencies.cacheNonce?.value
+            val upperExclusive = oldestScannedFrom
+            if (
+                !isActive ||
+                upperExclusive <= 0 ||
+                current.generation != expectedGeneration ||
+                current.revision != readRevision.value ||
+                (nonce != null && nonce != current.generation)
+            ) {
+                return
+            }
+            try {
+                val page = loadLatestPage(upperExclusive - 1)
+                if (
+                    !isActive ||
+                    nonce != dependencies.cacheNonce?.value ||
+                    mutableWindow.value.generation != current.generation ||
+                    mutableWindow.value.revision != current.revision
+                ) {
+                    return
+                }
+                oldestScannedFrom = page.oldestScannedFrom
+                if (page.entries.isNotEmpty()) {
+                    val latestWindow = mutableWindow.value
+                    mutableWindow.value = latestWindow.copy(
+                        entries = page.entries + latestWindow.entries,
+                    )
+                }
+            } catch (failure: CacheNonceMismatch) {
+                if (dependencies.cacheNonce == null) throw failure
+            }
+        }
+    }
+
+    private data class LoadedIndexPage(
+        val entries: List<HistoryIndexEntry>,
+        val oldestScannedFrom: Int,
+    )
+
+    private suspend fun loadLatestPage(toInclusive: Int): LoadedIndexPage =
         withContext(Dispatchers.Default) {
-            if (toInclusive < fromInclusive || toInclusive < 0) emptyList()
-            else dependencies.storage.indexesIn(
-                fromInclusive.coerceAtLeast(0)..toInclusive,
-                AgentCommitType.IndexTypes,
-            ).filterNot { index ->
-                index == 0 && dependencies.storage.getIndexEntryExact(index) == CleanCompactionPoint
+            if (toInclusive < 0) {
+                LoadedIndexPage(emptyList(), 0)
+            } else {
+                val commits = dependencies.storage.getLastCommitsIn(
+                    range = 0..toInclusive,
+                    types = AgentCommitType.IndexTypes,
+                    limit = HistoryIndexPageSize,
+                )
+                val oldestFrom = if (commits.size < HistoryIndexPageSize) 0 else commits.first().index
+                val entries = commits.mapNotNull { it.toHistoryIndexEntryOrNull() }
+                LoadedIndexPage(entries, oldestFrom)
             }
         }
 
-    private suspend fun <T> loadExact(
-        generation: Long,
-        index: Int,
-        transform: (CleanIndexEntry) -> T,
-    ): T = withContext(Dispatchers.Default) {
-        val revision = readRevision.value
-        ensureCurrent(generation, index, revision)
-        val entry = try {
-            dependencies.storage.getIndexEntryExact(index)
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (failure: Throwable) {
-            throw HistoryIndexLoadException(cause = failure)
+    private suspend fun loadAppendedEntries(fromInclusive: Int, toInclusive: Int): List<HistoryIndexEntry> =
+        withContext(Dispatchers.Default) {
+            if (toInclusive < fromInclusive || toInclusive < 0) {
+                emptyList()
+            } else {
+                dependencies.storage.getLastCommitsIn(
+                    range = fromInclusive.coerceAtLeast(0)..toInclusive,
+                    types = AgentCommitType.IndexTypes,
+                ).mapNotNull { it.toHistoryIndexEntryOrNull() }
+            }
         }
-        coroutineContext.ensureActive()
-        if (entry == null) throw HistoryIndexLoadException()
-        ensureCurrent(generation, index, revision)
-        transform(entry)
-    }
-
-    private fun ensureCurrent(generation: Long, index: Int, revision: Long) {
-        if (!contains(generation, index) || readRevision.value != revision) throw HistoryIndexLoadException()
-    }
 }
 
-internal class HistoryIndexLoadException(cause: Throwable? = null) :
-    IllegalStateException("Unable to read or decode the history entry.", cause)
+private fun IndexedAgentCommit.toHistoryIndexEntryOrNull(): HistoryIndexEntry? {
+    val event = commit as? CleanIndexEntry ?: return null
+    val kind = event.toHistoryIndexEntryKind()
+    val summary = event.toHistoryIndexSummary()
+    val detail = HistoryIndexEntryDetail(
+        kind = kind,
+        content = event.toHistoryIndexDetail(),
+        requestUserInput = event as? StableRequestUserInputToolEvent,
+        plan = event as? StablePlanUpdate,
+    )
+    val messageTimestamp = if (event is StableIndexEvent.Steerable) {
+        createdAt.takeIf { it != Instant.DISTANT_PAST }
+    } else {
+        null
+    }
+    return HistoryIndexEntry(
+        index = index,
+        kind = kind,
+        summary = summary,
+        detail = detail,
+        messageTimestamp = messageTimestamp,
+    )
+}
 
 private fun CleanIndexEntry.toHistoryIndexEntryKind(): HistoryIndexEntryKind = when (this) {
-    CleanCompactionPoint -> HistoryIndexEntryKind.CompactionPoint
+    is StableContextCompaction -> HistoryIndexEntryKind.CompactionPoint
     is StableUserMessage -> HistoryIndexEntryKind.UserMessage
     is StableAssistantMessage -> when (phase) {
         MessagePhase.Commentary -> HistoryIndexEntryKind.AssistantCommentary
@@ -305,7 +296,7 @@ private fun CleanIndexEntry.toHistoryIndexEntryKind(): HistoryIndexEntryKind = w
 }
 
 private fun CleanIndexEntry.toHistoryIndexSummary(): String = when (this) {
-    CleanCompactionPoint -> "Context compacted"
+    is StableContextCompaction -> "Context compacted"
     is StableUserMessage -> content.toDisplayContent().toSummary()
     is StableAssistantMessage -> content.toDisplayContent().toSummary()
     is StableDeveloperMessage -> content.toDisplayContent().toSummary()
@@ -320,7 +311,7 @@ private fun CleanIndexEntry.toHistoryIndexSummary(): String = when (this) {
 }
 
 private fun CleanIndexEntry.toHistoryIndexDetail(): String = when (this) {
-    CleanCompactionPoint -> "Context compacted"
+    is StableContextCompaction -> "Context compacted"
     is StableUserMessage -> content.toDisplayContent().toDetail()
     is StableAssistantMessage -> content.toDisplayContent().toDetail()
     is StableDeveloperMessage -> content.toDisplayContent().toDetail()

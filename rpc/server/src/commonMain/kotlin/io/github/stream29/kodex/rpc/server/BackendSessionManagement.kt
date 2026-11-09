@@ -40,7 +40,7 @@ public actual class BackendSessionManagement actual constructor(
                 SessionCatalogEntry(
                     sessionIndex = entry.entryIndex,
                     threadName = entry.threadName,
-                    createdAt = host.repository().readCreatedAt(entry.entryIndex),
+                    createdAt = entry.createdAt,
                     updatedAt = entry.lastActivityAt,
                     archived = entry.archived,
                     running = entry.running,

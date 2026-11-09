@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 internal class WorkGroupHistoryItemViewModelImpl(
     override val indexRange: IntRange,
     override val itemCount: Int,
-    private val groupElapsed: kotlin.time.Duration,
+    groupElapsed: kotlin.time.Duration,
     private val context: HistoryItemLoadContext,
     private val childFactory: suspend () -> List<WorkGroupChildHistoryItemViewModel>,
 ) : WorkGroupHistoryItemViewModel, LoadableHistoryItem {
@@ -26,23 +26,12 @@ internal class WorkGroupHistoryItemViewModelImpl(
         require(itemCount > 0)
     }
 
-    private val mutableState: MutableStateFlow<WorkGroupHistoryItemState>
-    private val initialLoadingJob: Job
-
-    init {
-        initialLoadingJob = context.launch(start = CoroutineStart.LAZY) {
-            if (context.isCurrent()) {
-                mutableState.value = WorkGroupHistoryItemState.Collapsed(groupElapsed)
-            }
-        }
-        mutableState = MutableStateFlow(WorkGroupHistoryItemState.Loading(initialLoadingJob))
-    }
+    private val mutableState: MutableStateFlow<WorkGroupHistoryItemState> =
+        MutableStateFlow(WorkGroupHistoryItemState.Collapsed(groupElapsed))
 
     override val state: StateFlow<WorkGroupHistoryItemState> = mutableState.asStateFlow()
 
-    override fun ensureLoaded() {
-        initialLoadingJob.start()
-    }
+    override fun ensureLoaded() = Unit
 
     override fun expand() {
         val collapsed = mutableState.value as? WorkGroupHistoryItemState.Collapsed ?: return
@@ -56,7 +45,6 @@ internal class WorkGroupHistoryItemViewModelImpl(
                     "History work group $indexRange expected $itemCount children, " +
                         "but loaded ${children.size}."
                 }
-                children.forEach { child -> child.ensureLoaded() }
                 if (context.isCurrent() && mutableState.value.isExpanding(loadingJob)) {
                     mutableState.value = WorkGroupHistoryItemState.Expanded(
                         children = children,

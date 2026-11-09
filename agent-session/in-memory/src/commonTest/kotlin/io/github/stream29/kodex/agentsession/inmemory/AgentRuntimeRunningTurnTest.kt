@@ -18,13 +18,14 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
+import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
@@ -254,8 +255,8 @@ val agentRuntimeRunningTurnTest by testSuite {
 
                 assertEquals(index, runtime.latestIndex.value)
                 assertEquals(index, root.storage.latestIndex())
-                assertEquals(StableContextCompaction(encryptedContent = "compacted"), root.storage.getWorkEventAt(index))
-                assertEquals(0L, root.storage.getTokenCountAt(index).totalTokens)
+                assertEquals(StableContextCompaction(encryptedContent = "compacted"), root.storage.getCommitAtOrBefore(index, AgentCommitType.IndexTypes)?.commit)
+                assertEquals(0L, root.storage.getLlmRequestMetaAtOrNull(index)!!.totalTokens)
                 val after = root.storage.getSettingsAt(index)
                 assertEquals(before.turnId, after.turnId)
                 assertEquals(before.windowNumber + 1, after.windowNumber)
@@ -429,7 +430,7 @@ val agentRuntimeRunningTurnTest by testSuite {
                 runtime.appendUserMessage(listOf(ContentItem.InputText("Continue.")))
                 runtime.modify {
                     it.commit(
-                        TokenCountSnapshot.Response(
+                        LlmRequestMeta.Response(
                             totalTokens = if (preTurn) 90L else 1L,
                         ),
                     )

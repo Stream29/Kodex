@@ -25,8 +25,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUse
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryKind
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadHandle
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadState
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexWindow
 import io.github.stream29.kodex.cli.components.LazyListState
@@ -55,9 +53,11 @@ val historyIndexRendererTest by testSuite {
                 "password" to RequestUserInputAnswer(listOf("SECRET")),
             ))),
         )
-        val vm = RenderIndex(listOf(entry(7, "Question"))).apply {
-            detail = HistoryIndexEntryDetail(HistoryIndexEntryKind.RequestUserInput, "SECRET raw fallback", secret)
-        }
+        val vm = RenderIndex(listOf(
+            entry(7, "Question").copy(
+                detail = HistoryIndexEntryDetail(HistoryIndexEntryKind.RequestUserInput, "SECRET raw fallback", secret),
+            ),
+        ))
         var visible by mutableStateOf(false)
         runMosaicTest {
             setContentAndSnapshot {
@@ -82,12 +82,10 @@ val historyIndexRendererTest by testSuite {
             assertFalse("SECRET" in snapshot, snapshot)
             assertTrue(vm.scrolled.isEmpty())
             visible = false
-            awaitIndexCondition { vm.detailHandles.single().state.value == HistoryIndexReadState.Closed }
-            assertEquals(HistoryIndexReadState.Closed, vm.timestampHandles.single().state.value)
         }
     }
 
-    test("keyboard Details keeps one exact lease pages read-only text and invalidates with its opening") {
+    test("keyboard Details pages read-only text and invalidates with its opening") {
         val vm = RenderIndex(listOf(entry(7, (0..80).joinToString("\n") { "detail-line-$it" })))
         var visible by mutableStateOf(false)
         runMosaicTest {
@@ -103,7 +101,6 @@ val historyIndexRendererTest by testSuite {
                     }
                 }
             }
-            assertTrue(vm.detailHandles.isEmpty())
             visible = true
             awaitContaining("Check out", "placed opening")
             sendKeyEvent(KeyboardEvent(codepoint = 9))
@@ -111,8 +108,6 @@ val historyIndexRendererTest by testSuite {
             sendKeyEvent(KeyboardEvent(codepoint = 13))
             val initial = awaitContaining("Back", "Details activation")
             assertTrue("detail-line-0" in initial, initial)
-            assertEquals(1, vm.detailHandles.size)
-            assertEquals(1, vm.timestampHandles.size)
             sendKeyEvent(KeyboardEvent(KeyboardEvent.PageDown))
             val paged = snapshotNow()
             assertFalse("detail-line-0" in paged, paged)
@@ -124,39 +119,30 @@ val historyIndexRendererTest by testSuite {
             sendKeyEvent(KeyboardEvent(codepoint = 13))
             awaitContaining("Back", "restored Details focus")
             assertTrue(vm.scrolled.isEmpty(), "Back restores Details focus rather than invoking Check out.")
-            assertEquals(1, vm.detailHandles.size)
             vm.replaceSameIndex()
-            awaitIndexCondition { !visible && vm.detailHandles.single().state.value == HistoryIndexReadState.Closed }
+            awaitIndexCondition { !visible }
             assertFalse("Back" in snapshotNow())
             assertTrue(vm.scrolled.isEmpty())
-            assertEquals(HistoryIndexReadState.Closed, vm.timestampHandles.single().state.value)
         }
     }
 
-    for ((name, state, expected) in listOf(
-        Triple("loading", HistoryIndexReadState.Loading, "┌● …"),
-        Triple("failed", HistoryIndexReadState.Failed, "┌● [error]"),
-        Triple("ready", HistoryIndexReadState.Ready(entry(2, "row summary")), "┌● row summary"),
-        Triple("closed", HistoryIndexReadState.Closed, ""),
-    )) {
-        test("row $name branch renders safely") {
-            runMosaicTest {
-                val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column(Modifier.width(28)) { HistoryIndexRowContent(state, "┌●") }
+    test("row ready branch renders safely") {
+        runMosaicTest {
+            val snapshot = setContentAndSnapshot {
+                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    Column(Modifier.width(28)) { HistoryIndexRowContent(entry(2, "row summary"), "┌●") }
                 }
-                }
-                if (expected.isEmpty()) assertTrue(snapshot.isBlank(), snapshot)
-                else assertTrue(expected in snapshot, snapshot)
             }
+            assertTrue("┌● row summary" in snapshot, snapshot)
         }
     }
+
     test("row terminal-width ellipsis never wraps into another history row") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Column(Modifier.width(12)) {
-                    HistoryIndexRowContent(HistoryIndexReadState.Ready(entry(2, "a long summary with 界 characters")), "●")
+                    HistoryIndexRowContent(entry(2, "a long summary with 界 characters"), "●")
                 }
             }
             }
@@ -176,10 +162,8 @@ val historyIndexRendererTest by testSuite {
             setContent {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { Text("unmounted") }
             }
-            awaitIndexCondition { vm.rowHandles.all { it.state.value == HistoryIndexReadState.Closed } }
         }
-        assertTrue(vm.rowHandles.all { it.state.value == HistoryIndexReadState.Closed })
-        assertTrue(vm.isActive) // Unmount released borrowed handles, not the shared child.
+        assertTrue(vm.isActive)
     }
     test("single row preserves its literal summary and single-point graph") {
         val vm = RenderIndex(listOf(entry(7, "┌● user text")))
@@ -190,7 +174,7 @@ val historyIndexRendererTest by testSuite {
             assertEquals(listOf("● ┌● user text"), snapshot.lines().map(String::trimEnd).filter(String::isNotEmpty))
         }
     }
-    test("two sidebars acquire independent handles and unmounting one leaves the other alive") {
+    test("two sidebars share window and unmounting one leaves the other alive") {
         val vm = RenderIndex(listOf(entry(2, "Shared")))
         var leftVisible by mutableStateOf(true)
         runMosaicTest {
@@ -202,13 +186,9 @@ val historyIndexRendererTest by testSuite {
                 }
             }
             }
-            assertEquals(2, vm.rowHandles.size)
-            val (left, right) = vm.rowHandles
-            assertNotSame(left, right)
             leftVisible = false
-            awaitIndexCondition { left.state.value == HistoryIndexReadState.Closed }
-            assertEquals(HistoryIndexReadState.Closed, left.state.value)
-            assertTrue(right.state.value is HistoryIndexReadState.Ready)
+            val snapshot = snapshotNow()
+            assertTrue("Shared" in snapshot, snapshot)
             assertTrue(vm.isActive)
         }
     }
@@ -268,7 +248,7 @@ val historyIndexRendererTest by testSuite {
         }
     }
     for (kind in HistoryIndexEntryKind.entries) {
-        test("hover Ready classification $kind renders full title and detail") {
+        test("hover classification $kind renders full title and detail") {
             runMosaicTest {
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
@@ -276,7 +256,7 @@ val historyIndexRendererTest by testSuite {
                         val anchor = rememberTuiPopupAnchor()
                         Text("entry", Modifier.tuiPopupAnchor(anchor))
                         HistoryIndexHoverContent(anchor, HistoryIndexSide.Left, null,
-                            HistoryIndexReadState.Ready(HistoryIndexEntryDetail(kind, "Complete detail")),
+                            HistoryIndexEntryDetail(kind, "Complete detail"),
                             60, 10, {})
                     }
                 }
@@ -284,24 +264,6 @@ val historyIndexRendererTest by testSuite {
                 val snapshot = awaitContaining("Complete detail")
                 assertTrue(expectedIndexKindName(kind) in snapshot, snapshot)
                 assertFalse("Index:" in snapshot, snapshot)
-            }
-        }
-    }
-    for (state in listOf(HistoryIndexReadState.Loading, HistoryIndexReadState.Failed, HistoryIndexReadState.Closed)) {
-        test("hover $state renders no stale detail or raw exception") {
-            runMosaicTest {
-                setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(70).height(8)) {
-                        val anchor = rememberTuiPopupAnchor()
-                        Text("entry", Modifier.tuiPopupAnchor(anchor))
-                        HistoryIndexHoverContent(anchor, HistoryIndexSide.Left, null, state, 60, 7, {})
-                    }
-                }
-                }
-                val snapshot = if (state == HistoryIndexReadState.Failed) awaitContaining("Unable to read") else snapshotNow()
-                assertEquals(state == HistoryIndexReadState.Failed, "Error" in snapshot)
-                assertFalse("raw-secret" in snapshot, snapshot)
             }
         }
     }
@@ -327,8 +289,8 @@ val historyIndexRendererTest by testSuite {
                     val anchor = rememberTuiPopupAnchor()
                     Text("entry", Modifier.tuiPopupAnchor(anchor))
                     HistoryIndexHoverContent(anchor, HistoryIndexSide.Left, null,
-                        HistoryIndexReadState.Ready(HistoryIndexEntryDetail(
-                            HistoryIndexEntryKind.RequestUserInput, "fallback", event)),
+                        HistoryIndexEntryDetail(
+                            HistoryIndexEntryKind.RequestUserInput, "fallback", event),
                         60, 11, {})
                 }
             }
@@ -342,7 +304,7 @@ val historyIndexRendererTest by testSuite {
             assertFalse("fallback" in snapshot, snapshot)
         }
     }
-    test("async hover delays acquisition and releases exact detail when host removes request") {
+    test("async hover delays display and hides when host removes request") {
         val vm = RenderIndex(listOf(entry(7, "Content")))
         var visible by mutableStateOf(true)
         runMosaicTest {
@@ -356,18 +318,14 @@ val historyIndexRendererTest by testSuite {
                 }
             }
             }
-            assertEquals(0, vm.detailHandles.size)
             awaitContaining("Content")
-            assertEquals(1, vm.detailHandles.size)
             visible = false
             val dismissed = snapshotNow()
-            assertEquals(HistoryIndexReadState.Closed, vm.detailHandles.single().state.value)
             assertFalse("User message" in dismissed, dismissed)
         }
     }
-    test("context menu timestamp Loading Ready null Ready value and Failed branches") {
+    test("context menu timestamp null and value branches") {
         val vm = RenderIndex(listOf(entry(7, "Content")))
-        vm.timestampState = HistoryIndexReadState.Loading
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
@@ -386,23 +344,13 @@ val historyIndexRendererTest by testSuite {
             assertFalse("Timestamp:" in initial, initial)
             assertFalse("Revert" in initial, initial)
             assertFalse("Fork" in initial, initial)
-            val handle = vm.timestampHandles.single()
-            handle.state.value = HistoryIndexReadState.Ready(null)
-            assertFalse("Timestamp:" in snapshotNow())
-            handle.state.value = HistoryIndexReadState.Ready(Instant.parse("2026-10-03T01:02:03Z"))
+            vm.updateEntry(entry(7, "Content").copy(messageTimestamp = Instant.parse("2026-10-03T01:02:03Z")))
             assertTrue("UTC" in awaitContaining("Timestamp:"))
-            handle.state.value = HistoryIndexReadState.Failed
-            assertFalse("Timestamp:" in snapshotNow())
             sendKeyEvent(KeyboardEvent(codepoint = 13))
             snapshotNow()
             assertEquals(listOf(7), vm.scrolled)
             assertTrue(vm.isActive)
-            setContent {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { Text("unmounted") }
-            }
-            awaitIndexCondition { handle.state.value == HistoryIndexReadState.Closed }
         }
-        assertEquals(HistoryIndexReadState.Closed, vm.timestampHandles.single().state.value)
     }
     test("same-index local revision invalidates an old menu without retargeting Check out") {
         val vm = RenderIndex(listOf(entry(7, "Content")))
@@ -471,37 +419,12 @@ val historyIndexRendererTest by testSuite {
 
 private fun entry(index: Int, text: String) = HistoryIndexEntry(index, HistoryIndexEntryKind.UserMessage, text)
 
-private class RenderHandle<T>(
-    override val generation: Long,
-    override val index: Int,
-    initial: HistoryIndexReadState<T>,
-) : HistoryIndexReadHandle<T> {
-    override val state = MutableStateFlow(initial)
-    override fun release() { state.value = HistoryIndexReadState.Closed }
-}
-
 private class RenderIndex(entries: List<HistoryIndexEntry>) : HistoryIndexViewModel {
     private val entries = entries.associateByTo(linkedMapOf()) { it.index }
-    override val window = MutableStateFlow(HistoryIndexWindow(11, this.entries.keys.toList()))
+    override val window = MutableStateFlow(HistoryIndexWindow(11, this.entries.values.toList()))
     override var isActive = true
-    val rowHandles = mutableListOf<RenderHandle<HistoryIndexEntry>>()
-    val detailHandles = mutableListOf<RenderHandle<HistoryIndexEntryDetail>>()
-    val timestampHandles = mutableListOf<RenderHandle<Instant?>>()
-    var timestampState: HistoryIndexReadState<Instant?> = HistoryIndexReadState.Ready(null)
-    var detail: HistoryIndexEntryDetail? = null
     val scrolled = mutableListOf<Int>()
     override fun contains(generation: Long, index: Int) = isActive && generation == window.value.generation && index in entries
-    override suspend fun load(generation: Long, index: Int) = entries.getValue(index)
-    override suspend fun loadDetail(generation: Long, index: Int) =
-        detail ?: entries.getValue(index).let { HistoryIndexEntryDetail(it.kind, it.summary) }
-    override suspend fun readMessageTimestamp(generation: Long, index: Int): Instant? = null
-    override fun acquireRow(generation: Long, index: Int) =
-        RenderHandle(generation, index, HistoryIndexReadState.Ready(entries.getValue(index))).also { rowHandles += it }
-    override fun acquireDetail(generation: Long, index: Int) =
-        RenderHandle(generation, index, HistoryIndexReadState.Ready(
-            detail ?: entries.getValue(index).let { HistoryIndexEntryDetail(it.kind, it.summary) })).also { detailHandles += it }
-    override fun acquireTimestamp(generation: Long, index: Int) =
-        RenderHandle(generation, index, timestampState).also { timestampHandles += it }
     override fun checkOut(generation: Long, index: Int): Boolean {
         if (!contains(generation, index)) return false
         scrolled += index
@@ -509,14 +432,16 @@ private class RenderIndex(entries: List<HistoryIndexEntry>) : HistoryIndexViewMo
     }
     override fun close() {
         isActive = false
-        (rowHandles + detailHandles + timestampHandles).forEach { it.release() }
     }
     fun append(entry: HistoryIndexEntry) {
         entries[entry.index] = entry
-        window.value = window.value.copy(indexes = window.value.indexes + entry.index)
+        window.value = window.value.copy(entries = entries.values.toList())
+    }
+    fun updateEntry(entry: HistoryIndexEntry) {
+        entries[entry.index] = entry
+        window.value = window.value.copy(entries = entries.values.toList())
     }
     fun replaceSameIndex() {
-        (rowHandles + detailHandles + timestampHandles).forEach { it.release() }
         window.value = window.value.copy(revision = window.value.revision + 1)
     }
 }

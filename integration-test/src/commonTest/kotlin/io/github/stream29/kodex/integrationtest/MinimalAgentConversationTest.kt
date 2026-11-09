@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.integrationtest
 
 import io.github.stream29.kodex.utils.shellclient.default
@@ -22,7 +24,6 @@ import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.agentstorage.cleanmodels.CleanOpenAiEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
@@ -32,11 +33,10 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessag
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventExact
-import io.github.stream29.kodex.agentstorage.contract.latestIndexOf
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.ContentItem
@@ -333,8 +333,7 @@ private suspend fun KodexAgentStateContract.appendUserMessage(text: String): Int
 
 private suspend fun InMemoryKodexAgentStorage.lastAssistantMessage(): String? {
     var message: String? = null
-    for (index in indexesIn(0..latestIndex(), AgentCommitType.IndexTypes)) {
-        val event = getIndexEntryExact(index)
+    for ((_, event) in getCommitsIn(0..latestIndex(), AgentCommitType.IndexTypes)) {
         if (event is StableAssistantMessage) {
             message = event.text
         }
@@ -487,12 +486,12 @@ val minimalAgentConversationTest by testSuite {
                 ),
                 requests[1].input.takeLast(2),
             )
-            assertIs<StableUserMessage>(storage.getIndexEntryExact(1))
-            assertIs<StableAssistantMessage>(storage.getIndexEntryExact(2))
-            assertIs<StableAssistantMessage>(storage.getIndexEntryExact(3))
+            assertIs<StableUserMessage>(storage.getCommitExact(1, AgentCommitType.IndexTypes)?.commit)
+            assertIs<StableAssistantMessage>(storage.getCommitExact(2, AgentCommitType.IndexTypes)?.commit)
+            assertIs<StableAssistantMessage>(storage.getCommitExact(3, AgentCommitType.IndexTypes)?.commit)
             assertEquals(OpenAiModelId("test-model"), checkNotNull(storage.getSettingsAt(2)).model)
-            assertTrue(checkNotNull(storage.getTimestampExact(3)) > Instant.fromEpochSeconds(0))
-            assertEquals(0, storage.latestIndexOf(AgentCommitType.TokenCountTypes))
+            assertTrue(checkNotNull(storage.getCommitExact(3)?.createdAt) > Instant.fromEpochSeconds(0))
+            assertEquals(0, storage.getCommitAtOrBefore(storage.latestIndex(), AgentCommitType.TokenCountTypes)?.index)
         }
     }
 }
@@ -973,9 +972,8 @@ val openAiForcedCompactProbeTest by testSuite {
                 request.request.input.last(),
                 "AgentState should project the remote-compaction trigger into the wire request.",
             )
-            assertIs<CleanCompactionPoint>(storage.getIndexEntryExact(compactIndex))
             val contextCompaction =
-                assertIs<StableContextCompaction>(storage.getWorkEventExact(compactIndex))
+                assertIs<StableContextCompaction>(storage.getCommitExact(compactIndex, AgentCommitType.IndexTypes)?.commit)
             assertTrue(contextCompaction.encryptedContent.isNotEmpty())
             assertEquals(compactIndex, storage.latestIndex())
         }

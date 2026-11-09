@@ -1,9 +1,7 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
@@ -38,12 +36,6 @@ private class CountingStorage(
     private val delegate: KodexAgentStorage,
 ) : KodexAgentStorage by delegate {
     var totalFetchedCommits: Int = 0
-
-    override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> =
-        delegate.getCommitsExact(index, types).also { totalFetchedCommits += it.size }
-
-    override suspend fun getCommitsIn(range: IntRange, types: Set<AgentCommitType>): List<IndexedAgentCommit> =
-        delegate.getCommitsIn(range, types).also { totalFetchedCommits += it.size }
 
     override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit> =
         delegate.getFirstCommitsIn(range, types, limit).also { totalFetchedCommits += it.size }
@@ -90,12 +82,11 @@ val agentStorageContractExtTest by testSuite {
     test("active message window retains prefix and preserves post-point events") {
         val mutable = storage()
         mutable.commit(user("retained")) // 1
-        mutable.commit(CleanCompactionPoint) // 2
-        mutable.commit(StableContextCompaction(encryptedContent = "encrypted")) // 3
-        mutable.commit(user("current")) // 4
-        mutable.commit(work("current-work")) // 5
+        mutable.commit(StableContextCompaction(encryptedContent = "encrypted")) // 2
+        mutable.commit(user("current")) // 3
+        mutable.commit(work("current-work")) // 4
 
-        val window = mutable.activeMessageWindowAt(5)
+        val window = mutable.activeMessageWindowAt(4)
 
         assertEquals(
             listOf(

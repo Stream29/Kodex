@@ -1,18 +1,19 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.rpc.client
 
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountDiagnostics
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
-import io.github.stream29.kodex.agentstorage.contract.ceilToIndex
-import io.github.stream29.kodex.agentstorage.contract.floorToIndex
-import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
-import io.github.stream29.kodex.agentstorage.contract.getTokenCountExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrAfter
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
+import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.openai.TokenUsage
 import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
@@ -44,7 +45,7 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
                     val last = view.getLastCommitsIn(0..49_999, AgentCommitType.TokenCountTypes, limit = 1).single()
                     assertEquals(10_000, last.index)
                     assertEquals(1, backend.lastQueries)
-                    assertEquals(0, backend.indexQueries)
+                    assertEquals(0, backend.countQueries)
                     assertEquals(0, backend.valueQueries)
                 } finally {
                     ownerJob.cancelAndJoin()
@@ -62,34 +63,34 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
                 val rpc = RestoringRpcClient(client).withService<AgentStorageRpc>()
                 val nonce = rpc.getCacheNonce(7)
                 assertEquals(5, rpc.getLatestIndex(7))
-                assertEquals(emptyList(), rpc.getCommitsExact(7, nonce, 4, AgentCommitType.TokenCountTypes))
-                assertEquals(listOf(0, 2, 5), rpc.indexesIn(7, nonce, 0, 5, AgentCommitType.TokenCountTypes))
+                assertEquals(emptyList(), rpc.getFirstCommitsIn(7, nonce, 4, 4, AgentCommitType.TokenCountTypes))
+                assertEquals(3, rpc.countCommitsIn(7, nonce, 0, 5, AgentCommitType.TokenCountTypes))
                 assertEquals(
                     backend.entries.map { IndexedAgentCommit(it.key, it.value) },
-                    rpc.getCommitsIn(7, nonce, 0, 5, AgentCommitType.TokenCountTypes),
+                    rpc.getFirstCommitsIn(7, nonce, 0, 5, AgentCommitType.TokenCountTypes),
                 )
 
                 val ownerJob = Job(coroutineContext[Job])
                 try {
                     val view = CoroutineScope(coroutineContext + ownerJob).rpcCachedAgentStorage(7, rpc)
-                    assertEquals(null, view.getTokenCountExact(4))
+                    assertEquals(null, view.getCommitExact(4, AgentCommitType.LlmRequestMetaTypes)?.commit)
                     val before = backend.exactReads
                     for ((index, snapshot) in backend.entries) {
-                        assertEquals(snapshot, view.getTokenCountExact(index))
-                        assertEquals(snapshot, view.getTokenCountExact(index))
+                        assertEquals(snapshot, view.getCommitExact(index, AgentCommitType.LlmRequestMetaTypes)?.commit)
+                        assertEquals(snapshot, view.getCommitExact(index, AgentCommitType.LlmRequestMetaTypes)?.commit)
                     }
                     assertEquals(before + backend.entries.size, backend.exactReads)
-                    assertEquals(backend.entries.getValue(2), view.getTokenCountAt(4))
-                    assertEquals(2, view.floorToIndex(4, AgentCommitType.TokenCountTypes))
-                    assertEquals(5, view.ceilToIndex(4, AgentCommitType.TokenCountTypes))
+                    assertEquals(backend.entries.getValue(2), view.getLlmRequestMetaAtOrNull(4))
+                    assertEquals(2, view.getCommitAtOrBefore(4, AgentCommitType.TokenCountTypes)?.index)
+                    assertEquals(5, view.getCommitAtOrAfter(4, AgentCommitType.TokenCountTypes)?.index)
                     assertEquals(nonce, view.cacheNonce.value)
                     assertEquals(5, view.latestIndex())
                 } finally {
                     ownerJob.cancelAndJoin()
                 }
                 assertEquals(
-                    listOf(backend.entries.getValue(5)),
-                    rpc.getCommitsExact(7, nonce, 5, AgentCommitType.TokenCountTypes),
+                    listOf(IndexedAgentCommit(5, backend.entries.getValue(5))),
+                    rpc.getFirstCommitsIn(7, nonce, 5, 5, AgentCommitType.TokenCountTypes),
                 )
             }
         }
@@ -109,7 +110,7 @@ private class TokenCountTestService(
 ) : AgentStorageRpc {
     var exactReads = 0
     var lastQueries = 0
-    var indexQueries = 0
+    var countQueries = 0
     var valueQueries = 0
     var returnedValues = 0
     private val nonce = MutableStateFlow(17L)
@@ -120,41 +121,15 @@ private class TokenCountTestService(
     override suspend fun getLatestIndex(sessionIndex: Int): Int = latest.value
     override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int> = latest
 
-    override suspend fun indexesIn(
+    override suspend fun countCommitsIn(
         sessionIndex: Int,
         cacheNonce: Long,
         fromInclusive: Int,
         toInclusive: Int,
         types: Set<AgentCommitType>,
-    ): List<Int> {
-        indexQueries++
-        return entries.filter { (index, commit) -> index in fromInclusive..toInclusive && commit.commitType in types }
-            .keys
-            .toList()
-    }
-
-    override suspend fun getCommitsExact(
-        sessionIndex: Int,
-        cacheNonce: Long,
-        index: Int,
-        types: Set<AgentCommitType>,
-    ): List<AgentCommit> {
-        exactReads++
-        return listOfNotNull(entries[index]).filter { it.commitType in types }
-    }
-
-    override suspend fun getCommitsIn(
-        sessionIndex: Int,
-        cacheNonce: Long,
-        fromInclusive: Int,
-        toInclusive: Int,
-        types: Set<AgentCommitType>,
-    ): List<IndexedAgentCommit> {
-        valueQueries++
-        return entries
-            .filter { (index, commit) -> index in fromInclusive..toInclusive && commit.commitType in types }
-            .map { IndexedAgentCommit(it.key, it.value) }
-            .also { returnedValues += it.size }
+    ): Int {
+        countQueries++
+        return entries.count { (index, commit) -> index in fromInclusive..toInclusive && commit.commitType in types }
     }
 
     override suspend fun getFirstCommitsIn(
@@ -164,11 +139,18 @@ private class TokenCountTestService(
         toInclusive: Int,
         types: Set<AgentCommitType>,
         limit: Int,
-    ): List<IndexedAgentCommit> =
-        entries
+    ): List<IndexedAgentCommit> {
+        if (fromInclusive == toInclusive) {
+            exactReads++
+        } else if (limit == Int.MAX_VALUE) {
+            valueQueries++
+        }
+        return entries
             .filter { (index, commit) -> index in fromInclusive..toInclusive && commit.commitType in types }
             .map { IndexedAgentCommit(it.key, it.value) }
             .take(limit)
+            .also { if (fromInclusive != toInclusive && limit == Int.MAX_VALUE) returnedValues += it.size }
+    }
 
     override suspend fun getLastCommitsIn(
         sessionIndex: Int,

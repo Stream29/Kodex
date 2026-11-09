@@ -6,7 +6,7 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.app.accountusage.AccountUsageViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
@@ -253,7 +253,7 @@ public expect class RpcSessionBinding {
     public val shellSessions: StateFlow<Map<Int, ShellSessionState>>
     public val settings: SuspendMutableStateFlow<KodexAgentSettings>
     public val pendingSteer: SuspendMutableStateFlow<List<StableIndexEvent.Steerable>>
-    public val tokenCount: StateFlow<TokenCountSnapshot?>
+    public val tokenCount: StateFlow<LlmRequestMeta?>
     public fun ensureActive(): Unit
     public suspend fun appendUserMessage(content: List<ContentItem>): Int
     public suspend fun resume(): Unit

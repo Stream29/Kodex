@@ -5,15 +5,11 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.codexRequestWindowId
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.contract.getSettingsExact
-import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventExact
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
@@ -111,7 +107,7 @@ val compactionSettingsConsistencyTest by testSuite {
                     release.complete(Unit)
                     val checkpoint = running.await()
 
-                    assertEquals(acceptedIndex + 2, checkpoint)
+                    assertEquals(acceptedIndex + 1, checkpoint)
                     assertEquals(storage.latestIndex(), agent.latestIndex.value)
                     val committed = storage.getSettingsAt(checkpoint)
                     assertNotEquals(initial.windowId, committed.windowId)
@@ -120,13 +116,10 @@ val compactionSettingsConsistencyTest by testSuite {
                         previousWindowId = latest.windowId,
                         windowId = committed.windowId,
                     ), committed)
-                    assertEquals(listOf(snapshotIndex + 1, snapshotIndex + 2, acceptedIndex, checkpoint - 1),
-                        storage.indexesIn((snapshotIndex + 1)..checkpoint, AgentCommitType.SettingsTypes))
                     assertEquals(listOf(snapshotIndex + 1, snapshotIndex + 2, acceptedIndex, checkpoint),
-                        storage.indexesIn((snapshotIndex + 1)..checkpoint, AgentCommitType.TimestampTypes))
-                    assertIs<CleanCompactionPoint>(storage.getIndexEntryExact(checkpoint - 1))
-                    assertIs<StableContextCompaction>(storage.getWorkEventExact(checkpoint))
-                    assertEquals(0L, storage.getTokenCountAt(checkpoint).totalTokens)
+                        storage.getCommitsIn((snapshotIndex + 1)..checkpoint, AgentCommitType.SettingsTypes).map { it.index })
+                    assertIs<StableContextCompaction>(storage.getIndexEntryExact(checkpoint))
+                    assertEquals(0L, storage.getLlmRequestMetaAt(checkpoint).totalTokens)
                     assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
                     val request = requests.single()
                     assertEquals(initial.model, request.model)
@@ -146,7 +139,7 @@ val compactionSettingsConsistencyTest by testSuite {
                     assertTrue(agent.compareAndSetSettings(committed, after))
                     assertEquals(checkpoint + 1, agent.latestIndex.value)
                     assertEquals(latest, storage.getSettingsExact(acceptedIndex))
-                    assertEquals(committed, storage.getSettingsExact(checkpoint - 1))
+                    assertEquals(committed, storage.getSettingsExact(checkpoint))
                 } finally {
                     release.complete(Unit)
                     running.cancelAndJoin()
@@ -189,7 +182,7 @@ val compactionSettingsConsistencyTest by testSuite {
                     assertEquals(acceptedIndex, storage.latestIndex())
                     assertEquals(acceptedIndex, agent.latestIndex.value)
                     assertEquals(latest, storage.getSettingsAt(acceptedIndex))
-                    assertEquals(emptyList(), storage.indexesIn(0..Int.MAX_VALUE, AgentCommitType.WorkTypes))
+                    assertEquals(0, storage.countCommitsIn(0..Int.MAX_VALUE, AgentCommitType.WorkTypes))
                     assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
                     assertTrue(agent.compareAndSetSettings(latest, latest.copy(threadName = "next")))
                 } finally {

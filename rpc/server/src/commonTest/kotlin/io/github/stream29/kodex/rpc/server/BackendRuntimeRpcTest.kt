@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestCompartment
@@ -64,9 +66,9 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 val nonce = rpc.getCacheNonce(index)
                 assertEquals(
                     emptyList(),
-                    (rpc.getCommitsExact(index, nonce, runtime.latestIndex.value, AgentCommitType.UnstableTypes).singleOrNull() as? UnstableSnapshot)?.events,
+                    (rpc.getFirstCommitsIn(index, nonce, runtime.latestIndex.value, runtime.latestIndex.value, AgentCommitType.UnstableTypes).singleOrNull()?.commit as? UnstableSnapshot)?.events,
                 )
-                assertEquals(emptyList(), rpc.getCommitsExact(index, nonce, 999, AgentCommitType.UnstableTypes))
+                assertEquals(emptyList(), rpc.getFirstCommitsIn(index, nonce, 999, 999, AgentCommitType.UnstableTypes))
             }
         }
     }
@@ -97,11 +99,11 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
             assertEquals(0, rpc.getLatestIndex(index))
             assertEquals(emptyList(), rpc.getPendingSteer(index))
             assertNotEquals(nonce, timelines.getCacheNonce(index))
-            assertFailsWith<CacheNonceMismatch> { timelines.getCommitsExact(index, nonce, 1, AgentCommitType.IndexTypes) }
+            assertFailsWith<CacheNonceMismatch> { timelines.getFirstCommitsIn(index, nonce, 1, 1, AgentCommitType.IndexTypes) }
             rpc.appendUserMessage(index, listOf(ContentItem.InputText("replacement")))
             assertEquals(
                 "replacement",
-                (timelines.getCommitsExact(index, timelines.getCacheNonce(index), 1, AgentCommitType.IndexTypes).single() as StableUserMessage)
+                (timelines.getFirstCommitsIn(index, timelines.getCacheNonce(index), 1, 1, AgentCommitType.IndexTypes).single().commit as StableUserMessage)
                     .content.filterIsInstance<ContentItem.InputText>().single().text,
             )
         }
@@ -246,10 +248,10 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                     ).single().commit as KodexAgentSettings
                     assertEquals(latest.threadName, published.threadName)
                     assertEquals(latest.model, published.model)
-                    // The returned index is the compaction output; settings
-                    // belong to its immediately preceding compaction point.
+                    // The returned index is the compaction checkpoint; settings
+                    // are committed atomically at the same checkpoint index.
                     assertEquals(
-                        checkpoint - 1,
+                        checkpoint,
                         settings.getLastCommitsIn(
                             index, settings.getCacheNonce(index), 0, checkpoint, AgentCommitType.SettingsTypes, 1,
                         ).single().index,
@@ -397,18 +399,18 @@ private suspend fun <T : Any> CoroutineScope.checkTimeline(
     val expectedLatest = expectedValues.lastOrNull()?.first ?: -1
     assertEquals(storage.cacheNonce.value, nonce)
     assertEquals(storage.latestIndex(), rpc.getLatestIndex(index))
-    assertEquals(expectedValues.map { it.first }, rpc.indexesIn(index, nonce, 0, 100, types))
-    assertEquals(expectedValues, rpc.getCommitsIn(index, nonce, 0, 100, types).map { it.index to extract(it.commit) })
-    assertEquals(emptyList(), rpc.getCommitsIn(index, nonce, 4, 3, types))
+    assertEquals(expectedValues.size, rpc.countCommitsIn(index, nonce, 0, 100, types))
+    assertEquals(expectedValues, rpc.getFirstCommitsIn(index, nonce, 0, 100, types).map { it.index to extract(it.commit) })
+    assertEquals(emptyList(), rpc.getFirstCommitsIn(index, nonce, 4, 3, types))
     assertEquals(expectedLatest.takeIf { it >= 0 }, rpc.getLastCommitsIn(index, nonce, 0, 100, types, 1).lastOrNull()?.index)
     assertEquals(expectedValues.firstOrNull()?.first, rpc.getFirstCommitsIn(index, nonce, 0, 100, types, 1).firstOrNull()?.index)
-    assertEquals(emptyList(), rpc.getCommitsExact(index, nonce, 100, types))
-    assertFailsWith<CacheNonceMismatch> { rpc.getCommitsExact(index, nonce xor 1, 0, types) }
+    assertEquals(emptyList(), rpc.getFirstCommitsIn(index, nonce, 100, 100, types))
+    assertFailsWith<CacheNonceMismatch> { rpc.getFirstCommitsIn(index, nonce xor 1, 0, 0, types) }
     val job = Job(coroutineContext[Job])
     try {
         val cached = CoroutineScope(coroutineContext + job).rpcCachedAgentStorage(index, storage.uri, rpc)
         for ((position, value) in expectedValues) {
-            assertEquals(value, extract(cached.getCommitsExact(position, types).single()))
+            assertEquals(value, extract(checkNotNull(cached.getCommitExact(position, types)).commit))
             assertEquals(value, extract(cached.getLastCommitsIn(0..position, types, 1).single().commit))
         }
     } finally { job.cancelAndJoin() }

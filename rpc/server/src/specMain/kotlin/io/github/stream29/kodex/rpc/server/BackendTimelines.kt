@@ -2,7 +2,6 @@
 
 package io.github.stream29.kodex.rpc.server
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -14,26 +13,13 @@ public expect class BackendAgentStorageRpc(host: BackendSessionHost) : AgentStor
     override fun getCacheNonceFlow(sessionIndex: Int): Flow<Long>
     override suspend fun getLatestIndex(sessionIndex: Int): Int
     override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int>
-    override suspend fun indexesIn(
+    override suspend fun countCommitsIn(
         sessionIndex: Int,
         cacheNonce: Long,
         fromInclusive: Int,
         toInclusive: Int,
         types: Set<AgentCommitType>,
-    ): List<Int>
-    override suspend fun getCommitsExact(
-        sessionIndex: Int,
-        cacheNonce: Long,
-        index: Int,
-        types: Set<AgentCommitType>,
-    ): List<AgentCommit>
-    override suspend fun getCommitsIn(
-        sessionIndex: Int,
-        cacheNonce: Long,
-        fromInclusive: Int,
-        toInclusive: Int,
-        types: Set<AgentCommitType>,
-    ): List<IndexedAgentCommit>
+    ): Int
     override suspend fun getFirstCommitsIn(
         sessionIndex: Int,
         cacheNonce: Long,

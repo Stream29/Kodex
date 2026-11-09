@@ -28,6 +28,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
@@ -39,6 +40,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 private const val token = "loopback-synthetic-bearer-secret"
 private const val bodySecret = "loopback-synthetic-provider-echo"
@@ -72,7 +74,7 @@ val backendOpenAiLoopbackTest by testSuite(compartment = { TestCompartment.RealT
                         try {
                             rpc.appendUserMessage(index, listOf(ContentItem.InputText(prompt)))
                             val failure = assertFailsWithReported { rpc.resume(index) }
-                            yield()
+                            withTimeout(5.seconds) { while (events.isEmpty()) delay(10) }
                             assertEquals(1, ordinary.value)
                             assertEquals(if (automatic) 1 else 0, compact.value)
                             val stop = assertIs<Notification.Stop.UnhandledError>(events.single())
@@ -107,7 +109,7 @@ val backendOpenAiLoopbackTest by testSuite(compartment = { TestCompartment.RealT
                     try {
                         rpc.appendUserMessage(index, listOf(ContentItem.InputText(prompt)))
                         val failure = assertFailsWithReported { rpc.resume(index) }
-                        yield()
+                        withTimeout(5.seconds) { while (events.isEmpty()) delay(10) }
                         // 20 Agent retries plus the initial attempt, each with two HTTP retries.
                         assertEquals(63, ordinary.value)
                         assertEquals(0, compact.value)

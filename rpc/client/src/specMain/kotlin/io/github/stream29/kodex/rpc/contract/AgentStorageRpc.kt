@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.rpc.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -24,31 +23,14 @@ public interface AgentStorageRpc {
     /** Includes the current greatest stored index when collection begins, followed by changes. */
     public fun getLatestIndexFlow(sessionIndex: Int): Flow<Int>
 
-    /** Reads all distinct commit indexes in [fromInclusive..toInclusive] whose type is in [types] in ascending order. */
-    public suspend fun indexesIn(
+    /** Counts all commits in [fromInclusive..toInclusive] whose type is in [types]. */
+    public suspend fun countCommitsIn(
         sessionIndex: Int,
         cacheNonce: Long,
         fromInclusive: Int,
         toInclusive: Int,
         types: Set<AgentCommitType> = AgentCommitType.All,
-    ): List<Int>
-
-    /** Reads all commits stored at exact [index] whose type is in [types]. */
-    public suspend fun getCommitsExact(
-        sessionIndex: Int,
-        cacheNonce: Long,
-        index: Int,
-        types: Set<AgentCommitType> = AgentCommitType.All,
-    ): List<AgentCommit>
-
-    /** Reads all commits in [fromInclusive..toInclusive] whose type is in [types] in ascending order. */
-    public suspend fun getCommitsIn(
-        sessionIndex: Int,
-        cacheNonce: Long,
-        fromInclusive: Int,
-        toInclusive: Int,
-        types: Set<AgentCommitType> = AgentCommitType.All,
-    ): List<IndexedAgentCommit>
+    ): Int
 
     /** Reads up to [limit] earliest commits in [fromInclusive..toInclusive] whose type is in [types]. */
     public suspend fun getFirstCommitsIn(
@@ -57,7 +39,7 @@ public interface AgentStorageRpc {
         fromInclusive: Int,
         toInclusive: Int,
         types: Set<AgentCommitType> = AgentCommitType.All,
-        limit: Int,
+        limit: Int = Int.MAX_VALUE,
     ): List<IndexedAgentCommit>
 
     /** Reads up to [limit] latest commits in [fromInclusive..toInclusive] whose type is in [types] in ascending order. */
@@ -67,7 +49,7 @@ public interface AgentStorageRpc {
         fromInclusive: Int,
         toInclusive: Int,
         types: Set<AgentCommitType> = AgentCommitType.All,
-        limit: Int,
+        limit: Int = Int.MAX_VALUE,
     ): List<IndexedAgentCommit>
 
     /**

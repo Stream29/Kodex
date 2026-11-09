@@ -6,17 +6,16 @@ import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
-import io.github.stream29.kodex.agentstorage.contract.getUnstableAt
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
+import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
@@ -152,7 +151,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             assertEquals(-1, session.storage.latestIndex())
             session.runtime.modify { storage -> storage.initialize(settings("root")) }
             assertEquals(0, session.storage.latestIndex())
-            assertEquals(0L, session.storage.getTokenCountAt(0).totalTokens)
+            assertEquals(0L, session.storage.getLlmRequestMetaAtOrNull(0)!!.totalTokens)
         }
 
         test("creates zero-based root entries") {
@@ -161,8 +160,8 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             val second = repository.createInitialized(settings("Named"))
             val firstLastActivityAt = Instant.parse("2026-07-31T10:00:00Z")
             val secondLastActivityAt = Instant.parse("2026-07-31T10:05:00Z")
-            repository.open(first).storage.commit(CommitTimestamp(firstLastActivityAt))
-            repository.open(second).storage.commit(CommitTimestamp(secondLastActivityAt))
+            repository.open(first).storage.commit(listOf(LlmRequestMeta.Initialization(0L)), firstLastActivityAt)
+            repository.open(second).storage.commit(listOf(LlmRequestMeta.Initialization(0L)), secondLastActivityAt)
 
             assertEquals(0, first)
             assertEquals(1, second)
@@ -256,8 +255,8 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
                 target.storage.getSettingsAt(latest).copy(threadName = "[fork] Source"),
             )
 
-            assertEquals(listOf(1), target.storage.indexesIn(0..latest, AgentCommitType.IndexTypes))
-            assertEquals(userMessage(), target.storage.getIndexEntryAt(1))
+            assertEquals(listOf(1), target.storage.getFirstCommitsIn(0..latest, AgentCommitType.IndexTypes).map { it.index })
+            assertEquals(userMessage(), target.storage.getCommitAtOrBefore(1, AgentCommitType.IndexTypes)?.commit)
             assertEquals("[fork] Source", target.storage.getSettingsAt(2).threadName)
         }
 
@@ -370,10 +369,10 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             pending.await()
             turn.cancelJobAndJoin()
 
-            val failure = assertIs<StableTextToolEvent>(root.storage.getWorkEventAt(3))
+            val failure = assertIs<StableTextToolEvent>(root.storage.getCommitAtOrBefore(3, AgentCommitType.WorkTypes)?.commit)
             assertEquals("user interrupt", failure.result)
             assertEquals(false, failure.success)
-            assertEquals(emptyList(), root.storage.getUnstableAt(3))
+            assertEquals(emptyList(), root.storage.getUnstableAtOrNull(3))
             assertEquals(KodexAgentStateValue.ToolCompleted, root.runtime.state.value)
             assertNull(root.runtime.runningTurn.value)
         }

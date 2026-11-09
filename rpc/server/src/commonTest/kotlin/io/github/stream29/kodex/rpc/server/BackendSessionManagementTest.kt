@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestCompartment
@@ -10,10 +12,10 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
-import io.github.stream29.kodex.agentstorage.contract.latestIndexOf
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
@@ -77,7 +79,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             assertNotEquals(a.turnId, b.turnId)
             assertNotEquals(a.windowId, b.windowId)
             assertEquals(0, runtime.getLatestIndex(first))
-            assertEquals(-1, host.session(first).session.storage.latestIndexOf(AgentCommitType.IndexTypes))
+            assertNull(host.session(first).session.storage.getCommitAtOrBefore(Int.MAX_VALUE, AgentCommitType.IndexTypes))
             val row = management.getSessionCatalog(false).single { it.sessionIndex == first }
             assertNotNull(row.createdAt)
             assertEquals(row.createdAt, row.updatedAt)
@@ -109,7 +111,8 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             val entries = management.getSessionCatalog(false)
             assertEquals(listOf(b, a), entries.take(2).map { it.sessionIndex })
             entries.take(2).forEach {
-                assertNull(it.createdAt)
+                assertNotNull(it.createdAt)
+                assertNotEquals(timestamp, it.createdAt)
                 assertEquals(timestamp, it.updatedAt)
                 assertFalse(it.isActive)
             }
@@ -147,8 +150,11 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             assertFalse(management.getSessionCatalog(false).single { it.sessionIndex == fork }.isActive)
             management.keepSessionAlive(fork)
             val target = host.session(fork).session.storage
-            assertEquals(source.getIndexEntryExact(1), target.getIndexEntryExact(1))
-            assertNull(target.getIndexEntryExact(2))
+            assertEquals(
+                source.getCommitExact(1, AgentCommitType.IndexTypes)?.commit,
+                target.getCommitExact(1, AgentCommitType.IndexTypes)?.commit,
+            )
+            assertNull(target.getCommitExact(2, AgentCommitType.IndexTypes))
             assertEquals(boundarySettings, target.getSettingsAt(1))
             val current = target.getSettingsAt(target.latestIndex())
             assertNotEquals(boundarySettings.turnId, current.turnId)
@@ -187,7 +193,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             assertTrue(entries.single { it.sessionIndex == index }.archived)
             assertFalse(entries.single { it.sessionIndex == fork }.archived)
             management.keepSessionAlive(fork)
-            assertNotNull(host.session(fork).session.storage.getIndexEntryExact(1))
+            assertNotNull(host.session(fork).session.storage.getCommitExact(1, AgentCommitType.IndexTypes))
         }
     }
 

@@ -2,7 +2,6 @@
 
 package io.github.stream29.kodex.rpc.server
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -56,31 +55,14 @@ public actual class BackendAgentStorageRpc actual constructor(
         emitAll(binding.observe((binding.session.storage as ObservableKodexAgentStorage).latestIndexFlow))
     }
 
-    actual override suspend fun indexesIn(
+    actual override suspend fun countCommitsIn(
         sessionIndex: Int,
         cacheNonce: Long,
         fromInclusive: Int,
         toInclusive: Int,
         types: Set<AgentCommitType>,
-    ): List<Int> =
-        checked(sessionIndex, cacheNonce) { indexesIn(fromInclusive..toInclusive, types) }
-
-    actual override suspend fun getCommitsExact(
-        sessionIndex: Int,
-        cacheNonce: Long,
-        index: Int,
-        types: Set<AgentCommitType>,
-    ): List<AgentCommit> =
-        checked(sessionIndex, cacheNonce) { getCommitsExact(index, types) }
-
-    actual override suspend fun getCommitsIn(
-        sessionIndex: Int,
-        cacheNonce: Long,
-        fromInclusive: Int,
-        toInclusive: Int,
-        types: Set<AgentCommitType>,
-    ): List<IndexedAgentCommit> =
-        checked(sessionIndex, cacheNonce) { getCommitsIn(fromInclusive..toInclusive, types) }
+    ): Int =
+        checked(sessionIndex, cacheNonce) { countCommitsIn(fromInclusive..toInclusive, types) }
 
     actual override suspend fun getFirstCommitsIn(
         sessionIndex: Int,

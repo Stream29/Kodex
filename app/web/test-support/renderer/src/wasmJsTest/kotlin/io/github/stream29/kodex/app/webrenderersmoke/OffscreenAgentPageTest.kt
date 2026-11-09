@@ -279,10 +279,8 @@ private class AgentPageProbe {
 internal suspend fun pageAgent(name: String, runtime: RuntimeConfigurationViewModel, owner: CoroutineScope): PageTestAgent {
     val stored = InMemoryKodexAgentStorage.empty()
     stored.commit(
-        listOf(
-            StableUserMessage(listOf(ContentItem.InputText("History $name"))),
-            CommitTimestamp(Instant.fromEpochMilliseconds(1_000)),
-        ),
+        StableUserMessage(listOf(ContentItem.InputText("History $name"))),
+        timestamp = Instant.fromEpochMilliseconds(1_000),
     )
     val historyScope = CoroutineScope(owner.coroutineContext + Job(owner.coroutineContext[Job]))
     val history = createAgentHistoryViewModel(

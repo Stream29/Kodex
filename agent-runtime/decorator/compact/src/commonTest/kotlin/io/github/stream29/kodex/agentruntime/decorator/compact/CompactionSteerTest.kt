@@ -18,10 +18,11 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.AgentMessageInputContent
@@ -116,7 +117,7 @@ val compactionSteerTest by testSuite {
 
                 runtime.resume()
 
-                assertEquals(input, storage.getIndexEntryAt(1))
+                assertEquals(input, storage.getCommitAtOrBefore(1, AgentCommitType.IndexTypes)?.commit)
                 assertTrue(userHistory().isEmpty())
                 assertTrue(queue.value.isEmpty())
             }
@@ -502,7 +503,7 @@ val compactionSteerTest by testSuite {
                 },
             ) {
                 state.appendUserMessage(content("initial"))
-                storage.commit(TokenCountSnapshot.Response(20L))
+                storage.commit(LlmRequestMeta.Response(20L))
                 val running = async { runtime.resume() }
                 compacting.await()
                 queue.value = listOf(user("during compact"))

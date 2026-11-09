@@ -131,24 +131,6 @@ public interface SessionCatalogViewModel : AutoCloseable {
     public suspend fun refresh(): Unit
 
     /**
-     * Reads the timestamp-zero value from the current catalog snapshot.
-     * No additional backend I/O or runtime activation is performed.
-     * @return null when exact timestamp zero is absent; later records are not searched.
-     * @throws NoSuchElementException if the index is not in the current snapshot.
-     * @throws CancellationException when the caller or component is cancelled.
-     */
-    public suspend fun readCreatedAt(sessionIndex: Int): Instant?
-
-    /**
-     * Reads the target's latest persisted timestamp sampled in the current
-     * catalog snapshot, without additional backend I/O.
-     * @return null when no timestamp has been persisted.
-     * @throws NoSuchElementException if the index is not in the current snapshot.
-     * @throws CancellationException when the caller or component is cancelled.
-     */
-    public suspend fun readUpdatedAt(sessionIndex: Int): Instant?
-
-    /**
      * Changes the archive filter and reloads the catalog when it changes.
      *
      * Repeating the current value is a no-op. The renderer should show the

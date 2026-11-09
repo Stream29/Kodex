@@ -7,6 +7,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import kotlin.time.Instant
 
 /**
  * Process-local mutable storage for tests and transient agent sessions.
@@ -20,12 +21,11 @@ public expect class InMemoryKodexAgentStorage(initialSettings: KodexAgentSetting
     override val uri: String
 
     override suspend fun latestIndex(): Int
-    override suspend fun indexesIn(range: IntRange, types: Set<AgentCommitType>): List<Int>
-    override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit>
-    override suspend fun getCommitsIn(range: IntRange, types: Set<AgentCommitType>): List<IndexedAgentCommit>
+    override suspend fun countCommitsIn(range: IntRange, types: Set<AgentCommitType>): Int
     override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit>
     override suspend fun getLastCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit>
     override suspend fun commit(commits: List<AgentCommit>): Int
+    override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int
     override suspend fun revert(untilExclusive: Int)
 
     public companion object {

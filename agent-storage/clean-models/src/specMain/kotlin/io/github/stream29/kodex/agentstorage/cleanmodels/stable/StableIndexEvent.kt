@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 
 /** Complete stable event stored directly on the index timeline. */
 @Serializable
-public sealed interface StableIndexEvent : StableCleanEvent, CleanIndexEntry {
+public sealed interface StableIndexEvent : StableCleanEvent {
     /** Completed tool event stored on the index timeline. */
     @Serializable
     public sealed interface CompletedTool :

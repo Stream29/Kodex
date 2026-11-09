@@ -126,54 +126,43 @@ val stableCleanEventSerializationTest by testSuite {
         assertEquals(listOf(imageGeneration), events[2].toResponseHistoryItems())
     }
 
-    test("round trips index events and compaction points through the index union") {
-        val entries: List<CleanIndexEntry> = listOf(
+    test("round trips index events and context compaction through the index union") {
+        val compaction = ResponseItem.Compaction(encryptedContent = "encrypted")
+        val entries: List<StableIndexEvent> = listOf(
             StableUserMessage(
                 listOf(ContentItem.InputText("retained")),
             ),
             StableAssistantMessage(
                 listOf(ContentItem.OutputText("answer")),
             ),
-            CleanCompactionPoint,
+            StableContextCompaction(
+                id = compaction.id,
+                encryptedContent = compaction.encryptedContent,
+            ),
         )
 
         entries.forEach { entry ->
-            val encoded = stableEventJson.encodeToString<CleanIndexEntry>(entry)
+            val encoded = stableEventJson.encodeToString<StableIndexEvent>(entry)
 
             assertEquals(
                 entry,
-                stableEventJson.decodeFromString<CleanIndexEntry>(encoded),
+                stableEventJson.decodeFromString<StableIndexEvent>(encoded),
             )
         }
         assertIs<StableIndexEvent>(entries[0])
         assertIs<StableIndexEvent>(entries[1])
-        assertFalse(entries[2] is StableCleanEvent)
+        assertIs<StableCleanEvent>(entries[2])
         assertEquals(
-            JsonPrimitive("compaction_point"),
+            JsonPrimitive("context_compaction"),
             stableEventJson
                 .parseToJsonElement(
-                    stableEventJson.encodeToString<CleanIndexEntry>(entries[2]),
+                    stableEventJson.encodeToString<StableIndexEvent>(entries[2]),
                 )
                 .jsonObject["type"],
         )
-    }
-
-    test("round trips context compaction through the work union") {
-        val compaction = ResponseItem.Compaction(encryptedContent = "encrypted")
-        val contextCompaction: StableWorkEvent = StableContextCompaction(
-            id = compaction.id,
-            encryptedContent = compaction.encryptedContent,
-        )
-
-        val encoded = stableEventJson.encodeToString<StableWorkEvent>(contextCompaction)
-
-        assertEquals(
-            contextCompaction,
-            stableEventJson.decodeFromString<StableWorkEvent>(encoded),
-        )
         assertEquals(
             listOf(compaction),
-            contextCompaction.toResponseHistoryItems(),
+            entries[2].toResponseHistoryItems(),
         )
     }
 }

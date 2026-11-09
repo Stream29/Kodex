@@ -4,15 +4,14 @@ package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.contract.getTimestampAtOrNull
-import io.github.stream29.kodex.agentstorage.contract.getTokenCountAtOrNull
+import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.rpc.client.asSuspendMutableStateFlow
 import io.github.stream29.kodex.rpc.client.rpcCachedAgentStorage
@@ -46,7 +45,7 @@ public actual class RpcSessionBinding private constructor(
     public actual val shellSessions: StateFlow<Map<Int, ShellSessionState>>,
     public actual val settings: SuspendMutableStateFlow<KodexAgentSettings>,
     public actual val pendingSteer: SuspendMutableStateFlow<List<StableIndexEvent.Steerable>>,
-    public actual val tokenCount: StateFlow<TokenCountSnapshot?>,
+    public actual val tokenCount: StateFlow<LlmRequestMeta?>,
     private val owner: Job,
     private val services: RpcServices,
     private val invalidate: (Throwable) -> Unit,
@@ -83,11 +82,11 @@ public actual class RpcSessionBinding private constructor(
     public actual suspend fun forkHistory(untilExclusive: Int, selectedCacheNonce: Long): Int =
         command { services.global.forkSessionHistory(sessionIndex, untilExclusive, selectedCacheNonce) }
     public actual suspend fun readCreatedAt(): Instant? =
-        (storage.getFirstCommitsIn(0..Int.MAX_VALUE, AgentCommitType.TimestampTypes, limit = 1)
-            .firstOrNull()
-            ?.commit as? CommitTimestamp)?.instant
+        storage.getCommitAtOrBefore(0)?.createdAt?.takeIf { it != Instant.DISTANT_PAST }
     public actual suspend fun readUpdatedAt(): Instant? =
-        storage.latestIndexFlow.value.takeIf { it >= 0 }?.let { storage.getTimestampAtOrNull(it) }
+        storage.latestIndexFlow.value.takeIf { it >= 0 }?.let {
+            storage.getCommitAtOrBefore(it)?.createdAt?.takeIf { ts -> ts != Instant.DISTANT_PAST }
+        }
 
     internal companion object {
         suspend fun create(
@@ -120,7 +119,7 @@ public actual class RpcSessionBinding private constructor(
             )
             val settings = scope.visibleValue(storage, latest) { position -> storage.getSettingsAt(position) }
             val tokenCount = scope.visibleValue(storage, latest) { position ->
-                if (position >= 0) storage.getTokenCountAtOrNull(position) else null
+                if (position >= 0) storage.getLlmRequestMetaAtOrNull(position) else null
             }
             suspend fun <R> compare(action: suspend () -> R): R {
                 owner.ensureActive()

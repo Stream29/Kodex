@@ -7,8 +7,9 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.openai.ContentItem
@@ -140,7 +141,7 @@ val backendSessionHostSqliteTest by testSuite(testConfig = TestConfig.testScope(
                         }
                         val old = host.session(index)
                         val settings = old.session.storage.getSettingsAt(0)
-                        val history = old.session.storage.getIndexEntryAt(1)
+                        val history = old.session.storage.getCommitAtOrBefore(1, AgentCommitType.IndexTypes)?.commit
                         clock += 60.seconds
                         advanceTimeBy(60_000)
                         runCurrent()
@@ -158,7 +159,7 @@ val backendSessionHostSqliteTest by testSuite(testConfig = TestConfig.testScope(
                         val fresh = host.session(index)
                         assertNotSame(old.session, fresh.session)
                         assertEquals(settings, fresh.session.storage.getSettingsAt(0))
-                        assertEquals(history, fresh.session.storage.getIndexEntryAt(1))
+                        assertEquals(history, fresh.session.storage.getCommitAtOrBefore(1, AgentCommitType.IndexTypes)?.commit)
                         assertTrue(host.deleteSession(index))
                         assertTrue(fresh.inactive.isCompleted)
                         assertEquals(emptyList(), host.repository().entries.value)

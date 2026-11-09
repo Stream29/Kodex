@@ -25,30 +25,27 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
 import io.github.oshai.kotlinlogging.KotlinLogging
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
-import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventExact
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlin.time.Duration
+import kotlin.time.Instant
 
 /**
- * Stable metadata needed to construct one history item without retaining its decoded payload.
- *
- * A descriptor is deliberately smaller than a stable event. It is retained by the history
- * projection and by collapsed work groups; concrete event payloads are owned only by item states.
+ * Stable metadata and already-fetched commit payload needed to construct one history item
+ * without a second storage round-trip.
  */
 internal data class HistoryItemDescriptor(
     val index: Int,
     val source: HistoryItemSource,
     val kind: HistoryItemKind,
     val elapsed: Duration,
+    val event: StableCleanEvent,
+    val createdAt: Instant = Instant.DISTANT_PAST,
+    val turnDuration: Duration? = null,
 )
 
 internal enum class HistoryItemSource {
@@ -71,10 +68,15 @@ internal fun StableCleanEvent.toHistoryItemDescriptor(
     index: Int,
     source: HistoryItemSource,
     elapsed: Duration,
+    createdAt: Instant = Instant.DISTANT_PAST,
+    turnDuration: Duration? = null,
 ): HistoryItemDescriptor = HistoryItemDescriptor(
     index = index,
     source = source,
     elapsed = elapsed,
+    event = this,
+    createdAt = createdAt,
+    turnDuration = turnDuration,
     kind = when (this) {
         is StableUserMessage,
         is StableAssistantMessage,
@@ -106,16 +108,11 @@ internal fun StableCleanEvent.toHistoryItemDescriptor(
 
 /**
  * Storage and lifecycle boundary shared by every item VM owned by one history VM.
- *
- * There is intentionally no semaphore here. Each item has one persistent state machine, so a
- * second viewport entry cannot create a duplicate read. The storage implementation already owns
- * its value cache and all reads are dispatched away from the UI thread.
  */
 internal class HistoryItemLoadContext(
     private val agentState: AgentHistorySource,
     private val scope: CoroutineScope,
     private val isGenerationCurrent: () -> Boolean,
-    private val turnDurationResolver: HistoryTurnDurationResolver,
 ) {
     fun launch(
         start: CoroutineStart = CoroutineStart.DEFAULT,
@@ -129,29 +126,6 @@ internal class HistoryItemLoadContext(
             "Failed to load History ${descriptor.source} entry ${descriptor.index} from ${agentState.storage.uri}."
         }
     }
-
-    suspend fun read(descriptor: HistoryItemDescriptor): StableCleanEvent =
-        withContext(Dispatchers.Default) {
-            (when (descriptor.source) {
-                HistoryItemSource.Index -> agentState.storage.getIndexEntryExact(descriptor.index)
-                HistoryItemSource.Work -> agentState.storage.getWorkEventExact(descriptor.index)
-            } as? StableCleanEvent) ?: error(
-                "History item ${descriptor.source} entry ${descriptor.index} is missing.",
-            )
-        }
-
-    /** @return null when this exact index has no timestamp. */
-    suspend fun readTimestamp(index: Int): kotlin.time.Instant? = withContext(Dispatchers.Default) {
-        check(isCurrent()) { "History generation is no longer current." }
-        val timestamp = agentState.storage.getTimestampExact(index)
-        check(isCurrent()) { "History generation is no longer current." }
-        timestamp
-    }
-
-    suspend fun finalTurnDuration(index: Int): Duration? =
-        withContext(Dispatchers.Default) {
-            turnDurationResolver.finalDuration(index)
-        }
 }
 
 /**

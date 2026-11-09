@@ -1,9 +1,10 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.cli.history
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
@@ -13,7 +14,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEv
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
-import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
@@ -31,6 +32,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
+import kotlin.test.assertNotEquals
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
@@ -64,28 +66,29 @@ val agentHistoryModelsTest by testSuite {
             try {
                 val session = repository.open(repository.create())
                 val time = Instant.parse("2026-09-08T01:02:03Z")
-                session.storage.commit(CommitTimestamp(time))
-                session.storage.commit(StableUserMessage(listOf(ContentItem.InputText("readable"))))
+                val userMsg = StableUserMessage(listOf(ContentItem.InputText("readable")))
+                session.storage.commit(listOf(userMsg), time + 1.seconds)
                 var current = true
                 val context = HistoryItemLoadContext(
                     AgentHistorySource(session.storage, session.runtime.latestIndex, session.runtime.state),
-                    this, { current }, HistoryTurnDurationResolver(session.storage),
+                    this, { current },
                 )
                 val item = MessageHistoryItemViewModelImpl(
-                    1, HistoryItemDescriptor(1, HistoryItemSource.Index, HistoryItemKind.Message, Duration.ZERO),
+                    1,
+                    HistoryItemDescriptor(
+                        index = 1,
+                        source = HistoryItemSource.Index,
+                        kind = HistoryItemKind.Message,
+                        elapsed = Duration.ZERO,
+                        event = userMsg,
+                        createdAt = time + 1.seconds,
+                    ),
                     context,
                 )
                 item.ensureLoaded()
                 val ready = awaitState(item.state) { it !is MessageHistoryItemState.Loading }
                 assertIs<MessageHistoryItemState.Ready>(ready)
-                assertEquals(null, item.readTimestamp())
-                session.storage.revert(1)
-                session.storage.commit(
-                    listOf(
-                        StableUserMessage(listOf(ContentItem.InputText("readable"))),
-                        CommitTimestamp(time + 1.seconds),
-                    ),
-                )
+                assertNotEquals(time, item.readTimestamp())
                 assertEquals(time + 1.seconds, item.readTimestamp())
                 current = false
                 kotlin.test.assertFailsWith<IllegalStateException> { item.readTimestamp() }
@@ -96,17 +99,21 @@ val agentHistoryModelsTest by testSuite {
         }
     }
 
-    test("missing suggestion history becomes a load failure rather than a rejected decision") {
+    test("invalid suggestion event payload becomes a load failure rather than a rejected decision") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             try {
                 val session = repository.open(repository.create())
                 val descriptor = HistoryItemDescriptor(
-                    99, HistoryItemSource.Index, HistoryItemKind.SuggestSubagentTask, Duration.ZERO,
+                    99,
+                    HistoryItemSource.Index,
+                    HistoryItemKind.SuggestSubagentTask,
+                    Duration.ZERO,
+                    StableUserMessage(listOf(ContentItem.InputText("unexpected"))),
                 )
                 val context = HistoryItemLoadContext(
                     AgentHistorySource(session.storage, session.runtime.latestIndex, session.runtime.state),
-                    this, { true }, HistoryTurnDurationResolver(session.storage),
+                    this, { true },
                 )
                 val item = SuggestSubagentTaskHistoryItemViewModelImpl(99, descriptor, context)
                 item.ensureLoaded()
@@ -504,7 +511,7 @@ val agentHistoryModelsTest by testSuite {
                     model = OpenAiModelId("test-model"),
                 )
                 storage.initialize(firstTurn)
-                val turnStart = storage.getTimestampExact(0)!!
+                val turnStart = storage.getCommitExact(0)!!.createdAt
                 storage.commit(listOf(CommitTimestamp(turnStart + 10.seconds), userMessage("first")))
                 storage.commit(listOf(CommitTimestamp(turnStart + 30.seconds), textTool("first-tool")))
                 storage.commit(
@@ -553,7 +560,7 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                val turnStart = storage.getTimestampExact(0)!!
+                val turnStart = storage.getCommitExact(0)!!.createdAt
                 storage.commit(listOf(CommitTimestamp(turnStart + 1.seconds), userMessage("first")))
                 storage.commit(
                     listOf(
@@ -765,14 +772,13 @@ val agentHistoryModelsTest by testSuite {
         }
     }
 
-    test("checks out a compaction point at its visible compaction result") {
+    test("checks out a compaction entry at its visible compaction result") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 storage.commit(userMessage("prompt"))
-                storage.commit(CleanCompactionPoint)
                 storage.commit(StableContextCompaction(encryptedContent = "encrypted"))
                 storage.commit(userMessage("after"))
             }
@@ -786,7 +792,7 @@ val agentHistoryModelsTest by testSuite {
                         window.size > 0 &&
                         window.peek(0) is ContextCompactionHistoryItemViewModel
                 }
-                assertEquals(3, checkedOut.peek(0).storageIndex)
+                assertEquals(2, checkedOut.peek(0).storageIndex)
                 assertFalse(model.followsLatest.value)
             } finally {
                 model.close()

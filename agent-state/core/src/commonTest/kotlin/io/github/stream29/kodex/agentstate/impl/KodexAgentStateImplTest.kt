@@ -14,11 +14,10 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
@@ -26,7 +25,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.codexRequestWindowId
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
@@ -34,18 +32,13 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerT
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
-import io.github.stream29.kodex.agentstorage.contract.floorToIndex
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
+import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.contract.getSettingsExact
-import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
-import io.github.stream29.kodex.agentstorage.contract.getUnstableAt
-import io.github.stream29.kodex.agentstorage.contract.getUnstableExact
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventExact
-import io.github.stream29.kodex.agentstorage.contract.latestIndexOf
-import io.github.stream29.kodex.agentstorage.contract.latestUnstableIndex
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.AgentMessageInputContent
@@ -239,7 +232,7 @@ val kodexAgentStateImplTest by testSuite {
 
             assertTrue(cancelled.isCancelled)
             assertEquals(listOf("first", "last"), executionOrder)
-            assertEquals(-1, storage.latestIndexOf(AgentCommitType.IndexTypes))
+            assertEquals(0, storage.countCommitsIn(0..Int.MAX_VALUE, AgentCommitType.IndexTypes))
             assertEquals(0, agent.latestIndex.value)
             assertEquals(KodexAgentStateValue.Empty, agent.state.value)
         }
@@ -250,16 +243,20 @@ val kodexAgentStateImplTest by testSuite {
                 commit(StableDeveloperMessage(listOf(ContentItem.InputText("Context"))))
                 commit(StableContextCompaction(encryptedContent = "compact"))
             }
-            var indexRangeReads = 0
+            var firstRangeReads = 0
             val observed = object : MutableKodexAgentStorage by source {
-                override suspend fun indexesIn(range: IntRange, types: Set<AgentCommitType>): List<Int> {
-                    indexRangeReads++
-                    return source.indexesIn(range, types)
+                override suspend fun getFirstCommitsIn(
+                    range: IntRange,
+                    types: Set<AgentCommitType>,
+                    limit: Int,
+                ): List<io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit> {
+                    if (range.first != range.last) firstRangeReads++
+                    return source.getFirstCommitsIn(range, types, limit)
                 }
             }
             val agent = KodexAgentState(client = mockOpenAiClient(), storage = observed)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
-            assertEquals(0, indexRangeReads)
+            assertEquals(0, firstRangeReads)
             agent.cancelAndJoin()
         }
 
@@ -277,7 +274,7 @@ val kodexAgentStateImplTest by testSuite {
 
         test("forked clean timelines reconstruct assistant state") {
             val source = storage().apply {
-                commit(CommitTimestamp(kotlin.time.Instant.DISTANT_PAST))
+                commit(listOf(LlmRequestMeta.Initialization(0L)), kotlin.time.Instant.DISTANT_PAST)
                 commit(userEvent("Question"))
                 commit(assistantEvent("Answer"))
             }
@@ -287,7 +284,7 @@ val kodexAgentStateImplTest by testSuite {
             )
 
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
-            assertEquals(listOf(2, 3), source.indexesIn(0..3, AgentCommitType.IndexTypes))
+            assertEquals(listOf(2, 3), source.getCommitsIn(0..3, AgentCommitType.IndexTypes).map { it.index })
             assertEquals(userEvent("Question"), source.getIndexEntryExact(2))
             assertEquals(assistantEvent("Answer"), source.getIndexEntryExact(3))
         }
@@ -308,11 +305,11 @@ val kodexAgentStateImplTest by testSuite {
 
             assertEquals(
                 listOf(userEvent("Implement."), developer, assistant),
-                storage.indexesIn(1..agent.latestIndex.value, AgentCommitType.IndexTypes).map { index ->
-                    checkNotNull(storage.getIndexEntryExact(index))
+                storage.getCommitsIn(1..agent.latestIndex.value, AgentCommitType.IndexTypes).map {
+                    it.commit as CleanIndexEntry
                 },
             )
-            assertEquals(-1, storage.latestUnstableIndex())
+            assertEquals(0, storage.countCommitsIn(0..Int.MAX_VALUE, AgentCommitType.UnstableTypes))
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
         }
 
@@ -382,7 +379,7 @@ val kodexAgentStateImplTest by testSuite {
                 ),
                 storage.getIndexEntryExact(3),
             )
-            assertEquals(12L, checkNotNull(storage.getTokenCountAt(4)).totalTokens)
+            assertEquals(12L, checkNotNull(storage.getLlmRequestMetaAt(4)).totalTokens)
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
         }
 
@@ -693,7 +690,7 @@ val kodexAgentStateImplTest by testSuite {
             assertFailsWith<IllegalStateException> {
                 agent.requestResponseApi()
             }
-            assertEquals(listOf(1), storage.indexesIn(0..storage.latestIndex(), AgentCommitType.IndexTypes))
+            assertEquals(listOf(1), storage.getCommitsIn(0..storage.latestIndex(), AgentCommitType.IndexTypes).map { it.index })
             assertEquals(listOf(PendingServerToolSearch(call)), storage.getUnstableAt(2))
         }
 
@@ -849,10 +846,9 @@ val kodexAgentStateImplTest by testSuite {
                     .filterIsInstance<StableUserMessage>()
                     .map { event -> event.toResponseHistoryItems().single() },
             )
-            assertIs<CleanCompactionPoint>(storage.getIndexEntryAt(compactIndex - 1))
-            assertEquals(stableCompaction, storage.getWorkEventAt(compactIndex))
-            assertEquals(0L, storage.getTokenCountAt(compactIndex - 1).totalTokens)
-            assertEquals(compactIndex - 1, storage.floorToIndex(Int.MAX_VALUE, AgentCommitType.TokenCountTypes))
+            assertEquals(stableCompaction, storage.getIndexEntryAt(compactIndex))
+            assertEquals(0L, storage.getLlmRequestMetaAt(compactIndex).totalTokens)
+            assertEquals(compactIndex, storage.getCommitAtOrBefore(Int.MAX_VALUE, AgentCommitType.LlmRequestMetaTypes)?.index)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             assertEquals(
                 listOf(user, ResponseItem.CompactionTrigger),
@@ -917,7 +913,7 @@ val kodexAgentStateImplTest by testSuite {
             )
             assertEquals(
                 StableContextCompaction(encryptedContent = "compact-2"),
-                storage.getWorkEventAt(compactIndex),
+                storage.getIndexEntryAt(compactIndex),
             )
         }
 
@@ -935,12 +931,12 @@ val kodexAgentStateImplTest by testSuite {
                 storage = storage,
             )
             agent.appendUserMessage(userMessage("Compact without usage.").content)
-            storage.commit(TokenCountSnapshot.Response(90L))
+            storage.commit(LlmRequestMeta.Response(90L))
 
             val compactIndex = agent.forcedCompact()
 
-            assertEquals(0L, storage.getTokenCountAt(compactIndex).totalTokens)
-            assertEquals(compactIndex - 1, storage.floorToIndex(Int.MAX_VALUE, AgentCommitType.TokenCountTypes))
+            assertEquals(0L, storage.getLlmRequestMetaAt(compactIndex).totalTokens)
+            assertEquals(compactIndex, storage.getCommitAtOrBefore(Int.MAX_VALUE, AgentCommitType.LlmRequestMetaTypes)?.index)
         }
 
         test("settings updates can commit while remote compaction is in flight") {
@@ -979,7 +975,7 @@ val kodexAgentStateImplTest by testSuite {
                     id = compactionItem.id,
                     encryptedContent = compactionItem.encryptedContent,
                 ),
-                storage.getWorkEventAt(compactedAt),
+                storage.getIndexEntryAt(compactedAt),
             )
             assertEquals("After compaction", storage.getSettingsAt(settingsAt).threadName)
             assertEquals("After compaction", storage.getSettingsAt(compactedAt).threadName)
@@ -1324,3 +1320,33 @@ private suspend fun KodexAgentStateContract.appendUserMessage(
     require(message.role == MessageRole.User)
     return appendUserMessage(message.content)
 }
+
+internal suspend fun KodexAgentStorage.getIndexEntryExact(index: Int): CleanIndexEntry? =
+    getCommitExact(index, AgentCommitType.IndexTypes)?.commit as? CleanIndexEntry
+
+internal suspend fun KodexAgentStorage.getIndexEntryAt(index: Int): CleanIndexEntry =
+    requireNotNull(getCommitAtOrBefore(index, AgentCommitType.IndexTypes)?.commit as? CleanIndexEntry)
+
+internal suspend fun KodexAgentStorage.getWorkEventExact(index: Int): StableWorkEvent? =
+    getCommitExact(index, AgentCommitType.WorkTypes)?.commit as? StableWorkEvent
+
+internal suspend fun KodexAgentStorage.getWorkEventAt(index: Int): StableWorkEvent =
+    requireNotNull(getCommitAtOrBefore(index, AgentCommitType.WorkTypes)?.commit as? StableWorkEvent)
+
+internal suspend fun KodexAgentStorage.getSettingsExact(index: Int): KodexAgentSettings? =
+    getCommitExact(index, AgentCommitType.SettingsTypes)?.commit as? KodexAgentSettings
+
+internal suspend fun KodexAgentStorage.getLlmRequestMetaAt(index: Int): LlmRequestMeta =
+    requireNotNull(getLlmRequestMetaAtOrNull(index))
+
+internal suspend fun KodexAgentStorage.getUnstableExact(index: Int): List< io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent>? =
+    (getCommitExact(index, AgentCommitType.UnstableTypes)?.commit as? UnstableSnapshot)?.events
+
+internal suspend fun KodexAgentStorage.getUnstableAt(index: Int): List<io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent> =
+    requireNotNull(getUnstableAtOrNull(index))
+
+internal suspend fun KodexAgentStorage.getTimestampExact(index: Int): kotlin.time.Instant? =
+    getCommitExact(index)?.createdAt?.takeIf { it != kotlin.time.Instant.DISTANT_PAST }
+
+internal suspend fun KodexAgentStorage.getTimestampAt(index: Int): kotlin.time.Instant =
+    requireNotNull(getCommitAtOrBefore(index)?.createdAt?.takeIf { it != kotlin.time.Instant.DISTANT_PAST })

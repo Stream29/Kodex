@@ -1,8 +1,6 @@
 package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.cli.historyindex.*
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadHandle
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadState
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -975,55 +973,29 @@ private class TestHistoryIndexViewModel(
 ) : HistoryIndexViewModel {
     override var isActive = true
         private set
-    override suspend fun readMessageTimestamp(generation: Long, index: Int): kotlin.time.Instant? = null
 
-    private val mutableEntries = entries.associateByTo(linkedMapOf()) { entry -> entry.index }
+    private val mutableEntries = entries.associateTo(linkedMapOf()) { entry ->
+        val resolved = details[entry.index]?.let { entry.copy(detail = it) } ?: entry
+        resolved.index to resolved
+    }
     override val window = MutableStateFlow(
         HistoryIndexWindow(
             generation = 0,
-            indexes = entries.map(HistoryIndexEntry::index),
+            entries = mutableEntries.values.toList(),
         ),
     )
 
     override fun contains(generation: Long, index: Int): Boolean =
         isActive && generation == window.value.generation && index in mutableEntries
 
-    override fun acquireRow(generation: Long, index: Int): HistoryIndexReadHandle<HistoryIndexEntry> =
-        TestIndexRead(generation, index, requireNotNull(mutableEntries[index]))
-    override fun acquireDetail(generation: Long, index: Int): HistoryIndexReadHandle<HistoryIndexEntryDetail> =
-        TestIndexRead(generation, index, details[index] ?: requireNotNull(mutableEntries[index]).let {
-            HistoryIndexEntryDetail(it.kind, it.summary)
-        })
-    override fun acquireTimestamp(generation: Long, index: Int): HistoryIndexReadHandle<kotlin.time.Instant?> =
-        TestIndexRead(generation, index, null)
     override fun checkOut(generation: Long, index: Int): Boolean = contains(generation, index)
     override fun close() { isActive = false }
 
-    override suspend fun load(generation: Long, index: Int): HistoryIndexEntry =
-        requireNotNull(mutableEntries[index])
-
-    override suspend fun loadDetail(
-        generation: Long,
-        index: Int,
-    ): HistoryIndexEntryDetail {
-        details[index]?.let { return it }
-        val entry = load(generation, index)
-        return HistoryIndexEntryDetail(entry.kind, entry.summary)
-    }
-
     fun append(entry: HistoryIndexEntry) {
-        mutableEntries[entry.index] = entry
-        window.value = window.value.copy(indexes = window.value.indexes + entry.index)
+        val resolved = details[entry.index]?.let { entry.copy(detail = it) } ?: entry
+        mutableEntries[resolved.index] = resolved
+        window.value = window.value.copy(entries = window.value.entries + resolved)
     }
-}
-
-private class TestIndexRead<T>(
-    override val generation: Long,
-    override val index: Int,
-    value: T,
-) : HistoryIndexReadHandle<T> {
-    override val state = MutableStateFlow<HistoryIndexReadState<T>>(HistoryIndexReadState.Ready(value))
-    override fun release() { state.value = HistoryIndexReadState.Closed }
 }
 
 private suspend fun TestMosaic<String>.awaitSnapshotContaining(expected: String): String {

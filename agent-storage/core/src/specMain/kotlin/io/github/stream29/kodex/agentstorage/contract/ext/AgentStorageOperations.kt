@@ -30,7 +30,7 @@ public expect suspend fun KodexAgentStorage.latestCompactionPointOrNull(at: Int)
  */
 public expect suspend fun KodexAgentStorage.activeMessageWindowAt(index: Int): List<StableCleanEvent>
 
-/** Appends one compaction point and its provider output at consecutive indexes. */
+/** Appends one compaction output and its updated settings at a single index. */
 public expect suspend fun MutableKodexAgentStorage.appendCompaction(
     output: StableContextCompaction,
     timestamp: Instant,

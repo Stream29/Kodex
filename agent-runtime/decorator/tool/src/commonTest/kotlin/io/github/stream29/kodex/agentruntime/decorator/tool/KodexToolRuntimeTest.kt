@@ -27,8 +27,9 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.contract.getUnstableAt
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
@@ -125,7 +126,7 @@ val kodexToolRuntimeTest by testSuite {
         assertTrue(toolSearchSpec.description.contains("- shared: Tools exposed by shared."))
         assertTrue(toolSearchSpec.description.contains("Kodex local tools").not())
         assertTrue(toolSearchSpec.description.contains("MCP servers").not())
-        assertEquals(listOf(0), storage.indexesIn(0..storage.latestIndex(), AgentCommitType.SettingsTypes))
+        assertEquals(listOf(0), storage.getCommitsIn(0..storage.latestIndex(), AgentCommitType.SettingsTypes).map { it.index })
     }
 
     test("deferred search output and handler use the active catalog") {
@@ -349,7 +350,7 @@ val kodexToolRuntimeTest by testSuite {
                 .filterIsInstance<StableMcpToolEvent>()
                 .single(),
         )
-        assertEquals(emptyList(), storage.getUnstableAt(storage.latestIndex()))
+        assertEquals(emptyList(), storage.getUnstableAtOrNull(storage.latestIndex()))
     }
 
     test("unowned pending calls stop at the state boundary") {

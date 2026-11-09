@@ -3,14 +3,22 @@ package io.github.stream29.kodex.cli.history
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
+import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.UpdatePlanArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 import kotlin.time.Duration
 
 val historyItemReleaseTest by testSuite {
@@ -20,7 +28,7 @@ val historyItemReleaseTest by testSuite {
         HistoryItemKind.RequestUserInput,
         HistoryItemKind.SuggestSubagentTask,
     )) {
-        test("evicted unvisited $kind releases its dormant loading job") {
+        test("leaf $kind initializes synchronously without spawning background jobs") {
             coroutineScope {
                 val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
                 val itemOwner = supervisorChildScope()
@@ -28,10 +36,28 @@ val historyItemReleaseTest by testSuite {
                     val session = repository.open(repository.create())
                     val context = HistoryItemLoadContext(
                         AgentHistorySource(session.storage, session.runtime.latestIndex, session.runtime.state),
-                        itemOwner, { true }, HistoryTurnDurationResolver(session.storage),
+                        itemOwner, { true },
                     )
+                    val event = when (kind) {
+                        HistoryItemKind.Message -> StableUserMessage(listOf(ContentItem.InputText("prompt")))
+                        HistoryItemKind.PlanUpdate -> StablePlanUpdate(
+                            callId = "call",
+                            arguments = UpdatePlanArgs(plan = emptyList()),
+                        )
+                        HistoryItemKind.RequestUserInput -> StableRequestUserInputToolEvent(
+                            callId = "call",
+                            arguments = RequestUserInputArgs(questions = emptyList()),
+                            result = StableRequestUserInputResult.Failure("none"),
+                        )
+                        HistoryItemKind.SuggestSubagentTask -> StableSuggestSubagentTaskToolEvent(
+                            callId = "call",
+                            arguments = SuggestSubagentTaskArgs(tasks = emptyList()),
+                            result = StableSuggestSubagentTaskResult.Failure("none"),
+                        )
+                        else -> error("Not a leaf kind")
+                    }
                     val descriptor = HistoryItemDescriptor(
-                        1, HistoryItemSource.Index, kind, Duration.ZERO,
+                        1, HistoryItemSource.Index, kind, Duration.ZERO, event,
                     )
                     val item: HistoryItemViewModel = when (kind) {
                         HistoryItemKind.Message -> MessageHistoryItemViewModelImpl(1, descriptor, context)
@@ -39,19 +65,10 @@ val historyItemReleaseTest by testSuite {
                         HistoryItemKind.RequestUserInput -> RequestUserInputHistoryItemViewModelImpl(1, descriptor, context)
                         HistoryItemKind.SuggestSubagentTask ->
                             SuggestSubagentTaskHistoryItemViewModelImpl(1, descriptor, context)
-                        else -> error("Not a lazy leaf kind")
                     }
                     val ownerJob = requireNotNull(itemOwner.coroutineContext[Job])
-                    val loading = ownerJob.children.single()
-                    assertFalse(loading.isActive)
-                    assertFalse(loading.isCompleted)
-
-                    item.release()
-
-                    assertTrue(loading.isCancelled)
-                    loading.join()
                     assertEquals(0, ownerJob.children.count())
-                    // A retained old row cannot revive a released load on re-entry.
+                    item.release()
                     item.ensureLoaded()
                     assertEquals(0, ownerJob.children.count())
                 } finally {

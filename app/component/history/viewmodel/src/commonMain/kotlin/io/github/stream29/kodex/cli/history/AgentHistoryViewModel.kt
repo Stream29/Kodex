@@ -2,13 +2,14 @@ package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemViewModel
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.floorToIndex
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
@@ -329,7 +330,6 @@ internal class AgentHistoryViewModelImpl(
                 !closed && activeGeneration == generation &&
                     (agentState.cacheNonce?.value?.let { it == generation } != false)
             },
-            turnDurationResolver = turnDurationResolver,
         )
 
     private fun materialize(
@@ -410,17 +410,23 @@ internal class AgentHistoryViewModelImpl(
             "History work group ${group.indexRange} expected ${group.itemCount} values, " +
                 "but storage returned ${values.size}."
         }
-        var previousIndex = agentState.storage.visibleStableIndexAtOrBefore(
-            group.indexRange.first - 1,
-        )
-        val descriptors = values.map { (index, commit) ->
+        var previousTimestamp = if (group.indexRange.first > 0) {
+            agentState.storage.getCommitAtOrBefore(
+                group.indexRange.first - 1,
+                AgentCommitType.CleanEventTypes,
+            )?.createdAt
+        } else {
+            null
+        }
+        val descriptors = values.map { (index, commit, createdAt) ->
             val event = commit as StableWorkEvent
             event.toHistoryItemDescriptor(
                 index = index,
                 source = HistoryItemSource.Work,
-                elapsed = agentState.storage.elapsedBetween(previousIndex, index),
+                elapsed = elapsedBetween(previousTimestamp, createdAt),
+                createdAt = createdAt,
             ).also {
-                previousIndex = index
+                previousTimestamp = createdAt
             }
         }
         descriptors.asReversed().map { descriptor ->
@@ -540,7 +546,7 @@ internal class AgentHistoryViewModelImpl(
 
         suspend fun refreshActiveTurnStart(force: Boolean = false) {
             val currentIndexEntry = if (observedLatestIndex >= 0) {
-                agentState.storage.floorToIndex(observedLatestIndex, AgentCommitType.IndexTypes)
+                agentState.storage.getCommitAtOrBefore(observedLatestIndex, AgentCommitType.IndexTypes)?.index
             } else {
                 null
             }
@@ -771,15 +777,11 @@ internal class AgentHistoryViewModelImpl(
             if (!isCurrent(intent)) return
             val snapshotIndex = agentState.latestIndex.value
             val indexEntry = withContext(Dispatchers.Default) {
-                agentState.storage.getIndexEntryExact(storageIndex)
+                agentState.storage.getCommitExact(storageIndex, AgentCommitType.IndexTypes)?.commit as? CleanIndexEntry
             }
             if (!isCurrent(intent)) return
             checkNotNull(indexEntry) { "The selected History entry is no longer available." }
-            val displayIndex = if (indexEntry is CleanCompactionPoint && storageIndex > 0) {
-                storageIndex + 1
-            } else {
-                storageIndex
-            }
+            val displayIndex = storageIndex
             check(displayIndex <= snapshotIndex) {
                 "The selected History entry is no longer available."
             }

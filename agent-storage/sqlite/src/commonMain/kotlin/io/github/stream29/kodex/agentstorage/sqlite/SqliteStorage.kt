@@ -19,6 +19,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 public actual class SqliteAgentStorage actual constructor(
     internal val connection: SqliteConnection,
@@ -56,49 +58,18 @@ public actual class SqliteAgentStorage actual constructor(
 
     public actual override suspend fun latestIndex(): Int = read { tailUnsafe() }
 
-    public actual override suspend fun indexesIn(
+    public actual override suspend fun countCommitsIn(
         range: IntRange,
         types: Set<AgentCommitType>,
-    ): List<Int> = read {
-        if (range.isEmpty() || types.isEmpty()) return@read emptyList()
+    ): Int = read {
+        if (range.isEmpty() || types.isEmpty()) return@read 0
         require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
         val (clause, params) = typeFilterClause(types)
         val rows = connection.query(
-            """SELECT DISTINCT "index" FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" ASC""",
+            """SELECT count(*) FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause""",
             listOf(agentId, range.first.toLong(), range.last.toLong()) + params,
         )
-        rows.map { (it[0] as Long).toInt() }
-    }
-
-    public actual override suspend fun getCommitsExact(
-        index: Int,
-        types: Set<AgentCommitType>,
-    ): List<AgentCommit> = read {
-        require(index >= 0) { "Index $index must be non-negative." }
-        if (types.isEmpty()) return@read emptyList()
-        val (clause, params) = typeFilterClause(types)
-        val rows = connection.query(
-            """SELECT type, payload_json FROM agent_commits WHERE agent_id = ? AND "index" = ?$clause""",
-            listOf(agentId, index.toLong()) + params,
-        )
-        rows.map { row ->
-            val type = AgentCommitType.fromWireName(row[0] as String)
-            type.decodePayloadJson(row[1] as String, OpenAiJsonCodec)
-        }.sortedBy { it.commitType.ordinal }
-    }
-
-    public actual override suspend fun getCommitsIn(
-        range: IntRange,
-        types: Set<AgentCommitType>,
-    ): List<IndexedAgentCommit> = read {
-        if (range.isEmpty() || types.isEmpty()) return@read emptyList()
-        require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
-        val (clause, params) = typeFilterClause(types)
-        val rows = connection.query(
-            """SELECT "index", type, payload_json FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" ASC""",
-            listOf(agentId, range.first.toLong(), range.last.toLong()) + params,
-        )
-        decodeIndexedRows(rows)
+        rows.firstOrNull()?.let { (it[0] as Long).toInt() } ?: 0
     }
 
     public actual override suspend fun getFirstCommitsIn(
@@ -112,7 +83,7 @@ public actual class SqliteAgentStorage actual constructor(
         val (clause, params) = typeFilterClause(types)
         val sqlLimit = boundedIndexScanLimit(limit, types)
         val rows = connection.query(
-            """SELECT "index", type, payload_json FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" ASC, type ASC LIMIT ?""",
+            """SELECT "index", type, payload_json, created_at FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" ASC, type ASC LIMIT ?""",
             listOf(agentId, range.first.toLong(), range.last.toLong()) + params + listOf(sqlLimit),
         )
         decodeIndexedRows(rows).take(limit)
@@ -129,24 +100,31 @@ public actual class SqliteAgentStorage actual constructor(
         val (clause, params) = typeFilterClause(types)
         val sqlLimit = boundedIndexScanLimit(limit, types)
         val rows = connection.query(
-            """SELECT "index", type, payload_json FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" DESC, type DESC LIMIT ?""",
+            """SELECT "index", type, payload_json, created_at FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" DESC, type DESC LIMIT ?""",
             listOf(agentId, range.first.toLong(), range.last.toLong()) + params + listOf(sqlLimit),
         )
         decodeIndexedRows(rows).takeLast(limit)
     }
 
+    @Suppress("DEPRECATION")
     public actual override suspend fun commit(commits: List<AgentCommit>): Int {
+        val legacyTimestamp = (commits.firstOrNull { it is io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp } as? io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp)?.instant
+        return commit(commits, legacyTimestamp ?: Clock.System.now())
+    }
+
+    public actual override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int {
         validateCommitBatch(commits)
         val sorted = commits.sortedBy { it.commitType.ordinal }
         val encoded = sorted.map { commit ->
             commit.commitType.wireName to commit.encodePayloadJson(OpenAiJsonCodec)
         }
+        val timestampStr = timestamp.toString()
         return write {
             val nextIndex = tailUnsafe() + 1
             for ((wireType, payloadJson) in encoded) {
                 connection.execute(
-                    "INSERT INTO agent_commits (agent_id, type, \"index\", payload_json) VALUES (?, ?, ?, ?)",
-                    listOf(agentId, wireType, nextIndex.toLong(), payloadJson),
+                    """INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at) VALUES (?, ?, ?, ?, ?)""",
+                    listOf(agentId, wireType, nextIndex.toLong(), payloadJson, timestampStr),
                 )
             }
             nextIndex
@@ -187,7 +165,8 @@ private fun decodeIndexedRows(rows: List<List<Any?>>): List<IndexedAgentCommit> 
     val decoded = rows.map { row ->
         val index = (row[0] as Long).toInt()
         val type = AgentCommitType.fromWireName(row[1] as String)
-        IndexedAgentCommit(index, type.decodePayloadJson(row[2] as String, OpenAiJsonCodec))
+        val createdAt = (row.getOrNull(3) as? String)?.let { Instant.parse(it) } ?: Instant.DISTANT_PAST
+        IndexedAgentCommit(index, type.decodePayloadJson(row[2] as String, OpenAiJsonCodec), createdAt)
     }
     return decoded.sortedWith(compareBy<IndexedAgentCommit> { it.index }.thenBy { it.commit.commitType.ordinal })
 }

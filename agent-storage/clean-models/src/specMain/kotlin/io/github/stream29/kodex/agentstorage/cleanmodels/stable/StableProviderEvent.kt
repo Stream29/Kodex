@@ -82,7 +82,7 @@ public data class StableContextCompaction(
     public val id: ResponseItemId? = null,
     @SerialName("encrypted_content")
     public val encryptedContent: String,
-) : StableWorkEvent {
+) : StableIndexEvent {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.Compaction(

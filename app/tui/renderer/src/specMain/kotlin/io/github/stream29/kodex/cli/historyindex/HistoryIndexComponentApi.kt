@@ -9,7 +9,6 @@ import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadState
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.cli.components.LazyListState
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
@@ -63,14 +62,14 @@ public expect fun HistoryIndexSidebarBody(
 /** Pure row rendering entrypoint, also useful for renderer snapshot coverage. */
 @Composable
 public expect fun HistoryIndexRowContent(
-    state: HistoryIndexReadState<HistoryIndexEntry>,
+    entry: HistoryIndexEntry,
     graph: String,
     hovered: Boolean = false,
     pressed: Boolean = false,
 ): Unit
 
 /**
- * Delays hover locally, then acquires/releases a detail handle for this exact request.
+ * Delays hover locally for this exact request.
  * Host filters selected child and popup priority before supplying request; hover exit grace
  * remains host-local. Invalid/released target is hidden, never shown as a new target's failure.
  */
@@ -89,7 +88,7 @@ public expect fun BoxScope.HistoryIndexHoverContent(
     anchor: TuiPopupAnchor,
     side: HistoryIndexSide,
     pointerPosition: IntOffset?,
-    state: HistoryIndexReadState<HistoryIndexEntryDetail>,
+    detail: HistoryIndexEntryDetail,
     contentColumns: Int,
     contentRows: Int,
     onHoverChanged: (Boolean) -> Unit,

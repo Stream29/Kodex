@@ -1,8 +1,9 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.agentstorage.inmemory
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -14,16 +15,14 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapsh
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.contract.ceilToIndex
 import io.github.stream29.kodex.agentstorage.contract.ext.appendCompaction
-import io.github.stream29.kodex.agentstorage.contract.floorToIndex
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrAfter
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
-import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
-import io.github.stream29.kodex.agentstorage.contract.getUnstableAt
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventExact
+import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ResponseItem
@@ -76,11 +75,13 @@ val inMemoryKodexAgentStorageTest by testSuite {
         assertEquals(0, first.latestIndex())
         assertEquals(OpenAiModelId("initial-model"), first.getSettingsAt(0).model)
         assertTrue(first.getSettingsAt(0).turnId.isNotEmpty())
-        assertNull(first.floorToIndex(0, AgentCommitType.IndexTypes))
-        assertNull(first.getIndexEntryExact(0))
+        assertNull(first.getCommitAtOrBefore(0, AgentCommitType.IndexTypes))
+        assertNull(first.getCommitExact(0, AgentCommitType.IndexTypes))
         assertEquals(0L, first.getSettingsAt(0).windowNumber)
-        assertNull(first.floorToIndex(0, AgentCommitType.WorkTypes))
-        assertNull(first.floorToIndex(0, AgentCommitType.UnstableTypes))
+        assertNull(first.getCommitAtOrBefore(0, AgentCommitType.WorkTypes))
+        assertNull(first.getCommitAtOrBefore(0, AgentCommitType.UnstableTypes))
+        assertEquals(0, first.countCommitsIn(0..0, AgentCommitType.IndexTypes))
+        assertEquals(1, first.countCommitsIn(0..0, AgentCommitType.SettingsTypes))
     }
 
     test("work commits are sparse and reject duplicate family in a single batch") {
@@ -95,14 +96,15 @@ val inMemoryKodexAgentStorageTest by testSuite {
         assertEquals(1, idx1)
         assertEquals(2, idx2)
         assertEquals(3, idx3)
-        assertEquals(3, storage.floorToIndex(3, AgentCommitType.WorkTypes))
-        assertEquals(first, storage.getWorkEventAt(2))
-        assertEquals(first, storage.getWorkEventExact(1))
-        assertNull(storage.getWorkEventExact(2))
-        assertEquals(second, storage.getWorkEventAt(3))
-        assertNull(storage.floorToIndex(0, AgentCommitType.WorkTypes))
-        assertEquals(1, storage.floorToIndex(2, AgentCommitType.WorkTypes))
-        assertEquals(3, storage.ceilToIndex(2, AgentCommitType.WorkTypes))
+        assertEquals(3, storage.getCommitAtOrBefore(3, AgentCommitType.WorkTypes)?.index)
+        assertEquals(first, storage.getCommitAtOrBefore(2, AgentCommitType.WorkTypes)?.commit)
+        assertEquals(first, storage.getCommitExact(1, AgentCommitType.WorkTypes)?.commit)
+        assertNull(storage.getCommitExact(2, AgentCommitType.WorkTypes))
+        assertEquals(second, storage.getCommitAtOrBefore(3, AgentCommitType.WorkTypes)?.commit)
+        assertNull(storage.getCommitAtOrBefore(0, AgentCommitType.WorkTypes))
+        assertEquals(1, storage.getCommitAtOrBefore(2, AgentCommitType.WorkTypes)?.index)
+        assertEquals(3, storage.getCommitAtOrAfter(2, AgentCommitType.WorkTypes)?.index)
+        assertEquals(2, storage.countCommitsIn(0..3, AgentCommitType.WorkTypes))
         assertEquals(
             listOf(IndexedAgentCommit(1, first)),
             storage.getCommitsIn(0..2, AgentCommitType.WorkTypes),
@@ -126,9 +128,9 @@ val inMemoryKodexAgentStorageTest by testSuite {
         storage.commit(listOf(assistantMessage("second completed"), UnstableSnapshot(listOf(first))))
         storage.commit(listOf(assistantMessage("first completed"), UnstableSnapshot(emptyList())))
 
-        assertEquals(listOf(first, second), storage.getUnstableAt(2))
-        assertEquals(listOf(first), storage.getUnstableAt(3))
-        assertEquals(emptyList(), storage.getUnstableAt(4))
+        assertEquals(listOf(first, second), storage.getUnstableAtOrNull(2))
+        assertEquals(listOf(first), storage.getUnstableAtOrNull(3))
+        assertEquals(emptyList(), storage.getUnstableAtOrNull(4))
     }
 
     test("revert removes suffix and permits replacement") {
@@ -144,7 +146,7 @@ val inMemoryKodexAgentStorageTest by testSuite {
             listOf(1),
             storage.getCommitsIn(0..Int.MAX_VALUE, AgentCommitType.WorkTypes).map { it.index },
         )
-        assertEquals(first, storage.getWorkEventAt(8))
+        assertEquals(first, storage.getCommitAtOrBefore(8, AgentCommitType.WorkTypes)?.commit)
         val replacement = workEvent("replacement")
         storage.commit(replacement) // 3
         assertEquals(
@@ -167,40 +169,38 @@ val inMemoryKodexAgentStorageTest by testSuite {
         assertEquals(2, storage.latestIndex())
         assertEquals(listOf(2), storage.getCommitsIn(0..Int.MAX_VALUE, AgentCommitType.IndexTypes).map { it.index })
         assertEquals(listOf(2), storage.getCommitsIn(0..Int.MAX_VALUE, AgentCommitType.WorkTypes).map { it.index })
-        assertNull(storage.floorToIndex(2, AgentCommitType.UnstableTypes))
-        assertEquals(1, storage.floorToIndex(2, AgentCommitType.TimestampTypes))
-        assertEquals(0, storage.floorToIndex(2, AgentCommitType.TokenCountTypes))
-        assertEquals(0, storage.floorToIndex(2, AgentCommitType.SettingsTypes))
+        assertNull(storage.getCommitAtOrBefore(2, AgentCommitType.UnstableTypes))
+        assertEquals(1, storage.getCommitAtOrBefore(2, AgentCommitType.TimestampTypes)?.index)
+        assertEquals(0, storage.getCommitAtOrBefore(2, AgentCommitType.TokenCountTypes)?.index)
+        assertEquals(0, storage.getCommitAtOrBefore(2, AgentCommitType.SettingsTypes)?.index)
     }
 
-    test("append compaction stores consecutive point and output indexes") {
+    test("append compaction stores output and settings at a single atomic index") {
         val storage = storage()
         val previousSettings = storage.getSettingsAt(0)
         val output = StableContextCompaction(encryptedContent = "encrypted")
         storage.commit(TokenCountSnapshot.Response(99L)) // 1
 
-        val outputIndex = storage.appendCompaction(
+        val compactionIndex = storage.appendCompaction(
             output = output,
             timestamp = timestamp(10),
             nextWindowId = "window-1",
             previousSettings = previousSettings,
         )
-        val pointIndex = outputIndex - 1
 
-        assertEquals(3, outputIndex)
-        assertIs<CleanCompactionPoint>(storage.getIndexEntryExact(pointIndex))
-        assertEquals(output, storage.getWorkEventExact(outputIndex))
+        assertEquals(2, compactionIndex)
+        assertEquals(output, storage.getCommitExact(compactionIndex, AgentCommitType.IndexTypes)?.commit)
         assertEquals(
             previousSettings.copy(
                 windowNumber = 1,
                 previousWindowId = previousSettings.windowId,
                 windowId = "window-1",
             ),
-            storage.getSettingsAt(pointIndex),
+            storage.getSettingsAt(compactionIndex),
         )
-        assertEquals(0L, storage.getTokenCountAt(pointIndex).totalTokens)
-        assertEquals(pointIndex, storage.floorToIndex(outputIndex, AgentCommitType.TokenCountTypes))
-        assertEquals(timestamp(10), storage.getTimestampExact(outputIndex))
-        assertEquals(outputIndex, storage.latestIndex())
+        assertEquals(0L, storage.getLlmRequestMetaAtOrNull(compactionIndex)?.totalTokens)
+        assertEquals(compactionIndex, storage.getCommitAtOrBefore(compactionIndex, AgentCommitType.TokenCountTypes)?.index)
+        assertEquals(timestamp(10), storage.getCommitExact(compactionIndex)?.createdAt)
+        assertEquals(compactionIndex, storage.latestIndex())
     }
 }

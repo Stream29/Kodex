@@ -8,16 +8,12 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.ceilToIndex
-import io.github.stream29.kodex.agentstorage.contract.floorToIndex
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrAfter
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
+import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
-import io.github.stream29.kodex.agentstorage.contract.getTokenCountAt
-import io.github.stream29.kodex.agentstorage.contract.getUnstableAt
-import io.github.stream29.kodex.agentstorage.contract.getWorkEventAt
-import io.github.stream29.kodex.agentstorage.contract.latestIndexOf
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.app.migration.KodexHomeMigrations
 import io.github.stream29.kodex.app.migration.MigrationVersion
 import io.github.stream29.kodex.app.migration.prepareKodexHome
@@ -67,7 +63,10 @@ public val migrateToV0_7_0Test by testSuite {
                 prepareKodexHome(home, MigrationVersion("0.7.0"), KodexHomeMigrations, fs) { _, target ->
                     activated += target
                 }.useHandle { handle -> assertEquals(MigrationVersion("0.7.0"), handle.version) }
-                assertEquals(KodexHomeMigrations.map { it.toVersion }, activated)
+                assertEquals(
+                    KodexHomeMigrations.filter { it.toVersion <= MigrationVersion("0.7.0") }.map { it.toVersion },
+                    activated,
+                )
                 assertEquals("\"0.7.0\"", fs.readString(Path(home, "version.json")))
                 database(home) { db ->
                     val token = db.query("SELECT payload_json FROM agent_commits WHERE type='token_count_legacy'").single().single() as String
@@ -122,18 +121,18 @@ public val migrateToV0_7_0Test by testSuite {
                     val storage = repository.open(2).storage
                     assertEquals(fs.resolve(Path(home, "sessions", "2")).toStorageUri(), storage.uri)
                     assertEquals("migration", checkNotNull(storage.getSettingsAt(7)).threadName)
-                    assertEquals(Instant.parse("2026-10-25T12:00:07.987654321Z"), storage.getTimestampExact(7))
-                    assertEquals(OpenAiJsonCodec.decodeFromString(CleanIndexEntry.serializer(), Index), storage.getIndexEntryAt(7))
-                    assertEquals(OpenAiJsonCodec.decodeFromString(StableWorkEvent.serializer(), Work), storage.getWorkEventAt(7))
-                    assertEquals(OpenAiJsonCodec.decodeFromString(TokenCountSnapshot.Response.serializer(), TokenCount), storage.getTokenCountAt(7))
-                    assertEquals(OpenAiJsonCodec.decodeFromString(ListSerializer(UnstableCleanEvent.serializer()), Unstable), storage.getUnstableAt(7))
-                    assertNull(storage.getIndexEntryExact(6))
-                    assertEquals(0, storage.floorToIndex(6, AgentCommitType.IndexTypes))
-                    assertEquals(7, storage.ceilToIndex(6, AgentCommitType.IndexTypes))
-                    assertEquals(Instant.parse("2026-10-25T12:00:00.123456789Z"), repository.readCreatedAt(2))
-                    assertEquals(storage.getTimestampExact(7), repository.readUpdatedAt(2))
-                    assertNull(repository.readCreatedAt(15))
-                    assertEquals(-1, repository.open(15).storage.latestIndexOf(AgentCommitType.SettingsTypes))
+                    assertEquals(Instant.parse("2026-10-25T12:00:07.987654321Z"), storage.getCommitExact(7)?.createdAt)
+                    assertEquals(OpenAiJsonCodec.decodeFromString(CleanIndexEntry.serializer(), Index), storage.getCommitAtOrBefore(7, AgentCommitType.IndexTypes)?.commit)
+                    assertEquals(OpenAiJsonCodec.decodeFromString(StableWorkEvent.serializer(), Work), storage.getCommitAtOrBefore(7, AgentCommitType.WorkTypes)?.commit)
+                    assertEquals(OpenAiJsonCodec.decodeFromString(TokenCountSnapshot.Response.serializer(), TokenCount), storage.getLlmRequestMetaAtOrNull(7))
+                    assertEquals(OpenAiJsonCodec.decodeFromString(ListSerializer(UnstableCleanEvent.serializer()), Unstable), storage.getUnstableAtOrNull(7))
+                    assertNull(storage.getCommitExact(6, AgentCommitType.IndexTypes))
+                    assertEquals(0, storage.getCommitAtOrBefore(6, AgentCommitType.IndexTypes)?.index)
+                    assertEquals(7, storage.getCommitAtOrAfter(6, AgentCommitType.IndexTypes)?.index)
+                    assertEquals(Instant.parse("2026-10-25T12:00:00.123456789Z"), repository.getEntry(2).createdAt)
+                    assertEquals(storage.getCommitExact(7)?.createdAt, repository.getEntry(2).lastActivityAt)
+                    assertNull(repository.getEntry(15).createdAt)
+                    assertNull(repository.open(15).storage.getCommitAtOrBefore(Int.MAX_VALUE, AgentCommitType.SettingsTypes))
                 }
             }
             assertEquals(before, snapshot(home).filterKeys { it != "kodex.db" })

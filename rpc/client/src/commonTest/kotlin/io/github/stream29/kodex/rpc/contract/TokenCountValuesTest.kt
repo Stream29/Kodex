@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.rpc.contract
 
 import de.infix.testBalloon.framework.core.testSuite

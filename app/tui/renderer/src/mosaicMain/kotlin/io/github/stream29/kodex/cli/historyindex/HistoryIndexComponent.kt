@@ -33,7 +33,6 @@ import com.jakewharton.mosaic.ui.unit.IntSize
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryKind
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexReadState
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.cli.components.EllipsizedText
 import io.github.stream29.kodex.cli.components.formatPopupTimestamp
@@ -100,12 +99,12 @@ public actual fun HistoryIndexSidebarBody(
 
 @Composable
 public actual fun HistoryIndexRowContent(
-    state: HistoryIndexReadState<HistoryIndexEntry>,
+    entry: HistoryIndexEntry,
     graph: String,
     hovered: Boolean,
     pressed: Boolean,
 ) {
-    val presentation = historyIndexRowPresentation(state, HistoryIndexRowPosition.Single) ?: return
+    val presentation = historyIndexRowPresentation(entry, HistoryIndexRowPosition.Single)
     MosaicHistoryIndexRowText(presentation, hovered, pressed, graph)
 }
 
@@ -152,13 +151,13 @@ public actual fun BoxScope.HistoryIndexHoverContent(
     anchor: TuiPopupAnchor,
     side: HistoryIndexSide,
     pointerPosition: IntOffset?,
-    state: HistoryIndexReadState<HistoryIndexEntryDetail>,
+    detail: HistoryIndexEntryDetail,
     contentColumns: Int,
     contentRows: Int,
     onHoverChanged: (Boolean) -> Unit,
 ) {
     if (contentColumns <= 0 || contentRows <= 0) return
-    val presentation = historyIndexDetailPresentation(state) ?: return
+    val presentation = historyIndexDetailPresentation(detail)
     HistoryIndexHoverSurface(
         anchor, side, pointerPosition, presentation.title, presentation.content, contentColumns, contentRows, presentation.questionRows,
         if (presentation.failed) TuiTheme.colorScheme.error else TuiTheme.colorScheme.onSurface,

@@ -328,12 +328,10 @@ private suspend fun historyGeometryModel(
     val stored = InMemoryKodexAgentStorage.empty()
     for (index in 1..count) {
         stored.commit(
-            listOf(
-                StableUserMessage(listOf(ContentItem.InputText(
-                    if (index == count && newestText != null) newestText else "Geometry message $index",
-                ))),
-                CommitTimestamp(Instant.fromEpochMilliseconds(index * 1_000L)),
-            ),
+            StableUserMessage(listOf(ContentItem.InputText(
+                if (index == count && newestText != null) newestText else "Geometry message $index",
+            ))),
+            timestamp = Instant.fromEpochMilliseconds(index * 1_000L),
         )
     }
     val owner = CoroutineScope(currentCoroutineContext() + Job(currentCoroutineContext()[Job]))

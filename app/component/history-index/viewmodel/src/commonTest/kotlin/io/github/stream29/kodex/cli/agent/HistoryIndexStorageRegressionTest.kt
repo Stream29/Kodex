@@ -1,9 +1,11 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.cli.agent
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
@@ -13,7 +15,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSub
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
@@ -48,21 +49,24 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.time.Duration.Companion.seconds
 
 val historyIndexViewModelTest by testSuite {
     test("only exact Message timestamps are exposed and replacement invalidates requests") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test")))
         val time = kotlin.time.Instant.parse("2026-09-08T01:02:03Z")
-        storage.commit(StableUserMessage(listOf(ContentItem.InputText("message"))))
-        storage.commit(CleanCompactionPoint)
+        storage.commit(StableUserMessage(listOf(ContentItem.InputText("message"))), kotlin.time.Instant.DISTANT_PAST)
+        storage.commit(StableContextCompaction(encryptedContent = "enc"), kotlin.time.Instant.DISTANT_PAST)
         val latest = MutableStateFlow(2)
         val state = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty)
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
         val model = storageIndex(storage, latest, state, scope)
         try {
-            val generation = model.awaitIndexes(listOf(1, 2)).generation
-            assertEquals(null, model.readMessageTimestamp(generation, 1))
+            val initialWindow = model.awaitIndexes(listOf(1, 2))
+            assertNull(assertNotNull(initialWindow.entryAtOrNull(1)).messageTimestamp)
             storage.revert(1)
             storage.commit(
                 listOf(
@@ -72,18 +76,23 @@ val historyIndexViewModelTest by testSuite {
             )
             storage.commit(
                 listOf(
-                    CleanCompactionPoint,
+                    StableContextCompaction(encryptedContent = "enc"),
                     CommitTimestamp(time + 2.seconds),
                 ),
             )
-            assertEquals(time + 1.seconds, model.readMessageTimestamp(generation, 1))
-            assertEquals(null, model.readMessageTimestamp(generation, 2))
+            state.value = KodexAgentStateValue.ExternalWrite
+            state.value = KodexAgentStateValue.Empty
+            val refreshed = withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(5.seconds) {
+                    model.window.first { it.revision > initialWindow.revision }
+                }
+            }
+            assertEquals(time + 1.seconds, assertNotNull(refreshed.entryAtOrNull(1)).messageTimestamp)
+            assertNull(assertNotNull(refreshed.entryAtOrNull(2)).messageTimestamp)
             storage.revert(1)
             latest.value = 0
             model.awaitIndexes(emptyList())
-            kotlin.test.assertFailsWith<HistoryIndexLoadException> {
-                model.readMessageTimestamp(generation, 1)
-            }
+            assertFalse(model.contains(refreshed.generation, 1))
         } finally {
             scope.cancelAndJoin()
         }
@@ -107,11 +116,11 @@ val historyIndexViewModelTest by testSuite {
         )
         try {
             val window = model.awaitIndexes(listOf(1))
-            assertEquals(HistoryIndexEntryKind.SuggestSubagents, model.load(window.generation, 1).kind)
-            assertEquals("suggest subagents", model.load(window.generation, 1).summary)
-            val detail = model.loadDetail(window.generation, 1)
-            assertEquals("suggest subagents", detail.content)
-            assertEquals(null, detail.requestUserInput)
+            val entry = assertNotNull(window.entryAtOrNull(1))
+            assertEquals(HistoryIndexEntryKind.SuggestSubagents, entry.kind)
+            assertEquals("suggest subagents", entry.summary)
+            assertEquals("suggest subagents", entry.detail.content)
+            assertEquals(null, entry.detail.requestUserInput)
         } finally {
             scope.cancelAndJoin()
         }
@@ -147,7 +156,7 @@ val historyIndexViewModelTest by testSuite {
                 val firstWindow = viewModel.awaitIndexes(listOf(2))
                 assertEquals(
                     "question with spaces",
-                    viewModel.load(firstWindow.generation, 2).summary,
+                    assertNotNull(firstWindow.entryAtOrNull(2)).summary,
                 )
 
                 storage.commit(CommitTimestamp(kotlin.time.Instant.DISTANT_PAST))
@@ -161,11 +170,11 @@ val historyIndexViewModelTest by testSuite {
                 val appended = viewModel.awaitIndexes(listOf(2, 5))
                 assertEquals(
                     HistoryIndexEntryKind.UserMessage,
-                    viewModel.load(appended.generation, 2).kind,
+                    assertNotNull(appended.entryAtOrNull(2)).kind,
                 )
                 assertEquals(
                     HistoryIndexEntryKind.AssistantFinal,
-                    viewModel.load(appended.generation, 5).kind,
+                    assertNotNull(appended.entryAtOrNull(5)).kind,
                 )
 
                 storage.revert(4)
@@ -186,7 +195,7 @@ val historyIndexViewModelTest by testSuite {
                 val refreshed = viewModel.awaitGenerationAtLeast(13)
                 assertEquals(
                     "rewritten",
-                    viewModel.load(refreshed.generation, 2).summary,
+                    assertNotNull(refreshed.entryAtOrNull(2)).summary,
                 )
             } finally {
                 childScope.cancelAndJoin()
@@ -201,7 +210,7 @@ val historyIndexViewModelTest by testSuite {
             )
             val latestIndex = MutableStateFlow(8)
             val agentState = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty)
-            storage.commit(CleanCompactionPoint)
+            storage.commit(StableContextCompaction(encryptedContent = "enc"))
             storage.commit(
                 StableDeveloperMessage(
                     content = listOf(
@@ -288,34 +297,33 @@ val historyIndexViewModelTest by testSuite {
             )
             try {
                 val window = viewModel.awaitIndexes((1..8).toList())
-                val generation = window.generation
-                assertEquals("Context compacted", viewModel.load(generation, 1).summary)
-                assertEquals("developer[image]", viewModel.load(generation, 2).summary)
+                assertEquals("Context compacted", assertNotNull(window.entryAtOrNull(1)).summary)
+                assertEquals("developer[image]", assertNotNull(window.entryAtOrNull(2)).summary)
                 assertEquals(
                     "private[encrypted content]",
-                    viewModel.load(generation, 3).summary,
+                    assertNotNull(window.entryAtOrNull(3)).summary,
                 )
-                assertEquals("Enter token", viewModel.load(generation, 4).summary)
-                assertEquals("current", viewModel.load(generation, 5).summary)
-                assertEquals("first", viewModel.load(generation, 6).summary)
-                assertEquals("[empty]", viewModel.load(generation, 7).summary)
+                assertEquals("Enter token", assertNotNull(window.entryAtOrNull(4)).summary)
+                assertEquals("current", assertNotNull(window.entryAtOrNull(5)).summary)
+                assertEquals("first", assertNotNull(window.entryAtOrNull(6)).summary)
+                assertEquals("[empty]", assertNotNull(window.entryAtOrNull(7)).summary)
                 assertEquals(
                     HistoryIndexEntryKind.AssistantMessage,
-                    viewModel.load(generation, 8).kind,
+                    assertNotNull(window.entryAtOrNull(8)).kind,
                 )
 
-                val agentDetail = viewModel.loadDetail(generation, 3).content
+                val agentDetail = assertNotNull(window.entryAtOrNull(3)).detail.content
                 assertEquals(
                     "Author: one\nRecipient: two\n\nprivate[encrypted content]",
                     agentDetail,
                 )
-                val requestDetail = viewModel.loadDetail(generation, 4).content
+                val requestDetail = assertNotNull(window.entryAtOrNull(4)).detail.content
                 assertEquals(true, requestDetail.contains("Enter token"))
                 assertEquals(true, requestDetail.contains("[hidden]"))
                 assertEquals(false, requestDetail.contains("do-not-render"))
                 assertEquals(
                     "Updated\n\n[x] done\n[>] current\n[ ] later",
-                    viewModel.loadDetail(generation, 5).content,
+                    assertNotNull(window.entryAtOrNull(5)).detail.content,
                 )
             } finally {
                 childScope.cancelAndJoin()

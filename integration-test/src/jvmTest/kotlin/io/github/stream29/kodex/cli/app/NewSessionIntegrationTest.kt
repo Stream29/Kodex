@@ -363,10 +363,11 @@ val newSessionIntegrationTest by testSuite(compartment = { TestCompartment.RealT
                     if (stage == "append-reply") {
                         val index = catalog.single().sessionIndex
                         val message = assertIs<StableUserMessage>(
-                            services.storage.getCommitsIn(
+                            services.storage.getFirstCommitsIn(
                                 index,
                                 services.storage.getCacheNonce(index),
-                                0..1,
+                                0,
+                                1,
                                 io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.IndexTypes,
                             ).last().commit,
                         )
@@ -696,10 +697,11 @@ private class IntegrationGate {
 
 private suspend fun BoundaryRoot.firstMessage(session: PersistedSessionViewModel): StableUserMessage =
     assertIs<StableUserMessage>(
-        services.storage.getCommitsIn(
+        services.storage.getFirstCommitsIn(
             session.sessionIndex,
             services.storage.getCacheNonce(session.sessionIndex),
-            0..1,
+            0,
+            1,
             io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.IndexTypes,
         ).last().commit,
     )

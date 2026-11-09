@@ -7,12 +7,14 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.reactivecircus.cache4k.FakeTimeSource
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.ceilToIndex
-import io.github.stream29.kodex.agentstorage.contract.floorToIndex
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryAt
-import io.github.stream29.kodex.agentstorage.contract.getIndexEntryExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrAfter
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
@@ -67,16 +69,16 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
             val view = backgroundScope.rpcCachedAgentStorage(7, backend)
             assertEquals(probeCommit("two"), view.getIndexEntryAt(4))
             assertEquals(null, view.getIndexEntryExact(4))
-            assertEquals(2, view.floorToIndex(4, AgentCommitType.IndexTypes))
-            assertEquals(5, view.ceilToIndex(4, AgentCommitType.IndexTypes))
-            assertEquals(null, view.floorToIndex(-1, AgentCommitType.IndexTypes))
-            assertEquals(null, view.ceilToIndex(6, AgentCommitType.IndexTypes))
-            assertEquals(listOf(2, 5), view.indexesIn(1..5, AgentCommitType.IndexTypes))
+            assertEquals(2, view.getCommitAtOrBefore(4, AgentCommitType.IndexTypes)?.index)
+            assertEquals(5, view.getCommitAtOrAfter(4, AgentCommitType.IndexTypes)?.index)
+            assertEquals(null, view.getCommitAtOrBefore(-1, AgentCommitType.IndexTypes)?.index)
+            assertEquals(null, view.getCommitAtOrAfter(6, AgentCommitType.IndexTypes)?.index)
+            assertEquals(2, view.countCommitsIn(1..5, AgentCommitType.IndexTypes))
             assertEquals(
                 listOf(IndexedAgentCommit(2, probeCommit("two")), IndexedAgentCommit(5, probeCommit("five"))),
                 view.getCommitsIn(1..5, AgentCommitType.IndexTypes),
             )
-            assertEquals(emptyList(), view.indexesIn(5..4, AgentCommitType.IndexTypes))
+            assertEquals(0, view.countCommitsIn(5..4, AgentCommitType.IndexTypes))
             assertEquals(emptyList(), view.getCommitsIn(5..4, AgentCommitType.IndexTypes))
             assertFailsWith<IllegalArgumentException> { view.getIndexEntryAt(-1) }
             assertEquals(probeCommit("zero"), view.getIndexEntryExact(0))
@@ -109,17 +111,17 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
             val view = backgroundScope.rpcCachedAgentStorage(7, backend)
             assertEquals(probeCommit("five"), view.getIndexEntryAt(10))
             assertEquals(null, view.getIndexEntryExact(10))
-            assertEquals(5, view.floorToIndex(10, AgentCommitType.IndexTypes))
-            assertEquals(null, view.ceilToIndex(6, AgentCommitType.IndexTypes))
-            assertEquals(emptyList(), view.indexesIn(6..10, AgentCommitType.IndexTypes))
+            assertEquals(5, view.getCommitAtOrBefore(10, AgentCommitType.IndexTypes)?.index)
+            assertEquals(null, view.getCommitAtOrAfter(6, AgentCommitType.IndexTypes)?.index)
+            assertEquals(0, view.countCommitsIn(6..10, AgentCommitType.IndexTypes))
             assertEquals(emptyList(), view.getCommitsIn(6..10, AgentCommitType.IndexTypes))
             backend.entries.value += 8 to listOf(probeCommit("eight"))
             backend.latest.value = 8
             runCurrent()
             assertEquals(probeCommit("eight"), view.getIndexEntryAt(10))
-            assertEquals(8, view.floorToIndex(10, AgentCommitType.IndexTypes))
-            assertEquals(8, view.ceilToIndex(6, AgentCommitType.IndexTypes))
-            assertEquals(listOf(8), view.indexesIn(6..10, AgentCommitType.IndexTypes))
+            assertEquals(8, view.getCommitAtOrBefore(10, AgentCommitType.IndexTypes)?.index)
+            assertEquals(8, view.getCommitAtOrAfter(6, AgentCommitType.IndexTypes)?.index)
+            assertEquals(1, view.countCommitsIn(6..10, AgentCommitType.IndexTypes))
             assertEquals(
                 listOf(IndexedAgentCommit(8, probeCommit("eight"))),
                 view.getCommitsIn(6..10, AgentCommitType.IndexTypes),
@@ -144,7 +146,7 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
         }
     }
 
-    for (method in listOf("exact", "values", "first", "last", "indexes")) {
+    for (method in listOf("exact", "values", "first", "last", "count")) {
         test("late $method result is rejected without repopulating the new nonce cache") {
             runTest {
                 val backend = TimelineProbeImpl()
@@ -464,7 +466,10 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
                 ownerJob.cancelAndJoin()
                 backend.subscriptions.first { it == 0 }
                 assertFailsWith<CancellationException> { view.getIndexEntryExact(0) }
-                assertEquals(listOf(probeCommit("new")), rpc.getCommitsExact(7, 18, 2, AgentCommitType.IndexTypes))
+                assertEquals(
+                    listOf(probeCommit("new")),
+                    rpc.getFirstCommitsIn(7, 18, 2, 2, AgentCommitType.IndexTypes).map { it.commit },
+                )
             } finally {
                 ownerJob.cancelAndJoin()
             }
@@ -497,10 +502,18 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
 }
 
 private suspend fun ObservableKodexAgentStorage.readUsing(method: String): Any? = when (method) {
-    "exact" -> getCommitsExact(0)
+    "exact" -> getCommitExact(0)
     "values" -> getCommitsIn(0..5)
     "first" -> getFirstCommitsIn(0..5, limit = 1)
     "last" -> getLastCommitsIn(0..5, limit = 1)
-    "indexes" -> indexesIn(0..5)
+    "count" -> countCommitsIn(0..5)
     else -> error("Unexpected method")
+}
+
+private suspend fun KodexAgentStorage.getIndexEntryExact(index: Int): CleanIndexEntry? =
+    getCommitExact(index, AgentCommitType.IndexTypes)?.commit as? CleanIndexEntry
+
+private suspend fun KodexAgentStorage.getIndexEntryAt(index: Int): CleanIndexEntry {
+    require(index >= 0) { "Index $index must be non-negative." }
+    return requireNotNull(getCommitAtOrBefore(index, AgentCommitType.IndexTypes)?.commit as? CleanIndexEntry)
 }

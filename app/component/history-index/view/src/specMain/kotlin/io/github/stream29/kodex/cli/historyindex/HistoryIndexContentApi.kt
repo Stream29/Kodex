@@ -55,12 +55,12 @@ public data class HistoryIndexDetailPresentation(
 )
 
 public expect fun historyIndexRowPresentation(
-    state: HistoryIndexReadState<HistoryIndexEntry>, position: HistoryIndexRowPosition,
-): HistoryIndexRowPresentation?
+    entry: HistoryIndexEntry, position: HistoryIndexRowPosition,
+): HistoryIndexRowPresentation
 
 public expect fun historyIndexDetailPresentation(
-    state: HistoryIndexReadState<HistoryIndexEntryDetail>,
-): HistoryIndexDetailPresentation?
+    detail: HistoryIndexEntryDetail,
+): HistoryIndexDetailPresentation
 
 public interface HistoryIndexListScope {
     public fun Rows(window: HistoryIndexWindow, content: @Composable (index: Int) -> Unit)

@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.rpc.client
 
 import io.github.reactivecircus.cache4k.Cache
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
@@ -120,8 +119,7 @@ private val SingleCommitCategorySets: Set<Set<AgentCommitType>> = setOf(
     AgentCommitType.IndexEventTypes,
     AgentCommitType.WorkTypes,
     AgentCommitType.SettingsTypes,
-    AgentCommitType.TimestampTypes,
-    AgentCommitType.TokenCountTypes,
+    AgentCommitType.LlmRequestMetaTypes,
     AgentCommitType.UnstableTypes,
 )
 
@@ -137,7 +135,7 @@ private class RpcCachedAgentStorage(
 ) : ObservableKodexAgentStorage {
     private val mutex = Mutex()
     private var valuesNonce: Long? = null
-    private val values = Cache.Builder<ExactCacheKey, List<AgentCommit>>()
+    private val values = Cache.Builder<ExactCacheKey, List<IndexedAgentCommit>>()
         .maximumCacheSize(valueCacheSize.toLong())
         .expireAfterAccess(60.seconds)
         .timeSource(timeSource)
@@ -160,45 +158,15 @@ private class RpcCachedAgentStorage(
 
     override suspend fun latestIndex(): Int = cached { latestIndexFlow.value }
 
-    override suspend fun indexesIn(
+    override suspend fun countCommitsIn(
         range: IntRange,
         types: Set<AgentCommitType>,
-    ): List<Int> {
+    ): Int {
         val nonce = cached { it }
-        val result = remote { rpc.indexesIn(sessionIndex, nonce, range.first, range.last, types) }
+        val result = remote {
+            rpc.countCommitsIn(sessionIndex, nonce, range.first, range.last, types)
+        }
         return cached(nonce) { result }
-    }
-
-    override suspend fun getCommitsExact(
-        index: Int,
-        types: Set<AgentCommitType>,
-    ): List<AgentCommit> {
-        val key = ExactCacheKey(index, types)
-        val (nonce, hit) = cached { it to values.get(key) }
-        if (hit != null) return hit
-        val result = remote { rpc.getCommitsExact(sessionIndex, nonce, index, types) }
-        return cached(nonce) {
-            if (result.isNotEmpty()) {
-                values.put(key, result)
-            }
-            result
-        }
-    }
-
-    override suspend fun getCommitsIn(
-        range: IntRange,
-        types: Set<AgentCommitType>,
-    ): List<IndexedAgentCommit> {
-        val nonce = cached { it }
-        val result = remote { rpc.getCommitsIn(sessionIndex, nonce, range.first, range.last, types) }
-        return cached(nonce) {
-            result.groupBy({ it.index }, { it.commit }).forEach { (idx, commits) ->
-                if (commits.isNotEmpty()) {
-                    values.put(ExactCacheKey(idx, types), commits)
-                }
-            }
-            result
-        }
     }
 
     override suspend fun getFirstCommitsIn(
@@ -206,16 +174,14 @@ private class RpcCachedAgentStorage(
         types: Set<AgentCommitType>,
         limit: Int,
     ): List<IndexedAgentCommit> {
-        val nonce = cached { it }
+        val exactKey = ExactCacheKey(range.first, types).takeIf { range.first == range.last && limit > 0 }
+        val (nonce, hit) = cached { it to exactKey?.let(values::get) }
+        if (hit != null) return hit.take(limit)
         val result = remote {
             rpc.getFirstCommitsIn(sessionIndex, nonce, range.first, range.last, types, limit)
         }
         return cached(nonce) {
-            if (types in SingleCommitCategorySets) {
-                result.forEach { indexed ->
-                    values.put(ExactCacheKey(indexed.index, types), listOf(indexed.commit))
-                }
-            }
+            cacheResult(result, types, limit)
             result
         }
     }
@@ -225,17 +191,33 @@ private class RpcCachedAgentStorage(
         types: Set<AgentCommitType>,
         limit: Int,
     ): List<IndexedAgentCommit> {
-        val nonce = cached { it }
+        val exactKey = ExactCacheKey(range.first, types).takeIf { range.first == range.last && limit > 0 }
+        val (nonce, hit) = cached { it to exactKey?.let(values::get) }
+        if (hit != null) return hit.takeLast(limit)
         val result = remote {
             rpc.getLastCommitsIn(sessionIndex, nonce, range.first, range.last, types, limit)
         }
         return cached(nonce) {
-            if (types in SingleCommitCategorySets) {
-                result.forEach { indexed ->
-                    values.put(ExactCacheKey(indexed.index, types), listOf(indexed.commit))
+            cacheResult(result, types, limit)
+            result
+        }
+    }
+
+    private fun cacheResult(
+        result: List<IndexedAgentCommit>,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ) {
+        if (limit == Int.MAX_VALUE) {
+            result.groupBy { it.index }.forEach { (idx, commits) ->
+                if (commits.isNotEmpty()) {
+                    values.put(ExactCacheKey(idx, types), commits)
                 }
             }
-            result
+        } else if (types in SingleCommitCategorySets) {
+            result.forEach { indexed ->
+                values.put(ExactCacheKey(indexed.index, types), listOf(indexed))
+            }
         }
     }
 

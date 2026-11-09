@@ -9,10 +9,10 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
@@ -36,19 +36,30 @@ val offscreenHistoryTest by testSuite {
         val stored = InMemoryKodexAgentStorage.empty()
         for (index in 1..640) {
             stored.commit(
-                listOf(
-                    StableUserMessage(listOf(ContentItem.InputText("Offscreen history $index"))),
-                    CommitTimestamp(Instant.fromEpochMilliseconds(index * 1_000L)),
-                ),
+                StableUserMessage(listOf(ContentItem.InputText("Offscreen history $index"))),
+                timestamp = Instant.fromEpochMilliseconds(index * 1_000L),
             )
         }
         val reads = mutableListOf<Int>()
         val source = object : KodexAgentStorage by stored {
-            override suspend fun getCommitsExact(index: Int, types: Set<AgentCommitType>): List<AgentCommit> {
+            override suspend fun getFirstCommitsIn(
+                range: IntRange,
+                types: Set<AgentCommitType>,
+                limit: Int,
+            ): List<IndexedAgentCommit> = stored.getFirstCommitsIn(range, types, limit).also { result ->
                 if (types == AgentCommitType.IndexTypes) {
-                    reads += index
+                    reads += result.map { it.index }
                 }
-                return stored.getCommitsExact(index, types)
+            }
+
+            override suspend fun getLastCommitsIn(
+                range: IntRange,
+                types: Set<AgentCommitType>,
+                limit: Int,
+            ): List<IndexedAgentCommit> = stored.getLastCommitsIn(range, types, limit).also { result ->
+                if (types == AgentCommitType.IndexTypes) {
+                    reads += result.map { it.index }
+                }
             }
         }
         val owner = CoroutineScope(currentCoroutineContext() + Job(currentCoroutineContext()[Job]))
@@ -149,10 +160,8 @@ val offscreenHistoryTest by testSuite {
     test("product list shares transient order, exact prefixed scroll and destructive empty-window replacement") { offscreenTest {
         val stored = InMemoryKodexAgentStorage.empty()
         stored.commit(
-            listOf(
-                StableUserMessage(listOf(ContentItem.InputText("Committed row"))),
-                CommitTimestamp(Instant.fromEpochMilliseconds(1_000)),
-            ),
+            StableUserMessage(listOf(ContentItem.InputText("Committed row"))),
+            timestamp = Instant.fromEpochMilliseconds(1_000),
         )
         val latest = MutableStateFlow(1)
         val owner = CoroutineScope(currentCoroutineContext() + Job(currentCoroutineContext()[Job]))

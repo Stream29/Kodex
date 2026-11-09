@@ -23,7 +23,7 @@ val stableTimelineGoldenTest by testSuite {
         var retainedIndex = 0
         for (source in suggestionGoldenInputs + listOf(
             """{"type":"user_message","content":[{"type":"input_text","text":"Synthetic"}]}""",
-            """{"type":"compaction_point"}""",
+            """{"type":"context_compaction","encrypted_content":"synthetic"}""",
         )) {
             val event = OpenAiJsonCodec.decodeFromString(CleanIndexEntry.serializer(), source)
             val canonical = OpenAiJsonCodec.encodeToJsonElement(CleanIndexEntry.serializer(), event)
@@ -46,7 +46,6 @@ val stableTimelineGoldenTest by testSuite {
         // Command goldens also verified against pre-migration commit 8d4cfba7.
         for (source in listOf(
             """{"type":"text_tool_event","call_id":"tool","name":"fixture","arguments":{},"result":"OK","success":true}""",
-            """{"type":"context_compaction","encrypted_content":"synthetic"}""",
             """{"type":"command_execution_tool_event","call_id":"command","action":{"type":"exec_command","arguments":{"cmd":"echo synthetic","yield_time_ms":10000,"max_output_tokens":10000}},"result":{"type":"failure","message":"Synthetic failure"}}""",
             """{"type":"command_execution_tool_event","call_id":"command","action":{"type":"write_stdin","arguments":{"session_id":42,"chars":"","yield_time_ms":250,"max_output_tokens":10000}},"result":{"type":"output","value":{"chunk_id":"chunk","wall_time_seconds":0.5,"exit_code":0,"original_token_count":1,"output":"OK"}}}""",
         )) {

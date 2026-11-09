@@ -29,8 +29,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.IOException
 import kotlinx.io.files.Path
 import kotlin.random.Random
+import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -90,20 +92,10 @@ internal class CachedSqliteAgentStorage(
 
     override suspend fun latestIndex(): Int = backing().latestIndex()
 
-    override suspend fun indexesIn(
+    override suspend fun countCommitsIn(
         range: IntRange,
         types: Set<AgentCommitType>,
-    ): List<Int> = backing().indexesIn(range, types)
-
-    override suspend fun getCommitsExact(
-        index: Int,
-        types: Set<AgentCommitType>,
-    ): List<AgentCommit> = backing().getCommitsExact(index, types)
-
-    override suspend fun getCommitsIn(
-        range: IntRange,
-        types: Set<AgentCommitType>,
-    ): List<IndexedAgentCommit> = backing().getCommitsIn(range, types)
+    ): Int = backing().countCommitsIn(range, types)
 
     override suspend fun getFirstCommitsIn(
         range: IntRange,
@@ -117,12 +109,24 @@ internal class CachedSqliteAgentStorage(
         limit: Int,
     ): List<IndexedAgentCommit> = backing().getLastCommitsIn(range, types, limit)
 
-    override suspend fun commit(commit: AgentCommit): Int = commit(listOf(commit))
+    @Suppress("DEPRECATION")
+    override suspend fun commit(commit: AgentCommit): Int {
+        val legacyTimestamp = (commit as? io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp)?.instant
+        return commit(listOf(commit), legacyTimestamp ?: Clock.System.now())
+    }
 
+    override suspend fun commit(commit: AgentCommit, timestamp: Instant): Int = commit(listOf(commit), timestamp)
+
+    @Suppress("DEPRECATION")
     override suspend fun commit(commits: List<AgentCommit>): Int {
+        val legacyTimestamp = (commits.firstOrNull { it is io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp } as? io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp)?.instant
+        return commit(commits, legacyTimestamp ?: Clock.System.now())
+    }
+
+    override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int {
         currentCoroutineContext().ensureActive()
         return withContext(NonCancellable) {
-            val index = backing().commit(commits)
+            val index = backing().commit(commits, timestamp)
             tail.value = index
             index
         }
@@ -148,12 +152,24 @@ internal class FileMirrorKodexAgentStorage(
     private val fileSystem: CoroutineFileSystem,
     private val mirrorQueue: SequentialMirrorQueue,
 ) : MutableKodexAgentStorage, ObservableKodexAgentStorage by delegate {
-    override suspend fun commit(commit: AgentCommit): Int = commit(listOf(commit))
+    @Suppress("DEPRECATION")
+    override suspend fun commit(commit: AgentCommit): Int {
+        val legacyTimestamp = (commit as? io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp)?.instant
+        return commit(listOf(commit), legacyTimestamp ?: Clock.System.now())
+    }
 
+    override suspend fun commit(commit: AgentCommit, timestamp: Instant): Int = commit(listOf(commit), timestamp)
+
+    @Suppress("DEPRECATION")
     override suspend fun commit(commits: List<AgentCommit>): Int {
+        val legacyTimestamp = (commits.firstOrNull { it is io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp } as? io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp)?.instant
+        return commit(commits, legacyTimestamp ?: Clock.System.now())
+    }
+
+    override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int {
         currentCoroutineContext().ensureActive()
         return withContext(NonCancellable) {
-            val index = delegate.commit(commits)
+            val index = delegate.commit(commits, timestamp)
             val encoded = commits.map { commit ->
                 commit.commitType.legacyTimelineName to commit.encodePayloadJson()
             }
@@ -183,6 +199,7 @@ internal val MirrorTimelineDirectories: List<String> = listOf(
     "settings",
     "timestamp",
     "token-count",
+    "llm-request-meta",
     "unstable",
 )
 

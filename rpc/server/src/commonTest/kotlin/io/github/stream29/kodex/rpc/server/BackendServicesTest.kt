@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestCompartment
@@ -182,7 +184,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                     AgentCommitType.TokenCountTypes,
                     AgentCommitType.UnstableTypes,
                 )) {
-                    storage.getCommitsIn(index, nonce, 0, 1, types)
+                    storage.getFirstCommitsIn(index, nonce, 0, 1, types)
                 }
                 global.archiveSession(index)
                 assertTrue(global.getSessionCatalog(false).isEmpty())
@@ -291,7 +293,13 @@ internal suspend fun withServices(
     checkAdmission: () -> Unit = {},
     block: suspend CoroutineScope.(BackendServices, ServicesTestLogin) -> Unit,
 ) = withTimeout(30.seconds) {
-    val root = Path(SystemTemporaryDirectory, "kodex-rpc-services-${Random.nextLong()}")
+    val tempDir = if (SystemTemporaryDirectory.isAbsolute) {
+        SystemTemporaryDirectory
+    } else {
+        val fallback = if (Path("C:\\").isAbsolute) Path("C:\\Temp") else Path("/tmp")
+        Path(fallback, SystemTemporaryDirectory.toString())
+    }
+    val root = Path(tempDir, "kodex-rpc-services-${Random.nextLong()}")
     val login = ServicesTestLogin()
     var clientClosed = false
     val mock = mockOpenAiClient {

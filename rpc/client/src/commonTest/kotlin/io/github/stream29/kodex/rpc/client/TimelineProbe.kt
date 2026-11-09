@@ -116,43 +116,17 @@ internal class TimelineProbeImpl : AgentStorageRpc {
         return result
     }
 
-    override suspend fun indexesIn(
+    override suspend fun countCommitsIn(
         sessionIndex: Int,
         cacheNonce: Long,
         fromInclusive: Int,
         toInclusive: Int,
         types: Set<AgentCommitType>,
-    ): List<Int> = read("indexes", sessionIndex, cacheNonce) { snapshot ->
-        if (fromInclusive > toInclusive || types.isEmpty()) return@read emptyList()
-        snapshot.entries
-            .filter { (index, commits) -> index in fromInclusive..toInclusive && commits.any { it.commitType in types } }
-            .map { it.key }
-            .sorted()
-    }
-
-    override suspend fun getCommitsExact(
-        sessionIndex: Int,
-        cacheNonce: Long,
-        index: Int,
-        types: Set<AgentCommitType>,
-    ): List<AgentCommit> = read("exact", sessionIndex, cacheNonce) { snapshot ->
-        snapshot[index].orEmpty().filter { it.commitType in types }
-    }
-
-    override suspend fun getCommitsIn(
-        sessionIndex: Int,
-        cacheNonce: Long,
-        fromInclusive: Int,
-        toInclusive: Int,
-        types: Set<AgentCommitType>,
-    ): List<IndexedAgentCommit> = read("values", sessionIndex, cacheNonce) { snapshot ->
-        if (fromInclusive > toInclusive || types.isEmpty()) return@read emptyList()
+    ): Int = read("count", sessionIndex, cacheNonce) { snapshot ->
+        if (fromInclusive > toInclusive || types.isEmpty()) return@read 0
         snapshot.entries
             .filter { it.key in fromInclusive..toInclusive }
-            .sortedBy { it.key }
-            .flatMap { (index, commits) ->
-                commits.filter { it.commitType in types }.map { IndexedAgentCommit(index, it) }
-            }
+            .sumOf { (_, commits) -> commits.count { it.commitType in types } }
     }
 
     override suspend fun getFirstCommitsIn(
@@ -162,15 +136,22 @@ internal class TimelineProbeImpl : AgentStorageRpc {
         toInclusive: Int,
         types: Set<AgentCommitType>,
         limit: Int,
-    ): List<IndexedAgentCommit> = read("first", sessionIndex, cacheNonce) { snapshot ->
-        if (fromInclusive > toInclusive || types.isEmpty() || limit <= 0) return@read emptyList()
-        snapshot.entries
-            .filter { it.key in fromInclusive..toInclusive }
-            .sortedBy { it.key }
-            .flatMap { (index, commits) ->
-                commits.filter { it.commitType in types }.map { IndexedAgentCommit(index, it) }
-            }
-            .take(limit)
+    ): List<IndexedAgentCommit> {
+        val method = when {
+            fromInclusive == toInclusive -> "exact"
+            limit == Int.MAX_VALUE -> "values"
+            else -> "first"
+        }
+        return read(method, sessionIndex, cacheNonce) { snapshot ->
+            if (fromInclusive > toInclusive || types.isEmpty() || limit <= 0) return@read emptyList()
+            snapshot.entries
+                .filter { it.key in fromInclusive..toInclusive }
+                .sortedBy { it.key }
+                .flatMap { (index, commits) ->
+                    commits.filter { it.commitType in types }.map { IndexedAgentCommit(index, it) }
+                }
+                .take(limit)
+        }
     }
 
     override suspend fun getLastCommitsIn(

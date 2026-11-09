@@ -87,7 +87,7 @@ val exactTargetCommandTest by testSuite(compartment = { TestCompartment.RealTime
             withCommandApplication {
                 val persisted = assertNotNull(application.submitNewSession(input(text)))
                 val message = assertIs<StableUserMessage>(
-                    backend.services.storage.getCommitsIn(
+                    backend.services.storage.getFirstCommitsIn(
                         persisted.sessionIndex,
                         backend.services.storage.getCacheNonce(persisted.sessionIndex),
                         0,
@@ -121,7 +121,7 @@ val exactTargetCommandTest by testSuite(compartment = { TestCompartment.RealTime
             assertEquals(later, first.composer.state.value.revision)
             first.settings.first { it.cwd == SystemTemporaryDirectory }
             val message = assertIs<StableUserMessage>(
-                backend.services.storage.getCommitsIn(
+                backend.services.storage.getFirstCommitsIn(
                     persisted.sessionIndex,
                     backend.services.storage.getCacheNonce(persisted.sessionIndex),
                     0,

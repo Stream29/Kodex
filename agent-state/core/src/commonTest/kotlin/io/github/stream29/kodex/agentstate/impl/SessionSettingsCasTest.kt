@@ -7,11 +7,9 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.floorToIndex
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.contract.getSettingsExact
-import io.github.stream29.kodex.agentstorage.contract.getTimestampAt
-import io.github.stream29.kodex.agentstorage.contract.getTimestampExact
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -28,6 +26,8 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
+import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -64,8 +64,7 @@ val sessionSettingsCasTest by testSuite {
             assertEquals(update, storage.getSettingsAt(1))
             assertEquals(old, storage.getSettingsExact(0))
             assertEquals(oldTimestamp, storage.getTimestampExact(0))
-            assertEquals(listOf(0, 1), storage.indexesIn(0..2, AgentCommitType.SettingsTypes))
-            assertEquals(listOf(0, 1), storage.indexesIn(0..2, AgentCommitType.TimestampTypes))
+            assertEquals(listOf(0, 1), storage.getCommitsIn(0..2, AgentCommitType.SettingsTypes).map { it.index })
             assertEquals(1, agent.latestIndex.value)
             assertEquals(KodexAgentStateValue.Empty, agent.state.value)
         }
@@ -74,7 +73,6 @@ val sessionSettingsCasTest by testSuite {
             val storage = casStorage()
             val agent = KodexAgentState(mockOpenAiClient(), storage)
             val current = storage.getSettingsAt(0)
-            val timestamps = storage.getCommitsIn(0..10, AgentCommitType.TimestampTypes)
 
             assertFalse(agent.compareAndSetSettings(current.copy(turnState = "stale"), current))
             assertFalse(agent.compareAndSetSettings(current.copy(threadName = "stale"), current))
@@ -83,7 +81,6 @@ val sessionSettingsCasTest by testSuite {
                 listOf(IndexedAgentCommit(0, current)),
                 storage.getCommitsIn(0..10, AgentCommitType.SettingsTypes),
             )
-            assertEquals(timestamps, storage.getCommitsIn(0..10, AgentCommitType.TimestampTypes))
             assertEquals(0, agent.latestIndex.value)
         }
 
@@ -92,11 +89,9 @@ val sessionSettingsCasTest by testSuite {
             val guarded = interceptSettingsWrites(backing) { _, _ -> error("Unexpected write") }
             val agent = KodexAgentState(mockOpenAiClient(), guarded)
             val current = backing.getSettingsAt(0)
-            val timestamps = backing.getCommitsIn(0..10, AgentCommitType.TimestampTypes)
 
             assertTrue(agent.compareAndSetSettings(current.copy(), current.copy()))
-            assertEquals(listOf(0), backing.indexesIn(0..10, AgentCommitType.SettingsTypes))
-            assertEquals(timestamps, backing.getCommitsIn(0..10, AgentCommitType.TimestampTypes))
+            assertEquals(listOf(0), backing.getCommitsIn(0..10, AgentCommitType.SettingsTypes).map { it.index })
             assertEquals(0, agent.latestIndex.value)
         }
 
@@ -121,7 +116,6 @@ val sessionSettingsCasTest by testSuite {
 
             assertEquals(listOf(true) + List(7) { false }, calls.awaitAll())
             assertEquals("name-1", backing.getSettingsAt(1).threadName)
-            assertEquals(listOf(0, 1), backing.indexesIn(0..10, AgentCommitType.TimestampTypes))
         }
 
         test("unconditional update holds the same lock and invalidates queued expect") {
@@ -311,7 +305,7 @@ val sessionSettingsCasTest by testSuite {
                 }
                 val agent = KodexAgentState(client, storage)
                 agent.appendUserMessage(listOf(ContentItem.InputText("Test settings editing.")))
-                val settingsIndex = requireNotNull(storage.floorToIndex(Int.MAX_VALUE, AgentCommitType.SettingsTypes))
+                val settingsIndex = requireNotNull(storage.getCommitAtOrBefore(Int.MAX_VALUE, AgentCommitType.SettingsTypes)?.index)
                 val current = storage.getSettingsAt(storage.latestIndex())
                 val updatedModel = OpenAiModelId("updated")
                 val update = current.copy(model = updatedModel)
@@ -355,11 +349,14 @@ private fun interceptSettingsWrites(
     backing: MutableKodexAgentStorage,
     beforeWrite: suspend (Int, KodexAgentSettings) -> Unit,
 ): MutableKodexAgentStorage = object : MutableKodexAgentStorage by backing {
-    override suspend fun commit(commits: List<AgentCommit>): Int {
+    override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int {
         val settings = commits.filterIsInstance<KodexAgentSettings>().singleOrNull()
         if (settings != null) {
             beforeWrite(backing.latestIndex() + 1, settings)
         }
-        return backing.commit(commits)
+        return backing.commit(commits, timestamp)
     }
+
+    override suspend fun commit(commits: List<AgentCommit>): Int =
+        commit(commits, Clock.System.now())
 }
