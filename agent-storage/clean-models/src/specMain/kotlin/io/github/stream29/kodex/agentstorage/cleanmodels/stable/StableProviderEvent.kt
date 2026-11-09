@@ -75,19 +75,34 @@ public data class StableImageGenerationCall(
         listOf(item)
 }
 
-/** Stable remote-compaction payload at a context-window boundary. */
+/**
+ * Self-contained remote-compaction checkpoint at a context-window boundary.
+ *
+ * Bundles the ordered [retainedItems] prefix (within the 64,000-token retention
+ * budget, including virtual [StableRequestUserInputToolEvent] items synthesized
+ * at compaction time from completed interactions) together with the encrypted
+ * compaction summary. Replaying model input starts directly from this commit
+ * without scanning earlier indices.
+ */
 @Serializable
 @SerialName("context_compaction")
 public data class StableContextCompaction(
     public val id: ResponseItemId? = null,
     @SerialName("encrypted_content")
     public val encryptedContent: String,
+    @SerialName("retained_items")
+    public val retainedItems: List<CompactionRetainedItem> = emptyList(),
 ) : StableIndexEvent {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
-        listOf(
-            ResponseItem.Compaction(
-                id = id,
-                encryptedContent = encryptedContent,
-            ),
-        )
+        buildList {
+            for (item in retainedItems) {
+                addAll(item.toResponseHistoryItems())
+            }
+            add(
+                ResponseItem.Compaction(
+                    id = id,
+                    encryptedContent = encryptedContent,
+                ),
+            )
+        }
 }

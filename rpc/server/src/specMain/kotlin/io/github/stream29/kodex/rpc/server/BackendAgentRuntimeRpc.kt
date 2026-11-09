@@ -3,7 +3,6 @@
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.ContentItem
@@ -27,6 +26,7 @@ public expect class BackendAgentRuntimeRpc(
     override suspend fun getState(sessionIndex: Int): AgentStateValue
     override fun getStateFlow(sessionIndex: Int): Flow<AgentStateValue>
     override fun currentFlow(sessionIndex: Int, nonce: Long): Flow<ResponsesStreamEvent>
+    override suspend fun submit(sessionIndex: Int, content: List<ContentItem>)
     override suspend fun appendUserMessage(sessionIndex: Int, content: List<ContentItem>): Int
     override suspend fun resume(sessionIndex: Int)
     override suspend fun forcedCompact(sessionIndex: Int): Int
@@ -39,11 +39,4 @@ public expect class BackendAgentRuntimeRpc(
     override suspend fun getRunningTurn(sessionIndex: Int): Boolean
     override fun getRunningTurnFlow(sessionIndex: Int): Flow<Boolean>
     override suspend fun cancelRunningTurn(sessionIndex: Int)
-    override suspend fun getPendingSteer(sessionIndex: Int): List<StableIndexEvent.Steerable>
-    override fun getPendingSteerFlow(sessionIndex: Int): Flow<List<StableIndexEvent.Steerable>>
-    override suspend fun compareAndSetPendingSteer(
-        sessionIndex: Int,
-        expect: List<StableIndexEvent.Steerable>,
-        update: List<StableIndexEvent.Steerable>,
-    ): Boolean
 }

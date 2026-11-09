@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.rpc.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
@@ -12,8 +11,9 @@ import kotlinx.rpc.annotations.Rpc
 /**
  * Runtime capabilities of the root Agent addressed by an existing Session index.
  *
- * Pending steer is the runtime's non-persistent queue, not a frontend composer or a history
- * snapshot. Its existing value types and ordering are preserved without a separate DTO.
+ * Pending steer is persisted in the root Agent's storage via `SteerSnapshot` and observed by
+ * the frontend directly through `AgentStorage` (`getSteerAt(latestIndex)`), while user input
+ * submission goes through [submit].
  * Access requires an active Session; otherwise it fails with SessionNotActive without
  * implicit activation. Await keepSessionAlive before access. Deactivation ends existing
  * Session-bound upstreams with SessionNotActive, requiring activation and a new subscription.
@@ -77,6 +77,20 @@ public interface AgentRuntimeRpc {
      * not the Agent; it neither requests a model retry nor renews the Session TTL.
      */
     public fun currentFlow(sessionIndex: Int, nonce: Long): Flow<ResponsesStreamEvent>
+
+    /**
+     * Submits one user message through the unified `submit` (`steer` vs `steer + resume`)
+     * state-machine extension.
+     *
+     * Persists the message into `pendingSteer` (`SteerSnapshot`), triggers automatic-title
+     * eligibility check if this is the session's first user submission, and either lets the
+     * currently active turn consume the queued steer at its next safe point (`runningTurn`
+     * occupied) or starts and awaits a new backend-owned `resume` turn (`runningTurn` idle).
+     *
+     * Accepted work belongs to the backend Agent lifetime; cancelling the caller's wait does
+     * not undo the persisted steer or cancel an accepted turn.
+     */
+    public suspend fun submit(sessionIndex: Int, content: List<ContentItem>): Unit
 
     /**
      * Appends one user message and returns its committed storage index.
@@ -242,37 +256,4 @@ public interface AgentRuntimeRpc {
      * pendingSteer, cancel history operations, close the owner or renew TTL.
      */
     public suspend fun cancelRunningTurn(sessionIndex: Int): Unit
-
-    /** Reads the initial queue; subsequent reads and CAS retries use the subscription. */
-    public suspend fun getPendingSteer(sessionIndex: Int): List<StableIndexEvent.Steerable>
-
-    /**
-     * Includes the current queue when collection begins, followed by updates, including runtime
-     * consumption. Cancelling collection neither clears the queue nor stops the Agent.
-     */
-    public fun getPendingSteerFlow(sessionIndex: Int): Flow<List<StableIndexEvent.Steerable>>
-
-    /**
-     * Compares and replaces the complete authoritative queue using list value equality.
-     *
-     * Operates on the runtime's actual pendingSteer MutableStateFlow, sharing its atomic boundary
-     * with the runtime's get-and-clear consumption, not on a separately synchronized mirror.
-     * A mismatch returns false without writing; matching equal values succeed without change.
-     * Failures resolving the Agent or performing the operation are not comparison mismatches.
-     *
-     * Success only means the queue replacement was accepted, not that its content was persisted
-     * or consumed by the model, and does not synchronize the frontend projection. After false,
-     * recompute from the latest subscribed queue; cancellable, paced retries are allowed even
-     * without an observed change. Do not poll Get, spin, or bypass the atomic comparison to
-     * restore consumed content. A failed transport does not establish whether replacement
-     * occurred and must not cause blind replay.
-     *
-     * An empty update clears queued steer, not pending tool calls. This is not an append-history,
-     * submit or resume command and does not renew the Session retention deadline.
-     */
-    public suspend fun compareAndSetPendingSteer(
-        sessionIndex: Int,
-        expect: List<StableIndexEvent.Steerable>,
-        update: List<StableIndexEvent.Steerable>,
-    ): Boolean
 }

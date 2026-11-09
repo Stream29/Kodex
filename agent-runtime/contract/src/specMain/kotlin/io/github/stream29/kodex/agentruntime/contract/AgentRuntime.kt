@@ -1,12 +1,13 @@
 package io.github.stream29.kodex.agentruntime.contract
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
+import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecClient
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** Thrown when resume or explicit compaction attempts to enter an occupied runtime turn. */
@@ -17,21 +18,20 @@ public class ConcurrentAgentRuntimeResumeException : IllegalStateException(
 /**
  * A fully composed Agent runtime for one Session.
  *
- * It retains the [ResumableAgentLayer] state operations while coordinating
- * one outer turn at a time. Pending steer is host-visible input for the
- * current logical turn; responding runtime layers claim it only at their own
- * legal insertion boundaries. The unified-exec client belongs to the
+ * It retains the [ResumableAgentLayer] state operations (including [steer] and
+ * [consumeSteer] delegated to [storage]) while coordinating one outer turn at
+ * a time. Responding runtime layers observe [latestIndex] and [storage] to
+ * preempt in-flight model requests when steer is queued and call [consumeSteer]
+ * only at legal insertion boundaries. The unified-exec client belongs to the
  * Session and is shared by both shell tools and observers.
  *
- * @property pendingSteer Pending clean input for the current logical turn. An
- * empty list means that no steer is waiting.
  * @property runningTurn The calling Job currently executing [resume] or explicit
  * [compact], or `null` when this runtime has no active turn. Automatic compaction
  * stays inside its existing resume turn. The slot remains occupied through cleanup
  * and is distinct from the owning Session's lifecycle Job. Recording the calling
  * Job does not itself detach execution from the caller's lifetime.
  * @property unifiedExecToolClient The session-scoped [UnifiedExecClient] shared
- * by this runtime's `exec_command` and `write_stdin` tools.
+ * by this runtime's terminal tools.
  */
 public interface AgentRuntime : ResumableAgentLayer {
     /**
@@ -63,9 +63,32 @@ public interface AgentRuntime : ResumableAgentLayer {
         phase: CompactionPhase,
     ): Int
 
-    public val pendingSteer: MutableStateFlow<List<StableIndexEvent.Steerable>>
-
     public val runningTurn: StateFlow<Job?>
 
     public val unifiedExecToolClient: UnifiedExecClient
+}
+
+/**
+ * Unified input submission extension over the Agent state machine and runtime.
+ *
+ * Persists [events] into `SteerSnapshot` via [AgentRuntime.steer].
+ * When [AgentRuntime.runningTurn] is currently occupied, the active turn
+ * observes the storage update via [AgentRuntime.latestIndex], preempts any
+ * in-flight model stream, and consumes the queued steer via
+ * [AgentRuntime.consumeSteer] at the next legal boundary (`steer` only).
+ * When [AgentRuntime.runningTurn] is idle (`null`), this extension starts
+ * [AgentRuntime.resume] (`steer + resume`), which consumes the persisted steer
+ * at turn entry and runs the turn to completion. If another caller claims
+ * [AgentRuntime.runningTurn] concurrently after [AgentRuntime.steer] commits,
+ * that active turn will consume the persisted steer so
+ * [ConcurrentAgentRuntimeResumeException] is treated as benign handoff.
+ */
+public expect suspend fun AgentRuntime.submit(events: List<StableIndexEvent.Steerable>)
+
+/**
+ * Convenience wrapper around [submit] for a single user message.
+ */
+public suspend fun AgentRuntime.submitUserMessage(content: List<ContentItem>) {
+    if (content.isEmpty()) return
+    submit(listOf(StableUserMessage(content)))
 }

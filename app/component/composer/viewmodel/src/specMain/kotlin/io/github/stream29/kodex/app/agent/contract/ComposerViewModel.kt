@@ -180,35 +180,17 @@ public sealed interface ComposerSubmissionResult {
 }
 
 /**
- * Narrow port for the non-running submit command.
+ * Unified port for submitting user input to the exact Agent or New Session owner.
  *
- * Implementations bind [ownerId] to the exact Agent/New Session instance. They must not perform
- * a current-owner lookup, retry, compensation or backend rollback.
- * Normal return means the append really completed; an unavailable draft-only owner must reject
- * the call instead of reporting success without persisting anything.
+ * Implementations bind [ownerId] to the exact Agent/New Session instance and delegate to
+ * the backend's unified `submit` (`steer` when running, `steer + resume` when idle).
  *
  * @throws CancellationException when the caller or owner cancels the operation.
- * @throws Exception when persistence fails; the component reports the failure without claiming
- * that no append occurred.
+ * @throws Exception when submission fails; the component reports the failure without claiming
+ * that no persistence occurred.
  */
 public fun interface ComposerSubmitPort {
     public suspend fun submit(
-        ownerId: ComposerOwnerId,
-        content: List<ContentItem>,
-    ): Unit
-}
-
-/**
- * Narrow port for the running-Agent steer command.
- *
- * Normal return means the exact runtime accepted the pending message, not that it was persisted.
- * Rejection/failure must throw; there is no single-case receipt wrapper to manufacture success.
- *
- * @throws CancellationException when the caller or owner cancels the operation.
- * @throws Exception when the exact owner rejects or fails the command.
- */
-public fun interface ComposerSteerPort {
-    public suspend fun steer(
         ownerId: ComposerOwnerId,
         content: List<ContentItem>,
     ): Unit
@@ -227,23 +209,6 @@ public fun interface ComposerSteerPort {
  */
 public fun interface ComposerCancellationPort {
     public fun cancel(ownerId: ComposerOwnerId): Unit
-}
-
-/**
- * Resume port used only after a normal submit has persisted its user message.
- *
- * It receives the captured owner identity even if the child was closed or replaced while the
- * accepted operation completed; it never resolves a different current owner.
- * A host may admit asynchronous resume in its fixed owner scope. Normal admission does not
- * promise execution success: ordinary completion failures use that owner's existing failure
- * outlet, while cancellation propagates within the command and invalidation still belongs to
- * the binding. The caller's subsequent cancellation must not cancel admitted owner work.
- *
- * @throws CancellationException when the exact owner rejects the cancellation context.
- * @throws Exception when synchronous admission or resuming the exact owner fails.
- */
-public fun interface ComposerResumePort {
-    public fun resume(ownerId: ComposerOwnerId): Unit
 }
 
 /** Backend observations used to choose Running/Steer branches; no command authority is exposed. */
@@ -278,9 +243,7 @@ public fun interface ComposerFailureReporter {
 public interface ComposerDependencies {
     public val runtime: ComposerRuntimePort
     public val submit: ComposerSubmitPort
-    public val steer: ComposerSteerPort
     public val cancellation: ComposerCancellationPort
-    public val resume: ComposerResumePort
     public val requestInput: ComposerRequestInputPort
     public val failures: ComposerFailureReporter
 }

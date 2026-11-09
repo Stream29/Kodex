@@ -5,8 +5,12 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.contract.ext.appendSteer
+import io.github.stream29.kodex.agentstorage.contract.ext.consumeSteerQueue
 import kotlin.time.Clock
 import kotlin.time.Instant
 
@@ -82,8 +86,30 @@ public interface MutableKodexAgentStorage : KodexAgentStorage {
         timestamp: Instant,
     ): Int
 
-    /** Removes every commit across all types at or after [untilExclusive]. */
+    /**
+     * Removes every commit across all types at or after [untilExclusive], and clears any
+     * remaining unconsumed [SteerSnapshot] state so historical steer does not reappear.
+     */
     public suspend fun revert(untilExclusive: Int)
+
+    /**
+     * Appends [events] to the persisted [SteerSnapshot] queue and returns the committed index.
+     *
+     * An empty [events] list is a no-op and returns [latestIndex].
+     */
+    public suspend fun steer(events: List<StableIndexEvent.Steerable>): Int =
+        appendSteer(events)
+
+    /**
+     * Atomically consumes all currently queued [SteerSnapshot] events into the stable timeline.
+     *
+     * Returns an empty list without writing when the current steer queue is empty. When non-empty,
+     * commits the queued [StableIndexEvent.Steerable] events (rotating `turnId` in
+     * [KodexAgentSettings] when a user message starts a new turn) together with an empty
+     * `SteerSnapshot(emptyList())`, and returns the consumed events in order.
+     */
+    public suspend fun consumeSteer(): List<StableIndexEvent.Steerable> =
+        consumeSteerQueue()
 }
 
 /** Validates that [commits] is non-empty and contains at most one commit per timeline family. */
@@ -159,3 +185,11 @@ public suspend fun KodexAgentStorage.getUnstableAtOrNull(index: Int): List<Unsta
     require(index >= 0) { "Index $index must be non-negative." }
     return (getCommitAtOrBefore(index, AgentCommitType.UnstableTypes)?.commit as? UnstableSnapshot)?.events
 }
+
+public suspend fun KodexAgentStorage.getSteerAtOrNull(index: Int): List<StableIndexEvent.Steerable>? {
+    require(index >= 0) { "Index $index must be non-negative." }
+    return (getCommitAtOrBefore(index, AgentCommitType.SteerTypes)?.commit as? SteerSnapshot)?.events
+}
+
+public suspend fun KodexAgentStorage.getSteerAt(index: Int): List<StableIndexEvent.Steerable> =
+    getSteerAtOrNull(index) ?: emptyList()

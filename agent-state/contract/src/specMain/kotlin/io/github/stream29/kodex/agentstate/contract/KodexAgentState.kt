@@ -231,15 +231,18 @@ public interface KodexAgentState : CoroutineScope {
 
     /**
      * Requests one server-side context compaction using the specified runtime
-     * policy metadata and returns the index that publishes its checkpoint.
+     * policy metadata and returns the index that publishes its self-contained
+     * checkpoint.
      *
      * The request and committed checkpoint retain the current persisted turn
      * identity. Runtime owns the decision to call this operation automatically.
      * Compaction retains logical ownership while releasing the write queue
      * during its remote wait. The remote request uses its initial settings and
      * history snapshot. Under the same write boundary, checkpoint creation
-     * reads the latest persisted settings, preserving updates accepted during
-     * the wait and advancing only the existing context-window lineage.
+     * reads the latest persisted settings, computes the bounded `retainedItems`
+     * prefix (including any external completed `ask_user` items merged by
+     * completion index), and commits a self-contained `StableContextCompaction`
+     * while advancing only the existing context-window lineage.
      * Delegate failures propagate; final state recovery is non-cancellable.
      *
      * @throws KodexAgentStateInvalidTransitionException when compaction is not legal.
@@ -252,6 +255,36 @@ public interface KodexAgentState : CoroutineScope {
         reason: CompactionReason,
         phase: CompactionPhase,
     ): Int
+
+    /**
+     * Delegates to [MutableKodexAgentStorage.steer] under the state write lock
+     * and advances [latestIndex].
+     *
+     * An empty [events] list is a no-op and returns [latestIndex]. Like
+     * [updateSettings], this operation acquires the short state write lock and
+     * is permitted in any state (including while a model request, compaction,
+     * or tool batch is in flight) without changing the conversation phase.
+     *
+     * @throws IllegalArgumentException when no initial storage index exists.
+     * @throws IllegalStateException when storage cannot safely admit mutation.
+     * @throws CancellationException when admission or writing is cancelled.
+     */
+    public suspend fun steer(events: List<StableIndexEvent.Steerable>): Int
+
+    /**
+     * Delegates to [MutableKodexAgentStorage.consumeSteer] when
+     * [canAppendUserMessage] holds, atomically committing the queued
+     * [StableIndexEvent.Steerable] events and an empty `SteerSnapshot(emptyList())`
+     * while updating [latestIndex] and [state].
+     *
+     * Returns an empty list without writing when no steer is queued.
+     *
+     * @return the delivered steer events in order, or an empty list if none were pending.
+     * @throws KodexAgentStateInvalidTransitionException when user message
+     * insertion is not legal in the current state.
+     * @throws CancellationException when admission or writing is cancelled.
+     */
+    public suspend fun consumeSteer(): List<StableIndexEvent.Steerable>
 
     /**
      * Injects model-visible stable clean events without reopening a generic

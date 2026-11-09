@@ -133,7 +133,10 @@ public enum class AgentCommitType(
     TokenCountResponse("token_count_response", "llm-request-meta"),
 
     @SerialName("unstable")
-    Unstable("unstable", "unstable");
+    Unstable("unstable", "unstable"),
+
+    @SerialName("steer")
+    Steer("steer", "steer");
 
     public companion object {
         private val byWireName: Map<String, AgentCommitType> = buildMap {
@@ -222,6 +225,7 @@ public enum class AgentCommitType(
         @Deprecated("Eliminated in 2026-11-08 schema optimization. Timestamps are native to each commit.")
         public val TimestampTypes: Set<AgentCommitType> = setOf(Timestamp)
         public val UnstableTypes: Set<AgentCommitType> = setOf(Unstable)
+        public val SteerTypes: Set<AgentCommitType> = setOf(Steer)
 
         public fun fromWireName(wireName: String): AgentCommitType =
             byWireName[wireName] ?: throw IllegalArgumentException("Unknown AgentCommitType wireName: $wireName")
@@ -269,6 +273,7 @@ public sealed interface AgentCommit {
             is LlmRequestMeta.Compaction -> AgentCommitType.LlmRequestMetaCompaction
             is LlmRequestMeta.Response -> AgentCommitType.LlmRequestMetaResponse
             is UnstableSnapshot -> AgentCommitType.Unstable
+            is SteerSnapshot -> AgentCommitType.Steer
         }
 }
 
@@ -318,8 +323,20 @@ public data class UnstableSnapshot(
     public val events: List<UnstableCleanEvent>,
 ) : AgentCommit
 
+/**
+ * Persisted snapshot of unconsumed steerable events at a logical storage index.
+ */
+@Serializable
+@SerialName("steer")
+public data class SteerSnapshot(
+    public val events: List<StableIndexEvent.Steerable>,
+) : AgentCommit
+
 private val UnstableEventListSerializer: KSerializer<List<UnstableCleanEvent>> =
     ListSerializer(UnstableCleanEvent.serializer())
+
+private val SteerableEventListSerializer: KSerializer<List<StableIndexEvent.Steerable>> =
+    ListSerializer(StableIndexEvent.Steerable.serializer())
 
 /**
  * Encodes the payload JSON stored in `agent_commits.payload_json` and `.kodex/sessions` mirror files.
@@ -332,6 +349,7 @@ public fun AgentCommit.encodePayloadJson(json: Json = OpenAiJsonCodec): String =
         is CommitTimestamp -> json.encodeToString(Instant.serializer(), instant)
         is LlmRequestMeta -> json.encodeToString(LlmRequestMeta.serializer(), this)
         is UnstableSnapshot -> json.encodeToString(UnstableEventListSerializer, events)
+        is SteerSnapshot -> json.encodeToString(SteerableEventListSerializer, events)
     }
 
 /**
@@ -355,6 +373,7 @@ public fun AgentCommitType.decodePayloadJson(
         AgentCommitType.LlmRequestMetaResponse, AgentCommitType.TokenCountResponse ->
             json.decodeFromString(LlmRequestMeta.Response.serializer(), payloadJson)
         AgentCommitType.Unstable -> UnstableSnapshot(json.decodeFromString(UnstableEventListSerializer, payloadJson))
+        AgentCommitType.Steer -> SteerSnapshot(json.decodeFromString(SteerableEventListSerializer, payloadJson))
         else -> error("Unhandled AgentCommitType: $this")
     }
     require(
