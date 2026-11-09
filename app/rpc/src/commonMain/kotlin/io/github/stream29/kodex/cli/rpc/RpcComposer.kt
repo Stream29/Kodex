@@ -1,22 +1,18 @@
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.app.agent.contract.ComposerDependencies
 import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
 import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
 import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPort
 import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPresentation
-import io.github.stream29.kodex.app.agent.contract.ComposerResumePort
 import io.github.stream29.kodex.app.agent.contract.ComposerRuntimePort
-import io.github.stream29.kodex.app.agent.contract.ComposerSteerPort
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmitPort
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.cli.agent.createComposerViewModel
 import io.github.stream29.kodex.rpc.models.AgentStateValue
-import io.github.stream29.kodex.rpc.client.update
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -26,7 +22,6 @@ import kotlinx.coroutines.flow.SharingStarted
 public actual fun createRpcComposerViewModel(
     binding: RpcSessionBinding,
     ownerScope: CoroutineScope,
-    resumePort: ComposerResumePort,
     cancellationPort: ComposerCancellationPort,
     failureReporter: ComposerFailureReporter,
 ): ComposerViewModel {
@@ -54,15 +49,10 @@ public actual fun createRpcComposerViewModel(
             }
 
             override val submit = ComposerSubmitPort { _, content ->
-                binding.appendUserMessage(content)
-            }
-
-            override val steer = ComposerSteerPort { _, content ->
-                binding.pendingSteer.update { it + StableUserMessage(content) }
+                binding.submit(content)
             }
 
             override val cancellation = cancellationPort
-            override val resume = resumePort
 
             override val requestInput = object : ComposerRequestInputPort {
                 override val presentation: StateFlow<ComposerRequestInputPresentation> = presentation

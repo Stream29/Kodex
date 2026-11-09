@@ -10,10 +10,10 @@ import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
+import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.cli.sessiontitle.AgentTitleGeneration
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
@@ -28,6 +28,7 @@ import io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported
 import io.github.stream29.kodex.utils.rpcexception.NoMatchException
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.*
@@ -88,6 +89,24 @@ public actual class BackendAgentRuntimeRpc actual constructor(
         emitAll(view.binding.observe(source))
     }
 
+    actual override suspend fun submit(sessionIndex: Int, content: List<ContentItem>): Unit =
+        command(sessionIndex) {
+            if (content.isEmpty()) return@command
+            runtime.steer(listOf(StableUserMessage(content)))
+            try {
+                val settings = titleSettings()
+                title.start(runtime, content, settings.enabled, settings.model, settings.reasoningEffort, titleGenerator)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Steer persistence has already succeeded. Optional title setup
+                // is not allowed to turn it into an apparent submit failure.
+            }
+            if (runtime.runningTurn.value == null) {
+                startBackgroundTurn(sessionIndex, notifications)
+            }
+        }
+
     actual override suspend fun appendUserMessage(sessionIndex: Int, content: List<ContentItem>): Int =
         command(sessionIndex) {
             val index = runtime.appendUserMessage(content)
@@ -106,11 +125,7 @@ public actual class BackendAgentRuntimeRpc actual constructor(
     actual override suspend fun resume(sessionIndex: Int): Unit = command(sessionIndex) {
         exclusive {
             val before = runtime.latestIndex.value
-            val acceptedState = when (runtime.state.value) {
-                KodexAgentStateValue.Empty, KodexAgentStateValue.ExternalWrite,
-                KodexAgentStateValue.Compacting, is KodexAgentStateValue.RequestResponse -> false
-                else -> true
-            }
+            val acceptedState = runtime.isAcceptedResumeStart(before)
             try {
                 runtime.resume()
             } catch (cancelled: CancellationException) {
@@ -164,7 +179,6 @@ public actual class BackendAgentRuntimeRpc actual constructor(
                         retainsText
                     }
                 }
-                runtime.pendingSteer.value = emptyList()
             }
         }
 
@@ -196,15 +210,6 @@ public actual class BackendAgentRuntimeRpc actual constructor(
     actual override suspend fun cancelRunningTurn(sessionIndex: Int): Unit = command(sessionIndex) {
         runtime.runningTurn.value?.cancel()
     }
-    actual override suspend fun getPendingSteer(sessionIndex: Int): List<StableIndexEvent.Steerable> =
-        host.session(sessionIndex).session.runtime.pendingSteer.value
-    actual override fun getPendingSteerFlow(sessionIndex: Int): Flow<List<StableIndexEvent.Steerable>> =
-        observe(sessionIndex) { pendingSteer }
-    actual override suspend fun compareAndSetPendingSteer(
-        sessionIndex: Int,
-        expect: List<StableIndexEvent.Steerable>,
-        update: List<StableIndexEvent.Steerable>,
-    ): Boolean = command(sessionIndex) { runtime.pendingSteer.compareAndSet(expect, update) }
 
     private fun <T> observe(index: Int, source: AgentRuntime.() -> Flow<T>): Flow<T> = flow {
         val binding = host.session(index)
@@ -228,7 +233,62 @@ private class RuntimeView(val binding: BackendSessionBinding) {
             admission.unlock()
         }
     }
+
+    fun startBackgroundTurn(
+        sessionIndex: Int,
+        notifications: BackendNotifications,
+    ) {
+        if (!admission.tryLock()) return
+        var started = false
+        try {
+            binding.operations.launch(start = CoroutineStart.UNDISPATCHED) {
+                started = true
+                try {
+                    val before = runtime.latestIndex.value
+                    val acceptedState = runtime.isAcceptedResumeStart(before)
+                    try {
+                        runtime.resume()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: ConcurrentAgentRuntimeResumeException) {
+                        return@launch
+                    } catch (failure: Throwable) {
+                        if (acceptedState) {
+                            notifications.publish(Notification.Stop.UnhandledError(sessionIndex, failure.message))
+                        } else {
+                            RuntimeRpcLogger.warn(failure) { "Background turn failed before admission." }
+                        }
+                        return@launch
+                    }
+                    try {
+                        notifications.stopped(sessionIndex, runtime, before)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Throwable) {
+                        RuntimeRpcLogger.warn(failure) { "Unable to project a Stop notification." }
+                    }
+                } finally {
+                    admission.unlock()
+                }
+            }
+        } finally {
+            if (!started) {
+                admission.unlock()
+            }
+        }
+    }
 }
+
+private suspend fun AgentRuntime.isAcceptedResumeStart(beforeIndex: Int): Boolean =
+    when (state.value) {
+        KodexAgentStateValue.Empty -> beforeIndex >= 0 && storage.getSteerAt(beforeIndex).isNotEmpty()
+        KodexAgentStateValue.ExternalWrite,
+        KodexAgentStateValue.Compacting,
+        is KodexAgentStateValue.RequestResponse,
+        -> false
+
+        else -> true
+    }
 
 /** Holds only the current stream identity; snapshots carry the captured source. */
 internal class RuntimeOutputProjection {

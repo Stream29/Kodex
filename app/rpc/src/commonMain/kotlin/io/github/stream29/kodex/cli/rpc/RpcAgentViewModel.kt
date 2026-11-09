@@ -9,7 +9,6 @@ import io.github.stream29.kodex.app.agent.contract.AgentNotification
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
-import io.github.stream29.kodex.app.agent.contract.ComposerResumePort
 import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
@@ -91,7 +90,6 @@ private class RpcAgentViewModel(
     override val composer: ComposerViewModel = createRpcComposerViewModel(
         binding = binding,
         ownerScope = local,
-        resumePort = ComposerResumePort { resume() },
         cancellationPort = ComposerCancellationPort { cancel() },
         failureReporter = ComposerFailureReporter { _, failure ->
             // Retain the failed draft, but report through the Application's local Hook outlet.
@@ -198,8 +196,7 @@ private class RpcAgentViewModel(
     /** Return values do not write any observed backend state or overwrite a later draft revision. */
     override suspend fun submit(content: List<ContentItem>) {
         owner.ensureActive()
-        binding.appendUserMessage(content)
-        resume()
+        binding.submit(content)
     }
 
     override fun resume(): Unit = operate { binding.resume() }

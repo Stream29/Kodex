@@ -92,12 +92,14 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
             val timelines = BackendAgentStorageRpc(host)
             rpc.appendUserMessage(index, listOf(ContentItem.InputText("old")))
             val nonce = timelines.getCacheNonce(index)
-            assertTrue(rpc.compareAndSetPendingSteer(index, emptyList(), listOf(StableUserMessage(listOf(ContentItem.InputText("queued"))))))
+            host.inSession(index) {
+                runtime.steer(listOf(StableUserMessage(listOf(ContentItem.InputText("queued")))))
+            }
             assertFailsWith<CacheNonceMismatch> { rpc.revertHistory(index, 1, nonce xor 1) }
             assertFailsWith<IllegalArgumentException> { rpc.revertHistory(index, 0, nonce) }
             rpc.revertHistory(index, 1, nonce)
             assertEquals(0, rpc.getLatestIndex(index))
-            assertEquals(emptyList(), rpc.getPendingSteer(index))
+            assertEquals(emptyList(), host.session(index).session.storage.getSteerAt(rpc.getLatestIndex(index)))
             assertNotEquals(nonce, timelines.getCacheNonce(index))
             assertFailsWith<CacheNonceMismatch> { timelines.getFirstCommitsIn(index, nonce, 1, 1, AgentCommitType.IndexTypes) }
             rpc.appendUserMessage(index, listOf(ContentItem.InputText("replacement")))
@@ -195,7 +197,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
             release.await()
             RemoteCompactionV2Response(ResponseItem.Compaction(encryptedContent = "test"), null)
         } }
-        runtimeFixture(client) { _, index, rpc ->
+        runtimeFixture(client) { host, index, rpc ->
             rpc.appendUserMessage(index, listOf(ContentItem.InputText("compact")))
             val operation = async { rpc.forcedCompact(index) }
             entered.await()
@@ -204,10 +206,10 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
             assertFailsWith<NoMatchException> { rpc.currentFlow(index, 0).first() }
             assertFailsWith<IllegalStateException> { rpc.resume(index) }
             val pending = listOf(StableUserMessage(listOf(ContentItem.InputText("queued"))))
-            assertTrue(rpc.compareAndSetPendingSteer(index, emptyList(), pending))
+            rpc.submit(index, listOf(ContentItem.InputText("queued")))
             release.complete(Unit)
             assertTrue(operation.await() > 1)
-            assertEquals(pending, rpc.getPendingSteer(index))
+            assertEquals(pending, host.session(index).session.storage.getSteerAt(rpc.getLatestIndex(index)))
             assertFalse(rpc.getRunningTurn(index))
         }
     }

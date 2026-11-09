@@ -10,9 +10,7 @@ import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
 import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
 import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPort
 import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPresentation
-import io.github.stream29.kodex.app.agent.contract.ComposerResumePort
 import io.github.stream29.kodex.app.agent.contract.ComposerRuntimePort
-import io.github.stream29.kodex.app.agent.contract.ComposerSteerPort
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmitPort
 import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.cli.agent.createComposerViewModel
@@ -70,11 +68,7 @@ public actual class RpcSessionDraft actual constructor(
             override val submit = ComposerSubmitPort { _, _ ->
                 error("A draft must be submitted through its New Session owner.")
             }
-            override val steer = ComposerSteerPort { _, _ ->
-                error("A non-persisted draft cannot steer an Agent.")
-            }
             override val cancellation = ComposerCancellationPort {}
-            override val resume = ComposerResumePort {}
             override val requestInput = object : ComposerRequestInputPort {
                 override val presentation = MutableStateFlow<ComposerRequestInputPresentation>(
                     ComposerRequestInputPresentation.None,

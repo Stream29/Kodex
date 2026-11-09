@@ -24,8 +24,9 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggest
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
-import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
@@ -243,7 +244,7 @@ val agentRuntimeRunningTurnTest by testSuite {
             runtime.appendUserMessage(listOf(ContentItem.InputText("Compact this.")))
             val before = root.storage.getSettingsAt(runtime.latestIndex.value)
             val queued = listOf(StableUserMessage(listOf(ContentItem.InputText("Keep queued."))))
-            runtime.pendingSteer.value = queued
+            runtime.steer(queued)
 
             val turn = async(start = CoroutineStart.UNDISPATCHED) { runtime.forcedCompact() }
             try {
@@ -255,7 +256,13 @@ val agentRuntimeRunningTurnTest by testSuite {
 
                 assertEquals(index, runtime.latestIndex.value)
                 assertEquals(index, root.storage.latestIndex())
-                assertEquals(StableContextCompaction(encryptedContent = "compacted"), root.storage.getCommitAtOrBefore(index, AgentCommitType.IndexTypes)?.commit)
+                assertEquals(
+                    StableContextCompaction(
+                        encryptedContent = "compacted",
+                        retainedItems = listOf(StableUserMessage(listOf(ContentItem.InputText("Compact this.")))),
+                    ),
+                    root.storage.getCommitAtOrBefore(index, AgentCommitType.IndexTypes)?.commit,
+                )
                 assertEquals(0L, root.storage.getLlmRequestMetaAtOrNull(index)!!.totalTokens)
                 val after = root.storage.getSettingsAt(index)
                 assertEquals(before.turnId, after.turnId)
@@ -263,7 +270,7 @@ val agentRuntimeRunningTurnTest by testSuite {
                 assertTrue(metadata.single().contains("\"trigger\":\"manual\""))
                 assertTrue(metadata.single().contains("\"reason\":\"user_requested\""))
                 assertTrue(metadata.single().contains("\"phase\":\"standalone_turn\""))
-                assertEquals(queued, runtime.pendingSteer.value)
+                assertEquals(queued, root.storage.getSteerAt(runtime.latestIndex.value))
                 assertNull(runtime.runningTurn.value)
             } finally {
                 finish.complete(Unit)
@@ -373,9 +380,9 @@ val agentRuntimeRunningTurnTest by testSuite {
                 },
             )
             val runtime = root.runtime
-            val originalIndex = runtime.appendUserMessage(listOf(ContentItem.InputText("Compact this.")))
+            runtime.appendUserMessage(listOf(ContentItem.InputText("Compact this.")))
             val queued = listOf(StableUserMessage(listOf(ContentItem.InputText("Still queued."))))
-            runtime.pendingSteer.value = queued
+            val originalIndex = runtime.steer(queued)
             val turn = async(start = CoroutineStart.UNDISPATCHED) { runtime.forcedCompact() }
             try {
                 entered.await()
@@ -393,7 +400,7 @@ val agentRuntimeRunningTurnTest by testSuite {
             assertNull(runtime.runningTurn.value)
             assertEquals(originalIndex, runtime.latestIndex.value)
             assertEquals(KodexAgentStateValue.UserMessage, runtime.state.value)
-            assertEquals(queued, runtime.pendingSteer.value)
+            assertEquals(queued, root.storage.getSteerAt(runtime.latestIndex.value))
         }
 
         for (preTurn in listOf(true, false)) {

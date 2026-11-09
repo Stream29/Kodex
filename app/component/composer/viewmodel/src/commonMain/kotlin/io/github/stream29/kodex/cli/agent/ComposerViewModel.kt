@@ -151,21 +151,17 @@ private class ComposerViewModelImpl(
             val content = listOf(ContentItem.InputText(text))
             // Command admission reads the fixed runtime, not a possibly delayed UI projection.
             val running = dependencies.runtime.running.value
-            var operation = if (running) {
+            val operation = if (running) {
                 ComposerOperation.Steer
             } else {
                 ComposerOperation.Submit
             }
             try {
+                dependencies.submit.submit(owner, content)
+                clearAccepted(owner, captured.revision)
                 if (running) {
-                    dependencies.steer.steer(owner, content)
-                    clearAccepted(owner, captured.revision)
                     ComposerSubmissionResult.QueuedAsSteer
                 } else {
-                    dependencies.submit.submit(owner, content)
-                    clearAccepted(owner, captured.revision)
-                    operation = ComposerOperation.Resume
-                    dependencies.resume.resume(owner)
                     ComposerSubmissionResult.Submitted
                 }
             } catch (cancelled: CancellationException) {

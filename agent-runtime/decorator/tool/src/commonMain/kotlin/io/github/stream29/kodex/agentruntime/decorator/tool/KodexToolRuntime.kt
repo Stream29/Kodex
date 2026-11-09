@@ -4,21 +4,20 @@ package io.github.stream29.kodex.agentruntime.decorator.tool
 
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
-import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
+import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
-import io.github.stream29.kodex.agentstate.contract.KodexAgentState
-import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.ToolName
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
 import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
+import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
 import io.github.stream29.kodex.utils.logging.tool
 import kotlinx.coroutines.CancellationException
@@ -29,18 +28,32 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Default [KodexToolRuntime] over borrowed tool catalogs.
  */
-public actual class KodexToolRuntimeImpl internal constructor(
+public actual class KodexToolRuntime internal constructor(
     private val delegate: ResumableAgentLayer,
     fixedTools: List<Tool>,
     private val dynamicTools: StateFlow<List<Tool>>,
     private val toolSearch: StateFlow<ToolSearchEngine>,
     private val logger: KLogger,
-    private val searchOperation: (ToolSearchEngine, SearchToolCallParams) -> ToolSearchResult =
-        { engine, arguments -> engine.search(arguments) },
-) : KodexToolRuntime, KodexAgentState by delegate {
+    private val searchOperation: (ToolSearchEngine, SearchToolCallParams) -> ToolSearchResult,
+) : ResumableAgentLayer by delegate {
+    public actual constructor(
+        delegate: ResumableAgentLayer,
+        fixedTools: List<Tool>,
+        dynamicTools: StateFlow<List<Tool>>,
+        toolSearch: StateFlow<ToolSearchEngine>,
+        logger: KLogger,
+    ) : this(
+        delegate = delegate,
+        fixedTools = fixedTools,
+        dynamicTools = dynamicTools,
+        toolSearch = toolSearch,
+        logger = logger,
+        searchOperation = { engine, arguments -> engine.search(arguments) },
+    )
+
     private val fixedToolsByName: Map<ToolName, Tool> = ToolRouting.index(fixedTools)
 
-    actual override suspend fun resume() {
+    public actual override suspend fun resume() {
         while (true) {
             val pending = state.value as? KodexAgentStateValue.ToolPending
             if (pending == null) {
@@ -164,27 +177,6 @@ private fun PendingInvalidToolInvocation.toStableInvocation(): InvalidToolInvoca
         is PendingInvalidToolInvocation.ToolSearch ->
             InvalidToolInvocation.ToolSearch(arguments)
     }
-
-/**
- * Adds a tool-execution layer over externally owned tool state.
- *
- * This runtime neither creates nor closes any supplied tool or state flow.
- *
- * @param logger Agent-scoped logger used to derive each Tool call logger.
- */
-public actual fun ResumableAgentLayer.toolRuntime(
-    fixedTools: List<Tool>,
-    dynamicTools: StateFlow<List<Tool>>,
-    toolSearch: StateFlow<ToolSearchEngine>,
-    logger: KLogger,
-): KodexToolRuntime =
-    KodexToolRuntimeImpl(
-        delegate = this,
-        fixedTools = fixedTools,
-        dynamicTools = dynamicTools,
-        toolSearch = toolSearch,
-        logger = logger,
-    )
 
 private fun ToolSearchEngine.handle(
     pending: PendingToolSearchEvent,

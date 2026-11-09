@@ -9,7 +9,6 @@ import io.github.oshai.kotlinlogging.KLoggingEventBuilder
 import io.github.oshai.kotlinlogging.Level
 import io.github.oshai.kotlinlogging.Marker
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
-import io.github.stream29.kodex.agentruntime.steer.StateFlowSteerProvider
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
@@ -19,6 +18,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
@@ -80,7 +80,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         val runtime: KodexAgentCompactionRuntime = state.compactionRuntime(
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         val agentState: KodexAgentStateContract = runtime
 
@@ -100,11 +99,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         val runtime: ResumableAgentLayer = DelegatingRuntime(
-            KodexAgentCompactionRuntimeImpl(
+            KodexAgentCompactionRuntime(
                 delegate = state,
                 modelCatalog = testModelCatalog(),
                 logger = TestLogger,
-                steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
             ),
         )
 
@@ -137,11 +135,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntimeImpl(
+        val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
 
         state.appendUserMessage(userMessage("Start."))
@@ -193,11 +190,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntimeImpl(
+        val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         val user = userMessage("Answer briefly.")
 
@@ -229,11 +225,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntimeImpl(
+        val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
 
         state.appendUserMessage(userMessage("Retry failed responses."))
@@ -267,11 +262,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntimeImpl(
+        val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = logger,
-            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         state.appendUserMessage(userMessage("complete private prompt"))
         assertFailsWith<AgentResponseRetryLimitExceededException> { runtime.resume() }
@@ -303,11 +297,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
                 contextSettings = TestAgentContextSettings,
                 mcpService = TestMcpService(),
             )
-            val runtime = KodexAgentCompactionRuntimeImpl(
+            val runtime = KodexAgentCompactionRuntime(
                 delegate = state,
                 modelCatalog = testModelCatalog(),
                 logger = logger,
-                steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
             )
             state.appendUserMessage(userMessage("private prompt"))
             val actual = assertFailsWith<IllegalStateException> {
@@ -356,11 +349,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntimeImpl(
+        val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
 
         state.appendUserMessage(userMessage("Continue after a recovered request."))
@@ -401,11 +393,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntimeImpl(
+        val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         val user = userMessage("Keep this context.")
 
@@ -424,6 +415,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             StableContextCompaction(
                 id = compaction.id,
                 encryptedContent = compaction.encryptedContent,
+                retainedItems = listOf(StableUserMessage(user.content)),
             ),
             storage.getCommitAtOrBefore(storage.latestIndex(), setOf(AgentCommitType.ContextCompaction))?.commit,
         )
@@ -449,11 +441,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntimeImpl(
+        val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         state.appendUserMessage(userMessage("Compact this."))
         val persistedTurnId = storage.getSettingsAt(storage.latestIndex()).turnId
@@ -471,7 +462,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertTrue(compactRequests.single().turnMetadata.contains("\"phase\":\"standalone_turn\""))
         assertEquals(persistedTurnId, storage.getSettingsAt(compactedIndex).turnId)
         assertEquals(
-            StableContextCompaction(encryptedContent = "committed"),
+            StableContextCompaction(
+                encryptedContent = "committed",
+                retainedItems = listOf(StableUserMessage(userMessage("Compact this.").content)),
+            ),
             storage.getCommitAtOrBefore(compactedIndex, AgentCommitType.IndexTypes)?.commit,
         )
     }
@@ -498,11 +492,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
                 contextSettings = TestAgentContextSettings,
                 mcpService = TestMcpService(),
             )
-            val runtime = KodexAgentCompactionRuntimeImpl(
+            val runtime = KodexAgentCompactionRuntime(
                 delegate = state,
                 modelCatalog = testModelCatalog(),
                 logger = TestLogger,
-                steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
             )
             state.appendUserMessage(userMessage("test"), tokenCount = 90)
             val failure = assertFailsWith<OpenAiModerationBlockedException> {
@@ -550,11 +543,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntimeImpl(
+        val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         state.appendUserMessage(userMessage("Compact once."), tokenCount = 90)
 
@@ -618,11 +610,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntimeImpl(
+        val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
 
         state.appendUserMessage(user, tokenCount = 1)
@@ -661,11 +652,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntimeImpl(
+        val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         val pending = PendingCommandExecutionToolEvent(
             callId = "call_1",

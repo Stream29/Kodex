@@ -10,7 +10,6 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(project(":agent-runtime-contract"))
-                api(project(":agent-runtime-steer"))
                 api(project(":openai-model-catalog"))
                 api(libs.kotlin.logging)
                 api(libs.kotlinx.coroutines.core)
@@ -21,7 +20,6 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(project(":agent-runtime-decorator-tool"))
-            implementation(project(":agent-runtime-steer"))
             implementation(project(":agent-state-core"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-core"))

@@ -3,9 +3,11 @@ package io.github.stream29.kodex.agentsession.sqlite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.agentstorage.filesystemlayout.deleteRecord
 import io.github.stream29.kodex.agentstorage.filesystemlayout.latestIndexPath
 import io.github.stream29.kodex.agentstorage.filesystemlayout.recordPath
@@ -136,9 +138,10 @@ internal class CachedSqliteAgentStorage(
         currentCoroutineContext().ensureActive()
         withContext(NonCancellable) {
             val previous = tail.value
+            val hadSteer = previous >= 0 && backing().getSteerAt(previous).isNotEmpty()
             backing().revert(untilExclusive)
             val latest = if (previous < untilExclusive) previous else backing().latestIndex()
-            if (latest != previous) {
+            if (latest != previous || hadSteer) {
                 nonce.value = Random.nextLong()
                 tail.value = latest
             }
@@ -201,6 +204,7 @@ internal val MirrorTimelineDirectories: List<String> = listOf(
     "token-count",
     "llm-request-meta",
     "unstable",
+    "steer",
 )
 
 internal fun mirrorTimelineDirectory(type: String): String =

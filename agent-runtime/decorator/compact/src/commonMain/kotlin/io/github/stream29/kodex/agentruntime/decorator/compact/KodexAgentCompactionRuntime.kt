@@ -3,12 +3,13 @@
 package io.github.stream29.kodex.agentruntime.decorator.compact
 
 import io.github.oshai.kotlinlogging.KLogger
-import io.github.stream29.kodex.agentruntime.steer.SteerProvider
+import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstate.contextwindow.tokensUntilCompaction
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.contract.canAppendUserMessage
+import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
@@ -20,6 +21,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 
@@ -28,12 +30,11 @@ import kotlinx.coroutines.withContext
  *
  * @param logger Agent-scoped logger for response and compaction operations.
  */
-public actual class KodexAgentCompactionRuntimeImpl actual constructor(
+public actual class KodexAgentCompactionRuntime actual constructor(
     private val delegate: KodexAgentState,
     private val modelCatalog: OpenAiModelCatalogStore,
     private val logger: KLogger,
-    private val steerProvider: SteerProvider,
-) : KodexAgentCompactionRuntime, KodexAgentState by delegate {
+) : ResumableAgentLayer, KodexAgentState by delegate {
 
     public actual override suspend fun resume() {
         if (state.value is KodexAgentStateValue.ToolPending) return
@@ -112,7 +113,7 @@ public actual class KodexAgentCompactionRuntimeImpl actual constructor(
     /** Null denotes only our own request preemption, not failure or retry. */
     private suspend fun requestResponseWithSteer(): RequestFinish? = coroutineScope {
         val response = async { requestResponseApi() }
-        val waitingSteer = async { steerProvider.waitForSteer() }
+        val waitingSteer = async { waitForSteer() }
         try {
             select {
                 response.onAwait { it }
@@ -136,6 +137,12 @@ public actual class KodexAgentCompactionRuntimeImpl actual constructor(
         // before the caller can inspect state or claim any input.
     }
 
+    private suspend fun waitForSteer() {
+        latestIndex.first { index ->
+            index >= 0 && storage.getSteerAt(index).isNotEmpty()
+        }
+    }
+
     private suspend fun deliverPendingSteer(): Boolean {
         val caller = currentCoroutineContext()
         caller.ensureActive()
@@ -143,12 +150,8 @@ public actual class KodexAgentCompactionRuntimeImpl actual constructor(
         val delivered = withContext(NonCancellable) {
             // Cancellation before claim leaves ownership with the queue.
             caller.ensureActive()
-            val inputs = steerProvider.take()
-            if (inputs.isEmpty()) return@withContext false
-            logger.info { "Agent steer delivery started (${inputs.size} input(s))." }
-            // Once claimed, finish persistence even if the outer turn is stopped.
-            try {
-                delegate.injectHistory(inputs)
+            val inputs = try {
+                delegate.consumeSteer()
             } catch (cancellation: CancellationException) {
                 logger.info { "Agent steer delivery cancelled." }
                 throw cancellation
@@ -156,6 +159,8 @@ public actual class KodexAgentCompactionRuntimeImpl actual constructor(
                 logger.error(failure) { "Agent steer delivery failed." }
                 throw failure
             }
+            if (inputs.isEmpty()) return@withContext false
+            logger.info { "Agent steer delivery started (${inputs.size} input(s))." }
             logger.info { "Agent steer delivery completed (${inputs.size} input(s))." }
             true
         }
@@ -206,23 +211,5 @@ public actual class KodexAgentCompactionRuntimeImpl actual constructor(
         return tokensUntilCompaction(modelCatalog) == 0L
     }
 }
-
-/**
- * Adds automatic compaction, server-requested continuation, and bounded
- * response retry to this state.
- *
- * @param logger Agent-scoped logger for response and compaction operations.
- */
-public actual fun KodexAgentState.compactionRuntime(
-    modelCatalog: OpenAiModelCatalogStore,
-    logger: KLogger,
-    steerProvider: SteerProvider,
-): KodexAgentCompactionRuntime =
-    KodexAgentCompactionRuntimeImpl(
-        delegate = this,
-        modelCatalog = modelCatalog,
-        logger = logger,
-        steerProvider = steerProvider,
-    )
 
 private class SteerRequestCancellation : CancellationException("Preempted by pending steer.")

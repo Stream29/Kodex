@@ -226,7 +226,7 @@ val kodexToolRuntimeTest by testSuite {
             mcpService = mcpService,
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Find the tool.")))
-        val runtime = KodexToolRuntimeImpl(
+        val runtime = KodexToolRuntime(
             delegate = RequestOnlyRuntime(state),
             fixedTools = emptyList(),
             dynamicTools = MutableStateFlow(listOf(dynamicTool)),

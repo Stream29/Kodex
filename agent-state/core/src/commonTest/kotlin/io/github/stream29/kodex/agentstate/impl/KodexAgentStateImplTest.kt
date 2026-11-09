@@ -839,6 +839,7 @@ val kodexAgentStateImplTest by testSuite {
             val stableCompaction = StableContextCompaction(
                 id = compaction.id,
                 encryptedContent = compaction.encryptedContent,
+                retainedItems = listOf(StableUserMessage(user.content)),
             )
             assertEquals(
                 listOf(user),
@@ -912,7 +913,10 @@ val kodexAgentStateImplTest by testSuite {
                     .toList(),
             )
             assertEquals(
-                StableContextCompaction(encryptedContent = "compact-2"),
+                StableContextCompaction(
+                    encryptedContent = "compact-2",
+                    retainedItems = listOf(firstUser, planUpdate, requestUserInput),
+                ),
                 storage.getIndexEntryAt(compactIndex),
             )
         }
@@ -954,7 +958,8 @@ val kodexAgentStateImplTest by testSuite {
                 },
                 storage = storage,
             )
-            agent.appendUserMessage(userMessage("Compact before updating settings.").content)
+            val user = userMessage("Compact before updating settings.")
+            agent.appendUserMessage(user.content)
             val compaction = async(start = CoroutineStart.UNDISPATCHED) {
                 agent.forcedCompact()
             }
@@ -974,6 +979,7 @@ val kodexAgentStateImplTest by testSuite {
                 StableContextCompaction(
                     id = compactionItem.id,
                     encryptedContent = compactionItem.encryptedContent,
+                    retainedItems = listOf(StableUserMessage(user.content)),
                 ),
                 storage.getIndexEntryAt(compactedAt),
             )

@@ -19,10 +19,13 @@ public actual fun ensureSqlitePhaseOneSchema(connection: SqliteConnection) {
                 }
             }
             val hasCreatedAt = connection.query("PRAGMA table_info(agent_commits)").any { it.getOrNull(1) == "created_at" }
-            if (!hasCreatedAt) {
+            val tableSql = connection.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_commits'")
+                .singleOrNull()?.singleOrNull() as? String ?: ""
+            val hasSteerType = "'steer'" in tableSql
+            if (!hasCreatedAt || !hasSteerType) {
                 connection.transaction {
                     connection.execute("CREATE INDEX IF NOT EXISTS idx_sessions_archived ON sessions(archived, session_id)")
-                    connection.execute("ALTER TABLE agent_commits RENAME TO agent_commits_v0_7_0")
+                    connection.execute("ALTER TABLE agent_commits RENAME TO agent_commits_legacy")
                     connection.execute("DROP INDEX IF EXISTS commits_global_index")
                     connection.execute("DROP INDEX IF EXISTS commits_settings_cwd")
                     connection.execute("DROP VIEW IF EXISTS session_catalog")
@@ -34,46 +37,57 @@ public actual fun ensureSqlitePhaseOneSchema(connection: SqliteConnection) {
                                 it.startsWith("CREATE VIEW session_catalog")
                         }
                         .forEach { connection.execute(it) }
-                    connection.execute(
-                        """
-                        INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at)
-                        SELECT
-                            c.agent_id,
-                            c.type,
-                            c."index",
-                            c.payload_json,
-                            coalesce(
-                                (
-                                    SELECT json_extract(t.payload_json, '$')
-                                    FROM agent_commits_v0_7_0 AS t
-                                    WHERE t.agent_id = c.agent_id
-                                      AND t.type = 'timestamp'
-                                      AND t."index" = c."index"
-                                ),
-                                (
-                                    SELECT json_extract(t.payload_json, '$')
-                                    FROM agent_commits_v0_7_0 AS t
-                                    WHERE t.agent_id = c.agent_id
-                                      AND t.type = 'timestamp'
-                                      AND t."index" <= c."index"
-                                    ORDER BY t."index" DESC
-                                    LIMIT 1
-                                ),
-                                (
-                                    SELECT json_extract(t.payload_json, '$')
-                                    FROM agent_commits_v0_7_0 AS t
-                                    WHERE t.agent_id = c.agent_id
-                                      AND t.type = 'timestamp'
-                                    ORDER BY t."index" ASC
-                                    LIMIT 1
-                                ),
-                                '1970-01-01T00:00:00Z'
-                            )
-                        FROM agent_commits_v0_7_0 AS c
-                        WHERE c.type NOT IN ('timestamp', 'compaction_point')
-                        """.trimIndent(),
-                    )
-                    connection.execute("DROP TABLE agent_commits_v0_7_0")
+                    if (hasCreatedAt) {
+                        connection.execute(
+                            """
+                            INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at)
+                            SELECT agent_id, type, "index", payload_json, created_at
+                            FROM agent_commits_legacy
+                            WHERE type NOT IN ('timestamp', 'compaction_point')
+                            """.trimIndent(),
+                        )
+                    } else {
+                        connection.execute(
+                            """
+                            INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at)
+                            SELECT
+                                c.agent_id,
+                                c.type,
+                                c."index",
+                                c.payload_json,
+                                coalesce(
+                                    (
+                                        SELECT json_extract(t.payload_json, '$')
+                                        FROM agent_commits_legacy AS t
+                                        WHERE t.agent_id = c.agent_id
+                                          AND t.type = 'timestamp'
+                                          AND t."index" = c."index"
+                                    ),
+                                    (
+                                        SELECT json_extract(t.payload_json, '$')
+                                        FROM agent_commits_legacy AS t
+                                        WHERE t.agent_id = c.agent_id
+                                          AND t.type = 'timestamp'
+                                          AND t."index" <= c."index"
+                                        ORDER BY t."index" DESC
+                                        LIMIT 1
+                                    ),
+                                    (
+                                        SELECT json_extract(t.payload_json, '$')
+                                        FROM agent_commits_legacy AS t
+                                        WHERE t.agent_id = c.agent_id
+                                          AND t.type = 'timestamp'
+                                        ORDER BY t."index" ASC
+                                        LIMIT 1
+                                    ),
+                                    '1970-01-01T00:00:00Z'
+                                )
+                            FROM agent_commits_legacy AS c
+                            WHERE c.type NOT IN ('timestamp', 'compaction_point')
+                            """.trimIndent(),
+                        )
+                    }
+                    connection.execute("DROP TABLE agent_commits_legacy")
                 }
             }
         }

@@ -23,7 +23,7 @@ val stableTimelineGoldenTest by testSuite {
         var retainedIndex = 0
         for (source in suggestionGoldenInputs + listOf(
             """{"type":"user_message","content":[{"type":"input_text","text":"Synthetic"}]}""",
-            """{"type":"context_compaction","encrypted_content":"synthetic"}""",
+            """{"type":"context_compaction","encrypted_content":"synthetic","retained_items":[]}""",
         )) {
             val event = OpenAiJsonCodec.decodeFromString(CleanIndexEntry.serializer(), source)
             val canonical = OpenAiJsonCodec.encodeToJsonElement(CleanIndexEntry.serializer(), event)

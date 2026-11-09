@@ -43,13 +43,13 @@ internal fun ComposerSmoke(onBack: () -> Unit) {
             override val submit = ComposerSubmitPort { owner, content ->
                 delay(300)
                 check(!fail) { "Fixture append failed" }
-                accepted = "Submit ${owner.value}: $content"
+                if (runtimeFixture.running.value) {
+                    runtimeFixture.pendingSteer.value += StableUserMessage(content)
+                    accepted = "Steer ${owner.value}: $content"
+                } else {
+                    accepted = "Submit ${owner.value}: $content"
+                }
             }
-            override val steer = ComposerSteerPort { owner, content ->
-                runtimeFixture.pendingSteer.value += StableUserMessage(content)
-                accepted = "Steer ${owner.value}: $content"
-            }
-            override val resume = ComposerResumePort {}
             override val cancellation = ComposerCancellationPort {}
             override val failures = ComposerFailureReporter { _, failure -> accepted = "Failure: ${failure.message}" }
         }, scope)

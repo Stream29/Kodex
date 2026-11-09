@@ -327,9 +327,7 @@ internal class PageTestAgent(
             override val presentation = MutableStateFlow<ComposerRequestInputPresentation>(ComposerRequestInputPresentation.None)
         }
         override val submit = ComposerSubmitPort { _, _ -> error("No DOM submit in page wiring test") }
-        override val steer = ComposerSteerPort { _, _ -> error("No DOM steer in page wiring test") }
         override val cancellation = ComposerCancellationPort { error("No cancellation in page wiring test") }
-        override val resume = ComposerResumePort { error("No resume in page wiring test") }
         override val failures = ComposerFailureReporter { _, _ -> error("No failure in page wiring test") }
     }, owner).also { it.update("retained $name") }
 

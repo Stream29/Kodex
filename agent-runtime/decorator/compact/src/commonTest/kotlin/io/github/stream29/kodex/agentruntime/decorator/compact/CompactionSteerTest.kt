@@ -3,8 +3,6 @@ package io.github.stream29.kodex.agentruntime.decorator.compact
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.decorator.tool.toolRuntime
-import io.github.stream29.kodex.agentruntime.steer.StateFlowSteerProvider
-import io.github.stream29.kodex.agentruntime.steer.SteerProvider
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as AgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.RequestFinish
@@ -13,17 +11,19 @@ import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.CompactionPhase
@@ -54,11 +54,12 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -76,7 +77,7 @@ val compactionSteerTest by testSuite {
         runTest {
             withSteerRuntime {
                 val input = listOf(user("first"), user("same"), user("same"))
-                queue.value = input
+                state.steer(input)
                 val turnId = storage.getSettingsAt(storage.latestIndex()).turnId
 
                 runtime.resume()
@@ -85,7 +86,7 @@ val compactionSteerTest by testSuite {
                 assertEquals(input, userHistory())
                 assertEquals(input.map { it.toResponseHistoryItems().single() }, requests.first().input.takeLast(3))
                 assertEquals(turnId, storage.getSettingsAt(storage.latestIndex()).turnId)
-                assertTrue(queue.value.isEmpty())
+                assertTrue(pendingSteer().isEmpty())
             }
         }
     }
@@ -95,7 +96,7 @@ val compactionSteerTest by testSuite {
             withSteerRuntime {
                 state.injectHistory(listOf(StableAssistantMessage(content("finished"))))
                 val turnId = storage.getSettingsAt(storage.latestIndex()).turnId
-                queue.value = listOf(user("continue"))
+                state.steer(listOf(user("continue")))
 
                 runtime.resume()
 
@@ -113,13 +114,13 @@ val compactionSteerTest by testSuite {
                     recipient = "/root",
                     content = listOf(AgentMessageInputContent.InputText("done")),
                 )
-                queue.value = listOf(input)
+                state.steer(listOf(input))
 
                 runtime.resume()
 
-                assertEquals(input, storage.getCommitAtOrBefore(1, AgentCommitType.IndexTypes)?.commit)
+                assertEquals(input, storage.getCommitAtOrBefore(2, AgentCommitType.IndexTypes)?.commit)
                 assertTrue(userHistory().isEmpty())
-                assertTrue(queue.value.isEmpty())
+                assertTrue(pendingSteer().isEmpty())
             }
         }
     }
@@ -128,8 +129,8 @@ val compactionSteerTest by testSuite {
         runTest {
             withSteerRuntime {
                 state.appendUserMessage(content("initial"))
-                queue.value = listOf(user("retracted"))
-                queue.value = emptyList()
+                state.steer(listOf(user("retracted")))
+                clearSteer()
 
                 runtime.resume()
 
@@ -143,11 +144,11 @@ val compactionSteerTest by testSuite {
         runTest {
             withSteerRuntime(
                 response = { count, _ -> completedFlow(endTurn = count != 1) },
-                wrapState = { delegate, queue ->
+                wrapState = { delegate ->
                     object : AgentState by delegate {
                         override suspend fun requestResponseApi(): RequestFinish =
                             delegate.requestResponseApi().also { finish ->
-                                if (finish == RequestFinish.Continue) queue.value = listOf(user("adjust"))
+                                if (finish == RequestFinish.Continue) delegate.steer(listOf(user("adjust")))
                             }
                     }
                 },
@@ -167,11 +168,11 @@ val compactionSteerTest by testSuite {
         runTest {
             withSteerRuntime(
                 response = { count, _ -> if (count == 1) emptyFlow() else completedFlow() },
-                wrapState = { delegate, queue ->
+                wrapState = { delegate ->
                     object : AgentState by delegate {
                         override suspend fun requestResponseApi(): RequestFinish =
                             delegate.requestResponseApi().also { finish ->
-                                if (finish == RequestFinish.Retryable) queue.value = listOf(user("retry with this"))
+                                if (finish == RequestFinish.Retryable) delegate.steer(listOf(user("retry with this")))
                             }
                     }
                 },
@@ -195,12 +196,12 @@ val compactionSteerTest by testSuite {
                         ResponsesStreamEvent.Completed(Response(id = "first", endTurn = true)),
                     ) else completedFlow()
                 },
-                wrapState = { delegate, queue ->
+                wrapState = { delegate ->
                     object : AgentState by delegate {
                         var invocation = 0
                         override suspend fun requestResponseApi(): RequestFinish =
                             delegate.requestResponseApi().also {
-                                if (++invocation == 1) queue.value = listOf(user("late"))
+                                if (++invocation == 1) delegate.steer(listOf(user("late")))
                             }
                     }
                 },
@@ -239,14 +240,14 @@ val compactionSteerTest by testSuite {
                 val turnId = storage.getSettingsAt(storage.latestIndex()).turnId
                 val running = async { runtime.resume() }
                 generating.await()
-                queue.value = listOf(user("first"))
+                state.steer(listOf(user("first")))
                 cleaning.await()
 
                 try {
                     assertEquals(1, requests.size)
-                    assertEquals(listOf(user("first")), queue.value)
+                    assertEquals(listOf(user("first")), pendingSteer())
                     assertIs<KodexAgentStateValue.RequestResponse>(state.state.value)
-                    queue.update { it + listOf(user("second"), user("second")) }
+                    state.steer(listOf(user("second"), user("second")))
                 } finally {
                     releaseCleanup.complete(Unit)
                 }
@@ -261,7 +262,7 @@ val compactionSteerTest by testSuite {
                         .count { it.commit is StableAssistantMessage },
                 )
                 assertEquals(turnId, storage.getSettingsAt(storage.latestIndex()).turnId)
-                assertTrue(queue.value.isEmpty())
+                assertTrue(pendingSteer().isEmpty())
                 assertEquals(KodexAgentStateValue.UserMessage, state.state.value)
             }
         }
@@ -280,11 +281,11 @@ val compactionSteerTest by testSuite {
                 state.appendUserMessage(content("initial"))
                 val running = async { runtime.resume() }
                 committed.await()
-                queue.value = listOf(user("after tool"))
+                state.steer(listOf(user("after tool")))
                 running.await()
 
                 val pending = assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
-                assertEquals(listOf(user("after tool")), queue.value)
+                assertEquals(listOf(user("after tool")), pendingSteer())
                 assertEquals(1, requests.size)
                 assertEquals(listOf(user("initial")), userHistory())
                 val call = assertIs<PendingFunctionToolEvent>(pending.events.single())
@@ -303,7 +304,7 @@ val compactionSteerTest by testSuite {
                 assertEquals(listOf("initial", "after tool"), requests[1].userTexts())
                 assertEquals(1, requests[1].input.filterIsInstance<ResponseItem.FunctionCall>().size)
                 assertEquals(1, requests[1].input.filterIsInstance<ResponseItem.FunctionCallOutput>().size)
-                assertTrue(queue.value.isEmpty())
+                assertTrue(pendingSteer().isEmpty())
             }
         }
     }
@@ -325,12 +326,12 @@ val compactionSteerTest by testSuite {
                         ),
                     )
                 }
-                queue.value = listOf(user("retain"))
+                state.steer(listOf(user("retain")))
 
                 runtime.resume()
 
                 assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
-                assertEquals(listOf(user("retain")), queue.value)
+                assertEquals(listOf(user("retain")), pendingSteer())
                 assertTrue(requests.isEmpty())
             }
         }
@@ -355,10 +356,10 @@ val compactionSteerTest by testSuite {
                 state.appendUserMessage(content("initial"))
                 val running = async { runtime.resume() }
                 generating.await()
-                queue.value = listOf(user("retract"))
+                state.steer(listOf(user("retract")))
                 cleaning.await()
                 try {
-                    queue.value = emptyList()
+                    clearSteer()
                 } finally {
                     releaseCleanup.complete(Unit)
                 }
@@ -366,7 +367,7 @@ val compactionSteerTest by testSuite {
 
                 assertEquals(2, requests.size)
                 assertEquals(listOf(user("initial")), userHistory())
-                assertTrue(queue.value.isEmpty())
+                assertTrue(pendingSteer().isEmpty())
             }
         }
     }
@@ -383,10 +384,10 @@ val compactionSteerTest by testSuite {
                 generating.await()
 
                 running.cancel()
-                queue.value = listOf(user("keep"))
+                state.steer(listOf(user("keep")))
                 assertFailsWith<CancellationException> { running.await() }
 
-                assertEquals(listOf(user("keep")), queue.value)
+                assertEquals(listOf(user("keep")), pendingSteer())
                 assertEquals(listOf(user("initial")), userHistory())
                 assertEquals(KodexAgentStateValue.UserMessage, state.state.value)
             }
@@ -409,12 +410,12 @@ val compactionSteerTest by testSuite {
                 supervisorScope {
                     val running = async { runtime.resume() }
                     generating.await()
-                    queue.value = listOf(user("retain on failure"))
+                    state.steer(listOf(user("retain on failure")))
                     assertEquals(failure.message, assertFailsWith<IllegalStateException> { running.await() }.message)
                 }
 
                 assertEquals(1, requests.size)
-                assertEquals(listOf(user("retain on failure")), queue.value)
+                assertEquals(listOf(user("retain on failure")), pendingSteer())
                 assertEquals(KodexAgentStateValue.UserMessage, state.state.value)
             }
         }
@@ -441,20 +442,21 @@ val compactionSteerTest by testSuite {
         runTest {
             val claimed = CompletableDeferred<Unit>()
             val releaseWrite = CompletableDeferred<Unit>()
-            withSteerRuntime(wrapState = { delegate, _ ->
+            withSteerRuntime(wrapState = { delegate ->
                 object : AgentState by delegate {
-                    override suspend fun injectHistory(events: List<StableIndexEvent.Steerable>): Int {
+                    override suspend fun consumeSteer(): List<StableIndexEvent.Steerable> {
+                        val consumed = delegate.consumeSteer()
                         claimed.complete(Unit)
                         releaseWrite.await()
-                        return delegate.injectHistory(events)
+                        return consumed
                     }
                 }
             }) {
-                queue.value = listOf(user("claimed"))
+                state.steer(listOf(user("claimed")))
                 val running = async { runtime.resume() }
                 claimed.await()
                 try {
-                    assertTrue(queue.value.isEmpty())
+                    assertTrue(pendingSteer().isEmpty())
                     running.cancel()
                     assertFalse(running.isCompleted)
                 } finally {
@@ -471,20 +473,23 @@ val compactionSteerTest by testSuite {
     test("delivery failure preserves committed prefix without replay or sampling") {
         runTest {
             val failure = IllegalStateException("write failed")
-            withSteerRuntime(wrapState = { delegate, _ ->
+            withSteerRuntime(wrapState = { delegate ->
                 object : AgentState by delegate {
-                    override suspend fun injectHistory(events: List<StableIndexEvent.Steerable>): Int {
-                        delegate.injectHistory(events.take(1))
+                    override suspend fun consumeSteer(): List<StableIndexEvent.Steerable> {
+                        val events = delegate.storage.getSteerAt(delegate.storage.latestIndex())
+                        (delegate.storage as InMemoryKodexAgentStorage).commit(
+                            listOf(events.first(), SteerSnapshot(emptyList())),
+                        )
                         throw failure
                     }
                 }
             }) {
-                queue.value = listOf(user("committed"), user("not committed"))
+                state.steer(listOf(user("committed"), user("not committed")))
 
                 assertEquals(failure.message, assertFailsWith<IllegalStateException> { runtime.resume() }.message)
 
                 assertEquals(listOf(user("committed")), userHistory())
-                assertTrue(queue.value.isEmpty())
+                assertTrue(pendingSteer().isEmpty())
                 assertTrue(requests.isEmpty())
             }
         }
@@ -506,9 +511,9 @@ val compactionSteerTest by testSuite {
                 storage.commit(LlmRequestMeta.Response(20L))
                 val running = async { runtime.resume() }
                 compacting.await()
-                queue.value = listOf(user("during compact"))
+                state.steer(listOf(user("during compact")))
 
-                assertEquals(listOf(user("during compact")), queue.value)
+                assertEquals(listOf(user("during compact")), pendingSteer())
                 assertEquals(KodexAgentStateValue.Compacting, state.state.value)
                 releaseCompact.complete(Unit)
                 running.await()
@@ -516,7 +521,7 @@ val compactionSteerTest by testSuite {
                 assertEquals(1, compactRequests.size)
                 assertEquals(1, requests.size)
                 assertEquals(listOf("initial", "during compact"), requests.single().userTexts())
-                assertTrue(queue.value.isEmpty())
+                assertTrue(pendingSteer().isEmpty())
             }
         }
     }
@@ -544,7 +549,7 @@ val compactionSteerTest by testSuite {
                 val running = async { runtime.resume() }
                 compacting.await()
                 try {
-                    queue.value = listOf(user("mid-turn"))
+                    state.steer(listOf(user("mid-turn")))
                     assertEquals(1, requests.size)
                     assertEquals(KodexAgentStateValue.Compacting, state.state.value)
                 } finally {
@@ -555,7 +560,7 @@ val compactionSteerTest by testSuite {
                 assertEquals(1, compactRequests.size)
                 assertEquals(2, requests.size)
                 assertEquals(listOf("initial", "mid-turn"), requests[1].userTexts())
-                assertTrue(queue.value.isEmpty())
+                assertTrue(pendingSteer().isEmpty())
             }
         }
     }
@@ -573,7 +578,7 @@ val compactionSteerTest by testSuite {
                 supervisorScope {
                     val running = async { runtime.resume() }
                     generating.await()
-                    queue.value = listOf(user("adjust"))
+                    state.steer(listOf(user("adjust")))
                     assertFailsWith<AgentResponseRetryLimitExceededException> { running.await() }
                 }
 
@@ -591,13 +596,13 @@ val compactionSteerTest by testSuite {
                 response = { count, _ ->
                     if (count == firstFinish || count == firstFinish * 2) completedFlow() else emptyFlow()
                 },
-                wrapState = { delegate, queue ->
+                wrapState = { delegate ->
                     var finishes = 0
                     object : AgentState by delegate {
                         override suspend fun requestResponseApi(): RequestFinish =
                             delegate.requestResponseApi().also { finish ->
                                 if (finish == RequestFinish.Finish && ++finishes == 1) {
-                                    queue.value = listOf(user("next"))
+                                    delegate.steer(listOf(user("next")))
                                 }
                             }
                     }
@@ -609,7 +614,7 @@ val compactionSteerTest by testSuite {
 
                 assertEquals(firstFinish * 2, requests.size)
                 assertEquals(listOf("initial", "next"), requests.last().userTexts())
-                assertTrue(queue.value.isEmpty())
+                assertTrue(pendingSteer().isEmpty())
             }
         }
     }
@@ -654,10 +659,10 @@ val compactionSteerTest by testSuite {
                     val running = async { composed.resume() }
                     handling.await()
                     try {
-                        queue.value = listOf(user("after execution"))
+                        state.steer(listOf(user("after execution")))
                         assertEquals(1, requests.size)
                         assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
-                        assertEquals(listOf(user("after execution")), queue.value)
+                        assertEquals(listOf(user("after execution")), pendingSteer())
                     } finally {
                         releaseTool.complete(Unit)
                     }
@@ -673,7 +678,7 @@ val compactionSteerTest by testSuite {
                     assertEquals(1, input.filterIsInstance<ResponseItem.FunctionCallOutput>().size)
                     assertTrue(callIndex >= 0 && callIndex < outputIndex && outputIndex < steerIndex)
                     assertEquals(listOf("initial", "after execution"), requests[1].userTexts())
-                    assertTrue(queue.value.isEmpty())
+                    assertTrue(pendingSteer().isEmpty())
                 } finally {
                     tool.close()
                 }
@@ -685,7 +690,7 @@ val compactionSteerTest by testSuite {
         runTest {
             withSteerRuntime {
                 state.appendUserMessage(content("initial"))
-                queue.value = listOf(user("retain"))
+                state.steer(listOf(user("retain")))
 
                 runtime.compact(
                     trigger = CompactionTrigger.Manual,
@@ -693,24 +698,27 @@ val compactionSteerTest by testSuite {
                     phase = CompactionPhase.StandaloneTurn,
                 )
 
-                assertEquals(listOf(user("retain")), queue.value)
+                assertEquals(listOf(user("retain")), pendingSteer())
                 assertEquals(1, compactRequests.size)
                 assertTrue(requests.isEmpty())
             }
         }
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi::class)
     test("sampling completion leaves no active steer waiter") {
         runTest {
             var activeWaiters = 0
-            withSteerRuntime(wrapProvider = { provider ->
-                object : SteerProvider by provider {
-                    override suspend fun waitForSteer() {
-                        activeWaiters += 1
-                        try {
-                            provider.waitForSteer()
-                        } finally {
-                            activeWaiters -= 1
+            withSteerRuntime(wrapState = { delegate ->
+                object : AgentState by delegate {
+                    override val latestIndex: StateFlow<Int> = object : StateFlow<Int> by delegate.latestIndex {
+                        override suspend fun collect(collector: FlowCollector<Int>): Nothing {
+                            activeWaiters += 1
+                            try {
+                                delegate.latestIndex.collect(collector)
+                            } finally {
+                                activeWaiters -= 1
+                            }
                         }
                     }
                 }
@@ -730,10 +738,16 @@ private class SteerFixture(
     val state: AgentState,
     val storage: InMemoryKodexAgentStorage,
     val runtime: KodexAgentCompactionRuntime,
-    val queue: MutableStateFlow<List<StableIndexEvent.Steerable>>,
     val requests: List<ResponsesApiRequest>,
     val compactRequests: List<ResponsesApiRequest>,
 ) {
+    suspend fun pendingSteer(): List<StableIndexEvent.Steerable> =
+        storage.getSteerAt(storage.latestIndex())
+
+    suspend fun clearSteer() {
+        storage.commit(SteerSnapshot(emptyList()))
+    }
+
     suspend fun userHistory(): List<StableUserMessage> =
         storage.getCommitsIn(0..storage.latestIndex(), AgentCommitType.IndexTypes)
             .mapNotNull { it.commit as? StableUserMessage }
@@ -743,12 +757,10 @@ private suspend fun CoroutineScope.withSteerRuntime(
     settings: KodexAgentSettings = KodexAgentSettings(OpenAiModelId("test-model")),
     response: suspend (Int, ResponsesApiRequest) -> Flow<ResponsesStreamEvent> = { _, _ -> completedFlow() },
     compact: suspend (ResponsesApiRequest) -> RemoteCompactionV2Response = { compactResponse() },
-    wrapState: (AgentState, MutableStateFlow<List<StableIndexEvent.Steerable>>) -> AgentState = { state, _ -> state },
-    wrapProvider: (SteerProvider) -> SteerProvider = { it },
+    wrapState: (AgentState) -> AgentState = { state -> state },
     block: suspend SteerFixture.() -> Unit,
 ) {
     val storage = InMemoryKodexAgentStorage(settings)
-    val queue = MutableStateFlow(emptyList<StableIndexEvent.Steerable>())
     val requests = mutableListOf<ResponsesApiRequest>()
     val compactRequests = mutableListOf<ResponsesApiRequest>()
     val state = KodexAgentState(
@@ -770,12 +782,12 @@ private suspend fun CoroutineScope.withSteerRuntime(
         client = mockOpenAiClient { listModels { OpenAiResult.Success(ModelsResponse()) } },
     )
     try {
-        val runtime = wrapState(state, queue).compactionRuntime(
+        val wrappedState = wrapState(state)
+        val runtime = wrappedState.compactionRuntime(
             modelCatalog = modelCatalog,
             logger = KotlinLogging.logger {},
-            steerProvider = wrapProvider(StateFlowSteerProvider(queue)),
         )
-        SteerFixture(state, storage, runtime, queue, requests, compactRequests).block()
+        SteerFixture(wrappedState, storage, runtime, requests, compactRequests).block()
     } finally {
         modelCatalog.close()
         state.cancelAndJoin()

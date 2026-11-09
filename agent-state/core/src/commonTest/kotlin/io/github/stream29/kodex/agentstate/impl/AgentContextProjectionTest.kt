@@ -193,7 +193,10 @@ val agentContextProjectionTest by testSuite {
                 assertEquals(2, compactIndex)
                 assertEquals(StableUserMessage(user.content), storage.getIndexEntryAt(1))
                 assertEquals(
-                    StableContextCompaction(encryptedContent = "compacted"),
+                    StableContextCompaction(
+                        encryptedContent = "compacted",
+                        retainedItems = listOf(StableUserMessage(user.content)),
+                    ),
                     storage.getIndexEntryAt(compactIndex),
                 )
             } finally {

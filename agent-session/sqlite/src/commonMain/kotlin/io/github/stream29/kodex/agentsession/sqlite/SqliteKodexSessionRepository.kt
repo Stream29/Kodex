@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Instant
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
 import io.github.stream29.kodex.agentstorage.sqlite.*
 import io.github.stream29.kodex.agentstorage.contract.*
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
@@ -120,9 +123,10 @@ public actual class SqliteKodexSessionRepository internal constructor(
             connection.execute("INSERT INTO agents(agent_id, session_id, parent_agent_id) VALUES (?, ?, NULL)",
                 listOf(candidate, candidate))
             if (source != null) {
+                val emptySteerJson = SteerSnapshot(emptyList()).encodePayloadJson()
                 connection.execute(
-                    """INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at) SELECT ?, type, "index", payload_json, created_at FROM agent_commits WHERE agent_id = ?""",
-                    listOf(candidate, source.toLong()),
+                    """INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at) SELECT ?, type, "index", CASE WHEN type = ? THEN ? ELSE payload_json END, created_at FROM agent_commits WHERE agent_id = ?""",
+                    listOf(candidate, AgentCommitType.Steer.wireName, emptySteerJson, source.toLong()),
                 )
                 val snapshot = connection.query(
                     """SELECT type, "index", payload_json FROM agent_commits WHERE agent_id = ? ORDER BY "index", type""",

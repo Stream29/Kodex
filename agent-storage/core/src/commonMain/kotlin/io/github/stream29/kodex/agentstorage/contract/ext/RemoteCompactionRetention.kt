@@ -2,6 +2,7 @@ package io.github.stream29.kodex.agentstorage.contract.ext
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
@@ -9,6 +10,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSub
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.StepStatus
@@ -26,40 +28,103 @@ private const val RemoteCompactionV2RetainedItemTokenBudget: Int = 64_000
 private const val ApproximateCharactersPerToken: Int = 4
 
 /**
- * Reads the bounded retained prefix before [beforeIndex].
+ * Computes the bounded retained prefix (up to the 64,000-token retention budget) for a new
+ * compaction checkpoint covering commits through [upToIndex].
  */
-public actual suspend fun KodexAgentStorage.buildCompactionPrefix(
-    beforeIndex: Int,
+public actual suspend fun KodexAgentStorage.buildCompactionRetainedItems(
+    upToIndex: Int,
+    additionalRetainedByIndex: Map<Int, List<CompactionRetainedItem>>,
 ): List<CompactionRetainedItem> {
-    require(beforeIndex >= 0) { "Index $beforeIndex must be non-negative." }
-    if (beforeIndex == 0) return emptyList()
+    require(upToIndex >= 0) { "Index $upToIndex must be non-negative." }
+
+    val previousPoint = getLastCommitsIn(
+        range = 0..upToIndex,
+        types = setOf(AgentCommitType.ContextCompaction),
+        limit = 1,
+    ).lastOrNull()
+    val previousCompaction = previousPoint?.commit as? StableContextCompaction
+    val lowerBound = (previousPoint?.index ?: -1) + 1
 
     var usedTokens = 0L
     val retainedReversed = mutableListOf<CompactionRetainedItem>()
-    var upperBound = beforeIndex - 1
+
+    fun tryRetain(item: CompactionRetainedItem): Boolean {
+        usedTokens += item.approximateTokenCount().coerceAtLeast(1)
+        if (usedTokens <= RemoteCompactionV2RetainedItemTokenBudget) {
+            retainedReversed += item
+            return true
+        }
+        return false
+    }
+
+    val extraKeysDescending = additionalRetainedByIndex.keys
+        .filter { it in lowerBound..upToIndex && !additionalRetainedByIndex[it].isNullOrEmpty() }
+        .sortedDescending()
+    var extraCursor = 0
+
+    fun drainExtrasAbove(minIndexExclusive: Int): Boolean {
+        while (extraCursor < extraKeysDescending.size && extraKeysDescending[extraCursor] > minIndexExclusive) {
+            val extraList = additionalRetainedByIndex[extraKeysDescending[extraCursor]].orEmpty()
+            for (i in extraList.indices.reversed()) {
+                if (!tryRetain(extraList[i])) return false
+            }
+            extraCursor++
+        }
+        return true
+    }
+
+    var upperBound = upToIndex
     var batchSize = 32
-    while (upperBound >= 0) {
+    while (upperBound >= lowerBound) {
         val page = getLastCommitsIn(
-            range = 0..upperBound,
+            range = lowerBound..upperBound,
             types = AgentCommitType.CompactionRetainedTypes,
             limit = batchSize,
         )
         if (page.isEmpty()) break
         for (i in page.indices.reversed()) {
-            val item = page[i].commit as CompactionRetainedItem
-            usedTokens += item.approximateTokenCount().coerceAtLeast(1)
-            if (usedTokens <= RemoteCompactionV2RetainedItemTokenBudget) {
-                retainedReversed += item
-            } else {
+            val entry = page[i]
+            if (!drainExtrasAbove(entry.index)) {
+                retainedReversed.reverse()
+                return retainedReversed
+            }
+            if (extraCursor < extraKeysDescending.size && extraKeysDescending[extraCursor] == entry.index) {
+                val extraList = additionalRetainedByIndex[entry.index].orEmpty()
+                for (j in extraList.indices.reversed()) {
+                    if (!tryRetain(extraList[j])) {
+                        retainedReversed.reverse()
+                        return retainedReversed
+                    }
+                }
+                extraCursor++
+            }
+            val item = entry.commit as CompactionRetainedItem
+            if (!tryRetain(item)) {
                 retainedReversed.reverse()
                 return retainedReversed
             }
         }
         val oldestFetchedIndex = page.first().index
-        if (oldestFetchedIndex <= 0) break
+        if (oldestFetchedIndex <= lowerBound) break
         upperBound = oldestFetchedIndex - 1
         if (batchSize < 512) batchSize *= 2
     }
+
+    if (!drainExtrasAbove(lowerBound - 1)) {
+        retainedReversed.reverse()
+        return retainedReversed
+    }
+
+    if (previousCompaction != null) {
+        val priorItems = previousCompaction.retainedItems
+        for (i in priorItems.indices.reversed()) {
+            if (!tryRetain(priorItems[i])) {
+                retainedReversed.reverse()
+                return retainedReversed
+            }
+        }
+    }
+
     retainedReversed.reverse()
     return retainedReversed
 }

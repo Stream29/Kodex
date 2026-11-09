@@ -25,23 +25,16 @@ public actual suspend fun KodexAgentStorage.latestCompactionPointOrNull(at: Int)
 /**
  * Reconstructs the model-visible message window at [index].
  *
- * The part before the latest compaction marker is reduced to the bounded
- * retained prefix. The part from the marker through [index] is preserved
- * exactly, including the context-compaction output.
+ * When a compaction checkpoint exists at or before [index], projection starts directly
+ * at that self-contained `StableContextCompaction` commit (which already carries its
+ * bounded `retainedItems` and encrypted compaction summary) and appends commits after
+ * the checkpoint through [index], without scanning commits before the checkpoint.
  */
 public actual suspend fun KodexAgentStorage.activeMessageWindowAt(
     index: Int,
 ): List<StableCleanEvent> {
     require(index >= 0) { "Index $index must be non-negative." }
-
-    val pointIndex = latestCompactionPointOrNull(index)
-    val prefix = if (pointIndex == null) {
-        emptyList()
-    } else {
-        buildCompactionPrefix(pointIndex)
-    }
-    val contextStart = pointIndex ?: 0
-    val contextWindow = getCommitsIn(contextStart..index, AgentCommitType.CleanEventTypes)
+    val contextStart = latestCompactionPointOrNull(index) ?: 0
+    return getCommitsIn(contextStart..index, AgentCommitType.CleanEventTypes)
         .map { it.commit as StableCleanEvent }
-    return prefix + contextWindow
 }

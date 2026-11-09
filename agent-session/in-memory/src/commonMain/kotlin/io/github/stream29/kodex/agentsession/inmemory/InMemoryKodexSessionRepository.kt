@@ -13,6 +13,7 @@ import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
@@ -336,6 +337,10 @@ private suspend fun cloneStorage(
     val grouped = source.getCommitsIn(0..latest).groupBy({ it.index }, { it.commit })
     for (index in 0..latest) {
         val commits = grouped[index] ?: continue
-        target.commit(commits)
+        target.commit(
+            commits.map { commit ->
+                if (commit is SteerSnapshot) SteerSnapshot(emptyList()) else commit
+            },
+        )
     }
 }

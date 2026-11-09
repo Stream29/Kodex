@@ -303,8 +303,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
     test("ordinary reads pending steer and subscription cancellation do not renew") {
         runTest {
             withBackendSessionHost(testScheduler.timeSource, { InMemoryKodexSessionRepository(testKodexAgentDependencies()) }) { host ->
-                val index = host.repository().create()
-                host.keepSessionAlive(index)
+                val index = host.createInitialized()
                 val binding = host.session(index)
                 val observer = launch { binding.observe(binding.session.runtime.latestIndex).collect() }
                 runCurrent()
@@ -312,7 +311,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
                 assertTrue(binding.session.coroutineContext.job.isActive)
                 advanceTimeBy(50_000)
                 host.inSession(index) {
-                    runtime.pendingSteer.value = listOf(StableUserMessage(listOf(ContentItem.InputText("queued"))))
+                    runtime.steer(listOf(StableUserMessage(listOf(ContentItem.InputText("queued")))))
                 }
                 host.session(index)
                 host.repository().listEntries()

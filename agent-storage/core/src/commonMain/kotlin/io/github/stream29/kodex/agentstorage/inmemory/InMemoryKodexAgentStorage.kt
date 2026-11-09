@@ -7,6 +7,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.validateCommitBatch
 import io.github.stream29.kodex.utils.ReadWriteMutex
@@ -136,6 +137,16 @@ public actual class InMemoryKodexAgentStorage private constructor(
         mutex.writer.withLock {
             if (untilExclusive < rowsByIndex.size) {
                 rowsByIndex.subList(untilExclusive, rowsByIndex.size).clear()
+            }
+            for (idx in rowsByIndex.indices) {
+                val row = rowsByIndex[idx]
+                if (row.commits.any { it is SteerSnapshot && it.events.isNotEmpty() }) {
+                    rowsByIndex[idx] = row.copy(
+                        commits = row.commits.map { commit ->
+                            if (commit is SteerSnapshot) SteerSnapshot(emptyList()) else commit
+                        },
+                    )
+                }
             }
         }
     }

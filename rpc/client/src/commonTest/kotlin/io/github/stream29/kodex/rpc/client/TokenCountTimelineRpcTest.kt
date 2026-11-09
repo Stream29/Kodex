@@ -5,6 +5,7 @@ package io.github.stream29.kodex.rpc.client
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -80,7 +81,7 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
                         assertEquals(snapshot, view.getCommitExact(index, AgentCommitType.LlmRequestMetaTypes)?.commit)
                     }
                     assertEquals(before + backend.entries.size, backend.exactReads)
-                    assertEquals(backend.entries.getValue(2), view.getLlmRequestMetaAtOrNull(4))
+                    assertEquals<AgentCommit?>(backend.entries.getValue(2), view.getLlmRequestMetaAtOrNull(4))
                     assertEquals(2, view.getCommitAtOrBefore(4, AgentCommitType.TokenCountTypes)?.index)
                     assertEquals(5, view.getCommitAtOrAfter(4, AgentCommitType.TokenCountTypes)?.index)
                     assertEquals(nonce, view.cacheNonce.value)

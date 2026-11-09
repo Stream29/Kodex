@@ -122,7 +122,6 @@ moduleTree("agent-runtime") {
         module("compact")
         module("tool")
     }
-    module("steer")
 }
 
 moduleTree("agent-session") {

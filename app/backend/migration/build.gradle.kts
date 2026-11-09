@@ -29,7 +29,9 @@ kotlin {
         named("cliHostMain") {
             kotlin.srcDir(files(generatedVersionDirectory).builtBy(generateKodexVersion))
             dependencies {
+                implementation(project(":agent-storage-clean-models"))
                 implementation(project(":agent-storage-filesystem-layout"))
+                implementation(project(":openai-json-codec"))
                 implementation(project(":utils-sqlite"))
                 implementation(project(":utils-filesystem-lease"))
                 implementation(libs.kotlinx.serialization.json)

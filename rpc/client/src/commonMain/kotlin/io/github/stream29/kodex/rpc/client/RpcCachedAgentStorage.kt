@@ -121,6 +121,7 @@ private val SingleCommitCategorySets: Set<Set<AgentCommitType>> = setOf(
     AgentCommitType.SettingsTypes,
     AgentCommitType.LlmRequestMetaTypes,
     AgentCommitType.UnstableTypes,
+    AgentCommitType.SteerTypes,
 )
 
 private class RpcCachedAgentStorage(

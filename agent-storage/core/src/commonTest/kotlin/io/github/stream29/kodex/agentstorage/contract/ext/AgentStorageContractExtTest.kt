@@ -64,7 +64,7 @@ val agentStorageContractExtTest by testSuite {
         )
     }
 
-    test("compaction prefix stops fetching after its retained token budget and skips assistant messages") {
+    test("compaction retained items stop fetching after retained token budget and skip assistant messages") {
         val mutable = storage()
         repeat(500) {
             mutable.commit(user("x".repeat(1_000)))
@@ -72,17 +72,22 @@ val agentStorageContractExtTest by testSuite {
         }
         val counted = CountingStorage(mutable)
 
-        val prefix = counted.buildCompactionPrefix(beforeIndex = mutable.latestIndex() + 1)
+        val retained = counted.buildCompactionRetainedItems(upToIndex = mutable.latestIndex())
 
-        assertTrue(prefix.isNotEmpty())
-        assertTrue(prefix.size < 500)
+        assertTrue(retained.isNotEmpty())
+        assertTrue(retained.size < 500)
         assertTrue(counted.totalFetchedCommits < 500)
     }
 
-    test("active message window retains prefix and preserves post-point events") {
+    test("active message window starts at latest compaction point and preserves post-point events") {
         val mutable = storage()
         mutable.commit(user("retained")) // 1
-        mutable.commit(StableContextCompaction(encryptedContent = "encrypted")) // 2
+        mutable.commit(
+            StableContextCompaction(
+                encryptedContent = "encrypted",
+                retainedItems = listOf(user("retained")),
+            ),
+        ) // 2
         mutable.commit(user("current")) // 3
         mutable.commit(work("current-work")) // 4
 
@@ -90,13 +95,13 @@ val agentStorageContractExtTest by testSuite {
 
         assertEquals(
             listOf(
-                StableUserMessage::class,
                 StableContextCompaction::class,
                 StableUserMessage::class,
                 StableWebSearchCall::class,
             ),
             window.map { it::class },
         )
+        assertEquals(listOf(user("retained")), (window.first() as StableContextCompaction).retainedItems)
     }
 
     test("active message window keeps the whole history when no point exists") {

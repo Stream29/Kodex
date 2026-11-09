@@ -14,6 +14,7 @@ import io.github.stream29.kodex.agentstate.tool.toPendingToolEvent
 import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
@@ -37,7 +38,10 @@ import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.ext.appendCompaction
 import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
+import io.github.stream29.kodex.agentstorage.contract.ext.buildCompactionRetainedItems
+import io.github.stream29.kodex.agentstorage.contract.ext.latestCompactionPointOrNull
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.CodexResponsesMetadata
@@ -109,6 +113,7 @@ public actual suspend fun CoroutineScope.KodexAgentState(
     storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
     mcpService: McpService,
+    compactionRetainedItemsProvider: suspend (IntRange) -> Map<Int, List<CompactionRetainedItem>>,
 ): KodexAgentState {
     val stateScope = supervisorChildScope()
     try {
@@ -119,6 +124,7 @@ public actual suspend fun CoroutineScope.KodexAgentState(
             storage = storage,
             contextSettings = contextSettings,
             mcpService = mcpService,
+            compactionRetainedItemsProvider = compactionRetainedItemsProvider,
             loadedLatestIndex = loadedLatestIndex,
             initialState = storage.stateAt(loadedLatestIndex),
         )
@@ -142,6 +148,7 @@ private class KodexAgentStateImpl(
     override val storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
     private val mcpService: McpService,
+    private val compactionRetainedItemsProvider: suspend (IntRange) -> Map<Int, List<CompactionRetainedItem>>,
     loadedLatestIndex: Int,
     initialState: KodexAgentStateValue,
 ) : KodexAgentState, CoroutineScope by scope {
@@ -406,13 +413,53 @@ private class KodexAgentStateImpl(
                 ),
             )
             commitCompaction(
-                output = StableContextCompaction(
-                    id = result.compactionOutput.id,
-                    encryptedContent = result.compactionOutput.encryptedContent,
-                ),
+                compactionOutput = result.compactionOutput,
             )
         } finally {
             finishCompaction()
+        }
+    }
+
+    override suspend fun steer(events: List<StableIndexEvent.Steerable>): Int =
+        writeMutex.withLock {
+            if (events.isEmpty()) return@withLock latestIndex.value
+            val index = storage.steer(events)
+            latestIndex.value = index
+            index
+        }
+
+    override suspend fun consumeSteer(): List<StableIndexEvent.Steerable> {
+        writeMutex.lock()
+        try {
+            val currentState = state.value
+            if (!currentState.isStable) {
+                throw KodexAgentStateInvalidTransitionException("start an atomic operation", currentState)
+            }
+            currentState.requireCanAppendUserMessage()
+            val currentLatest = storage.latestIndex()
+            if (currentLatest < 0 || storage.getSteerAt(currentLatest).isEmpty()) {
+                return emptyList()
+            }
+            state.value = KodexAgentStateValue.ExternalWrite
+            var succeeded = false
+            try {
+                val consumed = storage.consumeSteer()
+                val index = storage.latestIndex()
+                latestIndex.value = index
+                state.value = storage.stateAt(index)
+                succeeded = true
+                return consumed
+            } finally {
+                if (!succeeded) {
+                    withContext(NonCancellable) {
+                        val index = storage.latestIndex()
+                        latestIndex.value = index
+                        state.value = storage.stateAt(index)
+                    }
+                }
+            }
+        } finally {
+            writeMutex.unlock()
         }
     }
 
@@ -706,16 +753,33 @@ private class KodexAgentStateImpl(
 
     @OptIn(ExperimentalUuidApi::class)
     private suspend fun commitCompaction(
-        output: StableContextCompaction,
+        compactionOutput: ResponseItem.Compaction,
     ): Int = writeMutex.withLock {
         check(state.value == KodexAgentStateValue.Compacting) {
             "Compaction ownership was lost before its result was committed."
         }
+        val currentLatest = storage.latestIndex()
+        val previousPointIndex = storage.latestCompactionPointOrNull(currentLatest)
+        val incrementalRange = ((previousPointIndex ?: -1) + 1)..currentLatest
+        val additionalRetainedByIndex = if (incrementalRange.isEmpty()) {
+            emptyMap()
+        } else {
+            compactionRetainedItemsProvider(incrementalRange)
+        }
+        val retainedItems = storage.buildCompactionRetainedItems(
+            upToIndex = currentLatest,
+            additionalRetainedByIndex = additionalRetainedByIndex,
+        )
+        val output = StableContextCompaction(
+            id = compactionOutput.id,
+            encryptedContent = compactionOutput.encryptedContent,
+            retainedItems = retainedItems,
+        )
         val index = storage.appendCompaction(
             output = output,
             timestamp = now(),
             nextWindowId = Uuid.generateV7().toString(),
-            previousSettings = storage.getSettingsAt(storage.latestIndex()),
+            previousSettings = storage.getSettingsAt(currentLatest),
         )
         latestIndex.value = index
         index

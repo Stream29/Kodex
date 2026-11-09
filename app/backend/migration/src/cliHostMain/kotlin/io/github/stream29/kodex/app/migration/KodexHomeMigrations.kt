@@ -9,6 +9,7 @@ import io.github.stream29.kodex.app.migration.v0_4_15.migrateToV0_4_15
 import io.github.stream29.kodex.app.migration.v0_5_2.migrateToV0_5_2
 import io.github.stream29.kodex.app.migration.v0_7_0.migrateToV0_7_0
 import io.github.stream29.kodex.app.migration.v0_7_1.migrateToV0_7_1
+import io.github.stream29.kodex.app.migration.v0_7_2.migrateToV0_7_2
 
 internal val KodexHomeMigrations: List<Migration> = listOf(
     Migration(
@@ -46,5 +47,9 @@ internal val KodexHomeMigrations: List<Migration> = listOf(
     Migration(
         toVersion = MigrationVersion("0.7.1"),
         action = ::migrateToV0_7_1,
+    ),
+    Migration(
+        toVersion = MigrationVersion("0.7.2"),
+        action = ::migrateToV0_7_2,
     ),
 )

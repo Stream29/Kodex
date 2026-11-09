@@ -11,6 +11,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.rpc.client.asSuspendMutableStateFlow
@@ -44,7 +45,7 @@ public actual class RpcSessionBinding private constructor(
     public actual val running: StateFlow<Boolean>,
     public actual val shellSessions: StateFlow<Map<Int, ShellSessionState>>,
     public actual val settings: SuspendMutableStateFlow<KodexAgentSettings>,
-    public actual val pendingSteer: SuspendMutableStateFlow<List<StableIndexEvent.Steerable>>,
+    public actual val pendingSteer: StateFlow<List<StableIndexEvent.Steerable>>,
     public actual val tokenCount: StateFlow<LlmRequestMeta?>,
     private val owner: Job,
     private val services: RpcServices,
@@ -67,6 +68,8 @@ public actual class RpcSessionBinding private constructor(
         }
     }
 
+    public actual suspend fun submit(content: List<ContentItem>): Unit =
+        command { services.runtime.submit(sessionIndex, content) }
     public actual suspend fun appendUserMessage(content: List<ContentItem>): Int =
         command { services.runtime.appendUserMessage(sessionIndex, content) }
     public actual suspend fun resume(): Unit = command { services.runtime.resume(sessionIndex) }
@@ -114,9 +117,9 @@ public actual class RpcSessionBinding private constructor(
             val shell = scope.rpcStateIn(
                 { runtime.getShellSessions(index) }, { runtime.getShellSessionsFlow(index).requiredState() },
             )
-            val pending = scope.rpcStateIn(
-                { runtime.getPendingSteer(index) }, { runtime.getPendingSteerFlow(index).requiredState() },
-            )
+            val pending = scope.visibleValue(storage, latest) { position ->
+                if (position >= 0) storage.getSteerAt(position) else emptyList()
+            }
             val settings = scope.visibleValue(storage, latest) { position -> storage.getSettingsAt(position) }
             val tokenCount = scope.visibleValue(storage, latest) { position ->
                 if (position >= 0) storage.getLlmRequestMetaAtOrNull(position) else null
@@ -138,9 +141,7 @@ public actual class RpcSessionBinding private constructor(
                 settings.asSuspendMutableStateFlow { expect, update ->
                     compare { services.storage.compareAndSetSettings(index, expect, update) }
                 },
-                pending.asSuspendMutableStateFlow { expect, update ->
-                    compare { runtime.compareAndSetPendingSteer(index, expect, update) }
-                },
+                pending,
                 tokenCount, owner, services, invalidate,
             )
         }

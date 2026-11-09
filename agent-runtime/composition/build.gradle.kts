@@ -15,7 +15,6 @@ kotlin {
         }
         commonMain.dependencies {
             implementation(project(":agent-runtime-decorator-compact"))
-            implementation(project(":agent-runtime-steer"))
             implementation(project(":agent-runtime-decorator-tool"))
             implementation(project(":agent-state-core"))
             implementation(project(":agent-storage-core"))

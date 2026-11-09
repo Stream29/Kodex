@@ -13,7 +13,6 @@ import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
-import io.github.stream29.kodex.app.agent.contract.ComposerResumePort
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.applicationpreferences.ApplicationPreferencesViewModel
 import io.github.stream29.kodex.app.authenticationsettings.AuthenticationSettingsViewModel
@@ -80,14 +79,13 @@ public expect fun createRpcAgentViewModel(
 
 /**
  * Creates the Composer child bound to one exact RPC Session binding.
- * Command callbacks must belong to that binding's presentation owner: resume/cancel admit
+ * Command callbacks must belong to that binding's presentation owner: cancel admits
  * work through its caught command boundary, and failures use the Application's error outlet.
  * No callback may resolve the currently selected Session or silently discard a failure.
  */
 public expect fun createRpcComposerViewModel(
     binding: RpcSessionBinding,
     ownerScope: CoroutineScope,
-    resumePort: ComposerResumePort,
     cancellationPort: ComposerCancellationPort,
     failureReporter: ComposerFailureReporter,
 ): ComposerViewModel

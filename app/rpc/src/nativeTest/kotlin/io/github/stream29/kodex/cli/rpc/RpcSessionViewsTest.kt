@@ -326,7 +326,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val committed = binding.appendUserMessage(listOf(ContentItem.InputText("history")))
             val old = agent.historyIndex.window.first { committed in it.indexes }
             assertEquals(binding.storage.cacheNonce.value, old.generation)
-            assertTrue(agent.historyIndex.load(old.generation, committed).summary.contains("history"))
+            assertTrue(assertNotNull(old.entryAtOrNull(committed)).summary.contains("history"))
             agent.history.historyItems.first { it.size > 0 }
             assertTrue(agent.historyIndex.checkOut(old.generation, committed))
             assertEquals(committed, binding.latestIndex.value) // Check out did not revert history.
@@ -395,13 +395,11 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
     }
 
     test("bound Composer stale and closed submissions never issue an RPC command") {
-        var appends = 0
-        var resumes = 0
+        var submits = 0
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "appendUserMessage") appends++
-                    if (call.callableName == "resume") resumes++
+                    if (call.callableName == "submit") submits++
                     return delegate.call(call)
                 }
             }
@@ -417,27 +415,24 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertEquals(ComposerLifecycle.Closed, composer.state.value.lifecycle)
             assertEquals(ComposerSubmissionResult.Unavailable, composer.submit(current))
             assertEquals(SessionViewStatus.Closed, view.status.value)
-            assertEquals(0, appends)
-            assertEquals(0, resumes)
+            assertEquals(0, submits)
         }
     }
 
-    test("cancelled caller of bound Composer append restores editing without Stop or Agent failure") {
+    test("cancelled caller of bound Composer submit restores editing without Stop or Agent failure") {
         val entered = CompletableDeferred<Unit>()
         val cancelled = CompletableDeferred<Unit>()
-        var appends = 0
-        var resumes = 0
+        var submits = 0
         var stops = 0
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
                     when (call.callableName) {
-                        "appendUserMessage" -> {
-                            appends++
+                        "submit" -> {
+                            submits++
                             entered.complete(Unit)
                             try { awaitCancellation() } finally { cancelled.complete(Unit) }
                         }
-                        "resume" -> resumes++
                         "cancelRunningTurn" -> stops++
                     }
                     return delegate.call(call)
@@ -460,23 +455,20 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertNull(agent.notification.value)
             assertEquals(SessionViewStatus.Ready, view.status.value)
             assertSame(binding, view.current())
-            assertEquals(1, appends)
-            assertEquals(0, resumes)
+            assertEquals(1, submits)
             assertEquals(0, stops)
         }
     }
 
-    test("bound Composer lost append reply reports once without rollback retry or draft loss") {
-        var appends = 0
-        var resumes = 0
+    test("bound Composer lost submit reply reports once without rollback retry or draft loss") {
+        var submits = 0
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "resume") resumes++
                     val result = delegate.call<T>(call)
-                    if (call.callableName == "appendUserMessage") {
-                        appends++
-                        error("accepted append reply lost")
+                    if (call.callableName == "submit") {
+                        submits++
+                        error("accepted submit reply lost")
                     }
                     return result
                 }
@@ -487,18 +479,18 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             try {
                 val revision = agent.composer.update("  persisted but retained  ", 6)
                 assertEquals(
-                    ComposerSubmissionResult.Failed("accepted append reply lost"),
+                    ComposerSubmissionResult.Failed("accepted submit reply lost"),
                     agent.composer.submit(revision),
                 )
-                assertEquals("accepted append reply lost", failures.first { it.size == 1 }.single().message)
+                assertEquals("accepted submit reply lost", failures.first { it.size == 1 }.single().message)
                 assertNull(agent.notification.value)
                 assertEquals("  persisted but retained  ", agent.composer.state.value.text)
                 assertEquals(6, agent.composer.state.value.cursorOffset)
                 assertEquals(revision + 1, agent.composer.state.value.revision)
-                assertEquals(AgentStateValue.UserMessage, services.runtime.getState(view.index))
+                services.runtime.getRunningTurnFlow(view.index).first { !it }
+                assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(view.index))
                 assertEquals(SessionViewStatus.Ready, view.status.value)
-                assertEquals(1, appends)
-                assertEquals(0, resumes)
+                assertEquals(1, submits)
             } finally { agent.close() }
         }
     }
@@ -534,13 +526,25 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         }
     }
 
-    test("composer CAS queues while running and closing the tab does not stop the accepted turn") {
+    test("composer queues while running and closing the tab does not stop the accepted turn") {
         val entered = CompletableDeferred<Unit>()
+        val preempted = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()
+        var requests = 0
         frontend(response = {
+            val request = ++requests
             entered.complete(Unit)
-            finish.await()
-            answer()
+            try {
+                finish.await()
+                answer()
+            } finally {
+                if (request == 1 && !currentCoroutineContext().isActive) {
+                    withContext(NonCancellable) {
+                        preempted.complete(Unit)
+                        finish.await()
+                    }
+                }
+            }
         }) {
             val view = views.open(services.global.createSession(home))
             val binding = view.current()
@@ -552,15 +556,15 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             agent.composer.state.first { it.running }
             val revision = agent.composer.update("steer")
             assertEquals(ComposerSubmissionResult.QueuedAsSteer, agent.composer.submit(revision))
+            preempted.await()
             binding.pendingSteer.first { it.isNotEmpty() }
-            binding.pendingSteer.update { emptyList() }
-            binding.pendingSteer.first { it.isEmpty() }
             waiting.cancelAndJoin()
             views.release(view)
             assertTrue(services.runtime.getRunningTurn(view.index))
             finish.complete(Unit)
             services.runtime.getRunningTurnFlow(view.index).first { !it }
             assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(view.index))
+            assertEquals(2, requests)
         }
     }
 

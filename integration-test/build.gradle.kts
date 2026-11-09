@@ -13,7 +13,6 @@ kotlin {
             implementation(project(":agent-context-prefix"))
             implementation(project(":agent-runtime-decorator-compact"))
             implementation(project(":agent-runtime-composition"))
-            implementation(project(":agent-runtime-steer"))
             implementation(project(":agent-session-sqlite"))
             implementation(project(":utils-sqlite"))
             implementation(project(":agent-state-core"))

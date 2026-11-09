@@ -7,13 +7,11 @@ import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.decorator.tool.toolRuntime
-import io.github.stream29.kodex.agentruntime.steer.StateFlowSteerProvider
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
@@ -32,7 +30,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 
@@ -42,10 +39,9 @@ public actual fun KodexAgentState.buildMasterAgentRuntime(
 ): AgentRuntime {
     val sessionLogger = RuntimeLogger.session(storage.uri)
     return try {
-        buildAgentRuntime(sessionLogger) { pendingSteer, agentLogger ->
+        buildAgentRuntime(sessionLogger) { agentLogger ->
             masterRuntimeLayer(
                 dependencies = dependencies,
-                pendingSteer = pendingSteer,
                 logger = agentLogger,
             )
         }.also {
@@ -66,7 +62,6 @@ public actual fun KodexAgentState.buildMasterAgentRuntime(
 
 private fun KodexAgentState.masterRuntimeLayer(
     dependencies: KodexAgentDependencies,
-    pendingSteer: MutableStateFlow<List<StableIndexEvent.Steerable>>,
     logger: KLogger,
 ): AgentRuntimeLayer {
     val mcpTools = mcpToolsState(dependencies.mcpService)
@@ -77,7 +72,6 @@ private fun KodexAgentState.masterRuntimeLayer(
             delegate = compactionRuntime(
                 modelCatalog = dependencies.modelCatalog,
                 logger = logger,
-                steerProvider = StateFlowSteerProvider(pendingSteer),
             )
                 .toolRuntime(
                     fixedTools = fixedTools.tools,
@@ -97,15 +91,11 @@ private fun KodexAgentState.masterRuntimeLayer(
 
 private fun KodexAgentState.buildAgentRuntime(
     sessionLogger: KLogger,
-    buildLayer: (
-        MutableStateFlow<List<StableIndexEvent.Steerable>>,
-        KLogger,
-    ) -> AgentRuntimeLayer,
+    buildLayer: (KLogger) -> AgentRuntimeLayer,
 ): AgentRuntime {
     val logger = sessionLogger.agent()
-    val pendingSteer = MutableStateFlow(emptyList<StableIndexEvent.Steerable>())
     return try {
-        val layer = buildLayer(pendingSteer, logger)
+        val layer = buildLayer(logger)
         logger.info { "Agent runtime opened." }
         coroutineContext.job.invokeOnCompletion { failure ->
             logger.logClosed(
@@ -116,7 +106,6 @@ private fun KodexAgentState.buildAgentRuntime(
         }
         AgentRuntimeImpl(
             delegate = layer.delegate,
-            pendingSteer = pendingSteer,
             unifiedExecToolClient = layer.unifiedExecToolClient,
             logger = logger,
         )
@@ -133,7 +122,6 @@ private data class AgentRuntimeLayer(
 
 private class AgentRuntimeImpl(
     private val delegate: ResumableAgentLayer,
-    override val pendingSteer: MutableStateFlow<List<StableIndexEvent.Steerable>>,
     override val unifiedExecToolClient: UnifiedExecToolClient,
     private val logger: KLogger,
 ) : AgentRuntime, KodexAgentState by delegate {

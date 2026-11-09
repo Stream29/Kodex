@@ -60,7 +60,8 @@ CREATE TABLE agent_commits (
             'token_count_initialization',
             'token_count_compaction',
             'token_count_response',
-            'unstable'
+            'unstable',
+            'steer'
         )
     ),
     "index" INTEGER NOT NULL CHECK ("index" BETWEEN 0 AND 2147483647),

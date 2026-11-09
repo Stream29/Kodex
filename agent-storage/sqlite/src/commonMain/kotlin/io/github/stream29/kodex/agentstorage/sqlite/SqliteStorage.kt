@@ -5,6 +5,7 @@ package io.github.stream29.kodex.agentstorage.sqlite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.decodePayloadJson
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
@@ -133,10 +134,15 @@ public actual class SqliteAgentStorage actual constructor(
 
     public actual override suspend fun revert(untilExclusive: Int) {
         require(untilExclusive >= 0) { "Revert boundary $untilExclusive must be non-negative." }
+        val emptySteerJson = SteerSnapshot(emptyList()).encodePayloadJson(OpenAiJsonCodec)
         write {
             connection.execute(
                 """DELETE FROM agent_commits WHERE agent_id = ? AND "index" >= ?""",
                 listOf(agentId, untilExclusive.toLong()),
+            )
+            connection.execute(
+                """UPDATE agent_commits SET payload_json = ? WHERE agent_id = ? AND type = ?""",
+                listOf(emptySteerJson, agentId, AgentCommitType.Steer.wireName),
             )
         }
     }

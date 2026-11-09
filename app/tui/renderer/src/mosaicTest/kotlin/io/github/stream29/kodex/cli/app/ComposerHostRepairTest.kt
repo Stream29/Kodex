@@ -84,22 +84,20 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
         }
     }
 
-    test("real host Enter reports append failure once and retains exact draft and cursor") {
+    test("real host Enter reports submit failure once and retains exact draft and cursor") {
         val entered = CompletableDeferred<Unit>()
         val proceed = CompletableDeferred<Unit>()
-        var appends = 0
-        var resumes = 0
+        var submits = 0
         composerHost(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
                     when (call.callableName) {
-                        "appendUserMessage" -> {
-                            appends++
+                        "submit" -> {
+                            submits++
                             entered.complete(Unit)
                             proceed.await()
-                            error("injected append failure")
+                            error("injected submit failure")
                         }
-                        "resume" -> resumes++
                     }
                     return delegate.call(call)
                 }
@@ -121,7 +119,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 proceed.complete(Unit)
                 failures.first { it.size == 1 }
                 val snapshot = snapshotMatching { "Submitting…" !in it }
-                assertFalse("injected append failure" in snapshot, snapshot)
+                assertFalse("injected submit failure" in snapshot, snapshot)
                 assertFalse("Session operation failed." in snapshot, snapshot)
                 assertFalse("Unable to submit:" in snapshot, snapshot)
                 assertEquals("  keep this draft  ", agent.composer.state.value.text)
@@ -130,9 +128,8 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertEquals(revision + 1, agent.composer.state.value.revision)
                 assertIs<ComposerSubmissionState.Failed>(agent.composer.state.value.submission)
                 assertNull(agent.notification.value)
-                assertEquals("injected append failure", failures.value.single().message)
-                assertEquals(1, appends)
-                assertEquals(0, resumes)
+                assertEquals("injected submit failure", failures.value.single().message)
+                assertEquals(1, submits)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
                 assertSame(agent, session.rootAgent.value)
@@ -141,7 +138,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
         }
     }
 
-    test("real host Enter reports resume failure without an inline error and keeps Session Ready") {
+    test("real host resume reports failure without an inline error and keeps Session Ready") {
         var appends = 0
         var resumes = 0
         composerHost(decorate = { delegate ->
@@ -155,14 +152,13 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
         }) {
             val agent = requireNotNull(session.rootAgent.value)
             val binding = view.current()
-            val revision = agent.composer.update("persist once")
+            binding.appendUserMessage(listOf(ContentItem.InputText("persist once")))
             runComposerHostMosaicTest {
                 val focus = FocusRequester()
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RepairHost(agent, focus) }
                 }
-                assertTrue(focus.requestFocus())
-                sendKeyEvent(KeyboardEvent(13))
+                agent.resume()
                 awaitSnapshot()
                 failures.first { it.size == 1 }
                 assertEquals("injected resume failure", failures.value.single().message)
@@ -170,9 +166,6 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertFalse("injected resume failure" in snapshot, snapshot)
                 assertFalse("Session operation failed." in snapshot, snapshot)
                 assertFalse("Unable to submit:" in snapshot, snapshot)
-                assertEquals("", agent.composer.state.value.text)
-                assertEquals(revision + 1, agent.composer.state.value.revision)
-                assertIs<ComposerSubmissionState.Editing>(agent.composer.state.value.submission)
                 assertEquals(AgentStateValue.UserMessage, services.runtime.getState(view.index))
                 assertEquals(1, appends)
                 assertEquals(1, resumes)
@@ -220,7 +213,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 agent.resume()
                 entered.await()
                 agent.composer.state.first { it.running }
-                binding.pendingSteer.update { listOf(StableUserMessage(listOf(ContentItem.InputText("earlier")))) }
+                binding.submit(listOf(ContentItem.InputText("earlier")))
                 agent.pendingSteer.first { it.size == 1 }
                 agent.composer.update("next steer")
                 withTimeout(5.seconds) { preempted.await() }
@@ -263,25 +256,24 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 listOf("start", "earlier", "next steer").map { listOf(ContentItem.InputText(it)) }
             assertEquals(expected, messages)
             assertEquals(2, requests)
-            assertTrue(services.runtime.getPendingSteer(index).isEmpty())
+            assertTrue(view.current().pendingSteer.value.isEmpty())
         }
     }
 
-    test("real host Enter inactive resume replaces binding without replaying accepted append") {
-        var appends = 0
-        var resumes = 0
+    test("real host Enter inactive submit replaces binding without replaying accepted submit") {
+        var submits = 0
         composerHost(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "appendUserMessage") appends++
-                    if (call.callableName == "resume" && ++resumes == 1) throw SessionNotActive()
+                    if (call.callableName == "submit" && ++submits == 1) throw SessionNotActive()
                     return delegate.call(call)
                 }
             }
         }) {
             val agent = requireNotNull(session.rootAgent.value)
             val oldBinding = view.current()
-            agent.composer.update("accepted once")
+            oldBinding.appendUserMessage(listOf(ContentItem.InputText("accepted once")))
+            agent.composer.update("not replayed")
             runComposerHostMosaicTest {
                 val focus = FocusRequester()
                 setContentAndSnapshot {
@@ -293,8 +285,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 val recovered = view.binding.filterNotNull().first { it !== oldBinding }
                 view.status.first { it == SessionViewStatus.Ready }
                 session.rootAgent.filterNotNull().first { it !== agent }
-                assertEquals(1, appends)
-                assertEquals(1, resumes)
+                assertEquals(1, submits)
                 assertEquals(AgentStateValue.UserMessage, recovered.state.value)
                 assertEquals(ComposerLifecycle.Closed, agent.composer.state.value.lifecycle)
                 assertFailsWith<CancellationException> { oldBinding.resume() }
@@ -303,13 +294,15 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
         }
     }
 
-    test("real host Enter cancelled resume is not reported as ordinary failure") {
-        val cancelled = CompletableDeferred<Unit>()
+    test("real host Enter cancelled submit is not reported as ordinary failure") {
+        val entered = CompletableDeferred<Unit>()
+        val proceed = CompletableDeferred<Unit>()
         composerHost(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "resume") {
-                        cancelled.complete(Unit)
+                    if (call.callableName == "submit") {
+                        entered.complete(Unit)
+                        proceed.await()
                         throw CancellationException("injected command cancellation")
                     }
                     return delegate.call(call)
@@ -318,7 +311,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
         }) {
             val agent = requireNotNull(session.rootAgent.value)
             val binding = view.current()
-            agent.composer.update("accepted before cancellation")
+            agent.composer.update("retained on cancellation")
             runComposerHostMosaicTest {
                 val focus = FocusRequester()
                 setContentAndSnapshot {
@@ -327,38 +320,41 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertTrue(focus.requestFocus())
                 sendKeyEvent(KeyboardEvent(13))
                 awaitSnapshot()
-                cancelled.await()
-                val snapshot = awaitSnapshot()
+                entered.await()
+                snapshotContaining("Submitting…")
+                proceed.complete(Unit)
+                val snapshot = snapshotMatching { "Submitting…" !in it }
                 assertFalse("Session operation failed." in snapshot, snapshot)
                 assertNull(agent.notification.value)
                 assertTrue(failures.value.isEmpty(), "Cancellation must not enter the error outlet.")
                 assertSame(agent, view.agent.value)
-                assertEquals("", agent.composer.state.value.text)
+                assertEquals("retained on cancellation", agent.composer.state.value.text)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
-                assertEquals(AgentStateValue.UserMessage, services.runtime.getState(view.index))
+                assertEquals(AgentStateValue.Empty, services.runtime.getState(view.index))
             }
         }
     }
 
-    test("unmounting real host cancels renderer waiting only and accepted resume still completes") {
+    test("unmounting real host cancels renderer waiting only and accepted submit still completes") {
         val entered = CompletableDeferred<Unit>()
         val proceed = CompletableDeferred<Unit>()
-        var resumes = 0
-        var appends = 0
-        composerHost(decorate = { delegate ->
-            object : RpcClient by delegate {
-                override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "appendUserMessage") appends++
-                    if (call.callableName == "resume") {
-                        resumes++
-                        entered.complete(Unit)
-                        proceed.await()
+        var submits = 0
+        composerHost(
+            decorate = { delegate ->
+                object : RpcClient by delegate {
+                    override suspend fun <T> call(call: RpcCall): T {
+                        if (call.callableName == "submit") submits++
+                        return delegate.call(call)
                     }
-                    return delegate.call(call)
                 }
-            }
-        }) {
+            },
+            response = {
+                entered.complete(Unit)
+                proceed.await()
+                testAnswer()
+            },
+        ) {
             val agent = requireNotNull(session.rootAgent.value)
             agent.composer.update("accepted work")
             var visible by mutableStateOf(true)
@@ -366,8 +362,8 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 val focus = FocusRequester()
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    if (visible) RepairHost(agent, focus) else Text("renderer removed")
-                }
+                        if (visible) RepairHost(agent, focus) else Text("renderer removed")
+                    }
                 }
                 assertTrue(focus.requestFocus())
                 sendKeyEvent(KeyboardEvent(13))
@@ -378,8 +374,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 snapshotContaining("renderer removed")
                 proceed.complete(Unit)
                 agent.state.first { it == AgentStateValue.AssistantMessage }
-                assertEquals(1, appends)
-                assertEquals(1, resumes)
+                assertEquals(1, submits)
                 assertSame(agent, session.rootAgent.value)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertNull(agent.notification.value)

@@ -103,7 +103,7 @@ public enum class ComposerLifecycle {
  * [text], [cursorOffset] and [revision] are the component's editable projection. Selection,
  * focus, widget buffer, scroll viewport and layout remain renderer-local.
  * [pendingSteer] is a backend projection, not a second queue: the component only admits one
- * exact steer command through [ComposerSteerPort].
+ * exact submission command through [ComposerSubmitPort].
  *
  * @throws IllegalArgumentException if [revision] is negative or [ownerId] is invalid.
  */
@@ -284,9 +284,9 @@ public interface ComposerViewModel : AutoCloseable {
 
     /**
      * Admits one exact draft and preserves existing behavior:
-     * running owners call [ComposerSteerPort] and return [ComposerSubmissionResult.QueuedAsSteer];
-     * idle owners call [ComposerSubmitPort], clear after persistence, then call
-     * [ComposerResumePort] and return [ComposerSubmissionResult.Submitted].
+     * running owners call [ComposerSubmitPort], clear after submission, and return
+     * [ComposerSubmissionResult.QueuedAsSteer]; idle owners call [ComposerSubmitPort],
+     * clear after submission, and return [ComposerSubmissionResult.Submitted].
      *
      * Accepted/persisted work is never retried, compensated or rolled back. Caller cancellation
      * propagates as [CancellationException]; it does not invoke [ComposerCancellationPort].
