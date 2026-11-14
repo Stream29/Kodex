@@ -1,53 +1,26 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.cli.sessiontitle
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
-import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 
 /**
- * In-memory one-shot title generation for one Agent runtime.
+ * Dedicated automatic session-title capability attached when a new Session is created.
  *
- * This object only addresses [KodexAgentState]. It has no Session identifier,
- * catalog, or UI selection state.
+ * Runs as an auxiliary child [Job] in [scope] (typically the live Session/runtime scope) and
+ * observes [agentState]'s committed history and `cacheNonce`:
+ * - Image-only and blank user messages leave first-text eligibility open.
+ * - The first committed nonblank user text consumes the one-shot gate: if [settings] is enabled
+ *   and the current `threadName` still matches the default `Session <n>` pattern, calls [generator]
+ *   and writes the generated title via settings CAS (abandoning if a manual rename changed
+ *   `threadName` or if history replacement changed `cacheNonce`).
+ * - If destructive history replacement (`revert`) removes every committed nonblank user text,
+ *   cancels any in-flight title request and reopens first-text eligibility.
  */
-public expect class AgentTitleGeneration(scope: CoroutineScope) : AutoCloseable {
-    /**
-     * Starts one best-effort request for the first nonblank text input.
-     *
-     * A disabled setting or a non-default thread name consumes the first text
-     * without starting a request. Image-only input remains eligible.
-     */
-    public suspend fun start(
-        agentState: KodexAgentState,
-        content: List<ContentItem>,
-        enabled: Boolean,
-        model: OpenAiModelId?,
-        reasoningEffort: ReasoningEffort,
-        generator: SessionTitleGenerator,
-    ): Boolean
-
-    /** Cancels any pending automatic result and permanently consumes this Agent's chance. */
-    public suspend fun suppress()
-
-    /**
-     * Serializes one destructive history replacement against title generation.
-     *
-     * [replacement] performs the replacement and returns whether the retained
-     * history still contains an accepted nonblank user text. A retained text
-     * keeps the one-shot gate consumed; removing every such text makes the next
-     * accepted text eligible again.
-     */
-    public suspend fun replaceHistory(replacement: suspend () -> Boolean)
-
-    /** Serializes an explicit rename ahead of any generated title. */
-    public suspend fun renameThread(agentState: KodexAgentState, threadName: String): Int
-
-    /** Serializes an explicit thread-name settings update ahead of generated output. */
-    public suspend fun updateSettings(agentState: KodexAgentState, settings: KodexAgentSettings): Int
-    override fun close()
-}
+public expect fun attachSessionTitleGeneration(
+    scope: CoroutineScope,
+    agentState: KodexAgentState,
+    settings: () -> SessionTitleSettings,
+    generator: SessionTitleGenerator,
+): Job

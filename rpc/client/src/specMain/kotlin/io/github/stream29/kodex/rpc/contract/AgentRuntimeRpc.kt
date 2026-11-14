@@ -5,6 +5,8 @@ import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.ShellSessionState
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
+import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.flow.Flow
 import kotlinx.rpc.annotations.Rpc
 
@@ -79,18 +81,32 @@ public interface AgentRuntimeRpc {
     public fun currentFlow(sessionIndex: Int, nonce: Long): Flow<ResponsesStreamEvent>
 
     /**
-     * Submits one user message through the unified `submit` (`steer` vs `steer + resume`)
-     * state-machine extension.
+     * Submits one user message through the global `AgentEventBus.submitUserMessage` channel.
      *
-     * Persists the message into `pendingSteer` (`SteerSnapshot`), triggers automatic-title
-     * eligibility check if this is the session's first user submission, and either lets the
-     * currently active turn consume the queued steer at its next safe point (`runningTurn`
-     * occupied) or starts and awaits a new backend-owned `resume` turn (`runningTurn` idle).
+     * Requires an active Session (`SessionNotActive` otherwise). Persists the message into
+     * `SteerSnapshot` and either lets the currently active turn consume the queued steer at its
+     * next safe point (`runningTurn` occupied) or starts a new backend-owned `resume` turn
+     * (`runningTurn` idle). Automatic session-title generation is a standalone capability
+     * attached at Session creation, not part of [submit].
      *
      * Accepted work belongs to the backend Agent lifetime; cancelling the caller's wait does
      * not undo the persisted steer or cancel an accepted turn.
      */
     public suspend fun submit(sessionIndex: Int, content: List<ContentItem>): Unit
+
+    /**
+     * Submits a first-time user answer for `ask_user` entry [askId] on [sessionIndex] through
+     * the global `AgentEventBus.submitAskUserAnswer` channel.
+     *
+     * Requires an active Session (`SessionNotActive` otherwise). Atomically records [response]
+     * in `AskUserSnapshot` and appends `StableAskUserEvent` to `SteerSnapshot`, starting a
+     * backend-owned `resume` turn when `runningTurn` is idle.
+     */
+    public suspend fun submitAskUserAnswer(
+        sessionIndex: Int,
+        askId: Int,
+        response: RequestUserInputResponse,
+    ): Unit
 
     /**
      * Appends one user message and returns its committed storage index.
@@ -99,10 +115,8 @@ public interface AgentRuntimeRpc {
      * Does not introduce a separate markNewTurn operation. Requests targeting an invalid state
      * fail rather than bypassing admission; input during execution uses pendingSteer instead.
      *
-     * After committing the message, the backend checks automatic-title eligibility using its
-     * title settings and owns any resulting auxiliary task. Does not wait for title generation;
-     * title failure cannot undo the message or turn an accepted write into a failed append.
-     * Does not resume the Agent, clear the frontend composer or renew TTL.
+     * Does not resume the Agent, clear the frontend composer or renew TTL; automatic session-title
+     * generation observes committed storage independently when attached at Session creation.
      * Accepted writes belong to the backend owner; cancelling the caller's wait does not undo
      * them. A lost reply or a later resume failure must not trigger a blind repeat append.
      * The returned index does not imply that frontend subscriptions have caught up.
@@ -214,9 +228,42 @@ public interface AgentRuntimeRpc {
      * observes this single value flow and may derive local per-process presentation from it.
      *
      * Cancelling collection does not close processes, stop the Agent or renew the Session TTL.
-     * Does not expose process output consumption, command execution or stdin writing.
+     * Non-destructive output cursor reads and standard-input writes use [readShellSessionOutput]
+     * and [writeShellSessionStdin].
      */
     public fun getShellSessionsFlow(sessionIndex: Int): Flow<Map<Int, ShellSessionState>>
+
+    /**
+     * Non-destructively reads buffered output from [shellSessionId] starting at byte [offset]
+     * up to [limit] retained bytes.
+     *
+     * Captures the currently registered process instance in the active backend Session without
+     * implicitly activating an inactive Session (`SessionNotActive`) or renewing Session TTL;
+     * unknown or evicted [shellSessionId] fails. Returns immediately from the captured buffer
+     * snapshot without waiting for future output or consuming buffered bytes.
+     */
+    public suspend fun readShellSessionOutput(
+        sessionIndex: Int,
+        shellSessionId: Int,
+        offset: ULong = 0uL,
+        limit: UInt = UInt.MAX_VALUE,
+    ): StdoutSlice
+
+    /**
+     * Writes [chars] to [shellSessionId]'s standard input, optionally closing stdin afterwards
+     * when [closeInput] is `true`.
+     *
+     * Captures the currently registered running process instance in the active backend Session
+     * without implicitly activating an inactive Session (`SessionNotActive`) or renewing Session
+     * TTL; unknown/evicted [shellSessionId], completed process, or closed input fails. Accepted
+     * writes belong to the backend Session owner and complete when flushed to the process pipe.
+     */
+    public suspend fun writeShellSessionStdin(
+        sessionIndex: Int,
+        shellSessionId: Int,
+        chars: String,
+        closeInput: Boolean = false,
+    ): Unit
 
     /**
      * Requests process-tree termination for the currently registered [shellSessionId].

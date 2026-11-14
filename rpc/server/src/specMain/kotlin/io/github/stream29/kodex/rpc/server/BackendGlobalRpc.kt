@@ -25,17 +25,19 @@ import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.io.files.Path
 
 /** Complete frozen [GlobalRpc], delegating to the same owned backend graph. */
 public expect class BackendGlobalRpc(
-    host: BackendSessionHost,
+    scope: CoroutineScope,
     settings: BackendGlobalState,
     account: BackendAccountState,
     effects: BackendFrontendEffects,
     sessions: BackendSessionManagement,
-    notifications: BackendNotifications,
+    notifications: Flow<Notification>,
+    checkAdmission: () -> Unit = {},
 ) : GlobalRpc {
     override suspend fun validateDirectory(query: DirectoryQuery): DirectoryValidationResult
     override suspend fun listDirectories(query: DirectoryQuery): DirectoryListResult

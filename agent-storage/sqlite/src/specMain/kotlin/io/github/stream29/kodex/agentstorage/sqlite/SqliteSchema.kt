@@ -25,6 +25,9 @@ CREATE TABLE agent_commits (
     type TEXT NOT NULL CHECK (
         type IN (
             'user_message',
+            'event_ask_user',
+            'event_schedule',
+            'event_terminal_exited',
             'assistant_message',
             'assistant_message_commentary',
             'assistant_message_final',
@@ -32,6 +35,7 @@ CREATE TABLE agent_commits (
             'agent_message',
             'request_user_input_tool_event',
             'suggest_subagent_task_tool_event',
+            'await_event_tool_event',
             'plan_update',
             'compaction_point',
             'reasoning',
@@ -61,7 +65,8 @@ CREATE TABLE agent_commits (
             'token_count_compaction',
             'token_count_response',
             'unstable',
-            'steer'
+            'steer',
+            'ask_user'
         )
     ),
     "index" INTEGER NOT NULL CHECK ("index" BETWEEN 0 AND 2147483647),

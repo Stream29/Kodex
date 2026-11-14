@@ -11,6 +11,8 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":app-rpc-protocol"))
+            api(project(":agent-eventbus"))
+            api(project(":agent-schedule-contract"))
             api(project(":agent-session-contract"))
             api(project(":agent-state-contract"))
             api(project(":agent-storage-clean-models"))
@@ -39,6 +41,7 @@ kotlin {
             implementation(libs.ktor.utils)
             implementation(project(":utils-logging-backend-scope"))
             implementation(project(":utils-shell-client-system"))
+            implementation(project(":agent-schedule-sqlite"))
             implementation(project(":agent-session-sqlite"))
             implementation(project(":openai-json-codec"))
             implementation(libs.kaml)
@@ -48,6 +51,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(project(":app-rpc-system"))
+            implementation(project(":agent-schedule-in-memory"))
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-sqlite"))
             implementation(project(":agent-session-test"))

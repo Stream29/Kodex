@@ -6,12 +6,17 @@ import kotlinx.serialization.Serializable
 /**
  * Value of one entry in the Agent's shell-session registry snapshot.
  *
- * The surrounding map supplies the process session ID. A completed process may remain
- * registered until its final output is consumed by the backend tool. This value contains
- * neither process-control handles nor output buffers.
+ * The surrounding map supplies the process session ID. [cwd] uses backend OS path syntax.
+ * [exitCode] is `null` while running and non-null once completed ([completed] derives from
+ * `exitCode != null`). A completed process remains registered during its post-exit retention
+ * window. This value contains neither process-control handles nor output buffers.
  */
 @Serializable
 public data class ShellSessionState(
+    public val cwd: String,
     public val arguments: ExecCommandArguments,
-    public val completed: Boolean,
-)
+    public val exitCode: Int? = null,
+) {
+    public val completed: Boolean
+        get() = exitCode != null
+}

@@ -28,6 +28,7 @@ public const val UnifiedExecDefaultMaxOutputTokens: Long = 10_000L
 public data class ExecCommandArguments(
     @SerialName("cmd")
     public val command: String,
+    public val name: String? = null,
     public val workdir: String? = null,
     public val shell: Shell? = null,
     @SerialName("yield_time_ms")
@@ -37,17 +38,9 @@ public data class ExecCommandArguments(
 )
 
 /**
- * Arguments accepted by the `write_stdin` function tool.
+ * Historical arguments recorded by legacy `write_stdin` tool commits.
  *
- * @property sessionId Positive ID of a session still registered for final
- * output, even when its process has already completed.
- * @property chars Input to send; an empty string polls without writing.
- * @property yieldTimeMillis Required wait the caller chose for available
- * output, for both nonempty writes and empty polls; the call returns earlier
- * when the process exits, and an empty poll uses a longer minimum than a
- * nonempty write. Negative values are invalid.
- * @property maxOutputTokens Approximate per-result output budget; negative
- * values are invalid and the byte ceiling still applies.
+ * Retained as a serializable DTO for deserializing and rendering existing session history.
  */
 @Serializable
 public data class WriteStdinArguments(
@@ -61,12 +54,12 @@ public data class WriteStdinArguments(
 )
 
 /**
- * JSON result returned by `exec_command` and `write_stdin`.
+ * JSON result returned by `exec_command` (and recorded in historical `write_stdin` commits).
  *
  * @property exitCode Nullable while the process is still running; `null` means
- * callers must use [sessionId] with `write_stdin` to obtain a final exit code.
- * @property sessionId Nullable after process completion; `null` means this
- * result is final and the session can no longer receive `write_stdin` calls.
+ * the command moved to the background under [sessionId].
+ * @property sessionId Non-null when the command is still running in the background;
+ * `null` when the command completed within the initial wait window.
  * @property chunkId Identifier of this output chunk, not a process/session ID.
  * @property wallTimeSeconds Elapsed time spent in this client call.
  * @property originalTokenCount Approximate token count before truncation for

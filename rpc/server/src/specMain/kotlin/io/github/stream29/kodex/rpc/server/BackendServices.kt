@@ -2,6 +2,10 @@
 
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.agenteventbus.AgentEventBus
+import io.github.stream29.kodex.agentruntime.contract.AgentStopEvent
+import io.github.stream29.kodex.agentschedule.contract.ScheduleRepository
+import io.github.stream29.kodex.agentsession.contract.IndexedAgentStopEvent
 import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.openai.client.OpenAiClient
@@ -16,6 +20,7 @@ import io.github.stream29.kodex.rpc.models.Notification
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.io.files.Path
 import kotlinx.rpc.RpcServer
 import kotlin.time.Duration
@@ -28,12 +33,14 @@ import kotlin.time.Duration.Companion.seconds
  * seams, not frontend services; their returned clients are owned here and closed after their
  * consumers. The default factories use [OpenAiLoginClient], [OpenAiClient] and
  * [OpenAiSessionTitleGenerator]. Settings, authentication, model and global-service initialization
- * does not acquire the Session repository; the host's repository factory is first invoked by
- * actual Session/catalog access.
+ * does not create `kodex.db` on an empty Home; `kodex.db` is shared between [BackendServices.schedules]
+ * and the `KodexRootSessionRepository` (arming persisted schedules immediately when `kodex.db`
+ * already exists on disk, while deferring database creation on an untouched Home until first
+ * Session/catalog, event, or schedule persistence access).
  *
  * Normal return, failure and cancellation wait for acquired-resource cleanup. A primary failure
  * is preserved and cleanup failures are suppressed onto it; cleanup failure after normal return
- * is propagated. The Session repository and its resources remain owned by the host.
+ * is propagated.
  *
  * @throws CancellationException if the calling coroutine is cancelled; acquired resources are
  * cleaned before cancellation escapes.
@@ -55,20 +62,33 @@ public expect suspend fun <R> withBackendServices(
 ): R
 
 /**
- * Registered exactly once per shared connection; the graph remains owned by its host.
+ * Registered exactly once per shared connection; the graph remains owned by [withBackendServices].
  *
  * This non-owning view of the complete backend service graph must not outlive its
- * [withBackendServices] callback. [register] installs all eight Global, AgentRuntime and timeline
+ * [withBackendServices] callback. [register] installs all Global, AgentRuntime and timeline
  * services; call it once per shared RPC connection.
  */
 public expect class BackendServices {
     public val global: GlobalRpc
     public val runtime: AgentRuntimeRpc
+    public val eventBus: AgentEventBus
+    public val schedules: ScheduleRepository
     public val settings: BackendGlobalState
     public val notifications: Flow<Notification>
 
-    /** Drains accepted Session operations before network teardown. */
+    /** Closes all open Sessions (draining accepted operations) before network teardown. */
     public suspend fun shutdownSessions(): Unit
 
     public fun register(server: RpcServer): Unit
 }
+
+/** Projects [IndexedAgentStopEvent]s emitted by a Session repository into RPC [Notification]s. */
+public fun Flow<IndexedAgentStopEvent>.toNotifications(): Flow<Notification> =
+    map { (entryIndex, stopEvent) ->
+        when (stopEvent) {
+            is AgentStopEvent.AssistantMessage -> Notification.Stop.AssistantMessage(entryIndex, stopEvent.message)
+            is AgentStopEvent.RequestUserInput -> Notification.Stop.RequestUserInput(entryIndex, stopEvent.requests)
+            is AgentStopEvent.SuggestSubagent -> Notification.Stop.SuggestSubagent(entryIndex, stopEvent.requests)
+            is AgentStopEvent.UnhandledError -> Notification.Stop.UnhandledError(entryIndex, stopEvent.message)
+        }
+    }

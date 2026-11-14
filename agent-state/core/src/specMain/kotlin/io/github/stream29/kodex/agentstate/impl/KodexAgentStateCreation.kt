@@ -2,7 +2,6 @@ package io.github.stream29.kodex.agentstate.impl
 
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
@@ -24,12 +23,6 @@ import kotlinx.coroutines.flow.StateFlow
  * compaction request. AgentState derives the matching tool-search definition
  * internally and never closes the application-owned service.
  *
- * [compactionRetainedItemsProvider] supplies additional index-keyed
- * [CompactionRetainedItem] entries (such as virtual `request_user_input`
- * items synthesized from completed `ask_user` interactions within the
- * incremental index range since the previous compaction point) only when
- * [KodexAgentState.compact] builds a new self-contained compaction checkpoint.
- *
  * Client and storage are also borrowed. Suspending operations execute in the
  * caller's coroutine; cancelling the created child scope does not close these
  * resources or promise cancellation/rollback of unrelated caller jobs.
@@ -42,5 +35,4 @@ public expect suspend fun CoroutineScope.KodexAgentState(
     storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
     mcpService: McpService,
-    compactionRetainedItemsProvider: suspend (IntRange) -> Map<Int, List<CompactionRetainedItem>> = { emptyMap() },
 ): KodexAgentState

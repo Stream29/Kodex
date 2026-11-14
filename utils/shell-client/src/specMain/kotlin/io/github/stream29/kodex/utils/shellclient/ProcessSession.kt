@@ -72,18 +72,18 @@ public interface ProcessSession : AutoCloseable {
      */
     public val stdin: SendChannel<String>
 
-    /** Destructive, merged standard output and standard error buffer. */
+    /** Bounded, non-destructive merged standard output and standard error buffer. */
     public val stdout: StdoutBuffer
 
     /**
-     * Destructive standard-output-only buffer for pipe sessions.
+     * Bounded, non-destructive standard-output-only buffer for pipe sessions.
      * PTY sessions expose their terminal stream here because a pseudoterminal
      * does not preserve the stdout/stderr distinction.
      */
     public val standardOutput: StdoutBuffer
 
     /**
-     * Destructive standard-error-only buffer for pipe sessions.
+     * Bounded, non-destructive standard-error-only buffer for pipe sessions.
      * PTY sessions leave this buffer empty because a pseudoterminal exposes one
      * combined terminal stream.
      */

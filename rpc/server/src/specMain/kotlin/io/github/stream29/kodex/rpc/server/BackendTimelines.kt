@@ -2,13 +2,18 @@
 
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import kotlinx.coroutines.flow.Flow
 
-public expect class BackendAgentStorageRpc(host: BackendSessionHost) : AgentStorageRpc {
+public expect class BackendAgentStorageRpc(
+    repository: KodexSessionRepository,
+    checkAdmission: () -> Unit = {},
+) : AgentStorageRpc {
+
     override suspend fun getCacheNonce(sessionIndex: Int): Long
     override fun getCacheNonceFlow(sessionIndex: Int): Flow<Long>
     override suspend fun getLatestIndex(sessionIndex: Int): Int

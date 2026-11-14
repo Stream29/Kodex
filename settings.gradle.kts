@@ -115,6 +115,15 @@ moduleTree("agent-context") {
     module("skill")
 }
 
+moduleTree("agent-eventbus") {
+}
+
+moduleTree("agent-schedule") {
+    module("contract")
+    module("in-memory")
+    module("sqlite")
+}
+
 moduleTree("agent-runtime") {
     module("composition")
     module("contract")
@@ -337,6 +346,7 @@ moduleTree("rpc") {
 
 moduleTree("tool") {
     module("apply-patch")
+    module("await-event")
     module("core")
     module("current-time")
     module("get-context-remaining")

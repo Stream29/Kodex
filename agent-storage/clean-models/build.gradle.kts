@@ -16,6 +16,7 @@ kotlin {
                 api(project(":openai-json-codec"))
                 api(project(":openai-models"))
                 api(project(":utils-kotlinx-io-serialization"))
+                api(project(":tool-await-event"))
                 api(project(":tool-image-generation-contract"))
                 api(project(":tool-request-user-input"))
                 api(project(":tool-multi-agent"))

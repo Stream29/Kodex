@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.agentstate.contract
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
@@ -7,6 +8,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
@@ -240,8 +243,8 @@ public interface KodexAgentState : CoroutineScope {
      * during its remote wait. The remote request uses its initial settings and
      * history snapshot. Under the same write boundary, checkpoint creation
      * reads the latest persisted settings, computes the bounded `retainedItems`
-     * prefix (including any external completed `ask_user` items merged by
-     * completion index), and commits a self-contained `StableContextCompaction`
+     * prefix (including answered `StableAskUserEvent` commits), and commits a
+     * self-contained `StableContextCompaction`
      * while advancing only the existing context-window lineage.
      * Delegate failures propagate; final state recovery is non-cancellable.
      *
@@ -373,4 +376,28 @@ public interface KodexAgentState : CoroutineScope {
         expect: KodexAgentSettings,
         update: KodexAgentSettings,
     ): Boolean
+
+    /**
+     * Appends a new unanswered [AskUserEntry] to this Agent's `AskUserSnapshot` timeline
+     * under the short state write lock and advances [latestIndex].
+     *
+     * Like [steer] and [updateSettings], this operation is permitted in any state
+     * without changing the conversation phase.
+     */
+    public suspend fun createAskUser(
+        questions: RequestUserInputArgs,
+    ): AskUserEntry
+
+    /**
+     * Records first-time [response] for [askId] in `AskUserSnapshot` and atomically appends
+     * `StableAskUserEvent` to `SteerSnapshot` at the same index under the short state write lock,
+     * advancing [latestIndex] without changing the conversation phase.
+     *
+     * @throws IllegalArgumentException if [askId] does not exist in the current `AskUserSnapshot`.
+     * @throws IllegalStateException if [askId] has already been answered.
+     */
+    public suspend fun answerAskUser(
+        askId: Int,
+        response: RequestUserInputResponse,
+    ): AskUserEntry
 }

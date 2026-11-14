@@ -1,27 +1,29 @@
 package io.github.stream29.kodex.tool.unifiedexec
 
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
+import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.io.files.Path
 
 /**
- * Session-scoped client shared by the `exec_command` and `write_stdin` tools.
+ * Session-scoped client backing `exec_command` and background terminal controls.
  *
- * Closing the client cancels its active process sessions. Commands use the
+ * Closing the client cancels its owned process sessions. Commands use the
  * selected shell's login initialization; model calls cannot disable it. A
  * command without an explicit shell captures the current [ShellSettings.shell]
- * when its process starts. A returned session ID can be used for later input
- * or polling until the final output is read.
+ * when its process starts. A still-running command remains registered in
+ * [activeSessions] and returns its session ID; completed background sessions
+ * remain addressable in [activeSessions] for [UnifiedExecCompletedSessionRetentionMillis]
+ * after final process output and [UnifiedExecProcessSession.exitCode] settle.
  */
 public interface UnifiedExecClient : AutoCloseable {
     /**
-     * Sessions that can still be read through `write_stdin`, keyed by their
-     * public session identifier. A completed session can remain here until
-     * its final output is read.
+     * Addressable terminal sessions keyed by their public session identifier,
+     * including running sessions and completed sessions within their retention window.
      *
      * This is a read-only view of the registry that owns session membership,
-     * not a count of processes still running; inspect each
-     * [UnifiedExecProcessSession.completed] state to distinguish
-     * completed-but-unread sessions.
+     * not a count of processes still running; inspect whether each
+     * [UnifiedExecProcessSession.exitCode] is non-null to distinguish completed sessions.
      */
     public val activeSessions: StateFlow<Map<Int, UnifiedExecProcessSession>>
 
@@ -36,43 +38,42 @@ public interface UnifiedExecClient : AutoCloseable {
      */
     public suspend fun execCommand(arguments: ExecCommandArguments): UnifiedExecOutput
 
-    /**
-     * Sends [WriteStdinArguments.chars] or, when empty, polls an existing
-     * session without creating a new process. Reading a completed session's
-     * final output removes it from [activeSessions]. A session whose
-     * [UnifiedExecProcessSession.close] requested termination can still be
-     * read after its exit becomes observable.
-     *
-     * @throws UnifiedExecToolException if arguments are invalid, the session
-     * is unknown or unavailable, or a local process operation fails.
-     */
-    public suspend fun writeStdin(arguments: WriteStdinArguments): UnifiedExecOutput
-
     /** Requests termination of owned process sessions and releases the client. */
     override fun close()
 }
 
 /**
- * Observable control surface for one active unified-exec process session.
+ * Observable control surface for one unified-exec process session.
  *
- * Consumers can use the original command and [completed] state for
- * presentation. [close] requests process-tree termination but leaves the
- * session registered for a final `write_stdin` read after process exit is
- * observed.
+ * [exitCode] is the single completion state source (`null` while running, non-null once
+ * final IO has drained and process exit is observed). Consumers can inspect metadata,
+ * non-destructively read output slices via [readOutput], write input via [writeStdin],
+ * or request process-tree termination via [close] while keeping the session registered
+ * during its post-exit retention window.
  */
 public interface UnifiedExecProcessSession : AutoCloseable {
-    /** Positive identifier used to address this session through `write_stdin`. */
+    /** Positive identifier used to address this session. */
     public val sessionId: Int
+
+    /** Resolved working directory in which this session was started. */
+    public val cwd: Path
 
     /** Original command arguments, including the nullable shell request. */
     public val arguments: ExecCommandArguments
 
     /**
-     * Becomes `true` after the process exit code is observed; it does not
-     * indicate that the final output has been read or the session removed.
+     * Single source of truth for process completion: `null` while running, or the observed
+     * process exit code after final process output has drained; the session remains in
+     * [UnifiedExecClient.activeSessions] until its retention window expires.
      */
-    public val completed: StateFlow<Boolean>
+    public val exitCode: StateFlow<Int?>
 
-    /** Requests process-tree termination without removing the session from the client. */
+    /** Non-destructively reads output starting at byte [offset] up to [limit] bytes. */
+    public suspend fun readOutput(offset: ULong = 0uL, limit: UInt = UInt.MAX_VALUE): StdoutSlice
+
+    /** Writes [chars] to the session's standard input, optionally closing input afterwards when [closeInput] is `true`. */
+    public suspend fun writeStdin(chars: String, closeInput: Boolean = false)
+
+    /** Requests process-tree termination without immediately removing the session from the client. */
     override fun close()
 }

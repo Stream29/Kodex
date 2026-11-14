@@ -2,6 +2,8 @@ package io.github.stream29.kodex.agentstorage.contract
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
@@ -193,3 +195,11 @@ public suspend fun KodexAgentStorage.getSteerAtOrNull(index: Int): List<StableIn
 
 public suspend fun KodexAgentStorage.getSteerAt(index: Int): List<StableIndexEvent.Steerable> =
     getSteerAtOrNull(index) ?: emptyList()
+
+public suspend fun KodexAgentStorage.getAskUsersAtOrNull(index: Int): List<AskUserEntry>? {
+    require(index >= 0) { "Index $index must be non-negative." }
+    return (getCommitAtOrBefore(index, AgentCommitType.AskUserTypes)?.commit as? AskUserSnapshot)?.entries
+}
+
+public suspend fun KodexAgentStorage.getAskUsersAt(index: Int): List<AskUserEntry> =
+    getAskUsersAtOrNull(index) ?: emptyList()

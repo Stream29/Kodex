@@ -2,20 +2,33 @@
 
 package io.github.stream29.kodex.rpc.server
 
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
-import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
+import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
+import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
+import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import kotlinx.io.files.Path
 
-/** Management values from the same backend repository as live runtime services. */
+/**
+ * Management operations over [KodexRootSessionRepository].
+ *
+ * [createSession] automatically attaches one-shot session-title generation
+ * (`attachSessionTitleGeneration`) onto the newly created Session.
+ * [keepSessionAlive] delegates directly to [KodexRootSessionRepository.open], which activates
+ * unloaded entries and renews residency TTL.
+ */
 public expect class BackendSessionManagement(
-    host: BackendSessionHost,
-    runtime: BackendAgentRuntimeRpc,
+    repository: KodexRootSessionRepository,
     newSessionDefaults: () -> KodexNewSessionSettings,
+    titleSettings: () -> SessionTitleSettings,
+    titleGenerator: SessionTitleGenerator,
     reportBackgroundFailure: (Throwable) -> Unit,
+    checkAdmission: () -> Unit = {},
 ) {
+
     public suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry>
     public suspend fun createSession(cwd: Path): Int
     public suspend fun keepSessionAlive(sessionIndex: Int)

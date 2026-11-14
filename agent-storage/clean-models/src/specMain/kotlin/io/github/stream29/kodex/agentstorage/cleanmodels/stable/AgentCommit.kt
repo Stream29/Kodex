@@ -25,6 +25,15 @@ public enum class AgentCommitType(
     @SerialName("user_message")
     UserMessage("user_message", "index"),
 
+    @SerialName("event_ask_user")
+    EventAskUser("event_ask_user", "index"),
+
+    @SerialName("event_schedule")
+    EventSchedule("event_schedule", "index"),
+
+    @SerialName("event_terminal_exited")
+    EventTerminalExited("event_terminal_exited", "index"),
+
     @SerialName("assistant_message")
     AssistantMessage("assistant_message", "index"),
 
@@ -57,6 +66,9 @@ public enum class AgentCommitType(
 
     @SerialName("command_execution_tool_event")
     CommandExecutionToolEvent("command_execution_tool_event", "work"),
+
+    @SerialName("await_event_tool_event")
+    AwaitEventToolEvent("await_event_tool_event", "work"),
 
     @SerialName("patch_tool_event")
     PatchToolEvent("patch_tool_event", "work"),
@@ -136,7 +148,10 @@ public enum class AgentCommitType(
     Unstable("unstable", "unstable"),
 
     @SerialName("steer")
-    Steer("steer", "steer");
+    Steer("steer", "steer"),
+
+    @SerialName("ask_user")
+    AskUser("ask_user", "ask-user");
 
     public companion object {
         private val byWireName: Map<String, AgentCommitType> = buildMap {
@@ -151,6 +166,9 @@ public enum class AgentCommitType(
 
         public val IndexTypes: Set<AgentCommitType> = setOf(
             UserMessage,
+            EventAskUser,
+            EventSchedule,
+            EventTerminalExited,
             AssistantMessage,
             AssistantMessageCommentary,
             AssistantMessageFinal,
@@ -166,6 +184,9 @@ public enum class AgentCommitType(
 
         public val SteerableIndexEventTypes: Set<AgentCommitType> = setOf(
             UserMessage,
+            EventAskUser,
+            EventSchedule,
+            EventTerminalExited,
             AssistantMessage,
             AssistantMessageCommentary,
             AssistantMessageFinal,
@@ -175,6 +196,9 @@ public enum class AgentCommitType(
 
         public val TurnStartBoundaryTypes: Set<AgentCommitType> = setOf(
             UserMessage,
+            EventAskUser,
+            EventSchedule,
+            EventTerminalExited,
             AssistantMessage,
             AssistantMessageCommentary,
             AssistantMessageFinal,
@@ -182,6 +206,7 @@ public enum class AgentCommitType(
 
         public val CompactionRetainedTypes: Set<AgentCommitType> = setOf(
             UserMessage,
+            EventAskUser,
             PlanUpdate,
             RequestUserInputToolEvent,
             SuggestSubagentTaskToolEvent,
@@ -190,6 +215,7 @@ public enum class AgentCommitType(
         public val WorkTypes: Set<AgentCommitType> = setOf(
             Reasoning,
             CommandExecutionToolEvent,
+            AwaitEventToolEvent,
             PatchToolEvent,
             McpToolEvent,
             WebSearchToolEvent,
@@ -226,6 +252,7 @@ public enum class AgentCommitType(
         public val TimestampTypes: Set<AgentCommitType> = setOf(Timestamp)
         public val UnstableTypes: Set<AgentCommitType> = setOf(Unstable)
         public val SteerTypes: Set<AgentCommitType> = setOf(Steer)
+        public val AskUserTypes: Set<AgentCommitType> = setOf(AskUser)
 
         public fun fromWireName(wireName: String): AgentCommitType =
             byWireName[wireName] ?: throw IllegalArgumentException("Unknown AgentCommitType wireName: $wireName")
@@ -240,6 +267,9 @@ public sealed interface AgentCommit {
     public val commitType: AgentCommitType
         get() = when (this) {
             is StableUserMessage -> AgentCommitType.UserMessage
+            is StableAskUserEvent -> AgentCommitType.EventAskUser
+            is StableScheduleEvent -> AgentCommitType.EventSchedule
+            is StableTerminalExitedEvent -> AgentCommitType.EventTerminalExited
             is StableAssistantMessage -> when (phase) {
                 MessagePhase.Commentary -> AgentCommitType.AssistantMessageCommentary
                 MessagePhase.FinalAnswer -> AgentCommitType.AssistantMessageFinal
@@ -253,6 +283,7 @@ public sealed interface AgentCommit {
             is StableContextCompaction -> AgentCommitType.ContextCompaction
             is StableReasoning -> AgentCommitType.Reasoning
             is StableCommandExecutionToolEvent -> AgentCommitType.CommandExecutionToolEvent
+            is StableAwaitEventToolEvent -> AgentCommitType.AwaitEventToolEvent
             is StablePatchToolEvent -> AgentCommitType.PatchToolEvent
             is StableMcpToolEvent -> AgentCommitType.McpToolEvent
             is StableWebSearchToolEvent -> AgentCommitType.WebSearchToolEvent
@@ -274,6 +305,7 @@ public sealed interface AgentCommit {
             is LlmRequestMeta.Response -> AgentCommitType.LlmRequestMetaResponse
             is UnstableSnapshot -> AgentCommitType.Unstable
             is SteerSnapshot -> AgentCommitType.Steer
+            is AskUserSnapshot -> AgentCommitType.AskUser
         }
 }
 
@@ -338,6 +370,9 @@ private val UnstableEventListSerializer: KSerializer<List<UnstableCleanEvent>> =
 private val SteerableEventListSerializer: KSerializer<List<StableIndexEvent.Steerable>> =
     ListSerializer(StableIndexEvent.Steerable.serializer())
 
+private val AskUserEntryListSerializer: KSerializer<List<AskUserEntry>> =
+    ListSerializer(AskUserEntry.serializer())
+
 /**
  * Encodes the payload JSON stored in `agent_commits.payload_json` and `.kodex/sessions` mirror files.
  */
@@ -350,6 +385,7 @@ public fun AgentCommit.encodePayloadJson(json: Json = OpenAiJsonCodec): String =
         is LlmRequestMeta -> json.encodeToString(LlmRequestMeta.serializer(), this)
         is UnstableSnapshot -> json.encodeToString(UnstableEventListSerializer, events)
         is SteerSnapshot -> json.encodeToString(SteerableEventListSerializer, events)
+        is AskUserSnapshot -> json.encodeToString(AskUserEntryListSerializer, entries)
     }
 
 /**
@@ -374,6 +410,7 @@ public fun AgentCommitType.decodePayloadJson(
             json.decodeFromString(LlmRequestMeta.Response.serializer(), payloadJson)
         AgentCommitType.Unstable -> UnstableSnapshot(json.decodeFromString(UnstableEventListSerializer, payloadJson))
         AgentCommitType.Steer -> SteerSnapshot(json.decodeFromString(SteerableEventListSerializer, payloadJson))
+        AgentCommitType.AskUser -> AskUserSnapshot(json.decodeFromString(AskUserEntryListSerializer, payloadJson))
         else -> error("Unhandled AgentCommitType: $this")
     }
     require(

@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
@@ -7,6 +8,9 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCom
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
+import kotlin.time.Clock
 import kotlin.time.Instant
 
 /** Publishes the required snapshot-zero state into an empty AgentStorage. */
@@ -43,15 +47,9 @@ public expect suspend fun MutableKodexAgentStorage.appendCompaction(
 /**
  * Computes the bounded retained prefix (up to the 64,000-token retention budget) for a new
  * compaction checkpoint covering commits through [upToIndex].
- *
- * Reads the previous compaction checkpoint's `retainedItems` (if any) and merges them in
- * index order with retained index commits in `(previousCompactionIndex + 1)..upToIndex` and
- * any caller-supplied [additionalRetainedByIndex] (such as virtual [CompactionRetainedItem]
- * entries synthesized from completed `ask_user` interactions at their completion index).
  */
 public expect suspend fun KodexAgentStorage.buildCompactionRetainedItems(
     upToIndex: Int,
-    additionalRetainedByIndex: Map<Int, List<CompactionRetainedItem>> = emptyMap(),
 ): List<CompactionRetainedItem>
 
 /** Appends [events] to the persisted `SteerSnapshot` queue in this storage. */
@@ -61,3 +59,25 @@ public expect suspend fun MutableKodexAgentStorage.appendSteer(
 
 /** Atomically consumes all currently queued `SteerSnapshot` events into the stable timeline. */
 public expect suspend fun MutableKodexAgentStorage.consumeSteerQueue(): List<StableIndexEvent.Steerable>
+
+/**
+ * Allocates the next agent-local `askId` (`1`-based) and appends an unanswered [AskUserEntry]
+ * to `AskUserSnapshot` in this storage.
+ */
+public expect suspend fun MutableKodexAgentStorage.createAskUser(
+    questions: RequestUserInputArgs,
+    timestamp: Instant = Clock.System.now(),
+): AskUserEntry
+
+/**
+ * Records first-time [response] for [askId] in `AskUserSnapshot` and atomically appends the
+ * corresponding `StableAskUserEvent` to `SteerSnapshot` at the same storage index.
+ *
+ * @throws IllegalArgumentException if [askId] does not exist in the current `AskUserSnapshot`.
+ * @throws IllegalStateException if [askId] has already been answered.
+ */
+public expect suspend fun MutableKodexAgentStorage.answerAskUser(
+    askId: Int,
+    response: RequestUserInputResponse,
+    timestamp: Instant = Clock.System.now(),
+): AskUserEntry
