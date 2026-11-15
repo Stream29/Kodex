@@ -49,12 +49,6 @@ public enum class AgentCommitType(
     @SerialName("agent_message")
     AgentMessage("agent_message", "index"),
 
-    @SerialName("request_user_input_tool_event")
-    RequestUserInputToolEvent("request_user_input_tool_event", "index"),
-
-    @SerialName("suggest_subagent_task_tool_event")
-    SuggestSubagentTaskToolEvent("suggest_subagent_task_tool_event", "index"),
-
     @SerialName("plan_update")
     PlanUpdate("plan_update", "index"),
 
@@ -73,20 +67,8 @@ public enum class AgentCommitType(
     @SerialName("patch_tool_event")
     PatchToolEvent("patch_tool_event", "work"),
 
-    @SerialName("mcp_tool_event")
-    McpToolEvent("mcp_tool_event", "work"),
-
-    @SerialName("web_search_tool_event")
-    WebSearchToolEvent("web_search_tool_event", "work"),
-
-    @SerialName("image_generation_tool_event")
-    ImageGenerationToolEvent("image_generation_tool_event", "work"),
-
-    @SerialName("image_view_tool_event")
-    ImageViewToolEvent("image_view_tool_event", "work"),
-
-    @SerialName("tool_search_event")
-    ToolSearchEvent("tool_search_event", "work"),
+    @SerialName("read_media_tool_event")
+    ReadMediaToolEvent("read_media_tool_event", "work"),
 
     @SerialName("invalid_tool_call")
     InvalidToolCall("invalid_tool_call", "work"),
@@ -174,8 +156,6 @@ public enum class AgentCommitType(
             AssistantMessageFinal,
             DeveloperMessage,
             AgentMessage,
-            RequestUserInputToolEvent,
-            SuggestSubagentTaskToolEvent,
             PlanUpdate,
             ContextCompaction,
         )
@@ -208,8 +188,6 @@ public enum class AgentCommitType(
             UserMessage,
             EventAskUser,
             PlanUpdate,
-            RequestUserInputToolEvent,
-            SuggestSubagentTaskToolEvent,
         )
 
         public val WorkTypes: Set<AgentCommitType> = setOf(
@@ -217,11 +195,7 @@ public enum class AgentCommitType(
             CommandExecutionToolEvent,
             AwaitEventToolEvent,
             PatchToolEvent,
-            McpToolEvent,
-            WebSearchToolEvent,
-            ImageGenerationToolEvent,
-            ImageViewToolEvent,
-            ToolSearchEvent,
+            ReadMediaToolEvent,
             InvalidToolCall,
             ServerToolSearch,
             HostedWebSearch,
@@ -277,19 +251,13 @@ public sealed interface AgentCommit {
             }
             is StableDeveloperMessage -> AgentCommitType.DeveloperMessage
             is StableAgentMessage -> AgentCommitType.AgentMessage
-            is StableRequestUserInputToolEvent -> AgentCommitType.RequestUserInputToolEvent
-            is StableSuggestSubagentTaskToolEvent -> AgentCommitType.SuggestSubagentTaskToolEvent
             is StablePlanUpdate -> AgentCommitType.PlanUpdate
             is StableContextCompaction -> AgentCommitType.ContextCompaction
             is StableReasoning -> AgentCommitType.Reasoning
             is StableCommandExecutionToolEvent -> AgentCommitType.CommandExecutionToolEvent
             is StableAwaitEventToolEvent -> AgentCommitType.AwaitEventToolEvent
             is StablePatchToolEvent -> AgentCommitType.PatchToolEvent
-            is StableMcpToolEvent -> AgentCommitType.McpToolEvent
-            is StableWebSearchToolEvent -> AgentCommitType.WebSearchToolEvent
-            is StableImageGenerationToolEvent -> AgentCommitType.ImageGenerationToolEvent
-            is StableImageViewToolEvent -> AgentCommitType.ImageViewToolEvent
-            is StableToolSearchEvent -> AgentCommitType.ToolSearchEvent
+            is StableReadMediaToolEvent -> AgentCommitType.ReadMediaToolEvent
             is StableInvalidToolCall -> AgentCommitType.InvalidToolCall
             is StableServerToolSearch -> AgentCommitType.ServerToolSearch
             is StableWebSearchCall -> AgentCommitType.HostedWebSearch

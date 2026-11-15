@@ -2,8 +2,7 @@ package io.github.stream29.kodex.cli.history
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.openai.PlanItemArg
 import kotlin.time.Duration
 
@@ -38,21 +37,11 @@ public interface HistoryFormRenderer {
 }
 
 /** Secret answers are redacted before any renderer sees them. */
-public expect fun StableRequestUserInputToolEvent.requestUserInputHistoryRows(
-    elapsed: Duration? = null,
-): List<RequestUserInputHistoryRowModel>
-
-/** Preserve task order and pair each accepted Session URI with its original task index. */
-public expect fun StableSuggestSubagentTaskToolEvent.suggestSubagentTaskHistoryRows(
+public expect fun StableAskUserEvent.requestUserInputHistoryRows(
     elapsed: Duration? = null,
 ): List<RequestUserInputHistoryRowModel>
 
 @Composable
 public expect fun HistoryRequestUserInputContent(
-    event: StableRequestUserInputToolEvent, elapsed: Duration?, renderer: HistoryFormRenderer,
-)
-
-@Composable
-public expect fun HistorySuggestionContent(
-    event: StableSuggestSubagentTaskToolEvent, elapsed: Duration?, renderer: HistoryFormRenderer,
+    event: StableAskUserEvent, elapsed: Duration?, renderer: HistoryFormRenderer,
 )

@@ -8,9 +8,7 @@ import kotlinx.io.files.Path
  * Selection capability bound to the target captured when the chooser opened.
  * Never resolve the active tab/Agent again when processing a delayed selection.
  *
- * Application adapters await a captured target's cwd update. A suggestion adapter
- * edits only its captured pending call's configuration and may ignore a no-longer
- * pending/submitting call. Settings adapters consume the exact picker handle
+ * Application adapters await a captured target's cwd update. Settings adapters consume the exact picker handle
  * before handing off to a revision-checked queue; stale/unwritable revisions may
  * produce no write. A normal return therefore does not universally mean durable
  * persistence. Target/handle/revision admission remains the adapter's responsibility.

@@ -17,6 +17,7 @@ public expect class SqliteAgentStorage(
     mutex: Mutex = Mutex(),
     requireAccess: () -> Unit = {},
 ) : MutableKodexAgentStorage {
+    override val agentId: Int
     override val uri: String
 
     override suspend fun latestIndex(): Int

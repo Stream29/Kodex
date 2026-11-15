@@ -92,21 +92,20 @@ public interface AgentSettingsViewModel {
  *
  * Stable identity and mutable Agent-owned state are direct properties. Production
  * assembly uses the existing RPC factory
- * `createRpcAgentViewModel(binding, scope, services, models, onCreated, reportUnhandledError)`: the exact
+ * `createRpcAgentViewModel(binding, scope, services, models, reportUnhandledError)`: the exact
  * binding/services and model catalog are borrowed; scope owns the local Agent child;
- * onCreated receives accepted suggested-session results for navigation; reportUnhandledError
- * uses the Application's local error Hook outlet. Those inputs
+ * reportUnhandledError uses the Application's local error Hook outlet. Those inputs
  * are not renderer inputs or spec dependencies, and close does not close the shared
  * services/catalog/parent scope.
  * This owner belongs to one live binding, not to the currently selected tab.
  *
- * Composer, History, History Index, Runtime Configuration and the two pending-tool
- * children are stable for this owner's lifetime and are borrowed by renderers.
+ * Composer, History, History Index, Runtime Configuration and [requestUserInput]
+ * are stable for this owner's lifetime and are borrowed by renderers.
  * Unmounting a page/sidebar/popup does not close them or cancel accepted work.
  * History Index's per-consumer read handles still require their own release.
  *
  * Render the independent [state]/[running] facts without deriving another execution
- * aggregate. Show one pending-steer preview, the exact pending-tool child, and one
+ * aggregate. Show one pending-steer preview, the exact [requestUserInput] child, and one
  * [notification] outlet. [tokenCount] null omits the counter. History context menus
  * capture the real item, index and generation. Ordinary asynchronous command failures
  * use the Application error reporter, not [notification]. Backend-notified run failures
@@ -118,8 +117,8 @@ public interface AgentSettingsViewModel {
  * running; when idle it is enabled only for UserMessage, AssistantMessage and
  * ToolCompleted. History editing is unavailable while running or in RequestResponse,
  * ExternalWrite or Compacting. These are visual predicates, not substitutes for
- * backend admission. Pending-tool branches borrow their existing child renderer and
- * disable ordinary Composer editing while host interaction is pending; never clone
+ * backend admission. [requestUserInput] borrows its existing child renderer and
+ * disables ordinary Composer editing while host interaction is pending; never clone
  * answers/configuration into this parent.
  */
 public interface AgentViewModel :
@@ -133,7 +132,6 @@ public interface AgentViewModel :
     /** Stable configuration child bound to this exact Agent, closed with it; not the selected tab. */
     public val runtimeConfiguration: RuntimeConfigurationViewModel
     public val requestUserInput: RequestUserInputViewModel
-    public val suggestSubagentTask: SuggestSubagentTaskViewModel
     public val shellSessions: AgentShellSessionRegistry
 
     /** Independent backend facts; controls derive their own presentation predicates. */

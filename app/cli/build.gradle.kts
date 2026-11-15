@@ -12,6 +12,7 @@ plugins {
     id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
     id("kodex.kmp-cli-executable")
+    alias(libs.plugins.kotlin.serialization)
     id("kodex.kmp-tests")
 }
 
@@ -69,19 +70,29 @@ kotlin {
         }
     }
     sourceSets {
+        named("specMain").dependencies {
+            api(libs.clikt.core)
+            api(project(":app-rpc-protocol"))
+            api(project(":mcp-contract"))
+            api(project(":openai-models"))
+            api(project(":tool-request-user-input"))
+            api(libs.kotlinx.serialization.core)
+            api(libs.kotlinx.serialization.json)
+        }
         commonMain.dependencies {
-            implementation(libs.clikt.core)
-            implementation(project(":app-rpc-protocol"))
             implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)
-        }
-        mosaicMain.dependencies {
+            implementation(libs.kotlinx.io.core)
+            implementation(libs.kotlinx.serialization.json)
+            implementation(project(":tool-image-generation-contract"))
             implementation(project(":utils-kauri"))
             implementation(project(":app-backend-host"))
             implementation(project(":rpc-local"))
             implementation(project(":rpc-backend-control-client"))
+            implementation(project(":rpc-client"))
+            implementation(project(":rpc-models"))
+            implementation(project(":agent-schedule-contract"))
             implementation(project(":app-backend-daemon"))
-            implementation(libs.kotlinx.serialization.json)
             implementation(project(":app-tui-host"))
             implementation(project(":app-web-host"))
             implementation(project(":app-rpc-application"))
@@ -90,8 +101,6 @@ kotlin {
             implementation(project(":utils-logging-backend-file"))
             implementation(project(":utils-kotlinx-io-coroutines-system"))
             implementation(project(":utils-os-environment"))
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.io.core)
         }
     }
 }

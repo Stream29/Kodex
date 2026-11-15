@@ -1,11 +1,11 @@
 package io.github.stream29.kodex.cli.history
 
 import androidx.compose.runtime.Composable
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
@@ -53,8 +53,8 @@ public interface HistoryContentRenderer : HistoryFormRenderer {
         Text(value, style)
     }
     @Composable public fun Plan(value: HistoryPlanModel)
-    /** Render an answered History request without changing other read-only form surfaces. */
-    @Composable public fun RequestUserInput(event: StableRequestUserInputToolEvent, elapsed: Duration?) {
+    /** Render an answered History `ask_user` event without changing other read-only form surfaces. */
+    @Composable public fun RequestUserInput(event: StableAskUserEvent, elapsed: Duration?) {
         HistoryRequestUserInputContent(event, elapsed, this)
     }
     @Composable public fun Tool(

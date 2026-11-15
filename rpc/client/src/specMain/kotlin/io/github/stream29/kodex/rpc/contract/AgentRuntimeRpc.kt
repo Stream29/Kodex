@@ -1,10 +1,16 @@
 package io.github.stream29.kodex.rpc.contract
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.SearchCommands
+import io.github.stream29.kodex.openai.SearchResponse
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.ShellSessionState
+import io.github.stream29.kodex.tool.imagegeneration.GeneratedImageArtifact
+import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.flow.Flow
@@ -107,6 +113,41 @@ public interface AgentRuntimeRpc {
         askId: Int,
         response: RequestUserInputResponse,
     ): Unit
+
+    /**
+     * Creates a new unanswered [AskUserEntry] in [sessionIndex]'s `AskUserSnapshot` (`kodex ask create`).
+     *
+     * Requires an active Session (`SessionNotActive` otherwise) and
+     * `settings.requestUserInputMode == RequestUserInputMode.AskUser` (fails explicitly when `NoQuestion`).
+     * Immediately emits `Notification.AskUserCreated(sessionIndex, entry)` onto `GlobalRpc.getNotificationFlow()`.
+     */
+    public suspend fun createAskUser(
+        sessionIndex: Int,
+        arguments: RequestUserInputArgs,
+    ): AskUserEntry
+
+    /**
+     * Executes a Codex web-search query batch using the backend's authenticated OpenAI client and
+     * [sessionIndex]'s current model (`kodex search`).
+     *
+     * Requires an active Session (`SessionNotActive` otherwise) without renewing TTL.
+     */
+    public suspend fun runWebSearch(
+        sessionIndex: Int,
+        commands: SearchCommands,
+    ): SearchResponse
+
+    /**
+     * Generates or edits a PNG image using the backend's authenticated OpenAI client and
+     * [sessionIndex]'s current working directory, persisting the PNG under `<KodexHome>/media/generated/<sessionIndex>/`
+     * and returning its file artifact metadata (`kodex image`).
+     *
+     * Requires an active Session (`SessionNotActive` otherwise) without renewing TTL.
+     */
+    public suspend fun generateImage(
+        sessionIndex: Int,
+        arguments: ImageGenToolArguments,
+    ): GeneratedImageArtifact
 
     /**
      * Appends one user message and returns its committed storage index.

@@ -3,7 +3,7 @@ package io.github.stream29.kodex.tool.requestuserinput
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** Arguments emitted by the model for the `request_user_input` tool. */
+/** Arguments for creating a structured user-input prompt (`kodex ask create` / `AgentRuntimeRpc.createAskUser`). */
 @Serializable
 public data class RequestUserInputArgs(
     public val questions: List<RequestUserInputQuestion>,

@@ -7,7 +7,6 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonElement
 
 /**
  * Protocol-specific input of a tool call rejected during parsing.
@@ -34,13 +33,6 @@ public sealed interface InvalidToolInvocation {
         public val name: String,
         public val namespace: String? = null,
         public val input: String,
-    ) : InvalidToolInvocation
-
-    /** Client tool-search call whose JSON arguments did not match its schema. */
-    @Serializable
-    @SerialName("tool_search")
-    public data class ToolSearch(
-        public val arguments: JsonElement,
     ) : InvalidToolInvocation
 }
 
@@ -78,20 +70,6 @@ internal fun InvalidToolInvocation.toResponseHistoryItems(
                 ResponseItem.CustomToolCallOutput(
                     callId = callId,
                     output = FunctionCallOutputPayload.fromText(message).copy(success = false),
-                ),
-            )
-
-        is InvalidToolInvocation.ToolSearch ->
-            listOf(
-                ResponseItem.ClientToolSearchCall(
-                    id = itemId,
-                    callId = callId,
-                    arguments = arguments,
-                ),
-                ResponseItem.ClientToolSearchOutput(
-                    callId = callId,
-                    status = "completed",
-                    tools = emptyList(),
                 ),
             )
     }

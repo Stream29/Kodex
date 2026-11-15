@@ -1,8 +1,7 @@
 package io.github.stream29.kodex.rpc.models
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -15,7 +14,19 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 public sealed interface Notification {
-    /** A persisted root Agent stopped with an assistant message, host interaction, or final error. */
+    /**
+     * Emitted immediately when a new unanswered [AskUserEntry] is appended to [sessionIndex]'s
+     * `AskUserSnapshot` via `AgentRuntimeRpc.createAskUser` (`kodex ask create`), without waiting
+     * for the Agent turn to stop.
+     */
+    @Serializable
+    @SerialName("ask_user_created")
+    public data class AskUserCreated(
+        public val sessionIndex: Int,
+        public val entry: AskUserEntry,
+    ) : Notification
+
+    /** A persisted root Agent stopped with an assistant message or final error. */
     @Serializable
     public sealed interface Stop : Notification {
         public val sessionIndex: Int
@@ -27,33 +38,6 @@ public sealed interface Notification {
             override val sessionIndex: Int,
             public val message: StableAssistantMessage,
         ) : Stop
-
-        /**
-         * All pending user-input calls at this stop, in their original order.
-         * Questions within a call remain grouped in its original arguments.
-         */
-        @Serializable
-        @SerialName("stop_request_user_input")
-        public data class RequestUserInput(
-            override val sessionIndex: Int,
-            public val requests: List<PendingRequestUserInputToolEvent>,
-        ) : Stop {
-            init {
-                require(requests.isNotEmpty()) { "RequestUserInput notification requires pending calls." }
-            }
-        }
-
-        /** All pending subagent-suggestion calls at this stop, in their original order. */
-        @Serializable
-        @SerialName("stop_suggest_subagent")
-        public data class SuggestSubagent(
-            override val sessionIndex: Int,
-            public val requests: List<PendingSuggestSubagentTaskToolEvent>,
-        ) : Stop {
-            init {
-                require(requests.isNotEmpty()) { "SuggestSubagent notification requires pending calls." }
-            }
-        }
 
         /**
          * A non-cancellation error that finally terminated accepted Agent execution.

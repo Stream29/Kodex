@@ -2,6 +2,7 @@ package io.github.stream29.kodex.agentcontext.prefix.contract
 
 import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdInstructions
 import io.github.stream29.kodex.agentcontext.prefix.skill.contract.AvailableSkill
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.utils.shellclient.Shell
 import kotlinx.io.files.Path
 
@@ -19,6 +20,7 @@ public data class AgentSessionMeta(
  * @property agentMd Current AGENTS.md-derived instruction sources.
  * @property availableSkills Current skill metadata catalog visible to the model.
  * @property sessionMeta Stable identity metadata for the current Session.
+ * @property requestUserInputMode Current user-question policy controlling whether `kodex ask` is allowed.
  */
 public data class AgentContextPrefix(
     public val cwd: Path,
@@ -26,4 +28,5 @@ public data class AgentContextPrefix(
     public val agentMd: AgentsMdInstructions,
     public val availableSkills: List<AvailableSkill>,
     public val sessionMeta: AgentSessionMeta,
+    public val requestUserInputMode: RequestUserInputMode = RequestUserInputMode.AskUser,
 )

@@ -5,7 +5,6 @@ import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
-import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.history.AgentHistoryViewState
 import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDropdowns
@@ -24,7 +23,6 @@ public expect fun AgentRuntimeScreen(
     rows: Int,
     newLineKey: NewLineKey,
     dropdowns: RuntimeConfigurationDropdowns,
-    suggestionDropdowns: SuggestSubagentTaskDropdowns,
     onOpenHistoryEntryContextMenu: (
         generation: Long,
         storageIndex: Int,
@@ -33,7 +31,6 @@ public expect fun AgentRuntimeScreen(
         clickPosition: IntOffset?,
     ) -> Unit,
     onBrowseWorkingDirectory: () -> Unit,
-    onBrowseSuggestedWorkingDirectory: (String) -> Unit,
     onOpenSettings: () -> Unit,
     composerFocusRequester: FocusRequester? = null,
     historyViewState: AgentHistoryViewState = remember(viewModel.history) { AgentHistoryViewState() },

@@ -11,8 +11,6 @@ kotlin {
             dependencies {
                 api(project(":openai-client"))
                 api(project(":openai-models"))
-                api(project(":tool-core"))
-                api(libs.kotlinx.schema.json)
             }
         }
         commonTest.dependencies {

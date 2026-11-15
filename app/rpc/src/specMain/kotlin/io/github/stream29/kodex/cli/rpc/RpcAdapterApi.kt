@@ -54,10 +54,10 @@ import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.contract.SuspendMutableStateFlow
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.BackendSettings
-import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.rpc.models.NotificationHook
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.rpc.models.ShellSessionState
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -73,7 +73,6 @@ public expect fun createRpcAgentViewModel(
     scope: CoroutineScope,
     services: RpcServices,
     models: StateFlow<List<ModelInfo>>,
-    onCreated: (List<CreatedSuggestedSession>) -> Unit,
     reportUnhandledError: (Throwable) -> Unit,
 ): AgentViewModel
 
@@ -260,6 +259,7 @@ public expect class RpcSessionBinding {
     public suspend fun forcedCompact(): Int
     public suspend fun clearPending(): Int
     public suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int
+    public suspend fun submitAskUserAnswer(askId: Int, response: RequestUserInputResponse): Unit
     public suspend fun closeShellSession(id: Int): Unit
     public suspend fun revertHistory(untilExclusive: Int, selectedCacheNonce: Long): Unit
     public suspend fun forkHistory(untilExclusive: Int, selectedCacheNonce: Long): Int
@@ -287,7 +287,6 @@ public expect class RpcSessionViews(
     models: StateFlow<List<ModelInfo>>,
     reportUnhandledError: (Throwable) -> Unit,
     connectionAvailable: () -> Boolean = { true },
-    onCreated: (List<CreatedSuggestedSession>) -> Unit = {},
 ) : AutoCloseable {
     public val services: RpcServices
     public suspend fun open(index: Int): RpcSessionView
@@ -312,7 +311,6 @@ public expect class RpcSessionView internal constructor(
     services: RpcServices,
     scope: CoroutineScope,
     models: StateFlow<List<ModelInfo>>,
-    onCreated: (List<CreatedSuggestedSession>) -> Unit,
     reportUnhandledError: (Throwable) -> Unit,
     connectionAvailable: () -> Boolean,
 ) : AutoCloseable {

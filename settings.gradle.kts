@@ -267,10 +267,6 @@ moduleTree("app", includeGroupingRoot = false) {
             module("view")
             module("viewmodel")
         }
-        moduleTree("suggest-subagent-task") {
-            module("view")
-            module("viewmodel")
-        }
         moduleTree("usage-reset") {
             module("view")
             module("viewmodel")
@@ -348,22 +344,15 @@ moduleTree("tool") {
     module("apply-patch")
     module("await-event")
     module("core")
-    module("current-time")
-    module("get-context-remaining")
     moduleTree("image-generation") {
         module("contract")
     }
-    module("multi-agent")
     module("plan")
+    moduleTree("read-media") {
+        module("contract")
+    }
     module("request-user-input")
-    moduleTree("tool-search") {
-        module("contract")
-        module("backend")
-    }
     moduleTree("unified-exec") {
-        module("contract")
-    }
-    moduleTree("view-image") {
         module("contract")
     }
     module("web-run")

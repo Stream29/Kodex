@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.agentsession.contract
 
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
-import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
@@ -19,7 +18,6 @@ public class KodexAgentDependencies(
     public val modelCatalog: OpenAiModelCatalogStore,
     public val contextSettings: StateFlow<AgentContextSettings>,
     public val shellSettings: StateFlow<ShellSettings>,
-    public val mcpService: McpService,
 ) : AutoCloseable {
     /**
      * Stops higher-level consumers before closing the OpenAI client they use.
@@ -29,7 +27,6 @@ public class KodexAgentDependencies(
      */
     override fun close() {
         val failures = listOf<() -> Unit>(
-            mcpService::close,
             modelCatalog::close,
             client::close,
         )

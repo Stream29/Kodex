@@ -65,7 +65,6 @@ kotlin {
             implementation(project(":app-component-session-catalog-view"))
             implementation(project(":app-component-settings-view"))
             implementation(project(":app-component-request-user-input-view"))
-            implementation(project(":app-component-suggest-subagent-task-view"))
             implementation(project(":agent-storage-core"))
             implementation(project(":agent-state-contract"))
             implementation(project(":app-component-history-viewmodel"))

@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
  * irrelevant; command order comes from the owning configuration's ordered hooks list.
  * Each notification captures that list once; later edits affect only later notifications.
  * Names must be unique within that list. Strings are preserved without trimming.
- * Backend Stop Hooks and frontend error Hooks execute on the backend. Frontend error
+ * Backend notifications and frontend error Hooks execute on the backend. Frontend error
  * Hooks use the backend Home; this model neither executes commands nor authorizes an
  * execution request. Configuration still uses the existing settings RPC.
  * Output cannot block tools, inject context or continue an Agent turn.
@@ -34,11 +34,8 @@ public enum class NotificationHookType {
     @SerialName("stop_assistant_message")
     StopAssistantMessage,
 
-    @SerialName("stop_request_user_input")
-    StopRequestUserInput,
-
-    @SerialName("stop_suggest_subagent")
-    StopSuggestSubagent,
+    @SerialName("ask_user_created")
+    AskUserCreated,
 
     /** Matches Agent error Stops and frontend-local errors/warnings; stored value is retained. */
     @SerialName("stop_unhandled_error")

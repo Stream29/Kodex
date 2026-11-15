@@ -12,9 +12,7 @@ kotlin {
                 api(project(":agent-state-contract"))
                 api(project(":agent-context-settings"))
                 api(project(":agent-storage-core"))
-                api(project(":mcp-contract"))
                 api(project(":openai-client"))
-                api(project(":tool-tool-search-backend"))
                 api(libs.kotlinx.coroutines.core)
             }
         }
@@ -22,15 +20,9 @@ kotlin {
             implementation(project(":agent-context-prefix"))
             implementation(project(":tool-apply-patch"))
             implementation(project(":tool-await-event"))
-            implementation(project(":tool-current-time"))
-            implementation(project(":tool-image-generation"))
-            implementation(project(":tool-view-image"))
-            implementation(project(":tool-get-context-remaining"))
+            implementation(project(":tool-read-media"))
             implementation(project(":tool-plan"))
-            implementation(project(":tool-request-user-input"))
-            implementation(project(":tool-multi-agent"))
             implementation(project(":tool-unified-exec"))
-            implementation(project(":tool-web-run"))
             implementation(project(":openai-json-codec"))
             implementation(project(":utils-coroutines"))
         }

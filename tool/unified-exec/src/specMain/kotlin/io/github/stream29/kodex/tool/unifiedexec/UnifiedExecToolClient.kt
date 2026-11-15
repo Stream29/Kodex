@@ -8,6 +8,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
+/** Environment variable injected into `exec_command` subprocesses carrying the owning Agent ID. */
+public const val KodexAgentIdEnvironmentVariable: String = "KODEX_AGENT_ID"
+
+/** Environment variable injected into `exec_command` subprocesses carrying the active Kodex Home path. */
+public const val KodexHomeEnvironmentVariable: String = "KODEX_HOME"
+
 /**
  * ShellClient-backed implementation of [UnifiedExecClient].
  *
@@ -21,8 +27,15 @@ public expect class UnifiedExecToolClient : UnifiedExecClient {
     public override fun close()
 }
 
-/** Creates a unified-exec client with a dedicated shell client under this scope. */
+/**
+ * Creates a unified-exec client with a dedicated shell client under this scope.
+ *
+ * [environmentProvider] supplies additional environment variables (such as
+ * [KodexAgentIdEnvironmentVariable] and [KodexHomeEnvironmentVariable]) merged
+ * onto every spawned shell session.
+ */
 public expect fun CoroutineScope.UnifiedExecToolClient(
     settingsProvider: suspend () -> ShellSettings,
     workingDirectoryProvider: suspend () -> Path = { Path(".") },
+    environmentProvider: suspend () -> Map<String, String> = { emptyMap() },
 ): UnifiedExecToolClient

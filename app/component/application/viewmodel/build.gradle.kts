@@ -16,7 +16,6 @@ kotlin {
             api(project(":app-component-session-delete-viewmodel"))
             api(project(":app-component-openai-login-viewmodel"))
             api(project(":app-component-agent-contract"))
-            api(project(":tool-multi-agent"))
             api(project(":app-component-path-picker-viewmodel"))
             api(project(":app-component-session-catalog-viewmodel"))
             api(project(":app-component-session-contract"))

@@ -43,7 +43,6 @@ kotlin {
             implementation(project(":app-component-composer-viewmodel"))
             implementation(project(":app-component-history-index-viewmodel"))
             implementation(project(":app-component-request-user-input-viewmodel"))
-            implementation(project(":app-component-suggest-subagent-task-viewmodel"))
             implementation(project(":app-component-history-viewmodel"))
             implementation(libs.kotlin.logging)
             implementation(libs.ktor.http)

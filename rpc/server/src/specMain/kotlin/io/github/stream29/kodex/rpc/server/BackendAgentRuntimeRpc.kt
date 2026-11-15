@@ -4,15 +4,24 @@ package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.SearchCommands
+import io.github.stream29.kodex.openai.SearchResponse
+import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.models.AgentStateValue
+import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.ShellSessionState
+import io.github.stream29.kodex.tool.imagegeneration.GeneratedImageArtifact
+import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.flow.Flow
+import kotlinx.io.files.Path
 
 /**
  * RPC runtime adapter over [KodexSessionRepository.openSessions] and [AgentEventBus].
@@ -21,11 +30,15 @@ import kotlinx.coroutines.flow.Flow
  * `SessionNotActive` without implicitly opening unloaded entries or acquiring an untouched
  * repository. Accepted commands execute in the owning Session's [kotlinx.coroutines.CoroutineScope]
  * so cancelling an RPC waiter does not cancel accepted work. Stop notifications are emitted by
- * `AgentRuntime.stopEvents` itself rather than managed here.
+ * `AgentRuntime.stopEvents` itself, while [createAskUser] immediately publishes
+ * [Notification.AskUserCreated] via [onAskUserCreated].
  */
 public expect class BackendAgentRuntimeRpc(
     repository: KodexSessionRepository,
     eventBus: AgentEventBus = AgentEventBus(repository),
+    client: OpenAiClient? = null,
+    home: Path? = null,
+    onAskUserCreated: (Notification.AskUserCreated) -> Unit = {},
     checkAdmission: () -> Unit = {},
 ) : AgentRuntimeRpc {
 
@@ -41,6 +54,18 @@ public expect class BackendAgentRuntimeRpc(
         askId: Int,
         response: RequestUserInputResponse,
     )
+    override suspend fun createAskUser(
+        sessionIndex: Int,
+        arguments: RequestUserInputArgs,
+    ): AskUserEntry
+    override suspend fun runWebSearch(
+        sessionIndex: Int,
+        commands: SearchCommands,
+    ): SearchResponse
+    override suspend fun generateImage(
+        sessionIndex: Int,
+        arguments: ImageGenToolArguments,
+    ): GeneratedImageArtifact
     override suspend fun appendUserMessage(sessionIndex: Int, content: List<ContentItem>): Int
     override suspend fun resume(sessionIndex: Int)
     override suspend fun forcedCompact(sessionIndex: Int): Int

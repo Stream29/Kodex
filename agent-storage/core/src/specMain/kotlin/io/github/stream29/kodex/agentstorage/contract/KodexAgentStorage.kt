@@ -24,6 +24,13 @@ import kotlin.time.Instant
  * `io.github.stream29.kodex.agentstorage.contract.ext`.
  */
 public interface KodexAgentStorage {
+    /**
+     * Owning session/agent identifier when backed by a session repository, or `null`
+     * for standalone storage instances not registered in a session repository.
+     */
+    public val agentId: Int?
+        get() = null
+
     /** Stable identity locator for this storage backend. */
     public val uri: String
 

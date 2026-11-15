@@ -3,8 +3,6 @@ package io.github.stream29.kodex.agentruntime.contract
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
@@ -22,8 +20,7 @@ public class ConcurrentAgentRuntimeResumeException : IllegalStateException(
 
 /**
  * Transient stop event emitted by [AgentRuntime.stopEvents] when an accepted outer
- * [AgentRuntime.resume] turn stops at an assistant message, host-managed pending tool calls,
- * or an unhandled non-cancellation failure.
+ * [AgentRuntime.resume] turn stops at an assistant message or an unhandled non-cancellation failure.
  *
  * Cancellations, standalone [AgentRuntime.compact] calls, pre-admission rejections, and
  * `PendingAwaitEventToolEvent` parked waits do not emit stop events.
@@ -33,24 +30,6 @@ public sealed interface AgentStopEvent {
     public data class AssistantMessage(
         public val message: StableAssistantMessage,
     ) : AgentStopEvent
-
-    /** Pending `request_user_input` calls awaiting host completion at this stop, in original order. */
-    public data class RequestUserInput(
-        public val requests: List<PendingRequestUserInputToolEvent>,
-    ) : AgentStopEvent {
-        init {
-            require(requests.isNotEmpty()) { "RequestUserInput stop event requires pending calls." }
-        }
-    }
-
-    /** Pending `suggest_subagent_task` calls awaiting host completion at this stop, in original order. */
-    public data class SuggestSubagent(
-        public val requests: List<PendingSuggestSubagentTaskToolEvent>,
-    ) : AgentStopEvent {
-        init {
-            require(requests.isNotEmpty()) { "SuggestSubagent stop event requires pending calls." }
-        }
-    }
 
     /** Non-cancellation failure that terminated an accepted [AgentRuntime.resume] turn. */
     public data class UnhandledError(
@@ -82,7 +61,11 @@ public interface AgentRuntime : ResumableAgentLayer {
     /**
      * Runs one outer turn through the composed runtime layers.
      *
-     * `PendingAwaitEventToolEvent` is resolved entirely within this [runningTurn] slot:
+     * `PendingAwaitEventToolEvent` and any remaining unowned `PendingToolEvent` items are
+     * resolved within this [runningTurn] slot after inner `KodexToolRuntime` handling:
+     * - Any non-`await_event` pending tool call left unmatched by `KodexToolRuntime` (such as an
+     *   unknown or retired tool name emitted by the model) is completed as a failed tool output
+     *   so the turn can continue instead of stalling in `ToolPending`.
      * - When `SteerSnapshot` is non-empty at a pending `await_event` boundary, completes
      *   `await_event` with `AwaitEventOutput` and continues the turn to consume the steer.
      * - Otherwise validates `terminals` against [unifiedExecToolClient] (failing unknown or
@@ -92,7 +75,7 @@ public interface AgentRuntime : ResumableAgentLayer {
      *   becomes `null` (external wakeups and watched-terminal exits enter via `AgentEventBus`).
      *
      * Emits the corresponding [AgentStopEvent] onto [stopEvents] when an accepted turn finishes
-     * at an assistant message, host-managed pending tool calls, or an unhandled failure.
+     * at an assistant message or an unhandled failure.
      *
      * The call returns `Unit`; callers inspect the inherited observable state
      * for its result. On cancellation, pending-tool cleanup is attempted

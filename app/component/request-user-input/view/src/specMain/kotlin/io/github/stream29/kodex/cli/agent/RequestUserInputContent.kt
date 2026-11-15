@@ -26,7 +26,7 @@ public interface UserInputQuestionRenderer {
     )
 }
 
-/** Renderer-only focus/scroll lifetime for one exact tool call. */
+/** Renderer-only focus/scroll lifetime for one exact ask-user entry. */
 public interface UserInputRenderScope {
     public fun requestFocus(target: UserInputFocusTarget)
     public fun question(index: Int, questionId: String): UserInputQuestionRenderer
@@ -36,7 +36,7 @@ public interface UserInputRenderScope {
 
 public interface UserInputRenderer {
     @Composable public fun Frame(
-        callId: String, revision: Long, questionCount: Int,
+        askId: Int, revision: Long, questionCount: Int,
         content: @Composable (UserInputRenderScope) -> Unit,
     )
 }
@@ -47,7 +47,7 @@ public expect fun RequestUserInputContent(
     viewModel: RequestUserInputViewModel, state: RequestUserInputState.Pending, renderer: UserInputRenderer,
 )
 
-/** Shared question branches; callbacks are already bound to the caller's exact call/question. */
+/** Shared question branches; callbacks are already bound to the caller's exact ask/question. */
 @Composable
 public expect fun RequestUserInputQuestionContent(
     question: RequestUserInputQuestion, draft: RequestUserInputDraftAnswer?,

@@ -31,7 +31,6 @@ public expect fun ApplicationPersistedSurfaceContent(
 /** Captured root targets; callers never replace them with the selected tab after suspension. */
 public interface ApplicationRootActions {
     public fun browseWorkingDirectory(owner: AgentSettingsViewModel): Unit
-    public fun browseSuggestedWorkingDirectory(owner: AgentViewModel, callId: String): Unit
     /** Opens Current Session for a captured target, or New Session for the singleton draft. */
     public fun openSettings(target: PersistedSessionViewModel?): Unit
 }

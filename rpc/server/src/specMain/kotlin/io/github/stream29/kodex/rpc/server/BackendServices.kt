@@ -87,8 +87,6 @@ public fun Flow<IndexedAgentStopEvent>.toNotifications(): Flow<Notification> =
     map { (entryIndex, stopEvent) ->
         when (stopEvent) {
             is AgentStopEvent.AssistantMessage -> Notification.Stop.AssistantMessage(entryIndex, stopEvent.message)
-            is AgentStopEvent.RequestUserInput -> Notification.Stop.RequestUserInput(entryIndex, stopEvent.requests)
-            is AgentStopEvent.SuggestSubagent -> Notification.Stop.SuggestSubagent(entryIndex, stopEvent.requests)
             is AgentStopEvent.UnhandledError -> Notification.Stop.UnhandledError(entryIndex, stopEvent.message)
         }
     }

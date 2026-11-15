@@ -1,33 +1,37 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
 @file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
 
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
+import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
+import io.github.stream29.kodex.agentschedule.contract.ScheduleRepository
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
-import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
+import io.github.stream29.kodex.mcp.contract.McpCatalogTool
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.rpc.models.CliFrontendSettings
-import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.rpc.models.ContextPathQuery
-import io.github.stream29.kodex.rpc.models.DirectoryQuery
 import io.github.stream29.kodex.rpc.models.DirectoryListResult
+import io.github.stream29.kodex.rpc.models.DirectoryQuery
 import io.github.stream29.kodex.rpc.models.DirectoryValidationResult
 import io.github.stream29.kodex.rpc.models.FrontendErrorAdmission
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.io.files.Path
+import kotlinx.serialization.json.JsonObject
+import kotlin.time.Instant
 
 /** Complete frozen [GlobalRpc], delegating to the same owned backend graph. */
 public expect class BackendGlobalRpc(
@@ -37,6 +41,8 @@ public expect class BackendGlobalRpc(
     effects: BackendFrontendEffects,
     sessions: BackendSessionManagement,
     notifications: Flow<Notification>,
+    schedules: ScheduleRepository? = null,
+    home: Path? = null,
     checkAdmission: () -> Unit = {},
 ) : GlobalRpc {
     override suspend fun validateDirectory(query: DirectoryQuery): DirectoryValidationResult
@@ -73,10 +79,20 @@ public expect class BackendGlobalRpc(
     override suspend fun getCodexMcpSettings(): List<McpCodexImportCandidate>
     override suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry>
     override suspend fun createSession(cwd: Path): Int
-    override suspend fun createSuggestedSessions(
-        tasks: List<SuggestedSubagentTask>,
-        initialSettings: KodexAgentSettings,
-    ): List<CreatedSuggestedSession>
+    override suspend fun createSchedule(
+        agentId: Int,
+        triggerAt: Instant,
+        cron: String?,
+        description: String,
+    ): ScheduleRecord
+    override suspend fun listSchedules(agentId: Int): List<ScheduleRecord>
+    override suspend fun deleteSchedule(scheduleId: Long): Boolean
+    override suspend fun listMcpTools(): List<McpCatalogTool>
+    override suspend fun callMcpTool(
+        serverName: String,
+        toolName: String,
+        arguments: JsonObject,
+    ): CallToolResult
     override suspend fun keepSessionAlive(sessionIndex: Int): Unit
     override suspend fun archiveSession(sessionIndex: Int): Unit
     override suspend fun unarchiveSession(sessionIndex: Int): Unit

@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.app.application.contract
 
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
-import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
@@ -211,19 +210,6 @@ public interface ApplicationViewModel : AutoCloseable {
     public suspend fun openWorkingDirectoryPopup(
         target: AgentSettingsViewModel,
     ): ApplicationPopupState.WorkingDirectory
-
-    /**
-     * Edits only the captured suggestion call's batch cwd, not the source Session.
-     * Returns null if this call is absent/replaced/submitting; merges into its latest draft.
-     * @throws IllegalArgumentException if the Agent target is no longer owned/current.
-     * @throws IllegalStateException if the Application is closed.
-     * @throws Exception if child creation fails, preserving the current popup.
-     * @throws kotlinx.coroutines.CancellationException if cancelled during admission.
-     */
-    public suspend fun openSuggestedWorkingDirectoryPopup(
-        target: AgentViewModel,
-        callId: String,
-    ): ApplicationPopupState.WorkingDirectory?
 
     /**
      * Dismisses/closes [expected] only while it is the current exact open instance.

@@ -11,7 +11,6 @@ kotlin {
             dependencies {
                 api(project(":agent-runtime-contract"))
                 api(project(":tool-core"))
-                api(project(":tool-tool-search-backend"))
                 api(libs.kotlin.logging)
                 api(libs.kotlinx.coroutines.core)
             }

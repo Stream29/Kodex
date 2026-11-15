@@ -1,18 +1,21 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
 package io.github.stream29.kodex.rpc.contract
 
+import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
+import io.github.stream29.kodex.mcp.contract.McpCatalogTool
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.rpc.models.CliFrontendSettings
-import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.rpc.models.ContextPathQuery
 import io.github.stream29.kodex.rpc.models.DirectoryQuery
 import io.github.stream29.kodex.rpc.models.DirectoryListResult
@@ -21,12 +24,13 @@ import io.github.stream29.kodex.rpc.models.FrontendErrorAdmission
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.utils.kotlinxioserialization.PathAsStringSerializer
 import kotlinx.coroutines.flow.Flow
 import kotlinx.io.files.Path
 import kotlinx.rpc.annotations.Rpc
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+import kotlin.time.Instant
 
 /**
  * Application-wide RPC capabilities owned by the connected backend, not a Session.
@@ -107,9 +111,9 @@ public interface GlobalRpc {
      * A Session's inactivity does not terminate this global subscription. Cancelling collection
      * releases only this observer, not backend Agent execution.
      *
-     * At one host-interaction stop, publish one notification per present request type, preserving
-     * all calls of that type in their original order. Mixed types produce separate notifications,
-     * not an atomic batch. Notifications are not proof that a request remains pending.
+     * Emits `Notification.AskUserCreated` immediately when `AgentRuntimeRpc.createAskUser` creates
+     * a new `AskUserSnapshot` entry, and `Notification.Stop` when an accepted Agent turn stops at
+     * an assistant message or unhandled failure. Notifications are not proof that an entry remains unanswered.
      *
      * Frontend Hooks consume observations only; their result or failure cannot control the Agent.
      * RPC failures and backend logs remain independent. This declaration implements neither
@@ -317,32 +321,40 @@ public interface GlobalRpc {
     public suspend fun createSession(cwd: @Serializable(with = PathAsStringSerializer::class) Path): Int
 
     /**
-     * Creates and starts a suggested-Session batch explicitly confirmed by the frontend.
-     *
-     * Each task uses [initialSettings] with its own task name as threadName, through the usual
-     * creation validation and initialization. Turn and window identities are initialized
-     * independently for each child, not copied as shared identities from the input.
-     *
-     * The backend owns creation, naming, first-message submission and run startup; the frontend
-     * does not repeat these steps as per-child RPCs. Returns the complete creation metadata in
-     * input task order once startup work is handed off, without waiting for model execution.
-     * Each result includes the Session index and original URI/name metadata, so constructing
-     * the parent tool result does not require per-child metadata queries.
-     *
-     * Returning does not prove that a child's first message or model execution succeeded.
-     * Navigation, tab selection and completing the parent tool call remain frontend concerns.
-     * Ordinary [createSession] retains its separate creation and submission semantics.
-     *
-     * Creation failures propagate through the ordinary exception channel, without a dedicated
-     * known-error branch or partial-success result. The backend makes best-effort attempts to
-     * limit side effects; no all-or-nothing rollback is promised. An exception or lost reply does
-     * not prove that nothing was created, and must not trigger automatic replay of the batch.
-     * Cancelling the caller's wait does not revoke backend work already accepted.
+     * Creates and persists an external one-shot (`cron == null`) or recurring 5-field cron schedule
+     * targeting [agentId] (`kodex schedule create`).
      */
-    public suspend fun createSuggestedSessions(
-        tasks: List<SuggestedSubagentTask>,
-        initialSettings: KodexAgentSettings,
-    ): List<CreatedSuggestedSession>
+    public suspend fun createSchedule(
+        agentId: Int,
+        triggerAt: Instant,
+        cron: String? = null,
+        description: String,
+    ): ScheduleRecord
+
+    /** Lists active persisted schedules targeting [agentId] (`kodex schedule list`). */
+    public suspend fun listSchedules(agentId: Int): List<ScheduleRecord>
+
+    /** Deletes schedule [scheduleId], returning `true` if it existed (`kodex schedule delete`). */
+    public suspend fun deleteSchedule(scheduleId: Long): Boolean
+
+    /**
+     * Lists published MCP tools across all enabled MCP clients (`kodex tool list`,
+     * `kodex mcp status`, and dynamic `kodex <server> <tool>` CLI domains).
+     */
+    public suspend fun listMcpTools(): List<McpCatalogTool>
+
+    /**
+     * Invokes [toolName] on enabled MCP server [serverName] with [arguments] (`kodex <server> <tool>`).
+     *
+     * Any `type == "image"` content block in the MCP result is decoded and persisted under
+     * `<KodexHome>/media/mcp/<serverName>/...` and replaced with saved file path metadata so
+     * callers can inspect images on demand via `read_media(path)` without dumping raw base64.
+     */
+    public suspend fun callMcpTool(
+        serverName: String,
+        toolName: String,
+        arguments: JsonObject = JsonObject(emptyMap()),
+    ): CallToolResult
 
     /**
      * Activates an existing Session and renews its backend retention deadline.

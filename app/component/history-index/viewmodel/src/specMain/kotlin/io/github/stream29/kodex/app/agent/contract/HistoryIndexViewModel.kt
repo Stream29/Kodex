@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.app.agent.contract
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
@@ -37,29 +37,29 @@ public data class HistoryIndexWindow(
 /** Exact entry classification; renderer uses the corresponding message/tool title in hover. */
 public enum class HistoryIndexEntryKind {
     CompactionPoint, UserMessage, AssistantMessage, AssistantCommentary, AssistantFinal,
-    DeveloperMessage, AgentMessage, RequestUserInput, SuggestSubagents, PlanUpdate,
+    DeveloperMessage, AgentMessage, RequestUserInput, PlanUpdate,
 }
 
 /**
  * Full renderer-neutral hover. Text is trimmed, blank content becomes `[empty]`, image/encrypted
- * content uses placeholders, and secret answers are hidden. Suggest-subagents remains a simple
- * label; plan detail includes explanation and every step. [requestUserInput] is the original
- * stable event for the shared pure visual projection: that renderer must also hide secret answers.
+ * content uses placeholders, and secret answers are hidden. Plan detail includes explanation and
+ * every step. [requestUserInput] is the original answered [StableAskUserEvent] for the shared pure
+ * visual projection: that renderer must also hide secret answers.
  * [plan] carries typed plan data without requiring a renderer to parse terminal decoration.
  */
 public data class HistoryIndexEntryDetail(
     public val kind: HistoryIndexEntryKind,
     public val content: String,
-    public val requestUserInput: StableRequestUserInputToolEvent? = null,
+    public val requestUserInput: StableAskUserEvent? = null,
     public val plan: StablePlanUpdate? = null,
 )
 
 /**
  * One exact row: render graph plus summary, detail, and optional message timestamp.
  * Compaction summary is `Context compacted`; message summaries concatenate text plus `[image]`
- * or `[encrypted content]` placeholders. Request-user-input uses all question texts, not answers;
- * suggest-subagents uses only `suggest subagents`. Plan summary selects the last non-pending
- * step, otherwise the first step. Summaries trim/collapse whitespace and use `[empty]` if blank.
+ * or `[encrypted content]` placeholders. Request-user-input uses all question texts, not answers.
+ * Plan summary selects the last non-pending step, otherwise the first step. Summaries
+ * trim/collapse whitespace and use `[empty]` if blank.
  */
 public data class HistoryIndexEntry(
     public val index: Int,

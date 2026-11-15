@@ -98,9 +98,6 @@ public expect class McpServiceImpl : McpService, CoroutineScope {
 
 /**
  * Creates an independently cancellable MCP service under this scope.
- *
- * @throws IllegalArgumentException if the initial settings contain ambiguous server model routes,
- * before creating any resource or lifecycle child.
  */
 public expect fun CoroutineScope.McpServiceImpl(
     settings: StateFlow<McpSettings>,
@@ -156,7 +153,7 @@ public expect class PreparedMcpOAuthLogin(
  * Validates complete proposals at the persistence boundary without normalizing values or silently
  * changing the CAS update. Runtime credentials cannot move to a different server identity.
  *
- * @throws IllegalArgumentException if names are blank or ambiguous, a changed transport's required
+ * @throws IllegalArgumentException if names are blank, a changed transport's required
  * configuration is blank, or initialized credentials are moved to a different server identity.
  */
 public expect fun validateMcpConfigurationUpdate(

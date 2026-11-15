@@ -35,7 +35,6 @@ kotlin {
             implementation(project(":app-component-session-catalog-view"))
             implementation(project(":app-component-history-index-view"))
             implementation(project(":app-component-request-user-input-view"))
-            implementation(project(":app-component-suggest-subagent-task-view"))
             implementation(project(":app-component-working-directory-view"))
             implementation(project(":app-component-working-directory-viewmodel"))
             implementation(project(":app-component-path-picker-viewmodel"))

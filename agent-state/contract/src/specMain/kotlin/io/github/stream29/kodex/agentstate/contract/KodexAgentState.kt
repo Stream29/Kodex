@@ -41,8 +41,7 @@ public sealed interface KodexAgentStateValue {
     /**
      * The model emitted tool calls whose outputs have not all been persisted.
      *
-     * @property events Pending locally executable clean events, including
-     * client tool-search calls.
+     * @property events Pending locally executable clean events.
      * @throws IllegalArgumentException when [events] is empty.
      */
     public data class ToolPending(
@@ -166,6 +165,13 @@ public interface KodexAgentState : CoroutineScope {
     public val latestIndex: StateFlow<Int>
 
     /**
+     * Owning session/agent identifier delegated from [storage], or `null` when
+     * backed by standalone storage outside a session repository.
+     */
+    public val agentId: Int?
+        get() = storage.agentId
+
+    /**
      * Read-only persisted agent data.
      */
     public val storage: KodexAgentStorage
@@ -206,9 +212,7 @@ public interface KodexAgentState : CoroutineScope {
      * The implementation passes the settings visible at the request snapshot
      * to its bound context-prefix provider, renders the result, then prepends
      * that prefix to persisted model input without writing it to storage or
-     * compaction history. It also derives the complete model-visible tool list
-     * from fixed Codex tools, current settings, and its dynamic tool-search
-     * source.
+     * compaction history. It supplies the fixed 5-tool direct model surface.
      *
      * The operation atomically claims [KodexAgentStateValue.RequestResponse]
      * and captures one storage snapshot, then releases the write queue while
@@ -324,8 +328,7 @@ public interface KodexAgentState : CoroutineScope {
     public suspend fun appendUserMessage(content: List<ContentItem>): Int
 
     /**
-     * Completes one currently pending local tool call, including a
-     * client-executed tool-search call.
+     * Completes one currently pending local tool call.
      *
      * The event's projected output call id must match a pending clean call.
      * The same transition persists [completed] on the stable timeline and

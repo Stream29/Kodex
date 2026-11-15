@@ -4,7 +4,6 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonElement
 
 /**
  * Pending call whose input was rejected during parsing.
@@ -22,17 +21,15 @@ public data class PendingInvalidToolCall(
     public val invocation: PendingInvalidToolInvocation,
     public val message: String,
 ) : PendingToolEvent {
-    override val toolName: String?
+    override val toolName: String
         get() = when (val invalidInvocation = invocation) {
             is PendingInvalidToolInvocation.Function -> invalidInvocation.name
             is PendingInvalidToolInvocation.Custom -> invalidInvocation.name
-            is PendingInvalidToolInvocation.ToolSearch -> null
         }
     override val toolNamespace: String?
         get() = when (val invalidInvocation = invocation) {
             is PendingInvalidToolInvocation.Function -> invalidInvocation.namespace
             is PendingInvalidToolInvocation.Custom -> invalidInvocation.namespace
-            is PendingInvalidToolInvocation.ToolSearch -> null
         }
 
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
@@ -54,13 +51,6 @@ public data class PendingInvalidToolCall(
                         name = invalidInvocation.name,
                         namespace = invalidInvocation.namespace,
                         input = invalidInvocation.input,
-                    )
-
-                is PendingInvalidToolInvocation.ToolSearch ->
-                    ResponseItem.ClientToolSearchCall(
-                        id = itemId,
-                        callId = callId,
-                        arguments = invalidInvocation.arguments,
                     )
             },
         )
@@ -87,12 +77,5 @@ public sealed interface PendingInvalidToolInvocation {
         public val name: String,
         public val namespace: String? = null,
         public val input: String,
-    ) : PendingInvalidToolInvocation
-
-    /** Client tool-search arguments retained as their original JSON value. */
-    @Serializable
-    @SerialName("tool_search")
-    public data class ToolSearch(
-        public val arguments: JsonElement,
     ) : PendingInvalidToolInvocation
 }

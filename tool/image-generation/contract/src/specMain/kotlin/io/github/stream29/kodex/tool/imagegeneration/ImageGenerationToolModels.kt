@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
  * has no referenced local images; `null` means use no path-based edit images.
  * @property numLastImagesToInclude Retained for wire compatibility. This host
  * does not bind conversation image history; a non-null value is unsupported
- * and produces an explicit tool failure. Omit it and use local reference paths.
+ * and produces an explicit failure. Omit it and use local reference paths.
  */
 @Serializable
 public data class ImageGenToolArguments(
@@ -28,6 +28,18 @@ public data class GeneratedImageOutput(
     public val result: String,
     @SerialName("output_hint")
     public val outputHint: String? = null,
+)
+
+/**
+ * Saved PNG file artifact returned by `AgentRuntimeRpc.generateImage` and `kodex image`.
+ *
+ * Callers inspect the generated image in model context via `read_media(path)`.
+ */
+@Serializable
+public data class GeneratedImageArtifact(
+    public val path: String,
+    @SerialName("mime_type")
+    public val mimeType: String = "image/png",
 )
 
 public class ImageGenerationToolException(

@@ -17,7 +17,11 @@ import kotlin.time.Instant
  * so it can always back a legal empty agent state without a synthetic
  * compaction point.
  */
-public expect class InMemoryKodexAgentStorage(initialSettings: KodexAgentSettings) : MutableKodexAgentStorage {
+public expect class InMemoryKodexAgentStorage(
+    initialSettings: KodexAgentSettings,
+    agentId: Int? = null,
+) : MutableKodexAgentStorage {
+    override val agentId: Int?
     override val uri: String
 
     override suspend fun latestIndex(): Int
@@ -30,6 +34,6 @@ public expect class InMemoryKodexAgentStorage(initialSettings: KodexAgentSetting
 
     public companion object {
         /** Creates the uninitialized storage backing a freshly spawned AgentSession. */
-        public fun empty(): InMemoryKodexAgentStorage
+        public fun empty(agentId: Int? = null): InMemoryKodexAgentStorage
     }
 }

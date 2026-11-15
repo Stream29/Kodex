@@ -15,7 +15,6 @@ kotlin {
             api(project(":app-component-composer-view"))
             api(project(":app-component-history-view"))
             api(project(":app-component-request-user-input-view"))
-            api(project(":app-component-suggest-subagent-task-view"))
             api(compose.runtime)
         }
     }

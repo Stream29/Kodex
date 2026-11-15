@@ -79,8 +79,7 @@ public data class StableImageGenerationCall(
  * Self-contained remote-compaction checkpoint at a context-window boundary.
  *
  * Bundles the ordered [retainedItems] prefix (within the 64,000-token retention
- * budget, including virtual [StableRequestUserInputToolEvent] items synthesized
- * at compaction time from completed interactions) together with the encrypted
+ * budget, including answered [StableAskUserEvent] items) together with the encrypted
  * compaction summary. Replaying model input starts directly from this commit
  * without scanning earlier indices.
  */

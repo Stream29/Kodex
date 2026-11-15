@@ -32,10 +32,6 @@ public interface AgentPageRenderScope {
         viewModel: AgentHistoryViewModel, shellSessions: AgentShellSessionRegistry, canEdit: Boolean,
     )
     @Composable public fun UserInput(viewModel: RequestUserInputViewModel, state: RequestUserInputState.Pending)
-    @Composable public fun Suggestion(
-        viewModel: SuggestSubagentTaskViewModel, state: SuggestSubagentTaskState.Pending,
-        onBrowseWorkingDirectory: (String) -> Unit,
-    )
     @Composable public fun PendingSteer()
     @Composable public fun Notice(message: String)
     /** [enabled] also controls initial focus, leaving pending-tool focus with its exact child. */
@@ -50,7 +46,7 @@ public interface AgentPageRenderer {
 }
 
 /**
- * Borrows the exact Agent and stable children. Shared observations, pending-tool branches,
+ * Borrows the exact Agent and stable children. Shared observations, ask-user branch,
  * notification outlet and control wiring never resolve a replacement active tab.
  * Unmounting closes no child and does not cancel accepted owner work.
  */
@@ -60,6 +56,5 @@ public expect fun AgentPageContent(
     newLineKey: NewLineKey,
     renderer: AgentPageRenderer,
     onBrowseWorkingDirectory: () -> Unit,
-    onBrowseSuggestedWorkingDirectory: (String) -> Unit,
     onOpenSettings: () -> Unit,
 ): Unit

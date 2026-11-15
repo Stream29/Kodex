@@ -12,7 +12,6 @@ kotlin {
                 api(project(":openai-models"))
                 api(project(":tool-image-generation-contract"))
                 api(project(":openai-client"))
-                api(project(":tool-core"))
                 api(project(":utils-images"))
                 api(project(":utils-kotlinx-io-coroutines-system"))
                 api(project(":utils-images-codec"))

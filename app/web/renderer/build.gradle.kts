@@ -29,7 +29,6 @@ kotlin {
             api(project(":app-component-session-delete-view"))
             api(project(":app-component-settings-view"))
             api(project(":app-component-request-user-input-view"))
-            api(project(":app-component-suggest-subagent-task-view"))
             api(project(":app-component-history-view"))
             api(compose.runtime)
         }

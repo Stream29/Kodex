@@ -6,6 +6,7 @@ import io.github.oshai.kotlinlogging.KLogger
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.RequestFinish
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
@@ -16,27 +17,22 @@ import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.tool.contract.Tool
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.coroutines.CoroutineContext
 
 /**
- * [ResumableAgentLayer] that handles pending local tool and client tool-search calls.
+ * [ResumableAgentLayer] that handles pending local tool calls against a static [tools] catalog.
  *
- * The supplied fixed tools, dynamic tool catalog, tool-search engine, and their
- * state flows are borrowed: this layer neither constructs nor closes them.
- * Fixed callable routes are established when the layer is composed; dynamic
- * routes are sampled when a [KodexAgentStateValue.ToolPending] boundary is
- * handled. Function, freeform, and namespace-member routes must be callable
- * and unique within and across the fixed and dynamic catalogs.
+ * The supplied [tools] are borrowed: this layer neither constructs nor closes them.
+ * Function, freeform, and namespace-member routes must be callable and unique.
  *
  * @param logger Agent-scoped logger used to derive each Tool call logger.
  */
 public expect class KodexToolRuntime(
     delegate: ResumableAgentLayer,
-    fixedTools: List<Tool>,
-    dynamicTools: StateFlow<List<Tool>>,
-    toolSearch: StateFlow<ToolSearchEngine>,
+    tools: List<Tool>,
     logger: KLogger,
 ) : ResumableAgentLayer {
     override val coroutineContext: CoroutineContext
@@ -53,43 +49,39 @@ public expect class KodexToolRuntime(
     override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int
     override suspend fun updateSettings(settings: KodexAgentSettings): Int
     override suspend fun compareAndSetSettings(expect: KodexAgentSettings, update: KodexAgentSettings): Boolean
+    override suspend fun createAskUser(questions: RequestUserInputArgs): AskUserEntry
+    override suspend fun answerAskUser(askId: Int, response: RequestUserInputResponse): AskUserEntry
 
     /**
      * Handles an existing pending-tool boundary before delegating to the inner
      * layer. Otherwise delegates first and handles any tool calls it leaves
-     * pending. Invalid invocations are persisted as invalid completions, and
-     * client tool-search calls use the current search engine.
+     * pending. Invalid invocations are persisted as invalid completions.
      *
-     * A routed local tool invokes its handler directly, without a script control
-     * route. Its clean completion is persisted only if the
-     * call is still pending, since state-bound tools may have completed it
-     * atomically themselves. A missing `mcp__` route is completed as a failure;
-     * an unowned non-MCP route remains pending.
+     * A routed local tool invokes its handler directly. Its clean completion is
+     * persisted only if the call is still pending, since state-bound tools may
+     * have completed it atomically themselves. Unmatched pending calls are left
+     * untouched for an outer runtime layer (such as `AgentRuntime` handling
+     * `await_event`) or host completion.
      *
      * When handling advances state out of ToolPending, the inner layer resumes.
-     * If calls remain unhandled, this call returns at the observable state
-     * boundary. Non-cancellation handler failures become matching failed
-     * completions; cancellation, routing and persistence failures propagate.
+     * If unmatched calls remain pending, this call returns at the observable
+     * ToolPending state boundary. Non-cancellation handler failures become
+     * matching failed completions; cancellation, routing and persistence
+     * failures propagate.
      *
-     * @throws IllegalArgumentException if the sampled dynamic catalog has
-     * duplicate, empty, or fixed-colliding routes, or a pending local call
-     * does not identify a route name.
+     * @throws IllegalArgumentException if [tools] has duplicate or empty routes.
      */
     public override suspend fun resume()
 }
 
 /**
- * Adds a tool-execution layer over externally owned tool state.
+ * Adds a static tool-execution layer over [tools].
  */
 public fun ResumableAgentLayer.toolRuntime(
-    fixedTools: List<Tool>,
-    dynamicTools: StateFlow<List<Tool>>,
-    toolSearch: StateFlow<ToolSearchEngine>,
+    tools: List<Tool>,
     logger: KLogger,
 ): KodexToolRuntime = KodexToolRuntime(
     delegate = this,
-    fixedTools = fixedTools,
-    dynamicTools = dynamicTools,
-    toolSearch = toolSearch,
+    tools = tools,
     logger = logger,
 )

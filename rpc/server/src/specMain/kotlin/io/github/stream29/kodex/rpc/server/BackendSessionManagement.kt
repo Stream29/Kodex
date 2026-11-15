@@ -3,13 +3,10 @@
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
-import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import kotlinx.io.files.Path
 
 /**
@@ -28,7 +25,6 @@ public expect class BackendSessionManagement(
     reportBackgroundFailure: (Throwable) -> Unit,
     checkAdmission: () -> Unit = {},
 ) {
-
     public suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry>
     public suspend fun createSession(cwd: Path): Int
     public suspend fun keepSessionAlive(sessionIndex: Int)
@@ -37,8 +33,4 @@ public expect class BackendSessionManagement(
     public suspend fun deleteSession(sessionIndex: Int): Boolean
     public suspend fun forkSession(sessionIndex: Int): Int
     public suspend fun forkSessionHistory(sessionIndex: Int, untilExclusive: Int, expectedCacheNonce: Long): Int
-    public suspend fun createSuggestedSessions(
-        tasks: List<SuggestedSubagentTask>,
-        initialSettings: KodexAgentSettings,
-    ): List<CreatedSuggestedSession>
 }
