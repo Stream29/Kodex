@@ -20,6 +20,9 @@ kotlin {
                 implementation(project(":agent-session-in-memory"))
                 implementation(project(":agent-session-test"))
                 implementation(project(":openai-client-test"))
+                implementation(project(":openai-json-codec"))
+                implementation(project(":tool-await-event"))
+                implementation(project(":tool-unified-exec-contract"))
                 implementation(libs.kotlinx.coroutines.test)
             }
         }

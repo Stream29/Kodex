@@ -21,6 +21,7 @@ kotlin {
         commonMain.dependencies {
             implementation(project(":agent-context-prefix"))
             implementation(project(":tool-apply-patch"))
+            implementation(project(":tool-await-event"))
             implementation(project(":tool-current-time"))
             implementation(project(":tool-image-generation"))
             implementation(project(":tool-view-image"))

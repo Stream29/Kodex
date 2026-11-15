@@ -22,7 +22,12 @@ public actual fun ensureSqlitePhaseOneSchema(connection: SqliteConnection) {
             val tableSql = connection.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_commits'")
                 .singleOrNull()?.singleOrNull() as? String ?: ""
             val hasSteerType = "'steer'" in tableSql
-            if (!hasCreatedAt || !hasSteerType) {
+            val hasAskUserAndEventTypes = "'ask_user'" in tableSql &&
+                "'event_ask_user'" in tableSql &&
+                "'event_schedule'" in tableSql &&
+                "'event_terminal_exited'" in tableSql &&
+                "'await_event_tool_event'" in tableSql
+            if (!hasCreatedAt || !hasSteerType || !hasAskUserAndEventTypes) {
                 connection.transaction {
                     connection.execute("CREATE INDEX IF NOT EXISTS idx_sessions_archived ON sessions(archived, session_id)")
                     connection.execute("ALTER TABLE agent_commits RENAME TO agent_commits_legacy")

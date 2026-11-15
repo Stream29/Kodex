@@ -54,6 +54,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotSame
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -375,6 +376,32 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             assertEquals(emptyList(), root.storage.getUnstableAtOrNull(3))
             assertEquals(KodexAgentStateValue.ToolCompleted, root.runtime.state.value)
             assertNull(root.runtime.runningTurn.value)
+        }
+
+        test("idle TTL eviction drains session without self-deadlocking and allows clean reopen") {
+            withContext(Dispatchers.Default) {
+                val repository = InMemoryKodexSessionRepository(
+                    dependencies = testKodexAgentDependencies(),
+                    sessionTtl = 40.milliseconds,
+                )
+                try {
+                    val index = repository.createInitialized(settings("ttl-memory"))
+                    val first = repository.open(index)
+                    assertTrue(index in repository.openSessions.value)
+                    withTimeout(5.seconds) {
+                        while (index in repository.openSessions.value) {
+                            delay(10.milliseconds)
+                        }
+                        first.coroutineContext[Job]?.join()
+                    }
+                    assertFalse(first.coroutineContext[Job]?.isActive ?: true)
+                    val reopened = repository.open(index)
+                    assertNotSame(first, reopened)
+                    assertEquals("ttl-memory", reopened.storage.getSettingsAt(0).threadName)
+                } finally {
+                    repository.cancelAndJoin()
+                }
+            }
         }
 
     }

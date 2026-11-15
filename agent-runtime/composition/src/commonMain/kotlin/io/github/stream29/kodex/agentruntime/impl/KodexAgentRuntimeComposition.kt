@@ -4,34 +4,58 @@ import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.decorator.compact.compactionRuntime
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
+import io.github.stream29.kodex.agentruntime.contract.AgentStopEvent
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.decorator.tool.toolRuntime
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstate.contract.canAppendUserMessage
 import io.github.stream29.kodex.agentstate.contract.clearPending
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.ResponseItem
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventOutput
 import io.github.stream29.kodex.tool.contract.Tool
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecToolClient
 import io.github.stream29.kodex.utils.logging.agent
 import io.github.stream29.kodex.utils.logging.global
 import io.github.stream29.kodex.utils.logging.session
 import io.github.stream29.kodex.utils.logging.tool
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.time.Clock
 
 /** Builds the root Agent runtime. */
 public actual fun KodexAgentState.buildMasterAgentRuntime(
@@ -120,33 +144,72 @@ private data class AgentRuntimeLayer(
     val unifiedExecToolClient: UnifiedExecToolClient,
 )
 
+@OptIn(ExperimentalAtomicApi::class)
 private class AgentRuntimeImpl(
     private val delegate: ResumableAgentLayer,
     override val unifiedExecToolClient: UnifiedExecToolClient,
     private val logger: KLogger,
 ) : AgentRuntime, KodexAgentState by delegate {
     private val runningTurnSlot: MutableStateFlow<Job?> = MutableStateFlow(null)
+    private val needsSubmittedSteerDrain: AtomicBoolean = AtomicBoolean(false)
+    private val mutableStopEvents: MutableSharedFlow<AgentStopEvent> = MutableSharedFlow(
+        replay = 0,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
 
     override val runningTurn: StateFlow<Job?> = runningTurnSlot.asStateFlow()
+    override val stopEvents: Flow<AgentStopEvent> = mutableStopEvents.asSharedFlow()
 
-    override suspend fun resume(): Unit = withRunningTurn {
-        logger.info { "Agent turn started." }
-        try {
-            delegate.resume()
-            logger.logPendingHostToolCalls(delegate.state.value)
-            logger.info { "Agent turn completed." }
-        } catch (cancellation: CancellationException) {
-            val cleanupFailure = withContext(NonCancellable) {
-                runCatching { delegate.clearPending() }.exceptionOrNull()
+    override suspend fun resume() {
+        var completedNormally = false
+        withRunningTurn {
+            val before = delegate.latestIndex.value
+            val acceptedStart = isAcceptedResumeStart(before)
+            logger.info { "Agent turn started." }
+            try {
+                var parkedOnAwaitEvent = false
+                while (true) {
+                    needsSubmittedSteerDrain.store(false)
+                    delegate.resume()
+                    val pending = delegate.state.value as? KodexAgentStateValue.ToolPending
+                    val awaitEvents = pending?.events
+                        ?.takeIf { events -> events.all { it is PendingAwaitEventToolEvent } }
+                        ?.filterIsInstance<PendingAwaitEventToolEvent>()
+                        .orEmpty()
+                    if (awaitEvents.isEmpty()) {
+                        break
+                    }
+                    if (!resolvePendingAwaitEvents(awaitEvents)) {
+                        parkedOnAwaitEvent = true
+                        break
+                    }
+                }
+                if (!parkedOnAwaitEvent) {
+                    logger.logPendingHostToolCalls(delegate.state.value)
+                    emitStopEventsOnNormalStop(before)
+                }
+                logger.info { "Agent turn completed." }
+                completedNormally = true
+            } catch (cancellation: CancellationException) {
+                val cleanupFailure = withContext(NonCancellable) {
+                    runCatching { delegate.clearPending() }.exceptionOrNull()
+                }
+                if (cleanupFailure != null && cleanupFailure !== cancellation) {
+                    cancellation.addSuppressed(cleanupFailure)
+                }
+                logger.info { "Agent turn cancelled." }
+                throw cancellation
+            } catch (failure: Throwable) {
+                if (acceptedStart) {
+                    mutableStopEvents.tryEmit(AgentStopEvent.UnhandledError(failure.message))
+                }
+                logger.error(failure) { "Agent turn failed." }
+                throw failure
             }
-            if (cleanupFailure != null && cleanupFailure !== cancellation) {
-                cancellation.addSuppressed(cleanupFailure)
-            }
-            logger.info { "Agent turn cancelled." }
-            throw cancellation
-        } catch (failure: Throwable) {
-            logger.error(failure) { "Agent turn failed." }
-            throw failure
+        }
+        if (completedNormally && needsSubmittedSteerDrain.exchange(false)) {
+            recheckSubmittedSteerAfterTurnRelease()
         }
     }
 
@@ -154,8 +217,194 @@ private class AgentRuntimeImpl(
         trigger: CompactionTrigger,
         reason: CompactionReason,
         phase: CompactionPhase,
-    ): Int = withRunningTurn {
-        delegate.compact(trigger, reason, phase)
+    ): Int =
+        withRunningTurn {
+            try {
+                delegate.compact(trigger, reason, phase)
+            } finally {
+                // Per AgentRuntime.compact contract, standalone compaction preserves queued steer
+                // without consuming it or automatically launching a resume turn on completion.
+                needsSubmittedSteerDrain.store(false)
+            }
+        }
+
+    override suspend fun submit(events: List<StableIndexEvent.Steerable>) {
+        if (events.isEmpty()) return
+        delegate.steer(events)
+        ensureTurnRunningForSubmittedSteer()
+    }
+
+    override suspend fun submitAskUserAnswer(
+        askId: Int,
+        response: RequestUserInputResponse,
+    ) {
+        delegate.answerAskUser(askId, response)
+        ensureTurnRunningForSubmittedSteer()
+    }
+
+    private fun ensureTurnRunningForSubmittedSteer() {
+        needsSubmittedSteerDrain.store(true)
+        if (runningTurnSlot.value == null && isActive) {
+            launchBackgroundResume()
+        }
+    }
+
+    private suspend fun recheckSubmittedSteerAfterTurnRelease() {
+        if (runningTurnSlot.value == null && isActive && hasWakeableSteer()) {
+            launchBackgroundResume()
+        }
+    }
+
+    private fun launchBackgroundResume() {
+        launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                resume()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: ConcurrentAgentRuntimeResumeException) {
+                return@launch
+            } catch (_: Throwable) {
+                // Logged and published to stopEvents inside resume().
+            }
+        }
+    }
+
+    private suspend fun resolvePendingAwaitEvents(
+        awaitEvents: List<PendingAwaitEventToolEvent>,
+    ): Boolean {
+        val currentLatest = delegate.latestIndex.value
+        if (currentLatest >= 0 && delegate.storage.getSteerAt(currentLatest).isNotEmpty()) {
+            completeAllAwaitEventsWithTimestamp(awaitEvents)
+            return true
+        }
+
+        val activeSessions = unifiedExecToolClient.activeSessions.value
+        val invalidByCallId = awaitEvents.associate { pending ->
+            pending.callId to pending.arguments.terminals.filter { sessionId -> sessionId !in activeSessions }
+        }.filterValues { missing -> missing.isNotEmpty() }
+
+        if (invalidByCallId.isNotEmpty()) {
+            val timestamp = Clock.System.now()
+            for (pending in awaitEvents) {
+                val missing = invalidByCallId[pending.callId]
+                val result = if (missing != null) {
+                    StableAwaitEventResult.Failure(
+                        "Unknown or expired terminal session ID(s): ${missing.joinToString(", ")}",
+                    )
+                } else {
+                    StableAwaitEventResult.Output(AwaitEventOutput(timestamp = timestamp))
+                }
+                completeToolCall(
+                    StableAwaitEventToolEvent(
+                        callId = pending.callId,
+                        itemId = pending.itemId,
+                        arguments = pending.arguments,
+                        result = result,
+                    ),
+                )
+            }
+            return true
+        }
+
+        val exitedTerminals = awaitEvents
+            .flatMap { pending -> pending.arguments.terminals }
+            .distinct()
+            .mapNotNull { sessionId ->
+                val session = activeSessions[sessionId] ?: return@mapNotNull null
+                val code = session.exitCode.value ?: return@mapNotNull null
+                StableTerminalExitedEvent(
+                    sessionId = session.sessionId,
+                    name = session.arguments.name,
+                    command = session.arguments.command,
+                    exitCode = code,
+                )
+            }
+
+        if (exitedTerminals.isNotEmpty()) {
+            delegate.steer(exitedTerminals)
+            completeAllAwaitEventsWithTimestamp(awaitEvents)
+            return true
+        }
+
+        return false
+    }
+
+    private suspend fun completeAllAwaitEventsWithTimestamp(
+        awaitEvents: List<PendingAwaitEventToolEvent>,
+    ) {
+        val timestamp = Clock.System.now()
+        for (pending in awaitEvents) {
+            completeToolCall(
+                StableAwaitEventToolEvent(
+                    callId = pending.callId,
+                    itemId = pending.itemId,
+                    arguments = pending.arguments,
+                    result = StableAwaitEventResult.Output(AwaitEventOutput(timestamp = timestamp)),
+                ),
+            )
+        }
+    }
+
+    private suspend fun isAcceptedResumeStart(beforeIndex: Int): Boolean =
+        when (delegate.state.value) {
+            KodexAgentStateValue.Empty ->
+                beforeIndex >= 0 && delegate.storage.getSteerAt(beforeIndex).isNotEmpty()
+            KodexAgentStateValue.ExternalWrite,
+            KodexAgentStateValue.Compacting,
+            is KodexAgentStateValue.RequestResponse,
+            -> false
+            else -> true
+        }
+
+    private suspend fun hasWakeableSteer(): Boolean {
+        val currentState = delegate.state.value
+        val wakeable = currentState.canAppendUserMessage ||
+            (currentState is KodexAgentStateValue.ToolPending &&
+                currentState.events.all { it is PendingAwaitEventToolEvent })
+        if (!wakeable) return false
+        val index = delegate.latestIndex.value
+        return index >= 0 && delegate.storage.getSteerAt(index).isNotEmpty()
+    }
+
+    private suspend fun emitStopEventsOnNormalStop(before: Int) {
+        try {
+            when (val currentState = delegate.state.value) {
+                KodexAgentStateValue.AssistantMessage -> {
+                    val latest = delegate.latestIndex.value
+                    if (latest > before) {
+                        val message = delegate.storage.getLastCommitsIn(
+                            (before + 1)..latest,
+                            setOf(
+                                AgentCommitType.AssistantMessage,
+                                AgentCommitType.AssistantMessageCommentary,
+                                AgentCommitType.AssistantMessageFinal,
+                            ),
+                            limit = 1,
+                        ).lastOrNull()?.commit as? StableAssistantMessage
+                        if (message != null) {
+                            mutableStopEvents.tryEmit(AgentStopEvent.AssistantMessage(message))
+                        }
+                    }
+                }
+
+                is KodexAgentStateValue.ToolPending -> {
+                    val questions = currentState.events.filterIsInstance<PendingRequestUserInputToolEvent>()
+                    val suggestions = currentState.events.filterIsInstance<PendingSuggestSubagentTaskToolEvent>()
+                    if (questions.isNotEmpty()) {
+                        mutableStopEvents.tryEmit(AgentStopEvent.RequestUserInput(questions))
+                    }
+                    if (suggestions.isNotEmpty()) {
+                        mutableStopEvents.tryEmit(AgentStopEvent.SuggestSubagent(suggestions))
+                    }
+                }
+
+                else -> Unit
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Throwable) {
+            logger.warn(failure) { "Unable to project an AgentStopEvent." }
+        }
     }
 
     private suspend fun <T> withRunningTurn(block: suspend () -> T): T {

@@ -142,8 +142,10 @@ internal class CachedSqliteAgentStorage(
             backing().revert(untilExclusive)
             val latest = if (previous < untilExclusive) previous else backing().latestIndex()
             if (latest != previous || hadSteer) {
-                nonce.value = Random.nextLong()
                 tail.value = latest
+                var nextNonce = Random.nextLong()
+                while (nextNonce == nonce.value) nextNonce = Random.nextLong()
+                nonce.value = nextNonce
             }
         }
     }

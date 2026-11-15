@@ -7,6 +7,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettin
 import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventTools
 import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
 import io.github.stream29.kodex.tool.getcontextremaining.GetContextRemainingTools
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenerationTools
@@ -23,10 +24,10 @@ import io.github.stream29.kodex.tool.webrun.WebRunTools
 
 private val DirectToolSpecs: List<ToolSpec> = buildList {
     add(ApplyPatchTools.spec)
+    add(AwaitEventTools.spec)
     add(CurrentTimeTools.spec)
     add(GetContextRemainingTools.spec)
     add(UnifiedExecTools.execCommandSpec)
-    add(UnifiedExecTools.writeStdinSpec)
     add(WebRunTools.spec)
 }
 

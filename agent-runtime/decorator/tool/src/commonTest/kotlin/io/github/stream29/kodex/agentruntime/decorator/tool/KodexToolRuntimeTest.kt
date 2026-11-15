@@ -778,19 +778,19 @@ val kodexToolRuntimeTest by testSuite {
         }
     }
 
-    test("exec command and failed write stdin persist independent completions") {
+    test("exec command and failed exec command persist independent completions") {
         val execCall = ResponseItem.FunctionCall(
             name = "exec_command",
             arguments = "{\"cmd\":\"sleep 1\",\"yield_time_ms\":250}",
             callId = "call_exec",
         )
-        val writeCall = ResponseItem.FunctionCall(
-            name = "write_stdin",
-            arguments = "{\"session_id\":1,\"chars\":\"\",\"yield_time_ms\":250}",
-            callId = "call_write",
+        val failedExecCall = ResponseItem.FunctionCall(
+            name = "exec_command",
+            arguments = "{\"cmd\":\"   \",\"yield_time_ms\":250}",
+            callId = "call_failed_exec",
         )
         val mcpService = TestMcpService()
-        val fixture = testStateWithCalls(mcpService, calls = arrayOf(execCall, writeCall))
+        val fixture = testStateWithCalls(mcpService, calls = arrayOf(execCall, failedExecCall))
 
         val runtime = RequestOnlyRuntime(fixture.state)
             .testToolRuntime(mcpService)
@@ -798,7 +798,7 @@ val kodexToolRuntimeTest by testSuite {
 
         val outputs = fixture.state.storage.stableHistoryItems()
             .filterIsInstance<ResponseItem.ToolCallOutput>()
-        assertEquals(listOf("call_exec", "call_write"), outputs.map { it.callId })
+        assertEquals(listOf("call_exec", "call_failed_exec"), outputs.map { it.callId })
         val completed = fixture.state.storage.getCommitsIn(
             0..fixture.state.latestIndex.value,
             AgentCommitType.WorkTypes,
@@ -806,7 +806,7 @@ val kodexToolRuntimeTest by testSuite {
             .map { it.commit }
             .filterIsInstance<StableCommandExecutionToolEvent>()
         assertIs<StableCommandExecutionResult.Output>(completed.single { it.callId == "call_exec" }.result)
-        assertIs<StableCommandExecutionResult.Failure>(completed.single { it.callId == "call_write" }.result)
+        assertIs<StableCommandExecutionResult.Failure>(completed.single { it.callId == "call_failed_exec" }.result)
         assertEquals(KodexAgentStateValue.AssistantMessage, fixture.state.state.value)
     }
 
@@ -822,7 +822,7 @@ val kodexToolRuntimeTest by testSuite {
             callId = "call_exec_missing_yield",
         )
         val missingYieldWriteCall = ResponseItem.FunctionCall(
-            name = UnifiedExecTools.WriteStdinName,
+            name = "write_stdin",
             arguments = """{"session_id":1,"chars":"should-not-write\n"}""",
             callId = "call_write_missing_yield",
         )

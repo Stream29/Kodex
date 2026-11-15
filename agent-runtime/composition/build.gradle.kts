@@ -23,6 +23,7 @@ kotlin {
             implementation(project(":openai-model-catalog"))
             implementation(project(":openai-models"))
             implementation(project(":tool-apply-patch"))
+            implementation(project(":tool-await-event"))
             implementation(project(":tool-core"))
             implementation(project(":tool-current-time"))
             implementation(project(":tool-get-context-remaining"))

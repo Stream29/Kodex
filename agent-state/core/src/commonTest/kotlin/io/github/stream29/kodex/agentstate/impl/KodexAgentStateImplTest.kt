@@ -15,7 +15,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUse
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
@@ -842,10 +842,13 @@ val kodexAgentStateImplTest by testSuite {
                 retainedItems = listOf(StableUserMessage(user.content)),
             )
             assertEquals(
-                listOf(user),
+                listOf(stableCompaction),
+                storage.activeMessageWindowAt(compactIndex),
+            )
+            assertEquals(
+                listOf(user, compaction),
                 storage.activeMessageWindowAt(compactIndex)
-                    .filterIsInstance<StableUserMessage>()
-                    .map { event -> event.toResponseHistoryItems().single() },
+                    .flatMap { event -> event.toResponseHistoryItems() },
             )
             assertEquals(stableCompaction, storage.getIndexEntryAt(compactIndex))
             assertEquals(0L, storage.getLlmRequestMetaAt(compactIndex).totalTokens)
@@ -906,17 +909,16 @@ val kodexAgentStateImplTest by testSuite {
             }
             val compactIndex = agent.forcedCompact()
 
-            assertEquals(
-                listOf(firstUser, planUpdate, requestUserInput),
-                storage.activeMessageWindowAt(compactIndex)
-                    .filter { event -> event is CompactionRetainedItem }
-                    .toList(),
+            val expectedCompaction = StableContextCompaction(
+                encryptedContent = "compact-2",
+                retainedItems = listOf(firstUser, planUpdate, requestUserInput),
             )
             assertEquals(
-                StableContextCompaction(
-                    encryptedContent = "compact-2",
-                    retainedItems = listOf(firstUser, planUpdate, requestUserInput),
-                ),
+                listOf<StableCleanEvent>(expectedCompaction),
+                storage.activeMessageWindowAt(compactIndex),
+            )
+            assertEquals(
+                expectedCompaction,
                 storage.getIndexEntryAt(compactIndex),
             )
         }

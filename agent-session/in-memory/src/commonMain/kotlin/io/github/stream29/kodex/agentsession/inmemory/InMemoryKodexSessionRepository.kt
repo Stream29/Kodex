@@ -4,6 +4,8 @@ package io.github.stream29.kodex.agentsession.inmemory
 
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
+import io.github.stream29.kodex.agentsession.contract.DefaultKodexSessionRenewalInterval
+import io.github.stream29.kodex.agentsession.contract.IndexedAgentStopEvent
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
@@ -16,41 +18,90 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentComm
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAtOrNull
+import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin as cancelJobAndJoin
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.random.Random
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Instant
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 
 /** Process-local root session repository for tests and transient hosts. */
 public actual class InMemoryKodexSessionRepository internal constructor(
     scope: CoroutineScope,
     private val dependencies: KodexAgentDependencies,
+    private val sessionTtl: Duration,
+    private val origin: TimeMark,
+    private val onTurnActiveRenewal: suspend () -> Unit,
+    private val turnRenewalInterval: () -> Duration,
 ) :
     KodexRootSessionRepository,
     CoroutineScope by scope {
     private val entriesMutex: Mutex = Mutex()
     private val sessions: MutableMap<Int, SessionNode> = linkedMapOf()
-    private val openRoots: MutableMap<Int, InMemoryKodexAgentSession> = mutableMapOf()
+    private val openRoots: MutableMap<Int, OpenSessionHandle> = linkedMapOf()
     private val mutableEntries = MutableStateFlow<List<Int>>(emptyList())
+    private val mutableOpenSessions = MutableStateFlow<Map<Int, KodexAgentSession>>(emptyMap())
+    private val mutableStopEvents = MutableSharedFlow<IndexedAgentStopEvent>(
+        replay = 0,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
 
     actual override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
+    actual override val openSessions: StateFlow<Map<Int, KodexAgentSession>> = mutableOpenSessions.asStateFlow()
+    actual override val stopEvents: Flow<IndexedAgentStopEvent> = mutableStopEvents.asSharedFlow()
 
     init {
-        coroutineContext[Job]?.invokeOnCompletion { openRoots.clear() }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                withContext(NonCancellable) {
+                    entriesMutex.withLock {
+                        val handles = openRoots.values.toList()
+                        openRoots.clear()
+                        mutableOpenSessions.value = emptyMap()
+                        for (handle in handles) {
+                            drainHandleJobs(handle, currentCoroutineContext()[Job])
+                        }
+                    }
+                }
+            }
+        }
     }
 
     actual override suspend fun list(): List<Int> = entriesMutex.withLock {
@@ -70,7 +121,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
             if (session.archived && !includeArchived) return@mapNotNull null
             session.rootEntry(
                 entryIndex = entryIndex,
-                owner = openRoots[entryIndex],
+                owner = openRoots[entryIndex]?.session,
                 updateArchived = { updated ->
                     updateArchived(entryIndex, updated)
                 },
@@ -83,7 +134,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
             requireOpen()
             requireSession(entryIndex).rootEntry(
                 entryIndex = entryIndex,
-                owner = openRoots[entryIndex],
+                owner = openRoots[entryIndex]?.session,
                 updateArchived = { updated ->
                     updateArchived(entryIndex, updated)
                 },
@@ -121,29 +172,189 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         requireOpen()
         require(entryIndex >= 0) { "Session entry index must be non-negative." }
         val root = requireSession(entryIndex)
-        openRoots[entryIndex]?.let { session ->
-            if (session.coroutineContext[Job]?.isActive == true) return@withLock session
-            openRoots.remove(entryIndex)
+        openRoots[entryIndex]?.let { handle ->
+            if (handle.session.coroutineContext[Job]?.isActive == true) {
+                renewLocked(handle)
+                return@withLock handle.session
+            }
+            withContext(NonCancellable) {
+                closeHandleLocked(entryIndex, handle)
+            }
         }
-        InMemoryKodexAgentSession.open(
+        val opened = InMemoryKodexAgentSession.open(
+            entryIndex = entryIndex,
             node = root,
             parentScope = this@InMemoryKodexSessionRepository,
             dependencies = dependencies,
-        ).also { session ->
-            openRoots[entryIndex] = session
+            stopEventsSink = mutableStopEvents,
+        )
+        installHandleLocked(entryIndex, opened).session
+    }
+
+    actual override suspend fun closeSession(entryIndex: Int): Unit = entriesMutex.withLock {
+        val handle = openRoots[entryIndex] ?: return@withLock
+        withContext(NonCancellable) {
+            closeHandleLocked(entryIndex, handle)
+        }
+    }
+
+    actual override suspend fun closeAllSessions(): Unit = entriesMutex.withLock {
+        if (openRoots.isEmpty()) return@withLock
+        withContext(NonCancellable) {
+            for ((index, handle) in openRoots.toList()) {
+                closeHandleLocked(index, handle)
+            }
         }
     }
 
     actual override suspend fun delete(entryIndex: Int) {
-        val openRoot = entriesMutex.withLock {
+        val handle = entriesMutex.withLock {
             requireOpen()
             require(entryIndex >= 0) { "Session entry index must be non-negative." }
             requireSession(entryIndex)
             sessions.remove(entryIndex)
             mutableEntries.value = entries.value - entryIndex
-            openRoots.remove(entryIndex)
+            openRoots.remove(entryIndex)?.also {
+                publishOpenSessionsLocked()
+            }
         }
-        withContext(NonCancellable) { openRoot?.cancelAndJoin() }
+        if (handle != null) {
+            withContext(NonCancellable) {
+                drainDetachedHandle(handle)
+            }
+        }
+    }
+
+    private fun installHandleLocked(
+        entryIndex: Int,
+        opened: OpenedInMemorySession,
+    ): OpenSessionHandle {
+        val initialDeadline = if (sessionTtl.isFinite()) origin.elapsedNow() + sessionTtl else Duration.INFINITE
+        val handle = OpenSessionHandle(
+            session = opened.session,
+            storageScope = opened.storageScope,
+            deadline = initialDeadline,
+        )
+        openRoots[entryIndex] = handle
+        publishOpenSessionsLocked()
+
+        handle.renewalJob = launch {
+            opened.session.runtime.runningTurn.collectLatest { turn ->
+                if (turn != null) {
+                    while (true) {
+                        val renewed = entriesMutex.withLock {
+                            if (openRoots[entryIndex] !== handle ||
+                                opened.session.coroutineContext[Job]?.isActive != true ||
+                                opened.session.runtime.runningTurn.value !== turn
+                            ) {
+                                false
+                            } else {
+                                renewLocked(handle)
+                                true
+                            }
+                        }
+                        if (!renewed) return@collectLatest
+                        onTurnActiveRenewal()
+                        delay(nextRenewalDelay())
+                    }
+                }
+            }
+        }
+
+        handle.expiryJob = if (sessionTtl.isFinite()) {
+            launch {
+                while (true) {
+                    val remaining = entriesMutex.withLock {
+                        if (openRoots[entryIndex] !== handle) return@launch
+                        handle.deadline - origin.elapsedNow()
+                    }
+                    if (remaining.isPositive()) {
+                        delay(remaining)
+                    }
+                    val expired = entriesMutex.withLock {
+                        if (openRoots[entryIndex] !== handle) return@launch
+                        if (opened.session.runtime.runningTurn.value != null) {
+                            renewLocked(handle)
+                            false
+                        } else if (handle.deadline > origin.elapsedNow()) {
+                            false
+                        } else {
+                            closeHandleLocked(entryIndex, handle)
+                            true
+                        }
+                    }
+                    if (expired) return@launch
+                }
+            }
+        } else {
+            null
+        }
+
+        handle.completionWatcher = launch {
+            opened.session.coroutineContext.job.join()
+            entriesMutex.withLock {
+                if (openRoots[entryIndex] === handle) {
+                    withContext(NonCancellable) {
+                        openRoots.remove(entryIndex)
+                        publishOpenSessionsLocked()
+                        handle.renewalJob?.cancelJobAndJoin()
+                        handle.expiryJob?.cancelJobAndJoin()
+                        handle.storageScope.cancelAndJoin()
+                    }
+                }
+            }
+        }
+
+        return handle
+    }
+
+    private fun renewLocked(handle: OpenSessionHandle) {
+        if (sessionTtl.isFinite()) {
+            handle.deadline = maxOf(handle.deadline, origin.elapsedNow() + sessionTtl)
+        }
+    }
+
+    private fun nextRenewalDelay(): Duration {
+        val candidate = minOf(DefaultKodexSessionRenewalInterval, turnRenewalInterval())
+        return if (sessionTtl.isFinite()) {
+            minOf(candidate, (sessionTtl / 3).coerceAtLeast(1.milliseconds))
+        } else {
+            candidate.coerceAtLeast(1.milliseconds)
+        }
+    }
+
+    private suspend fun closeHandleLocked(entryIndex: Int, handle: OpenSessionHandle) {
+        val caller = currentCoroutineContext()[Job]
+        if (openRoots[entryIndex] === handle) {
+            openRoots.remove(entryIndex)
+            publishOpenSessionsLocked()
+        }
+        drainHandleJobs(handle, caller)
+    }
+
+    private suspend fun drainDetachedHandle(handle: OpenSessionHandle) {
+        drainHandleJobs(handle, currentCoroutineContext()[Job])
+    }
+
+    private suspend fun drainHandleJobs(handle: OpenSessionHandle, caller: Job?) =
+        withContext(NonCancellable) {
+            if (handle.completionWatcher !== caller) {
+                handle.completionWatcher?.cancelJobAndJoin()
+            }
+            if (handle.renewalJob !== caller) {
+                handle.renewalJob?.cancelJobAndJoin()
+            }
+            if (handle.expiryJob !== caller) {
+                handle.expiryJob?.cancelJobAndJoin()
+            }
+            handle.session.cancelAndJoin()
+            handle.storageScope.cancelAndJoin()
+        }
+
+    private fun publishOpenSessionsLocked() {
+        mutableOpenSessions.value = openRoots
+            .filterValues { it.session.coroutineContext[Job]?.isActive == true }
+            .mapValues { it.value.session }
     }
 
     private fun nextSessionIndex(): Int {
@@ -160,6 +371,21 @@ public actual class InMemoryKodexSessionRepository internal constructor(
     }
 }
 
+private class OpenSessionHandle(
+    val session: InMemoryKodexAgentSession,
+    val storageScope: CoroutineScope,
+    var deadline: Duration,
+) {
+    var renewalJob: Job? = null
+    var expiryJob: Job? = null
+    var completionWatcher: Job? = null
+}
+
+private data class OpenedInMemorySession(
+    val session: InMemoryKodexAgentSession,
+    val storageScope: CoroutineScope,
+)
+
 private class InMemoryKodexAgentSession(
     scope: CoroutineScope,
     override val storage: MutableKodexAgentStorage,
@@ -167,25 +393,40 @@ private class InMemoryKodexAgentSession(
 ) : KodexAgentSession, CoroutineScope by scope {
     companion object {
         suspend fun open(
+            entryIndex: Int,
             node: SessionNode,
             parentScope: CoroutineScope,
             dependencies: KodexAgentDependencies,
-        ): InMemoryKodexAgentSession {
-            val scope = parentScope.supervisorChildScope()
-            val storage = SessionAgentStorage(scope, node.storage)
+            stopEventsSink: MutableSharedFlow<IndexedAgentStopEvent>,
+        ): OpenedInMemorySession {
+            val storageScope = CoroutineScope(parentScope.coroutineContext.minusKey(Job) + SupervisorJob())
+            val sessionScope = parentScope.supervisorChildScope()
+            val storage = SessionAgentStorage(storageScope, node.storage, node.storage.latestIndex())
             return try {
-                InMemoryKodexAgentSession(
-                    scope = scope,
+                val runtime = sessionScope.KodexAgentState(
+                    client = dependencies.client,
                     storage = storage,
-                    runtime = scope.KodexAgentState(
-                        client = dependencies.client,
+                    contextSettings = dependencies.contextSettings,
+                    mcpService = dependencies.mcpService,
+                ).buildMasterAgentRuntime(dependencies)
+                sessionScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    runtime.stopEvents.collect { event ->
+                        stopEventsSink.tryEmit(IndexedAgentStopEvent(entryIndex = entryIndex, event = event))
+                    }
+                }
+                OpenedInMemorySession(
+                    session = InMemoryKodexAgentSession(
+                        scope = sessionScope,
                         storage = storage,
-                        contextSettings = dependencies.contextSettings,
-                        mcpService = dependencies.mcpService,
-                    ).buildMasterAgentRuntime(dependencies),
+                        runtime = runtime,
+                    ),
+                    storageScope = storageScope,
                 )
             } catch (failure: Throwable) {
-                withContext(NonCancellable) { scope.cancelAndJoin() }
+                withContext(NonCancellable) {
+                    sessionScope.cancelAndJoin()
+                    storageScope.cancelAndJoin()
+                }
                 throw failure
             }
         }
@@ -195,11 +436,21 @@ private class InMemoryKodexAgentSession(
 /** Creates an in-memory session repository owned by this scope. */
 public actual fun CoroutineScope.InMemoryKodexSessionRepository(
     dependencies: KodexAgentDependencies,
-): InMemoryKodexSessionRepository =
-    InMemoryKodexSessionRepository(
+    sessionTtl: Duration,
+    timeSource: TimeSource,
+    onTurnActiveRenewal: suspend () -> Unit,
+    turnRenewalInterval: () -> Duration,
+): InMemoryKodexSessionRepository {
+    require(sessionTtl.isPositive()) { "sessionTtl must be positive: $sessionTtl" }
+    return InMemoryKodexSessionRepository(
         scope = supervisorChildScope(),
         dependencies = dependencies,
+        sessionTtl = sessionTtl,
+        origin = timeSource.markNow(),
+        onTurnActiveRenewal = onTurnActiveRenewal,
+        turnRenewalInterval = turnRenewalInterval,
     )
+}
 
 private class SessionNode(
     val storage: InMemoryKodexAgentStorage,
@@ -255,13 +506,20 @@ private suspend fun SessionNode.rootEntry(
 }
 
 private class SessionAgentStorage(
-    parentScope: CoroutineScope,
+    storageScope: CoroutineScope,
     private val delegate: InMemoryKodexAgentStorage,
+    initialLatestIndex: Int,
 ) :
     MutableKodexAgentStorage,
-    CoroutineScope by parentScope.supervisorChildScope(),
+    ObservableKodexAgentStorage,
+    CoroutineScope by storageScope,
     AutoCloseable {
+    private val nonce = MutableStateFlow(Random.nextLong())
+    private val tail = MutableStateFlow(initialLatestIndex)
+
     override val uri: String = delegate.uri
+    override val cacheNonce: StateFlow<Long> = nonce.asStateFlow()
+    override val latestIndexFlow: StateFlow<Int> = tail.asStateFlow()
 
     override suspend fun latestIndex(): Int {
         requireActive()
@@ -296,27 +554,36 @@ private class SessionAgentStorage(
 
     override suspend fun commit(commit: AgentCommit): Int {
         requireActive()
-        return delegate.commit(commit)
+        return delegate.commit(commit).also { tail.value = it }
     }
 
     override suspend fun commit(commit: AgentCommit, timestamp: Instant): Int {
         requireActive()
-        return delegate.commit(commit, timestamp)
+        return delegate.commit(commit, timestamp).also { tail.value = it }
     }
 
     override suspend fun commit(commits: List<AgentCommit>): Int {
         requireActive()
-        return delegate.commit(commits)
+        return delegate.commit(commits).also { tail.value = it }
     }
 
     override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int {
         requireActive()
-        return delegate.commit(commits, timestamp)
+        return delegate.commit(commits, timestamp).also { tail.value = it }
     }
 
     override suspend fun revert(untilExclusive: Int) {
         requireActive()
+        val previous = tail.value
+        val hadSteer = previous >= 0 && delegate.getSteerAt(previous).isNotEmpty()
         delegate.revert(untilExclusive)
+        val latest = if (previous < untilExclusive) previous else delegate.latestIndex()
+        if (latest != previous || hadSteer) {
+            tail.value = latest
+            var nextNonce = Random.nextLong()
+            while (nextNonce == nonce.value) nextNonce = Random.nextLong()
+            nonce.value = nextNonce
+        }
     }
 
     override fun close() {

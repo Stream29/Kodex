@@ -14,6 +14,7 @@ import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventTools
 import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
 import io.github.stream29.kodex.tool.getcontextremaining.GetContextRemainingTools
 import io.github.stream29.kodex.tool.plan.PlanTools
@@ -31,10 +32,10 @@ val kodexVisibleToolSpecsTest by testSuite {
         val service = TestMcpService()
         val fixedSpecs = listOf(
             ApplyPatchTools.spec,
+            AwaitEventTools.spec,
             CurrentTimeTools.spec,
             GetContextRemainingTools.spec,
             UnifiedExecTools.execCommandSpec,
-            UnifiedExecTools.writeStdinSpec,
             WebRunTools.spec,
         )
         val specs = service.visibleToolSpecs(

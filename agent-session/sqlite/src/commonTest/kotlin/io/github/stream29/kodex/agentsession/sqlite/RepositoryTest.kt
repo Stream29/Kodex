@@ -312,4 +312,35 @@ val sqliteRepositoryTest by testSuite {
             } finally { unblock.complete(Unit) }
         }
     }
+    test("idle TTL eviction drains session without self-deadlocking and allows clean reopen and shutdown") {
+        withContext(Dispatchers.Default) {
+            fixture { root ->
+                testKodexAgentDependencies().use { dependencies ->
+                    val repository = SqliteKodexSessionRepository(
+                        root = root,
+                        dependencies = dependencies,
+                        sessionTtl = 40.milliseconds,
+                    )
+                    try {
+                        val index = repository.create()
+                        val first = repository.open(index)
+                        first.runtime.modify { it.initialize(settings("ttl-sqlite")) }
+                        assertTrue(index in repository.openSessions.value)
+                        withTimeout(5000.milliseconds) {
+                            while (index in repository.openSessions.value) {
+                                delay(10.milliseconds)
+                            }
+                            first.coroutineContext[Job]?.join()
+                        }
+                        assertFalse(first.coroutineContext[Job]?.isActive ?: true)
+                        val reopened = repository.open(index)
+                        assertNotSame(first, reopened)
+                        assertEquals("ttl-sqlite", reopened.storage.getSettingsAt(0).threadName)
+                    } finally {
+                        repository.closeAndJoin()
+                    }
+                }
+            }
+        }
+    }
 }

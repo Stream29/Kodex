@@ -2,6 +2,7 @@ package io.github.stream29.kodex.agentstorage.contract.ext
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
@@ -10,7 +11,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSub
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.StepStatus
@@ -33,7 +33,6 @@ private const val ApproximateCharactersPerToken: Int = 4
  */
 public actual suspend fun KodexAgentStorage.buildCompactionRetainedItems(
     upToIndex: Int,
-    additionalRetainedByIndex: Map<Int, List<CompactionRetainedItem>>,
 ): List<CompactionRetainedItem> {
     require(upToIndex >= 0) { "Index $upToIndex must be non-negative." }
 
@@ -57,22 +56,6 @@ public actual suspend fun KodexAgentStorage.buildCompactionRetainedItems(
         return false
     }
 
-    val extraKeysDescending = additionalRetainedByIndex.keys
-        .filter { it in lowerBound..upToIndex && !additionalRetainedByIndex[it].isNullOrEmpty() }
-        .sortedDescending()
-    var extraCursor = 0
-
-    fun drainExtrasAbove(minIndexExclusive: Int): Boolean {
-        while (extraCursor < extraKeysDescending.size && extraKeysDescending[extraCursor] > minIndexExclusive) {
-            val extraList = additionalRetainedByIndex[extraKeysDescending[extraCursor]].orEmpty()
-            for (i in extraList.indices.reversed()) {
-                if (!tryRetain(extraList[i])) return false
-            }
-            extraCursor++
-        }
-        return true
-    }
-
     var upperBound = upToIndex
     var batchSize = 32
     while (upperBound >= lowerBound) {
@@ -83,22 +66,7 @@ public actual suspend fun KodexAgentStorage.buildCompactionRetainedItems(
         )
         if (page.isEmpty()) break
         for (i in page.indices.reversed()) {
-            val entry = page[i]
-            if (!drainExtrasAbove(entry.index)) {
-                retainedReversed.reverse()
-                return retainedReversed
-            }
-            if (extraCursor < extraKeysDescending.size && extraKeysDescending[extraCursor] == entry.index) {
-                val extraList = additionalRetainedByIndex[entry.index].orEmpty()
-                for (j in extraList.indices.reversed()) {
-                    if (!tryRetain(extraList[j])) {
-                        retainedReversed.reverse()
-                        return retainedReversed
-                    }
-                }
-                extraCursor++
-            }
-            val item = entry.commit as CompactionRetainedItem
+            val item = page[i].commit as CompactionRetainedItem
             if (!tryRetain(item)) {
                 retainedReversed.reverse()
                 return retainedReversed
@@ -108,11 +76,6 @@ public actual suspend fun KodexAgentStorage.buildCompactionRetainedItems(
         if (oldestFetchedIndex <= lowerBound) break
         upperBound = oldestFetchedIndex - 1
         if (batchSize < 512) batchSize *= 2
-    }
-
-    if (!drainExtrasAbove(lowerBound - 1)) {
-        retainedReversed.reverse()
-        return retainedReversed
     }
 
     if (previousCompaction != null) {
@@ -132,6 +95,13 @@ public actual suspend fun KodexAgentStorage.buildCompactionRetainedItems(
 private fun CompactionRetainedItem.approximateTokenCount(): Int =
     when (this) {
         is StableUserMessage -> content.textTokenCount()
+        is StableAskUserEvent ->
+            (
+                24L +
+                    askId.toLong().decimalDigitCount() +
+                    arguments.approximateTokenCount() +
+                    response.approximateTokenCount()
+                ).toApproximateTokenCount()
         is StablePlanUpdate ->
             arguments.approximateTokenCount() +
                 PlanUpdatedOutput.approximateTokenCount()

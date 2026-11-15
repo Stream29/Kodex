@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.agentstate.tool
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
@@ -21,6 +22,8 @@ import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventTools
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenNamespace
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolName
@@ -66,7 +69,16 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
                 )
             }
 
-        namespace == null && name == UnifiedExecTools.WriteStdinName ->
+        namespace == null && name == AwaitEventTools.Name ->
+            typed(AwaitEventArguments.serializer()) { arguments ->
+                PendingAwaitEventToolEvent(
+                    callId = callId,
+                    itemId = id,
+                    arguments = arguments,
+                )
+            }
+
+        namespace == null && name == LegacyWriteStdinToolName ->
             typed(WriteStdinArguments.serializer()) { arguments ->
                 PendingCommandExecutionToolEvent(
                     callId = callId,
@@ -235,3 +247,5 @@ private fun <Arguments> ResponseItem.FunctionCall.decodeArguments(
     } catch (_: IllegalArgumentException) {
         null
     }
+
+private const val LegacyWriteStdinToolName: String = "write_stdin"

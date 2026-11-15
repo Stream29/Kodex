@@ -15,12 +15,17 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapsh
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.contract.ext.answerAskUser
 import io.github.stream29.kodex.agentstorage.contract.ext.appendCompaction
+import io.github.stream29.kodex.agentstorage.contract.ext.buildCompactionRetainedItems
+import io.github.stream29.kodex.agentstorage.contract.ext.createAskUser
+import io.github.stream29.kodex.agentstorage.contract.getAskUsersAt
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrAfter
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.openai.ContentItem
@@ -202,5 +207,52 @@ val inMemoryKodexAgentStorageTest by testSuite {
         assertEquals(compactionIndex, storage.getCommitAtOrBefore(compactionIndex, AgentCommitType.TokenCountTypes)?.index)
         assertEquals(timestamp(10), storage.getCommitExact(compactionIndex)?.createdAt)
         assertEquals(compactionIndex, storage.latestIndex())
+    }
+
+    test("createAskUser and answerAskUser atomically update AskUserSnapshot and SteerSnapshot and retain across compaction") {
+        val storage = storage()
+        val questions = io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs(
+            questions = listOf(
+                io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion(
+                    id = "q1",
+                    header = "Confirm",
+                    question = "Ship?",
+                ),
+            ),
+        )
+        val created = storage.createAskUser(questions, timestamp(1))
+        assertEquals(1, created.askId)
+        assertNull(created.answer)
+        assertEquals(listOf(created), storage.getAskUsersAt(storage.latestIndex()))
+
+        val response = io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse(
+            answers = mapOf("q1" to io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer(listOf("yes"))),
+        )
+        val indexBeforeAnswer = storage.latestIndex()
+        val answered = storage.answerAskUser(created.askId, response, timestamp(2))
+        assertEquals(indexBeforeAnswer + 1, storage.latestIndex())
+        assertEquals(response, answered.answer?.response)
+        assertEquals(
+            listOf(
+                io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent(
+                    askId = 1,
+                    arguments = questions,
+                    response = response,
+                ),
+            ),
+            storage.getSteerAt(storage.latestIndex()),
+        )
+
+        assertFailsWith<IllegalStateException> {
+            storage.answerAskUser(created.askId, response, timestamp(3))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            storage.answerAskUser(999, response, timestamp(3))
+        }
+
+        val consumed = storage.consumeSteer()
+        assertEquals(1, consumed.size)
+        val retained = storage.buildCompactionRetainedItems(storage.latestIndex())
+        assertEquals<List<Any>>(consumed, retained)
     }
 }

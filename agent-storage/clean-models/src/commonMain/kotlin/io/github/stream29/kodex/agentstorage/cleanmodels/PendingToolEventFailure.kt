@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolJson
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
@@ -23,6 +25,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEv
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
@@ -96,6 +99,14 @@ public actual fun PendingToolEvent.toFailedToolEvent(message: String): StableCle
                 itemId = itemId,
                 action = action.toStableAction(),
                 result = StableCommandExecutionResult.Failure(message),
+            )
+
+        is PendingAwaitEventToolEvent ->
+            StableAwaitEventToolEvent(
+                callId = callId,
+                itemId = itemId,
+                arguments = arguments,
+                result = StableAwaitEventResult.Failure(message),
             )
 
         is PendingWebSearchToolEvent ->

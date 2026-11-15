@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.agentstate.tool
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
@@ -20,6 +21,8 @@ import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.SearchQuery
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventTools
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenNamespace
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolName
@@ -66,6 +69,7 @@ val pendingToolEventProjectionTest by testSuite {
                 ),
             ),
         )
+        val awaitEvent = AwaitEventArguments(terminals = listOf(3, 9))
         val cases: List<Pair<ResponseItem.FunctionCall, PendingToolEvent>> = listOf(
             functionCall(
                 UnifiedExecTools.ExecCommandName,
@@ -77,11 +81,20 @@ val pendingToolEventProjectionTest by testSuite {
                 action = PendingCommandExecutionAction.ExecCommand(exec),
             ),
             functionCall(
-                UnifiedExecTools.WriteStdinName,
+                AwaitEventTools.Name,
+                AwaitEventArguments.serializer(),
+                awaitEvent,
+            ) to PendingAwaitEventToolEvent(
+                callId = "call_${AwaitEventTools.Name}",
+                itemId = ItemId,
+                arguments = awaitEvent,
+            ),
+            functionCall(
+                LegacyWriteStdinName,
                 WriteStdinArguments.serializer(),
                 write,
             ) to PendingCommandExecutionToolEvent(
-                callId = "call_${UnifiedExecTools.WriteStdinName}",
+                callId = "call_$LegacyWriteStdinName",
                 itemId = ItemId,
                 action = PendingCommandExecutionAction.WriteStdin(write),
             ),
@@ -199,20 +212,26 @@ val pendingToolEventProjectionTest by testSuite {
             ResponseItem.FunctionCall(
                 id = ItemId,
                 callId = "call_write_missing_yield",
-                name = UnifiedExecTools.WriteStdinName,
+                name = LegacyWriteStdinName,
                 arguments = """{"session_id":7,"chars":""}""",
             ),
             ResponseItem.FunctionCall(
                 id = ItemId,
                 callId = "call_write_null_yield",
-                name = UnifiedExecTools.WriteStdinName,
+                name = LegacyWriteStdinName,
                 arguments = """{"session_id":7,"chars":"","yield_time_ms":null}""",
             ),
             ResponseItem.FunctionCall(
                 id = ItemId,
                 callId = "call_write_bad_yield",
-                name = UnifiedExecTools.WriteStdinName,
+                name = LegacyWriteStdinName,
                 arguments = """{"session_id":7,"chars":"hi","yield_time_ms":12.5}""",
+            ),
+            ResponseItem.FunctionCall(
+                id = ItemId,
+                callId = "call_await_bad_terminals",
+                name = AwaitEventTools.Name,
+                arguments = """{"terminals":"not-an-array"}""",
             ),
         )
 
@@ -253,7 +272,7 @@ val pendingToolEventProjectionTest by testSuite {
 
             val write = WriteStdinArguments(sessionId = 9, chars = "", yieldTimeMillis = yieldMillis)
             val writeCall = functionCall(
-                UnifiedExecTools.WriteStdinName,
+                LegacyWriteStdinName,
                 WriteStdinArguments.serializer(),
                 write,
             )
@@ -306,6 +325,7 @@ val pendingToolEventProjectionTest by testSuite {
 }
 
 private val ItemId: ResponseItemId = ResponseItemId("item_1")
+private const val LegacyWriteStdinName: String = "write_stdin"
 
 private fun <Arguments> functionCall(
     name: String,

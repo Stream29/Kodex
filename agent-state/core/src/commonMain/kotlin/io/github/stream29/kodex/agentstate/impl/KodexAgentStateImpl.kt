@@ -14,14 +14,17 @@ import io.github.stream29.kodex.agentstate.tool.toPendingToolEvent
 import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
@@ -38,12 +41,15 @@ import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.ext.appendCompaction
 import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
+import io.github.stream29.kodex.agentstorage.contract.ext.answerAskUser
 import io.github.stream29.kodex.agentstorage.contract.ext.buildCompactionRetainedItems
-import io.github.stream29.kodex.agentstorage.contract.ext.latestCompactionPointOrNull
+import io.github.stream29.kodex.agentstorage.contract.ext.createAskUser
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.mcp.contract.McpService
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.openai.CodexResponsesMetadata
 import io.github.stream29.kodex.openai.CodexResponsesRequestKind
 import io.github.stream29.kodex.openai.CompactionImplementation
@@ -113,7 +119,6 @@ public actual suspend fun CoroutineScope.KodexAgentState(
     storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
     mcpService: McpService,
-    compactionRetainedItemsProvider: suspend (IntRange) -> Map<Int, List<CompactionRetainedItem>>,
 ): KodexAgentState {
     val stateScope = supervisorChildScope()
     try {
@@ -124,7 +129,6 @@ public actual suspend fun CoroutineScope.KodexAgentState(
             storage = storage,
             contextSettings = contextSettings,
             mcpService = mcpService,
-            compactionRetainedItemsProvider = compactionRetainedItemsProvider,
             loadedLatestIndex = loadedLatestIndex,
             initialState = storage.stateAt(loadedLatestIndex),
         )
@@ -148,7 +152,6 @@ private class KodexAgentStateImpl(
     override val storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
     private val mcpService: McpService,
-    private val compactionRetainedItemsProvider: suspend (IntRange) -> Map<Int, List<CompactionRetainedItem>>,
     loadedLatestIndex: Int,
     initialState: KodexAgentStateValue,
 ) : KodexAgentState, CoroutineScope by scope {
@@ -478,7 +481,11 @@ private class KodexAgentStateImpl(
             var previousMessageStartsNewTurn = storage.startsNewTurnBefore(firstIndex)
             var index = storage.latestIndex()
             for (event in events) {
-                val startsNewTurn = event is StableUserMessage &&
+                val isUserTurnInput = event is StableUserMessage ||
+                    event is StableAskUserEvent ||
+                    event is StableScheduleEvent ||
+                    event is StableTerminalExitedEvent
+                val startsNewTurn = isUserTurnInput &&
                     previousMessageStartsNewTurn
                 val commits = buildList<AgentCommit> {
                     if (startsNewTurn) {
@@ -490,9 +497,9 @@ private class KodexAgentStateImpl(
                     add(event)
                 }
                 index = storage.commit(commits, timestamp)
-                previousMessageStartsNewTurn = when (event) {
-                    is StableAssistantMessage -> event.startsNewTurn()
-                    is StableUserMessage -> false
+                previousMessageStartsNewTurn = when {
+                    event is StableAssistantMessage -> event.startsNewTurn()
+                    isUserTurnInput -> false
                     else -> previousMessageStartsNewTurn
                 }
             }
@@ -569,6 +576,23 @@ private class KodexAgentStateImpl(
         if (current != expect) return@withLock false
         if (current != update) appendSettings(update)
         true
+    }
+
+    override suspend fun createAskUser(
+        questions: RequestUserInputArgs,
+    ): AskUserEntry = writeMutex.withLock {
+        val created = storage.createAskUser(questions, now())
+        latestIndex.value = storage.latestIndex()
+        created
+    }
+
+    override suspend fun answerAskUser(
+        askId: Int,
+        response: RequestUserInputResponse,
+    ): AskUserEntry = writeMutex.withLock {
+        val answered = storage.answerAskUser(askId, response, now())
+        latestIndex.value = storage.latestIndex()
+        answered
     }
 
     /** Caller holds [writeMutex], just as for the unconditional settings write. */
@@ -759,16 +783,8 @@ private class KodexAgentStateImpl(
             "Compaction ownership was lost before its result was committed."
         }
         val currentLatest = storage.latestIndex()
-        val previousPointIndex = storage.latestCompactionPointOrNull(currentLatest)
-        val incrementalRange = ((previousPointIndex ?: -1) + 1)..currentLatest
-        val additionalRetainedByIndex = if (incrementalRange.isEmpty()) {
-            emptyMap()
-        } else {
-            compactionRetainedItemsProvider(incrementalRange)
-        }
         val retainedItems = storage.buildCompactionRetainedItems(
             upToIndex = currentLatest,
-            additionalRetainedByIndex = additionalRetainedByIndex,
         )
         val output = StableContextCompaction(
             id = compactionOutput.id,
@@ -899,11 +915,15 @@ private fun KodexAgentStateValue.requireToolPending(): KodexAgentStateValue.Tool
 private val StateTransitionCommitTypes: Set<AgentCommitType> = setOf(
     AgentCommitType.UserMessage,
     AgentCommitType.AgentMessage,
+    AgentCommitType.EventAskUser,
+    AgentCommitType.EventSchedule,
+    AgentCommitType.EventTerminalExited,
     AgentCommitType.AssistantMessage,
     AgentCommitType.AssistantMessageCommentary,
     AgentCommitType.AssistantMessageFinal,
     AgentCommitType.RequestUserInputToolEvent,
     AgentCommitType.SuggestSubagentTaskToolEvent,
+    AgentCommitType.AwaitEventToolEvent,
     AgentCommitType.PlanUpdate,
     AgentCommitType.CommandExecutionToolEvent,
     AgentCommitType.PatchToolEvent,
@@ -944,6 +964,9 @@ private fun StableCleanEvent.toAgentStateValueOrNull(): KodexAgentStateValue? =
     when (this) {
         is StableUserMessage,
         is StableAgentMessage,
+        is StableAskUserEvent,
+        is StableScheduleEvent,
+        is StableTerminalExitedEvent,
         -> KodexAgentStateValue.UserMessage
 
         is StableAssistantMessage ->

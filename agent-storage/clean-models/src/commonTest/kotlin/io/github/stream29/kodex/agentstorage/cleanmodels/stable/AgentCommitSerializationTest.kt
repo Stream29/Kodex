@@ -3,7 +3,14 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventOutput
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessagePhase
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -133,18 +140,49 @@ val agentCommitSerializationTest by testSuite {
     }
 
     test("all agent commit families round-trip through native AgentCommit polymorphism and payload helpers") {
+        val sampleArgs = RequestUserInputArgs(
+            questions = listOf(
+                RequestUserInputQuestion(id = "q1", header = "H", question = "Continue?"),
+            ),
+        )
+        val sampleResponse = RequestUserInputResponse(
+            answers = mapOf("q1" to RequestUserInputAnswer(listOf("yes"))),
+        )
         val commits: List<AgentCommit> = listOf(
             StableUserMessage(listOf(ContentItem.InputText("hi"))),
+            StableAskUserEvent(askId = 1, arguments = sampleArgs, response = sampleResponse),
+            StableScheduleEvent(scheduleId = 9L, description = "nightly check"),
+            StableTerminalExitedEvent(sessionId = 4, name = "server", command = "./run.sh", exitCode = 0),
             StableAssistantMessage(listOf(ContentItem.OutputText("plan")), phase = MessagePhase.Commentary),
             StableAssistantMessage(listOf(ContentItem.OutputText("done")), phase = MessagePhase.FinalAnswer),
             StableAssistantMessage(listOf(ContentItem.OutputText("legacy")), phase = null),
             StableContextCompaction(encryptedContent = "compacted"),
             StableReasoning(ResponseItem.Reasoning(ResponseItemId("r1"), emptyList())),
+            StableAwaitEventToolEvent(
+                callId = "call_await",
+                arguments = AwaitEventArguments(terminals = listOf(4)),
+                result = StableAwaitEventResult.Output(AwaitEventOutput(Instant.parse("2026-11-15T10:00:00Z"))),
+            ),
             KodexAgentSettings(model = OpenAiModelId("gpt-5")),
             CommitTimestamp(Instant.parse("2026-11-05T12:00:00Z")),
             TokenCountSnapshot.Initialization(0),
             TokenCountSnapshot.Response(42),
-            UnstableSnapshot(listOf(PendingPlanUpdate("c1", null, UpdatePlanArgs("plan", emptyList())))),
+            UnstableSnapshot(
+                listOf(
+                    PendingPlanUpdate("c1", null, UpdatePlanArgs("plan", emptyList())),
+                    PendingAwaitEventToolEvent("c2", null, AwaitEventArguments(listOf(4))),
+                ),
+            ),
+            AskUserSnapshot(
+                listOf(
+                    AskUserEntry(
+                        askId = 1,
+                        questions = sampleArgs,
+                        answer = AskUserAnswer(sampleResponse, Instant.parse("2026-11-15T10:01:00Z")),
+                        createdAt = Instant.parse("2026-11-15T10:00:00Z"),
+                    ),
+                ),
+            ),
         )
         for ((idx, commit) in commits.withIndex()) {
             val payload = commit.encodePayloadJson()
