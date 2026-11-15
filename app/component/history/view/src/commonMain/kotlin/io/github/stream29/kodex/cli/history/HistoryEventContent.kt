@@ -9,8 +9,13 @@ import io.github.stream29.kodex.cli.history.HistoryTextStyle as TextStyle
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
@@ -34,6 +39,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
@@ -58,6 +64,7 @@ import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.SearchCommands
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
@@ -83,7 +90,14 @@ public actual fun HistoryEventContent(
         LocalHistoryRenderer provides renderer,
     ) {
         with(event) { when (this) {
-            is StableUserMessage, is StableAssistantMessage, is StableDeveloperMessage, is StableAgentMessage ->
+            is StableUserMessage,
+            is StableAssistantMessage,
+            is StableDeveloperMessage,
+            is StableAgentMessage,
+            is StableAskUserEvent,
+            is StableScheduleEvent,
+            is StableTerminalExitedEvent,
+                ->
                 HistoryMessageContent(
                     this,
                     heading = { Header(it, TextStyle.Bold) },
@@ -98,6 +112,7 @@ public actual fun HistoryEventContent(
             is StableContextCompaction -> ContextCompactionEvent()
             is StablePatchToolEvent -> renderer.StablePatch(this)
 
+            is StableAwaitEventToolEvent -> renderAwaitEvent()
             is StableCommandExecutionToolEvent -> HistoryCommandContent(this, renderer)
             is StableJsonToolEvent -> renderJsonTool()
             is StableTextToolEvent -> renderTextTool()
@@ -143,6 +158,15 @@ public actual fun HistoryEventContent(
 
         is PendingPatchToolEvent -> renderer.PendingPatch(diff)
         is PendingPlanUpdate -> HistoryPlanContent(this, renderer)
+        is PendingAwaitEventToolEvent -> ToolEvent(
+            summary = arguments.ongoingToolSummary(),
+            rawName = "await_event",
+            status = "running",
+            expansionKey = callId,
+        ) {
+            section("Arguments") { arguments.renderDetails() }
+        }
+
         is PendingCommandExecutionToolEvent -> renderCommandExecution(shellSessions)
 
         is PendingImageGenerationToolEvent -> ToolEvent(
@@ -445,6 +469,27 @@ private fun StableMcpToolEvent.renderMcpTool() {
 }
 
 @Composable
+private fun StableAwaitEventToolEvent.renderAwaitEvent() {
+    BuiltInToolEvent(
+        summary = functionToolSummary("await_event", null, failed = result is StableAwaitEventResult.Failure),
+        firstLine = compactToolLine(
+            "await_event",
+            "terminals" to arguments.terminals.takeIf { it.isNotEmpty() }?.joinToString(),
+        ),
+        status = when (result) {
+            is StableAwaitEventResult.Output -> "succeeded"
+            is StableAwaitEventResult.Failure -> "failed"
+        },
+        expansionKey = callId,
+    ) {
+        when (val outcome = result) {
+            is StableAwaitEventResult.Output -> RecordedField("timestamp", outcome.value.timestamp.toString())
+            is StableAwaitEventResult.Failure -> RecordedErrorField("error", outcome.message)
+        }
+    }
+}
+
+@Composable
 private fun StableToolSearchEvent.renderToolSearch() {
     BuiltInToolEvent(
         summary = functionToolSummary("tool_search", null, failed = result !is ToolSearchResult.Success),
@@ -722,6 +767,17 @@ private fun ViewImageToolArguments.renderDetails(
 }
 
 @Composable
+private fun AwaitEventArguments.renderDetails(
+    textStyle: TextStyle = TextStyle.Normal,
+) {
+    if (terminals.isEmpty()) {
+        Detail("Terminals", "none", textStyle)
+    } else {
+        Detail("Terminals", terminals.joinToString(), textStyle)
+    }
+}
+
+@Composable
 private fun SearchToolCallParams.renderDetails(
     textStyle: TextStyle = TextStyle.Normal,
 ) {
@@ -891,6 +947,7 @@ internal fun functionToolOngoingSummary(
     name: String,
     namespace: String?,
 ): String = when (qualifiedName(name, namespace)) {
+    "await_event" -> "Waiting for events"
     "exec_command",
     "shell.run",
         -> "Running a command"
@@ -984,6 +1041,13 @@ private fun RequestUserInputArgs.ongoingToolSummary(): String =
         ?.let { question -> "Waiting for user input: $question" }
         ?: "Waiting for user input"
 
+private fun AwaitEventArguments.ongoingToolSummary(): String =
+    if (terminals.isEmpty()) {
+        "Waiting for events"
+    } else {
+        "Waiting for events (terminals: ${terminals.joinToString()})"
+    }
+
 private fun SearchToolCallParams.ongoingToolSummary(): String =
     query.singleLineSummary()
         .takeIf(String::isNotBlank)
@@ -1028,6 +1092,7 @@ internal fun functionToolSummary(
     namespace: String?,
     failed: Boolean = false,
 ): String = when (qualifiedName(name, namespace)) {
+    "await_event" -> if (failed) "Failed to wait for events" else "Wait for events"
     "exec_command",
     "shell.run",
         -> if (failed) "Failed to run a command" else "Run a command"

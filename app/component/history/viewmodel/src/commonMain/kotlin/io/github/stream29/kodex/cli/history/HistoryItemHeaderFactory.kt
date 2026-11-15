@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.cli.history
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
@@ -79,6 +81,7 @@ internal fun StableCleanEvent.CompletedTool.toHistoryHeader(
         elapsed = elapsed,
     )
 
+    is StableAwaitEventToolEvent,
     is StableInvalidToolCall,
     is StableServerToolSearch,
     is StableWebSearchCall,
@@ -105,6 +108,7 @@ internal fun StableCleanEvent.CompletedTool.toHistoryHeader(
 }
 
 private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): String = when (this) {
+    is StableAwaitEventToolEvent -> functionToolSummary("await_event", null, failed)
     is StableInvalidToolCall -> "Model emitted an invalid tool call"
     is StableServerToolSearch -> functionToolSummary("server_tool_search", null, failed)
     is StableWebSearchCall ->
@@ -132,6 +136,10 @@ private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): 
 }
 
 private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (this) {
+    is StableAwaitEventToolEvent -> when (result) {
+        is StableAwaitEventResult.Output -> "completed"
+        is StableAwaitEventResult.Failure -> "failed"
+    }
     is StableInvalidToolCall -> "failed"
     is StableServerToolSearch -> output.status.ifBlank { "completed" }
     is StableWebSearchCall -> item.status ?: "completed"
@@ -172,6 +180,7 @@ private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (t
 private fun functionToolSummary(name: String, namespace: String?, failed: Boolean): String {
     val qualifiedName = qualifiedToolName(name, namespace)
     if (!failed) return when (qualifiedName) {
+        "await_event" -> "Wait for events"
         "exec_command", "shell.run" -> "Run a command"
         "write_stdin" -> "Interact with a terminal session"
         "view_image" -> "View an image"
@@ -192,6 +201,7 @@ private fun functionToolSummary(name: String, namespace: String?, failed: Boolea
         else -> qualifiedName
     }
     return when (qualifiedName) {
+        "await_event" -> "Failed to wait for events"
         "exec_command", "shell.run" -> "Failed to run a command"
         "write_stdin" -> "Failed to interact with a terminal session"
         "view_image" -> "Failed to view an image"

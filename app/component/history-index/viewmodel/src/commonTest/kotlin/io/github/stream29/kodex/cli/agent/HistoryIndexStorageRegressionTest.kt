@@ -62,11 +62,12 @@ val historyIndexViewModelTest by testSuite {
         storage.commit(StableContextCompaction(encryptedContent = "enc"), kotlin.time.Instant.DISTANT_PAST)
         val latest = MutableStateFlow(2)
         val state = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty)
-        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
         val model = storageIndex(storage, latest, state, scope)
         try {
             val initialWindow = model.awaitIndexes(listOf(1, 2))
             assertNull(assertNotNull(initialWindow.entryAtOrNull(1)).messageTimestamp)
+            state.value = KodexAgentStateValue.ExternalWrite
             storage.revert(1)
             storage.commit(
                 listOf(
@@ -80,7 +81,6 @@ val historyIndexViewModelTest by testSuite {
                     CommitTimestamp(time + 2.seconds),
                 ),
             )
-            state.value = KodexAgentStateValue.ExternalWrite
             state.value = KodexAgentStateValue.Empty
             val refreshed = withContext(Dispatchers.Default.limitedParallelism(1)) {
                 withTimeout(5.seconds) {

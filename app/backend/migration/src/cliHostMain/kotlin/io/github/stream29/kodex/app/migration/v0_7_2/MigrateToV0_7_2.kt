@@ -3,6 +3,7 @@ package io.github.stream29.kodex.app.migration.v0_7_2
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
@@ -92,14 +93,26 @@ private data class MirrorCompactionUpdate(
     val indexMirrorJson: String,
 )
 
+private data class ScheduleRowSnapshot(
+    val scheduleId: Long,
+    val agentId: Long,
+    val triggerAtEpochSeconds: Long,
+    val triggerAtNanoseconds: Long,
+    val triggerAt: String,
+    val cron: String?,
+    val description: String,
+    val createdAt: String,
+)
+
 private data class SourceDatabaseSnapshot(
     val sessions: List<Pair<Long, Long>>,
     val agents: List<Triple<Long, Long, Long?>>,
     val commits: List<CommitRecord>,
+    val schedules: List<ScheduleRowSnapshot>,
     val mirrorCompactionUpdates: List<MirrorCompactionUpdate>,
 ) {
     companion object {
-        val Empty = SourceDatabaseSnapshot(emptyList(), emptyList(), emptyList(), emptyList())
+        val Empty = SourceDatabaseSnapshot(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
     }
 }
 
@@ -130,6 +143,9 @@ CREATE TABLE agent_commits (
     type TEXT NOT NULL CHECK (
         type IN (
             'user_message',
+            'event_ask_user',
+            'event_schedule',
+            'event_terminal_exited',
             'assistant_message',
             'assistant_message_commentary',
             'assistant_message_final',
@@ -137,6 +153,7 @@ CREATE TABLE agent_commits (
             'agent_message',
             'request_user_input_tool_event',
             'suggest_subagent_task_tool_event',
+            'await_event_tool_event',
             'plan_update',
             'compaction_point',
             'reasoning',
@@ -166,7 +183,8 @@ CREATE TABLE agent_commits (
             'token_count_compaction',
             'token_count_response',
             'unstable',
-            'steer'
+            'steer',
+            'ask_user'
         )
     ),
     "index" INTEGER NOT NULL CHECK ("index" BETWEEN 0 AND 2147483647),
@@ -198,6 +216,23 @@ LEFT JOIN agent_commits AS st
         SELECT max("index") FROM agent_commits
         WHERE agent_id = s.session_id AND type = 'settings'
     );
+
+CREATE TABLE schedules (
+    schedule_id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (schedule_id >= 1),
+    agent_id INTEGER NOT NULL CHECK (agent_id BETWEEN 0 AND 2147483647),
+    trigger_at_epoch_seconds INTEGER NOT NULL,
+    trigger_at_nanoseconds INTEGER NOT NULL CHECK (trigger_at_nanoseconds BETWEEN 0 AND 999999999),
+    trigger_at TEXT NOT NULL,
+    cron TEXT,
+    description TEXT NOT NULL,
+    created_at TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX idx_schedules_trigger_at
+    ON schedules(trigger_at_epoch_seconds, trigger_at_nanoseconds, schedule_id);
+
+CREATE INDEX idx_schedules_agent_id
+    ON schedules(agent_id, trigger_at_epoch_seconds, trigger_at_nanoseconds, schedule_id);
 """.trimIndent()
 
 private suspend fun cleanStaging(home: Path, fs: CoroutineFileSystem, sidecarsOnly: Boolean = false) {
@@ -253,11 +288,35 @@ private suspend fun readSourceDatabase(path: Path): SourceDatabaseSnapshot {
                     createdAt = createdAt,
                 )
             }
+            val hasSchedules = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schedules'").size == 1
+            val schedules = if (hasSchedules) {
+                db.query(
+                    """
+                    SELECT schedule_id, agent_id, trigger_at_epoch_seconds, trigger_at_nanoseconds, trigger_at, cron, description, created_at
+                    FROM schedules
+                    ORDER BY schedule_id
+                    """.trimIndent(),
+                ).map { row ->
+                    ScheduleRowSnapshot(
+                        scheduleId = row[0] as Long,
+                        agentId = row[1] as Long,
+                        triggerAtEpochSeconds = row[2] as Long,
+                        triggerAtNanoseconds = row[3] as Long,
+                        triggerAt = row[4] as String,
+                        cron = row[5] as? String,
+                        description = row[6] as String,
+                        createdAt = row[7] as String,
+                    )
+                }
+            } else {
+                emptyList()
+            }
             val (upgradedCommits, mirrorUpdates) = upgradeCompactionCommits(rawCommits, path)
             SourceDatabaseSnapshot(
                 sessions = sessions,
                 agents = agents,
                 commits = upgradedCommits,
+                schedules = schedules,
                 mirrorCompactionUpdates = mirrorUpdates,
             )
         }
@@ -377,6 +436,8 @@ private fun mergeWithinBudget(
 private fun CompactionRetainedItem.approximateTokenCount(): Int =
     when (this) {
         is StableUserMessage -> content.approximateTokenCount()
+        is StableAskUserEvent ->
+            encodePayloadJson(OpenAiJsonCodec).approximateTokenCount()
         is StablePlanUpdate ->
             encodePayloadJson(OpenAiJsonCodec).approximateTokenCount()
         is StableRequestUserInputToolEvent ->
@@ -430,6 +491,26 @@ private suspend fun importSnapshot(db: SqliteConnection, snapshot: SourceDatabas
             } catch (failure: SqliteFailure) {
                 throw IOException("Invalid migration commit record: agent=${commit.agentId}, index=${commit.index}", failure)
             }
+        }
+        for (schedule in snapshot.schedules) {
+            currentCoroutineContext().ensureActive()
+            db.execute(
+                """
+                INSERT INTO schedules (
+                    schedule_id, agent_id, trigger_at_epoch_seconds, trigger_at_nanoseconds, trigger_at, cron, description, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                listOf(
+                    schedule.scheduleId,
+                    schedule.agentId,
+                    schedule.triggerAtEpochSeconds,
+                    schedule.triggerAtNanoseconds,
+                    schedule.triggerAt,
+                    schedule.cron,
+                    schedule.description,
+                    schedule.createdAt,
+                ),
+            )
         }
         currentCoroutineContext().ensureActive()
         db.execute("COMMIT")
@@ -498,18 +579,32 @@ private suspend fun verifyV0_7_2Structure(db: SqliteConnection) {
         "sessions" to "table",
         "agents" to "table",
         "agent_commits" to "table",
+        "schedules" to "table",
         "idx_sessions_archived" to "index",
         "commits_global_index" to "index",
         "commits_settings_cwd" to "index",
+        "idx_schedules_trigger_at" to "index",
+        "idx_schedules_agent_id" to "index",
         "session_catalog" to "view",
     )) {
         verify(db.query("SELECT 1 FROM sqlite_master WHERE name = ? AND type = ?", listOf(name, type)).size == 1)
     }
     val createdAtColumn = db.query("PRAGMA table_info(agent_commits)").firstOrNull { it.getOrNull(1) == "created_at" }
     verify(createdAtColumn != null && createdAtColumn[2] == "TEXT" && createdAtColumn[3] == 1L)
+    val schedulesSql = db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedules'")
+        .singleOrNull()?.singleOrNull() as? String ?: ""
+    verify("AUTOINCREMENT" in schedulesSql.uppercase())
     val tableSql = db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_commits'")
         .singleOrNull()?.singleOrNull() as? String ?: ""
-    verify("llm_request_meta_response" in tableSql && "'steer'" in tableSql)
+    verify(
+        "llm_request_meta_response" in tableSql &&
+            "'steer'" in tableSql &&
+            "'ask_user'" in tableSql &&
+            "'event_ask_user'" in tableSql &&
+            "'event_schedule'" in tableSql &&
+            "'event_terminal_exited'" in tableSql &&
+            "'await_event_tool_event'" in tableSql,
+    )
     verify(
         db.query(
             """

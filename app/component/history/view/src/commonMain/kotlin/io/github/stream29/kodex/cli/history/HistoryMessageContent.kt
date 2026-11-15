@@ -5,9 +5,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.ui.UiColumn
 import io.github.stream29.kodex.app.ui.UiText
@@ -67,6 +70,31 @@ public actual fun HistoryMessageContent(
                     }
                     if (text.isNotBlank()) body(text, false)
                 }
+            }
+            is StableAskUserEvent -> {
+                heading("User (ask #${event.askId})")
+                event.arguments.questions.forEach { question ->
+                    val answer = event.response.answers[question.id]
+                    val answerText = when {
+                        answer == null -> "[unanswered]"
+                        question.isSecret -> "[hidden]"
+                        else -> answer.answers.joinToString(", ").ifBlank { "[empty]" }
+                    }
+                    body("${question.question}: $answerText", false)
+                }
+            }
+            is StableScheduleEvent -> {
+                heading("Schedule #${event.scheduleId}")
+                if (event.description.isNotBlank()) body(event.description, false)
+            }
+            is StableTerminalExitedEvent -> {
+                val label = if (!event.name.isNullOrBlank()) {
+                    "Terminal #${event.sessionId} (${event.name})"
+                } else {
+                    "Terminal #${event.sessionId}"
+                }
+                heading("$label exited (${event.exitCode})")
+                if (event.command.isNotBlank()) body(event.command, false)
             }
         }
     }

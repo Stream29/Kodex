@@ -2,22 +2,33 @@
 
 package io.github.stream29.kodex.rpc.server
 
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
+import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
+import io.github.stream29.kodex.cli.sessiontitle.attachSessionTitleGeneration
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
+import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
-import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
+import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
+import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -27,16 +38,30 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 public actual class BackendSessionManagement actual constructor(
-    private val host: BackendSessionHost,
-    private val runtime: BackendAgentRuntimeRpc,
+    private val repository: KodexRootSessionRepository,
     private val newSessionDefaults: () -> KodexNewSessionSettings,
+    private val titleSettings: () -> SessionTitleSettings,
+    private val titleGenerator: SessionTitleGenerator,
     private val reportBackgroundFailure: (Throwable) -> Unit,
+    private val checkAdmission: () -> Unit,
 ) {
+    private val operations: CoroutineScope = repository.supervisorChildScope()
     private val commands = Mutex()
 
-    public actual suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> = host.inBackend {
+    private suspend fun <T> inBackend(block: suspend () -> T): T {
+        currentCoroutineContext().ensureActive()
+        repository.ensureActive()
+        checkAdmission()
+        return operations.async {
+            repository.ensureActive()
+            checkAdmission()
+            block()
+        }.await()
+    }
+
+    public actual suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> = inBackend {
         commands.withLock {
-            host.repository().listEntries(includeArchived).map { entry ->
+            repository.listEntries(includeArchived).map { entry ->
                 SessionCatalogEntry(
                     sessionIndex = entry.entryIndex,
                     threadName = entry.threadName,
@@ -50,10 +75,8 @@ public actual class BackendSessionManagement actual constructor(
         }
     }
 
-    public actual suspend fun createSession(cwd: Path): Int = host.inBackend {
+    public actual suspend fun createSession(cwd: Path): Int = inBackend {
         commands.withLock {
-            // Capture the owned defaults at the creation boundary, not at RPC admission
-            // or from a frontend projection. Suggested Sessions and forks never use this.
             val defaults = newSessionDefaults()
             val initialSettings = KodexAgentSettings(
                 model = defaults.model,
@@ -62,40 +85,51 @@ public actual class BackendSessionManagement actual constructor(
                 requestUserInputMode = defaults.requestUserInputMode,
                 cwd = cwd,
             )
-            create(initialSettings) { "Session $it" }
+            create(initialSettings, attachAutoTitle = true) { "Session $it" }.first
         }
     }
 
-    public actual suspend fun keepSessionAlive(sessionIndex: Int): Unit = host.keepSessionAlive(sessionIndex)
-
-    public actual suspend fun archiveSession(sessionIndex: Int): Unit = host.inBackend {
+    public actual suspend fun keepSessionAlive(sessionIndex: Int): Unit = inBackend {
         commands.withLock {
             requireEntry(sessionIndex)
-            host.repository().getEntry(sessionIndex).archive()
+            repository.open(sessionIndex).let {}
         }
     }
 
-    public actual suspend fun unarchiveSession(sessionIndex: Int): Unit = host.inBackend {
+    public actual suspend fun archiveSession(sessionIndex: Int): Unit = inBackend {
         commands.withLock {
             requireEntry(sessionIndex)
-            host.repository().getEntry(sessionIndex).unarchive()
+            repository.getEntry(sessionIndex).archive()
         }
     }
 
-    public actual suspend fun deleteSession(sessionIndex: Int): Boolean = host.inBackend {
-        commands.withLock { host.deleteSession(sessionIndex) }
+    public actual suspend fun unarchiveSession(sessionIndex: Int): Unit = inBackend {
+        commands.withLock {
+            requireEntry(sessionIndex)
+            repository.getEntry(sessionIndex).unarchive()
+        }
+    }
+
+    public actual suspend fun deleteSession(sessionIndex: Int): Boolean = inBackend {
+        commands.withLock {
+            if (sessionIndex !in repository.list()) return@withLock false
+            repository.delete(sessionIndex)
+            true
+        }
     }
 
     public actual suspend fun forkSession(sessionIndex: Int): Int = fork(sessionIndex, null, null)
 
     public actual suspend fun forkSessionHistory(
-        sessionIndex: Int, untilExclusive: Int, expectedCacheNonce: Long,
+        sessionIndex: Int,
+        untilExclusive: Int,
+        expectedCacheNonce: Long,
     ): Int = fork(sessionIndex, untilExclusive, expectedCacheNonce)
 
     @OptIn(ExperimentalUuidApi::class)
-    private suspend fun fork(sourceIndex: Int, boundary: Int?, nonce: Long?): Int = host.inBackend {
+    private suspend fun fork(sourceIndex: Int, boundary: Int?, nonce: Long?): Int = inBackend {
         commands.withLock {
-            host.withManagementSource(sourceIndex, requireActive = nonce != null) { source ->
+            withManagementSource(sourceIndex, requireActive = nonce != null) { source ->
                 require(source.runtime.runningTurn.value == null) { "Cannot fork a running Agent." }
                 source.runtime.modify { sourceStorage ->
                     require(source.runtime.runningTurn.value == null) { "Cannot fork a running Agent." }
@@ -107,9 +141,9 @@ public actual class BackendSessionManagement actual constructor(
                     val until = boundary ?: (latest + 1)
                     require(until > 0 && until <= latest + 1) { "Invalid fork boundary." }
                     val settings = sourceStorage.getSettingsAt(until - 1)
-                    val targetIndex = host.repository().createFork(sourceIndex)
+                    val targetIndex = repository.createFork(sourceIndex)
                     try {
-                        val target = host.repository().open(targetIndex)
+                        val target = repository.open(targetIndex)
                         try {
                             target.runtime.modify { storage ->
                                 if (boundary != null) storage.revert(until)
@@ -122,12 +156,12 @@ public actual class BackendSessionManagement actual constructor(
                                 )
                             }
                         } finally {
-                            withContext(NonCancellable) { target.cancelAndJoin() }
+                            withContext(NonCancellable) { repository.closeSession(targetIndex) }
                         }
                         targetIndex
                     } catch (failure: Throwable) {
                         withContext(NonCancellable) {
-                            runCatching { host.repository().delete(targetIndex) }.onFailure(failure::addSuppressed)
+                            runCatching { repository.delete(targetIndex) }.onFailure(failure::addSuppressed)
                         }
                         throw failure
                     }
@@ -139,19 +173,18 @@ public actual class BackendSessionManagement actual constructor(
     public actual suspend fun createSuggestedSessions(
         tasks: List<SuggestedSubagentTask>,
         initialSettings: KodexAgentSettings,
-    ): List<CreatedSuggestedSession> = host.inBackend {
+    ): List<CreatedSuggestedSession> = inBackend {
         commands.withLock {
             val created = tasks.map { task ->
-                val index = create(initialSettings) { task.name }
-                CreatedSuggestedSession(index, SuggestedSessionMeta(runtime.getStorageUri(index), task.name))
+                val (index, session) = create(initialSettings, attachAutoTitle = false) { task.name }
+                CreatedSuggestedSession(index, SuggestedSessionMeta(session.storage.uri, task.name)) to session
             }
-            created.zip(tasks).forEach { (createdSession, task) ->
-                val index = createdSession.sessionIndex
-                // This scope is owned by the original Session, not the RPC waiter.
-                host.session(index).operations.launch {
+            created.zip(tasks).forEach { (pair, task) ->
+                val session = pair.second
+                session.supervisorChildScope().launch {
                     try {
-                        runtime.appendUserMessage(index, listOf(ContentItem.InputText(task.prompt)))
-                        runtime.resume(index)
+                        session.runtime.appendUserMessage(listOf(ContentItem.InputText(task.prompt)))
+                        session.runtime.resume()
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (failure: Throwable) {
@@ -159,27 +192,56 @@ public actual class BackendSessionManagement actual constructor(
                     }
                 }
             }
-            created
+            created.map { it.first }
         }
     }
 
-    private suspend fun create(initialSettings: KodexAgentSettings, name: (Int) -> String): Int {
-        val index = host.repository().create()
+    private suspend fun create(
+        initialSettings: KodexAgentSettings,
+        attachAutoTitle: Boolean,
+        name: (Int) -> String,
+    ): Pair<Int, KodexAgentSession> {
+        val index = repository.create()
         try {
-            host.keepSessionAlive(index)
-            host.inSession(index) {
-                runtime.modify { it.initialize(initialSettings.copy(threadName = name(index))) }
+            val session = repository.open(index)
+            session.runtime.modify { it.initialize(initialSettings.copy(threadName = name(index))) }
+            if (attachAutoTitle) {
+                attachSessionTitleGeneration(
+                    scope = session.runtime,
+                    agentState = session.runtime,
+                    settings = titleSettings,
+                    generator = titleGenerator,
+                )
             }
-            return index
+            return index to session
         } catch (failure: Throwable) {
             withContext(NonCancellable) {
-                runCatching { host.deleteSession(index) }.onFailure(failure::addSuppressed)
+                runCatching { repository.delete(index) }.onFailure(failure::addSuppressed)
             }
             throw failure
         }
     }
 
+    private suspend fun <T> withManagementSource(
+        index: Int,
+        requireActive: Boolean,
+        block: suspend (KodexAgentSession) -> T,
+    ): T {
+        requireEntry(index)
+        val active = repository.openSessions.value[index]?.takeIf { it.coroutineContext.job.isActive }
+        if (requireActive && active == null) throw SessionNotActive()
+        if (active != null) {
+            return block(active)
+        }
+        val temporary = repository.open(index)
+        return try {
+            block(temporary)
+        } finally {
+            withContext(NonCancellable) { repository.closeSession(index) }
+        }
+    }
+
     private suspend fun requireEntry(index: Int) {
-        if (index !in host.repository().entries.value) throw SessionNotFound()
+        if (index !in repository.list()) throw SessionNotFound()
     }
 }

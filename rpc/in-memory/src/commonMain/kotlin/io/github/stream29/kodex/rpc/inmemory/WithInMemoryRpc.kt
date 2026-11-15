@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
@@ -28,15 +29,19 @@ public actual suspend fun <R> withInMemoryRpc(
 ): R = coroutineScope {
     val toServer = Channel<String>(TRANSPORT_CAPACITY)
     val toClient = Channel<String>(TRANSPORT_CAPACITY)
-    val clientTransport = ChannelRpcTransport(coroutineContext, toClient, toServer)
-    val serverTransport = ChannelRpcTransport(coroutineContext, toServer, toClient)
+    val transportParent = SupervisorJob()
+    val transportContext = coroutineContext.minusKey(Job) + transportParent
+    val clientTransport = ChannelRpcTransport(transportContext, toClient, toServer)
+    val serverTransport = ChannelRpcTransport(transportContext, toServer, toClient)
     val monitors = mutableListOf<Job>()
+    var serverInstance: KrpcServer? = null
+    var clientInstance: InitializedKrpcClient? = null
     var failure: Throwable? = null
     try {
         val server = object : KrpcServer(
             rpcServerConfig { serialization { json() } },
             serverTransport,
-        ) {}
+        ) {}.also { serverInstance = it }
         // The client initializes lazily, so awaitCompletion before its first call is not a monitor.
         // Watch its transport instead; also watch the server directly, before transport draining.
         monitors += launch(start = CoroutineStart.UNDISPATCHED) {
@@ -60,7 +65,7 @@ public actual suspend fun <R> withInMemoryRpc(
         val client = object : InitializedKrpcClient(
             rpcClientConfig { serialization { json() } },
             clientTransport,
-        ) {}
+        ) {}.also { clientInstance = it }
         coroutineScope { block(client) }
     } catch (cause: Throwable) {
         failure = cause
@@ -71,16 +76,21 @@ public actual suspend fun <R> withInMemoryRpc(
         monitors.forEach { it.cancel() }
         clientTransport.beginShutdown()
         serverTransport.beginShutdown()
+        clientInstance?.close()
+        serverInstance?.close()
         clientTransport.owner.cancel()
         serverTransport.owner.cancel()
+        transportParent.cancel()
         toServer.cancel()
         toClient.cancel()
         try {
             withContext(NonCancellable) {
                 withTimeout(10.seconds) {
                     monitors.forEach { it.join() }
+                    serverInstance?.awaitCompletion()
                     clientTransport.owner.join()
                     serverTransport.owner.join()
+                    transportParent.join()
                 }
             }
         } catch (cleanup: Throwable) {

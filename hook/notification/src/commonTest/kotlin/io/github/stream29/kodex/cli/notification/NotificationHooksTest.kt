@@ -247,8 +247,8 @@ private class FakeNotificationProcess(
     override val stdin = Channel<String>(if (bufferedInput) 1 else 0)
     override val exitCode = CompletableDeferred<Int>()
     override val stdout: StdoutBuffer = object : StdoutBuffer {
-        override suspend fun drain(): StdoutBufferSnapshot = error("Hook output must not be read as control data")
-        override suspend fun read(yieldTime: Duration): StdoutBufferSnapshot = error("Hook output must not be read as control data")
+        override suspend fun read(offset: ULong, limit: UInt): StdoutSlice =
+            error("Hook output must not be read as control data")
     }
     override val standardOutput: StdoutBuffer get() = stdout
     override val standardError: StdoutBuffer get() = stdout

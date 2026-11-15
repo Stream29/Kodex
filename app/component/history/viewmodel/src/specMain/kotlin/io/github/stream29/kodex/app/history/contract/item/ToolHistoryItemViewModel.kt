@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.app.history.contract.item
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
@@ -168,6 +169,7 @@ public val StableCleanEvent.CompletedTool.isOrdinaryHistoryToolEvent: Boolean
         is StableSuggestSubagentTaskToolEvent,
             -> false
 
+        is StableAwaitEventToolEvent,
         is StableCommandExecutionToolEvent,
         is StableCustomToolEvent,
         is StableImageGenerationCall,

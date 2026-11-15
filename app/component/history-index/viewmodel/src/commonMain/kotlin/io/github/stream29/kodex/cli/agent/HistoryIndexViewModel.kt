@@ -4,6 +4,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
@@ -11,7 +12,9 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
@@ -282,7 +285,11 @@ private fun IndexedAgentCommit.toHistoryIndexEntryOrNull(): HistoryIndexEntry? {
 
 private fun CleanIndexEntry.toHistoryIndexEntryKind(): HistoryIndexEntryKind = when (this) {
     is StableContextCompaction -> HistoryIndexEntryKind.CompactionPoint
-    is StableUserMessage -> HistoryIndexEntryKind.UserMessage
+    is StableUserMessage,
+    is StableAskUserEvent,
+    is StableScheduleEvent,
+    is StableTerminalExitedEvent,
+        -> HistoryIndexEntryKind.UserMessage
     is StableAssistantMessage -> when (phase) {
         MessagePhase.Commentary -> HistoryIndexEntryKind.AssistantCommentary
         MessagePhase.FinalAnswer -> HistoryIndexEntryKind.AssistantFinal
@@ -301,6 +308,12 @@ private fun CleanIndexEntry.toHistoryIndexSummary(): String = when (this) {
     is StableAssistantMessage -> content.toDisplayContent().toSummary()
     is StableDeveloperMessage -> content.toDisplayContent().toSummary()
     is StableAgentMessage -> content.toAgentDisplayContent().toSummary()
+    is StableAskUserEvent -> "ask_user #$askId answered".toSummary()
+    is StableScheduleEvent -> "schedule #$scheduleId: $description".toSummary()
+    is StableTerminalExitedEvent -> {
+        val label = if (!name.isNullOrBlank()) "terminal #$sessionId ($name)" else "terminal #$sessionId"
+        "$label exited ($exitCode): $command".toSummary()
+    }
     is StableRequestUserInputToolEvent ->
         arguments.questions.joinToString(separator = " ") { it.question }.toSummary()
     is StableSuggestSubagentTaskToolEvent -> "suggest subagents"
@@ -321,6 +334,24 @@ private fun CleanIndexEntry.toHistoryIndexDetail(): String = when (this) {
         add("")
         add(content.toAgentDisplayContent().toDetail())
     }.joinToString("\n")
+    is StableAskUserEvent -> buildList {
+        add("ask_user #$askId answered")
+        arguments.questions.forEach { question ->
+            add("")
+            add(question.question.ifBlank { "[empty]" })
+            val answer = response.answers[question.id]
+            when {
+                answer == null -> add("[unanswered]")
+                question.isSecret -> add("[hidden]")
+                else -> answer.answers.ifEmpty { listOf("[empty]") }.forEach { add(it.ifBlank { "[empty]" }) }
+            }
+        }
+    }.joinToString("\n").toDetail()
+    is StableScheduleEvent -> "Schedule #$scheduleId\n\n$description".toDetail()
+    is StableTerminalExitedEvent -> {
+        val label = if (!name.isNullOrBlank()) "Terminal #$sessionId ($name)" else "Terminal #$sessionId"
+        "$label exited with code $exitCode\n\n$command".toDetail()
+    }
     is StableRequestUserInputToolEvent -> toRequestUserInputDetail()
     is StableSuggestSubagentTaskToolEvent -> "suggest subagents"
     is StablePlanUpdate -> toPlanDetail()

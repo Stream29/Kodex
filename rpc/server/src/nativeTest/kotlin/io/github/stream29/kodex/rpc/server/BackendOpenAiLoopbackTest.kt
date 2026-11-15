@@ -54,9 +54,9 @@ val backendOpenAiLoopbackTest by testSuite(compartment = { TestCompartment.RealT
         for (automatic in listOf(false, true)) {
             test("real client ${status.value} policy reaches RPC once, automatic=$automatic") {
                 withLoopback(if (automatic) Scenario.AutoCompact else Scenario.Policy, status) { client, ordinary, compact, _ ->
-                    runtimeFixture(client) { host, index, rpc ->
+                    runtimeFixture(client) { repository, index, rpc ->
                         if (automatic) {
-                            val storage = BackendAgentStorageRpc(host)
+                            val storage = BackendAgentStorageRpc(repository)
                             val before = storage.getLastCommitsIn(
                                 index,
                                 storage.getCacheNonce(index),
@@ -69,7 +69,7 @@ val backendOpenAiLoopbackTest by testSuite(compartment = { TestCompartment.RealT
                         }
                         val events = mutableListOf<Notification>()
                         val collector = launch(start = CoroutineStart.UNDISPATCHED) {
-                            rpc.notifications.flow.collect { events += it }
+                            repository.stopEvents.toNotifications().collect { events += it }
                         }
                         try {
                             rpc.appendUserMessage(index, listOf(ContentItem.InputText(prompt)))
@@ -101,10 +101,10 @@ val backendOpenAiLoopbackTest by testSuite(compartment = { TestCompartment.RealT
 
         test("real client ${status.value} retains HTTP and Agent retry budgets") {
             withLoopback(Scenario.Transient, status) { client, ordinary, compact, _ ->
-                runtimeFixture(client) { _, index, rpc ->
+                runtimeFixture(client) { repository, index, rpc ->
                     val events = mutableListOf<Notification>()
                     val collector = launch(start = CoroutineStart.UNDISPATCHED) {
-                        rpc.notifications.flow.collect { events += it }
+                        repository.stopEvents.toNotifications().collect { events += it }
                     }
                     try {
                         rpc.appendUserMessage(index, listOf(ContentItem.InputText(prompt)))
@@ -128,10 +128,10 @@ val backendOpenAiLoopbackTest by testSuite(compartment = { TestCompartment.RealT
 
     test("real client cancellation during an unfinished response produces no Stop") {
         withLoopback(Scenario.Cancel, HttpStatusCode.ServiceUnavailable) { client, ordinary, compact, entered ->
-            runtimeFixture(client) { _, index, rpc ->
+            runtimeFixture(client) { repository, index, rpc ->
                 val events = mutableListOf<Notification>()
                 val collector = launch(start = CoroutineStart.UNDISPATCHED) {
-                    rpc.notifications.flow.collect { events += it }
+                    repository.stopEvents.toNotifications().collect { events += it }
                 }
                 try {
                     rpc.appendUserMessage(index, listOf(ContentItem.InputText(prompt)))

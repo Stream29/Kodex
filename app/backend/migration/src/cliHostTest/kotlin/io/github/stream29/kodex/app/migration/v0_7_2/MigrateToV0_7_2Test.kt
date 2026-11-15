@@ -47,7 +47,12 @@ public val migrateToV0_7_2Test by testSuite {
                 val sql = db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_commits'")
                     .single().single() as String
                 assertTrue("'steer'" in sql)
-                for (table in listOf("sessions", "agents", "agent_commits", "session_catalog")) {
+                assertTrue("'ask_user'" in sql)
+                assertTrue("'event_ask_user'" in sql)
+                assertTrue("'event_schedule'" in sql)
+                assertTrue("'event_terminal_exited'" in sql)
+                assertTrue("'await_event_tool_event'" in sql)
+                for (table in listOf("sessions", "agents", "agent_commits", "schedules", "session_catalog")) {
                     assertEquals(listOf(listOf(0L)), db.query("SELECT count(*) FROM $table"))
                 }
             }

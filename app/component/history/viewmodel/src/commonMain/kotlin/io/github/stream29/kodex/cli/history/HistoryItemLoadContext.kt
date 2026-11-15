@@ -2,10 +2,14 @@ package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
@@ -82,6 +86,9 @@ internal fun StableCleanEvent.toHistoryItemDescriptor(
         is StableAssistantMessage,
         is StableDeveloperMessage,
         is StableAgentMessage,
+        is StableAskUserEvent,
+        is StableScheduleEvent,
+        is StableTerminalExitedEvent,
             -> HistoryItemKind.Message
 
         is StableReasoning -> HistoryItemKind.Reasoning
@@ -90,6 +97,7 @@ internal fun StableCleanEvent.toHistoryItemDescriptor(
         is StableSuggestSubagentTaskToolEvent -> HistoryItemKind.SuggestSubagentTask
         is StablePatchToolEvent -> HistoryItemKind.Patch
         is StablePlanUpdate -> HistoryItemKind.PlanUpdate
+        is StableAwaitEventToolEvent,
         is StableCommandExecutionToolEvent,
         is StableCustomToolEvent,
         is StableImageGenerationCall,

@@ -1,3 +1,4 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
 @file:Suppress("DEPRECATION")
 
 package io.github.stream29.kodex.rpc.server
@@ -35,6 +36,7 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.rpc.withService
 import kotlin.random.Random
 import kotlin.test.*
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime }) {
@@ -277,12 +279,160 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val runtime = client.withService<AgentRuntimeRpc>()
                 val index = global.createSession(Path("."))
                 val event = async(start = CoroutineStart.UNDISPATCHED) { global.getNotificationFlow().first() }
-                (services.runtime as BackendAgentRuntimeRpc).notifications.subscriptionCount.first { it > 0 }
+                services.notificationSubscriptionCount.first { it > 0 }
                 runtime.appendUserMessage(index, listOf(ContentItem.InputText("question")))
                 runtime.resume(index)
                 val stop = assertIs<Notification.Stop.AssistantMessage>(event.await())
                 assertEquals(index, stop.sessionIndex)
                 assertEquals("answer", stop.message.content.filterIsInstance<ContentItem.OutputText>().single().text)
+            }
+        }
+    }
+
+    test("shared SQLite schedule repository fires due schedule through AgentEventBus and cleans one-shot row") {
+        withServices { services, _ ->
+            withInMemoryRpc(services::register) { raw ->
+                val client = RestoringRpcClient(raw)
+                val global = client.withService<GlobalRpc>()
+                val runtime = client.withService<AgentRuntimeRpc>()
+                val storage = client.withService<AgentStorageRpc>()
+                val index = global.createSession(Path("."))
+                val event = async(start = CoroutineStart.UNDISPATCHED) { global.getNotificationFlow().first() }
+                services.notificationSubscriptionCount.first { it > 0 }
+
+                val now = kotlin.time.Clock.System.now()
+                val created = services.schedules.create(
+                    agentId = index,
+                    triggerAt = now,
+                    cron = null,
+                    description = "daily check-in",
+                    createdAt = now,
+                )
+                val stop = assertIs<Notification.Stop.AssistantMessage>(event.await())
+                assertEquals(index, stop.sessionIndex)
+                runtime.getRunningTurnFlow(index).first { !it }
+                withTimeout(5.seconds) {
+                    while (services.schedules.list(index).isNotEmpty()) delay(10)
+                }
+                val nonce = storage.getCacheNonce(index)
+                val scheduleCommits = storage.getFirstCommitsIn(
+                    index,
+                    nonce,
+                    0,
+                    storage.getLatestIndex(index),
+                    setOf(AgentCommitType.EventSchedule),
+                    10,
+                )
+                assertEquals(1, scheduleCommits.size)
+                val committed = assertIs<io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent>(
+                    scheduleCommits.single().commit,
+                )
+                assertEquals(created.scheduleId, committed.scheduleId)
+                assertEquals("daily check-in", committed.description)
+            }
+        }
+    }
+
+    test("schedule runner retains due schedule on transient delivery failure and drops orphan schedule for missing agent") {
+        var failDeliveryCallsRemaining = 0
+        var injectedFailures = 0
+        var gateArmed = false
+        var callsSinceArmed = 0
+        withServices(checkAdmission = {
+            if (gateArmed && failDeliveryCallsRemaining > 0) {
+                callsSinceArmed++
+                // Allow the runner's batch pre-check (1) and per-record pre-check (2),
+                // then fail inside submitScheduleTrigger -> sessionRepository.open (3).
+                if (callsSinceArmed >= 3) {
+                    failDeliveryCallsRemaining--
+                    injectedFailures++
+                    error("Transient delivery failure")
+                }
+            }
+        }) { services, _ ->
+            withInMemoryRpc(services::register) { raw ->
+                val client = RestoringRpcClient(raw)
+                val global = client.withService<GlobalRpc>()
+                val runtime = client.withService<AgentRuntimeRpc>()
+                val storage = client.withService<AgentStorageRpc>()
+                val index = global.createSession(Path("."))
+                val event = async(start = CoroutineStart.UNDISPATCHED) { global.getNotificationFlow().first() }
+                services.notificationSubscriptionCount.first { it > 0 }
+
+                val now = kotlin.time.Clock.System.now()
+                // Orphan schedule for nonexistent agent should be cleaned up instead of spinning forever.
+                services.schedules.create(
+                    agentId = index + 9999,
+                    triggerAt = now,
+                    cron = null,
+                    description = "orphan",
+                    createdAt = now,
+                )
+                withTimeout(5.seconds) {
+                    while (services.schedules.list(index + 9999).isNotEmpty()) delay(10)
+                }
+
+                // Arm transient failure for the first delivery attempt of a valid due schedule,
+                // and schedule a second due entry + concurrent timer update to ensure nextTriggerAt
+                // changes never cancel acknowledgement or duplicate delivery.
+                val firstDueAt = kotlin.time.Clock.System.now() + 80.milliseconds
+                val firstCreated = services.schedules.create(
+                    agentId = index,
+                    triggerAt = firstDueAt,
+                    cron = null,
+                    description = "retained-on-transient-failure",
+                    createdAt = now,
+                )
+                val secondCreated = services.schedules.create(
+                    agentId = index,
+                    triggerAt = firstDueAt + 5.milliseconds,
+                    cron = null,
+                    description = "second-due-without-duplicate",
+                    createdAt = now,
+                )
+                callsSinceArmed = 0
+                failDeliveryCallsRemaining = 1
+                gateArmed = true
+
+                val stop = assertIs<Notification.Stop.AssistantMessage>(event.await())
+                assertEquals(index, stop.sessionIndex)
+                assertEquals(1, injectedFailures)
+                withTimeout(5.seconds) {
+                    while (services.schedules.list(index).isNotEmpty()) delay(10)
+                }
+                withTimeout(5.seconds) {
+                    while (true) {
+                        val currentNonce = storage.getCacheNonce(index)
+                        val count = storage.getFirstCommitsIn(
+                            index,
+                            currentNonce,
+                            0,
+                            storage.getLatestIndex(index),
+                            setOf(AgentCommitType.EventSchedule),
+                            10,
+                        ).size
+                        if (count >= 2 && !runtime.getRunningTurn(index)) break
+                        delay(10)
+                    }
+                }
+                delay(50)
+                val nonce = storage.getCacheNonce(index)
+                val scheduleCommits = storage.getFirstCommitsIn(
+                    index,
+                    nonce,
+                    0,
+                    storage.getLatestIndex(index),
+                    setOf(AgentCommitType.EventSchedule),
+                    10,
+                )
+                assertEquals(2, scheduleCommits.size)
+                val descriptions = scheduleCommits.map {
+                    assertIs<io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent>(it.commit)
+                }
+                assertEquals(
+                    listOf(firstCreated.scheduleId to "retained-on-transient-failure", secondCreated.scheduleId to "second-due-without-duplicate"),
+                    descriptions.map { it.scheduleId to it.description },
+                )
             }
         }
     }

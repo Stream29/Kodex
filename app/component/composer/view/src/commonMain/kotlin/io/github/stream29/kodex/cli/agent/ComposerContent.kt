@@ -6,9 +6,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.ComposerMode
 import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
@@ -132,6 +135,10 @@ private fun StableIndexEvent.Steerable.previewText(): String = when (this) {
     is StableAssistantMessage -> "Assistant: ${content.previewContentText()}"
     is StableDeveloperMessage -> "Developer: ${content.previewContentText()}"
     is StableAgentMessage -> "$author → $recipient: ${content.previewAgentMessageText()}"
+    is StableAskUserEvent -> "Answer for ask #$askId"
+    is StableScheduleEvent -> "Schedule #$scheduleId: ${description.singleLine()}"
+    is StableTerminalExitedEvent ->
+        "Terminal ${name?.takeIf(String::isNotBlank) ?: "#$sessionId"} exited ($exitCode): ${command.singleLine()}"
 }.ifBlank { "[empty message]" }
 
 private fun List<ContentItem>.previewContentText(): String =

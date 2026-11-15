@@ -153,7 +153,7 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
             fs.writeString(Path(session, "index", "latest.json"), "0")
             fs.writeString(Path(home, "version.json"), "\"0.5.2\"")
         }) { home, endpoint, _ ->
-            assertEquals("\"0.7.0\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+            assertEquals("\"$CurrentKodexApplicationVersion\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
             assertTrue(SystemCoroutineFileSystem.exists(Path(home, "kodex.db")))
             withLocalRpcClient(home, endpoint) { connection ->
                 val client = RestoringRpcClient(connection)
