@@ -2,10 +2,10 @@
 
 package io.github.stream29.kodex.tool.unifiedexec
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
@@ -13,8 +13,6 @@ import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.typedTool
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools.ExecCommandName
-import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools.WriteStdinDescription
-import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools.WriteStdinName
 
 internal actual object UnifiedExecToolImplementation {
     public actual val execCommandSpec: ResponsesApiTool =
@@ -26,16 +24,7 @@ internal actual object UnifiedExecToolImplementation {
             outputSchema = UnifiedExecOutputSchema,
         )
 
-    public actual val writeStdinSpec: ResponsesApiTool =
-        ResponsesApiTool(
-            name = WriteStdinName,
-            description = WriteStdinDescription,
-            strict = false,
-            parameters = WriteStdinParametersSchema,
-            outputSchema = UnifiedExecOutputSchema,
-        )
-
-    /** Creates both tools around one shared [UnifiedExecClient]. */
+    /** Creates the unified-exec model tools around [client]. */
     public actual fun createTools(client: UnifiedExecClient): List<Tool> =
         listOf(
             CloseableUnifiedExecTool(
@@ -63,37 +52,6 @@ internal actual object UnifiedExecToolImplementation {
                             action = StableCommandExecutionAction.ExecCommand(action.arguments),
                             result = StableCommandExecutionResult.Failure(
                                 failure.message ?: "exec_command failed.",
-                            ),
-                        )
-                    }
-                },
-                client = client,
-            ),
-            CloseableUnifiedExecTool(
-                delegate = typedTool(
-                    spec = writeStdinSpec,
-                    select = { event ->
-                        (event as? PendingCommandExecutionToolEvent)
-                            ?.takeIf { it.action is PendingCommandExecutionAction.WriteStdin }
-                    },
-                ) { pending ->
-                    val action = pending.action as PendingCommandExecutionAction.WriteStdin
-                    try {
-                        StableCommandExecutionToolEvent(
-                            callId = pending.callId,
-                            itemId = pending.itemId,
-                            action = StableCommandExecutionAction.WriteStdin(action.arguments),
-                            result = StableCommandExecutionResult.Output(
-                                client.writeStdin(action.arguments),
-                            ),
-                        )
-                    } catch (failure: UnifiedExecToolException) {
-                        StableCommandExecutionToolEvent(
-                            callId = pending.callId,
-                            itemId = pending.itemId,
-                            action = StableCommandExecutionAction.WriteStdin(action.arguments),
-                            result = StableCommandExecutionResult.Failure(
-                                failure.message ?: "write_stdin failed.",
                             ),
                         )
                     }

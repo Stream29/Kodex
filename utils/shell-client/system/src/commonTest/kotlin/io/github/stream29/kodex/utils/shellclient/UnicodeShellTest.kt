@@ -73,7 +73,7 @@ val unicodeShellTest by testSuite(
                     }
                     try {
                         assertEquals(0, withTimeout(10.seconds) { session.exitCode.await() })
-                        val output = session.stdout.drain().renderedBytes()
+                        val output = session.stdout.read().renderedBytes()
                         if (tty) {
                             assertTrue(output.containsSequence(expected))
                         } else {

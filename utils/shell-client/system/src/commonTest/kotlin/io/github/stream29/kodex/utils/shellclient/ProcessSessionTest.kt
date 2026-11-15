@@ -56,25 +56,35 @@ private data class CompletedProcessOutput(
     val exitCode: Int,
 )
 
-private fun StdoutBufferSnapshot.decodeOutput(): String =
+private fun StdoutSlice.decodeOutput(): String =
     renderedBytes().decodeToString()
 
 private suspend fun ProcessSession.readUntilCompleted(): CompletedProcessOutput {
+    var cursor = 0uL
     val output = StringBuilder()
     repeat(100) {
-        output.append(stdout.read(100.milliseconds).decodeOutput())
+        val slice = stdout.read(offset = cursor)
+        cursor = slice.nextOffset
+        output.append(slice.decodeOutput())
         if (exitCode.isCompleted) {
+            val tailSlice = stdout.read(offset = cursor)
+            output.append(tailSlice.decodeOutput())
             return CompletedProcessOutput(output.toString(), exitCode.await())
         }
+        delay(100.milliseconds)
     }
     fail("Process did not finish within ten seconds.")
 }
 
 private suspend fun ProcessSession.readUntilContains(expected: String): String {
+    var cursor = 0uL
     val output = StringBuilder()
     repeat(100) {
-        output.append(stdout.read(100.milliseconds).decodeOutput())
+        val slice = stdout.read(offset = cursor)
+        cursor = slice.nextOffset
+        output.append(slice.decodeOutput())
         if (expected in output) return output.toString()
+        delay(100.milliseconds)
     }
     fail("Process output did not contain $expected: $output")
 }
@@ -146,9 +156,9 @@ val processSessionTest by testSuite(
         try {
             assertEquals(0, withTimeout(3.seconds) { session.exitCode.await() })
 
-            val merged = session.stdout.drain().decodeOutput()
-            val standardOutput = session.standardOutput.drain().decodeOutput()
-            val standardError = session.standardError.drain().decodeOutput()
+            val merged = session.stdout.read().decodeOutput()
+            val standardOutput = session.standardOutput.read().decodeOutput()
+            val standardError = session.standardError.read().decodeOutput()
 
             assertTrue("stdout-only" in merged)
             assertTrue("stderr-only" in merged)
@@ -275,11 +285,11 @@ val processSessionTest by testSuite(
         }
     }
 
-    test("returns after the requested yield time for a running process") {
+    test("returns an empty slice immediately when a running process has produced no output") {
         val client = testShellClient()
         val session = client.startTestSession(delayedProcessCommand)
         try {
-            val result = session.stdout.read(25.milliseconds)
+            val result = session.stdout.read()
 
             assertTrue(result.isEmpty)
         } finally {
@@ -343,7 +353,7 @@ val processSessionTest by testSuite(
         try {
             client.close()
             try {
-                session.stdout.read(0.milliseconds)
+                session.stdout.read()
                 fail("Closed shell client left its process session usable.")
             } catch (_: CancellationException) {
                 // Expected: session ownership follows the shell client.
@@ -375,29 +385,19 @@ val processSessionTest by testSuite(
         }
     }
 
-    test("cancelling a pending read preserves later process output") {
+    test("repeated non-destructive reads preserve earlier and later process output") {
         val client = testShellClient()
         val session = client.startTestSession(interactiveProcessCommand)
         try {
             assertTrue("ready" in session.readUntilContains("ready"))
-            coroutineScope {
-                val read = async(start = CoroutineStart.UNDISPATCHED) {
-                    session.stdout.read(30.seconds)
-                }
-                delay(100.milliseconds)
-                read.cancel()
-                try {
-                    read.await()
-                    fail("Canceled process read completed normally.")
-                } catch (_: CancellationException) {
-                    // Expected: every platform implementation must cooperate with coroutine cancellation.
-                }
-            }
-            session.stdin.send("after cancellation\n")
+            val firstSnapshot = session.stdout.read(offset = 0uL).decodeOutput()
+            assertTrue("ready" in firstSnapshot)
+            session.stdin.send("after snapshot\n")
             val result = session.readUntilCompleted()
 
             assertEquals(0, result.exitCode)
-            assertTrue("received:after cancellation" in result.output)
+            assertTrue("ready" in result.output)
+            assertTrue("received:after snapshot" in result.output)
         } finally {
             session.closeAndAwaitCompletion()
             client.close()

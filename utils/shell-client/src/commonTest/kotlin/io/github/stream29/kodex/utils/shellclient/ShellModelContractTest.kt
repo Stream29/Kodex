@@ -37,10 +37,19 @@ val shellModelContractTest by testSuite {
         }
     }
 
-    test("output snapshot retains original byte accounting and omission rendering") {
-        val snapshot = StdoutBufferSnapshot("head".encodeToByteArray(), "tail".encodeToByteArray(), 9)
-        assertEquals(8L, snapshot.retainedByteCount)
-        assertEquals(17L, snapshot.originalByteCount)
-        assertEquals("head\n... 9 bytes omitted ...\ntail", snapshot.renderedBytes().decodeToString())
+    test("output slice retains cursor accounting and omission rendering") {
+        val slice = StdoutSlice(
+            head = "head".encodeToByteArray(),
+            tail = "tail".encodeToByteArray(),
+            omittedByteCount = 9uL,
+            offset = 0uL,
+            nextOffset = 17uL,
+            totalByteCount = 20uL,
+        )
+        assertEquals(8uL, slice.retainedByteCount)
+        assertEquals(17uL, slice.nextOffset - slice.offset)
+        assertEquals("head\n... 9 bytes omitted ...\ntail", slice.renderedBytes().decodeToString())
+        assertEquals(1_024 * 1_024, StdoutBufferDefaultQuotaByteCount)
+        assertEquals(10, StdoutBufferHeadTailRetentionPercent)
     }
 }

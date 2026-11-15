@@ -18,7 +18,6 @@ import kotlinx.io.files.Path
 public expect class UnifiedExecToolClient : UnifiedExecClient {
     public override val activeSessions: StateFlow<Map<Int, UnifiedExecProcessSession>>
     public override suspend fun execCommand(arguments: ExecCommandArguments): UnifiedExecOutput
-    public override suspend fun writeStdin(arguments: WriteStdinArguments): UnifiedExecOutput
     public override fun close()
 }
 

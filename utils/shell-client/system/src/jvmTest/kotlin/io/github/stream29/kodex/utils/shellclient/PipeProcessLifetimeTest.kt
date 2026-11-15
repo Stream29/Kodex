@@ -161,9 +161,15 @@ val pipeProcessLifetimeTest by testSuite(compartment = { TestCompartment.RealTim
             val started = PipeProcessSession(raw, scope)
             session = started
             withTimeout(5.seconds) {
+                var cursor = 0uL
                 val output = StringBuilder()
                 while ("fixture-ready" !in output) {
-                    output.append(started.stdout.read(100.milliseconds).renderedBytes().decodeToString())
+                    val slice = started.stdout.read(offset = cursor)
+                    cursor = slice.nextOffset
+                    output.append(slice.renderedBytes().decodeToString())
+                    if ("fixture-ready" !in output) {
+                        kotlinx.coroutines.delay(50.milliseconds)
+                    }
                 }
             }
             started.close()

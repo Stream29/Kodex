@@ -25,10 +25,11 @@ val shellSessionModelsTest by testSuite {
             maxOutputTokens = 5678,
         )
         val snapshot = linkedMapOf(
-            7 to ShellSessionState(arguments, completed = false),
+            7 to ShellSessionState(cwd = "/fixture/work", arguments = arguments, exitCode = null),
             Int.MAX_VALUE to ShellSessionState(
-                ExecCommandArguments(command = "completed fixture", yieldTimeMillis = 10_000),
-                completed = true,
+                cwd = "/fixture/done",
+                arguments = ExecCommandArguments(command = "completed fixture", yieldTimeMillis = 10_000),
+                exitCode = 0,
             ),
         )
         val encoded = json.encodeToString<Map<Int, ShellSessionState>>(snapshot)
@@ -39,35 +40,40 @@ val shellSessionModelsTest by testSuite {
 
     test("completion changes the value without changing registry membership") {
         val running = ShellSessionState(
-            ExecCommandArguments(command = "fixture", yieldTimeMillis = 10_000),
-            false,
+            cwd = "/fixture/work",
+            arguments = ExecCommandArguments(command = "fixture", yieldTimeMillis = 10_000),
+            exitCode = null,
         )
-        val completed = running.copy(completed = true)
+        val completed = running.copy(exitCode = 0)
         val before = mapOf(1 to running)
         val after = mapOf(1 to completed)
         assertEquals(before.keys, after.keys)
         assertNotEquals(before, after)
         assertNotEquals(after, emptyMap<Int, ShellSessionState>())
         val fields = json.encodeToJsonElement(ShellSessionState.serializer(), completed).jsonObject
-        assertEquals(setOf("arguments", "completed"), fields.keys)
+        assertEquals(setOf("cwd", "arguments", "exitCode"), fields.keys)
         assertTrue(json.decodeFromString<ShellSessionState>(fields.toString()).completed)
     }
 
-    test("completion and yield_time_ms are required while optional argument defaults remain available") {
+    test("cwd and yield_time_ms are required while optional exitCode and argument defaults remain available") {
         val decoded = json.decodeFromString<ShellSessionState>(
-            """{"arguments":{"cmd":"fixture","yield_time_ms":10000},"completed":false}""",
+            """{"cwd":"/fixture/work","arguments":{"cmd":"fixture","yield_time_ms":10000}}""",
         )
         assertEquals(
-            ShellSessionState(ExecCommandArguments(command = "fixture", yieldTimeMillis = 10_000), false),
+            ShellSessionState(
+                cwd = "/fixture/work",
+                arguments = ExecCommandArguments(command = "fixture", yieldTimeMillis = 10_000),
+            ),
             decoded,
         )
         for (invalid in listOf(
-            """{"arguments":{"cmd":"fixture"},"completed":false}""",
-            """{"arguments":{"cmd":"fixture","yield_time_ms":null},"completed":false}""",
-            """{"arguments":{"cmd":"fixture","yield_time_ms":"not-a-number"},"completed":false}""",
+            """{"cwd":"/fixture/work","arguments":{"cmd":"fixture"}}""",
+            """{"cwd":"/fixture/work","arguments":{"cmd":"fixture","yield_time_ms":null}}""",
+            """{"cwd":"/fixture/work","arguments":{"cmd":"fixture","yield_time_ms":"not-a-number"}}""",
             """{"arguments":{"cmd":"fixture","yield_time_ms":10000}}""",
-            """{"arguments":{"cmd":"fixture","yield_time_ms":10000},"completed":null}""",
-            """{"completed":true}""",
+            """{"cwd":null,"arguments":{"cmd":"fixture","yield_time_ms":10000}}""",
+            """{"cwd":"/fixture/work","arguments":{"cmd":"fixture","yield_time_ms":10000},"exitCode":"not-an-int"}""",
+            """{"cwd":"/fixture/work"}""",
         )) {
             assertFailsWith<SerializationException> {
                 json.decodeFromString<ShellSessionState>(invalid)

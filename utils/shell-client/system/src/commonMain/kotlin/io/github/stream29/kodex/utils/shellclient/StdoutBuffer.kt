@@ -10,17 +10,10 @@ import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.io.Buffer
-import kotlinx.io.readByteArray
-import kotlin.time.Duration
 
 /**
  * Writable side of a [StdoutBuffer].
@@ -30,10 +23,6 @@ import kotlin.time.Duration
  * readable state. This type is internal so callers only depend on [StdoutBuffer].
  */
 internal interface MutableStdoutBuffer : StdoutBuffer, SendChannel<ByteArray> {
-    val changeVersion: StateFlow<Long>
-
-    suspend fun drainSnapshot(): VersionedStdoutBufferSnapshot
-
     suspend fun flush()
 
     fun signalTerminal()
@@ -44,33 +33,30 @@ internal interface MutableStdoutBuffer : StdoutBuffer, SendChannel<ByteArray> {
     fun abort(cause: Throwable)
 }
 
-/** Maximum retained process output before its middle is omitted. */
-internal const val DefaultProcessOutputMaximumRetainedByteCount: Int = 1_024 * 1_024
-
 /** Creates the internal writable side while exposing [StdoutBuffer] to readers. */
 internal fun MutableStdoutBuffer(
     scope: CoroutineScope,
-    maximumRetainedByteCount: Int = DefaultProcessOutputMaximumRetainedByteCount,
-): MutableStdoutBuffer = MutableStdoutBufferImpl(scope, maximumRetainedByteCount)
-
-/** Snapshot version captured atomically with one [MutableStdoutBuffer.drainSnapshot]. */
-internal data class VersionedStdoutBufferSnapshot(
-    val output: StdoutBufferSnapshot,
-    val changeVersion: Long,
-    val isTerminal: Boolean,
+    quotaByteCount: Int = StdoutBufferDefaultQuotaByteCount,
+    headTailRetentionPercent: Int = StdoutBufferHeadTailRetentionPercent,
+): MutableStdoutBuffer = MutableStdoutBufferImpl(
+    scope = scope,
+    quotaByteCount = quotaByteCount,
+    headTailRetentionPercent = headTailRetentionPercent,
 )
 
 private class MutableStdoutBufferImpl(
     scope: CoroutineScope,
-    maximumRetainedByteCount: Int,
+    quotaByteCount: Int,
+    headTailRetentionPercent: Int,
     private val input: Channel<ByteArray> = Channel(Channel.RENDEZVOUS),
 ) : MutableStdoutBuffer, SendChannel<ByteArray> by input {
     private val ownerJob: Job? = scope.coroutineContext[Job]
     private val stateMutex: Mutex = Mutex()
-    private val retainedOutput: HeadTailBytes = HeadTailBytes(maximumRetainedByteCount)
+    private val retainedOutput: RetainedStdoutBytes = RetainedStdoutBytes(
+        quotaByteCount = quotaByteCount,
+        headTailRetentionPercent = headTailRetentionPercent,
+    )
     private val flushes: Channel<CompletableDeferred<Unit>> = Channel(Channel.RENDEZVOUS)
-    override val changeVersion: StateFlow<Long>
-        field = MutableStateFlow(0L)
     private val terminal: MutableStateFlow<Boolean> = MutableStateFlow(false)
     private val abortCause: MutableStateFlow<CancellationException?> = MutableStateFlow(null)
 
@@ -78,30 +64,13 @@ private class MutableStdoutBufferImpl(
         consumeInput()
     }
 
-    override suspend fun drain(): StdoutBufferSnapshot = drainSnapshot().output
-
-    override suspend fun read(yieldTime: Duration): StdoutBufferSnapshot {
-        require(!yieldTime.isNegative()) { "yieldTime must not be negative." }
-        val initial: VersionedStdoutBufferSnapshot = drainSnapshot()
-        if (!initial.output.isEmpty || initial.isTerminal) return initial.output
-
-        withTimeoutOrNull(yieldTime) {
-            changeVersion.first { version -> version != initial.changeVersion }
-        }
-        return drain()
-    }
-
-    override suspend fun drainSnapshot(): VersionedStdoutBufferSnapshot = stateMutex.withLock {
+    override suspend fun read(offset: ULong, limit: UInt): StdoutSlice = stateMutex.withLock {
         abortCause.value?.let { throw it }
         if (ownerJob?.isActive == false && !terminal.value) {
             ownerJob.ensureActive()
         }
         currentCoroutineContext().ensureActive()
-        VersionedStdoutBufferSnapshot(
-            output = retainedOutput.drain(),
-            changeVersion = changeVersion.value,
-            isTerminal = terminal.value,
-        )
+        retainedOutput.read(offset = offset, limit = limit)
     }
 
     override suspend fun flush() {
@@ -112,7 +81,6 @@ private class MutableStdoutBufferImpl(
 
     override fun signalTerminal() {
         terminal.value = true
-        changeVersion.update { version -> version + 1L }
     }
 
     override fun finish() {
@@ -138,7 +106,6 @@ private class MutableStdoutBufferImpl(
                         result.getOrNull()?.let { bytes ->
                             stateMutex.withLock {
                                 retainedOutput.append(bytes)
-                                changeVersion.update { version -> version + 1L }
                             }
                         }
                         !result.isClosed
@@ -162,77 +129,230 @@ private class MutableStdoutBufferImpl(
     }
 }
 
-/** Bounded byte retention matching unified-exec's stable head/tail policy. */
-private class HeadTailBytes(maximumRetainedByteCount: Int) {
+private val EmptyByteArray: ByteArray = ByteArray(0)
+
+/**
+ * Non-destructive bounded stream retaining leading `head` (`headTailRetentionPercent` of [quotaByteCount])
+ * and trailing `tail` (`headTailRetentionPercent` of [quotaByteCount]).
+ */
+private class RetainedStdoutBytes(
+    quotaByteCount: Int,
+    headTailRetentionPercent: Int,
+) {
     private val headByteBudget: Int
-    private val tailByteBudget: Int
-    private val head: Buffer = Buffer()
-    private val tail: Buffer = Buffer()
-    private var omittedByteCount: Long = 0L
+    private val tailRing: RingBytes
+    private var headBuffer: ByteArray = EmptyByteArray
+    private var headSize: Int = 0
+    private var totalByteCount: ULong = 0uL
 
     init {
-        require(maximumRetainedByteCount >= 0) {
-            "maximumRetainedByteCount must not be negative."
+        require(quotaByteCount >= 0) { "quotaByteCount must not be negative." }
+        require(headTailRetentionPercent in 0..50) {
+            "headTailRetentionPercent must be in 0..50."
         }
-        headByteBudget = maximumRetainedByteCount / 2
-        tailByteBudget = maximumRetainedByteCount - headByteBudget
+        headByteBudget = ((quotaByteCount.toLong() * headTailRetentionPercent) / 100L).toInt()
+        val tailByteBudget = ((quotaByteCount.toLong() * headTailRetentionPercent) / 100L).toInt()
+        tailRing = RingBytes(tailByteBudget)
     }
 
     fun append(bytes: ByteArray) {
         if (bytes.isEmpty()) return
 
-        var offset = 0
-        val remainingHead: Long = (headByteBudget.toLong() - head.size).coerceAtLeast(0L)
-        val headLength: Int = minOf(remainingHead, bytes.size.toLong()).toInt()
+        totalByteCount = totalByteCount.saturatingPlus(bytes.size.toULong())
+        val remainingHead = headByteBudget - headSize
+        val headLength = minOf(remainingHead, bytes.size).coerceAtLeast(0)
         if (headLength > 0) {
-            head.write(bytes, offset, offset + headLength)
-            offset += headLength
+            ensureHeadCapacity(headSize + headLength)
+            bytes.copyInto(
+                destination = headBuffer,
+                destinationOffset = headSize,
+                startIndex = 0,
+                endIndex = headLength,
+            )
+            headSize += headLength
         }
-        appendTail(bytes, offset)
+        if (headLength < bytes.size) {
+            tailRing.append(bytes, offset = headLength)
+        }
     }
 
-    fun drain(): StdoutBufferSnapshot {
-        val drainedHead: ByteArray = head.readByteArray()
-        val drainedTail: ByteArray = tail.readByteArray()
-        val omitted: Long = omittedByteCount
-        head.clear()
-        tail.clear()
-        omittedByteCount = 0L
-        return StdoutBufferSnapshot(
-            head = drainedHead,
-            tail = drainedTail,
+    fun read(offset: ULong, limit: UInt): StdoutSlice {
+        val total = totalByteCount
+        if (offset >= total) {
+            return StdoutSlice(
+                head = EmptyByteArray,
+                tail = EmptyByteArray,
+                omittedByteCount = 0uL,
+                offset = total,
+                nextOffset = total,
+                totalByteCount = total,
+            )
+        }
+        if (limit == 0u) {
+            return StdoutSlice(
+                head = EmptyByteArray,
+                tail = EmptyByteArray,
+                omittedByteCount = 0uL,
+                offset = offset,
+                nextOffset = offset,
+                totalByteCount = total,
+            )
+        }
+
+        val headEnd = headSize.toULong()
+        val tailSize = tailRing.size.toULong()
+        val tailStart = total - tailSize
+
+        var remaining = limit.toULong()
+        var cursor = offset
+
+        val headPart = if (cursor < headEnd) {
+            val headTake = minOf(headEnd - cursor, remaining)
+            val startIdx = cursor.toInt()
+            val endIdx = (cursor + headTake).toInt()
+            cursor += headTake
+            remaining -= headTake
+            headBuffer.copyOfRange(startIdx, endIdx)
+        } else {
+            EmptyByteArray
+        }
+
+        if (remaining == 0uL) {
+            return StdoutSlice(
+                head = headPart,
+                tail = EmptyByteArray,
+                omittedByteCount = 0uL,
+                offset = offset,
+                nextOffset = cursor,
+                totalByteCount = total,
+            )
+        }
+
+        val omitted = if (cursor < tailStart) {
+            (tailStart - cursor).also { cursor = tailStart }
+        } else {
+            0uL
+        }
+
+        val tailAvailable = total - cursor
+        val tailTake = minOf(tailAvailable, remaining)
+        val tailPart = tailRing.slice(
+            tailOffset = (cursor - tailStart).toInt(),
+            length = tailTake.toInt(),
+        )
+        val nextOffset = cursor + tailTake
+
+        if (omitted == 0uL) {
+            val contiguous = when {
+                headPart.isEmpty() -> tailPart
+                tailPart.isEmpty() -> headPart
+                else -> headPart + tailPart
+            }
+            return StdoutSlice(
+                head = contiguous,
+                tail = EmptyByteArray,
+                omittedByteCount = 0uL,
+                offset = offset,
+                nextOffset = nextOffset,
+                totalByteCount = total,
+            )
+        }
+
+        return StdoutSlice(
+            head = headPart,
+            tail = tailPart,
             omittedByteCount = omitted,
+            offset = offset,
+            nextOffset = nextOffset,
+            totalByteCount = total,
         )
     }
 
-    private fun appendTail(bytes: ByteArray, offset: Int) {
-        val remainingByteCount: Int = bytes.size - offset
-        if (remainingByteCount == 0) return
-        if (tailByteBudget == 0) {
-            omittedByteCount = omittedByteCount.saturatingPlus(remainingByteCount.toLong())
-            return
-        }
-        if (remainingByteCount >= tailByteBudget) {
-            omittedByteCount = omittedByteCount
-                .saturatingPlus(tail.size)
-                .saturatingPlus((remainingByteCount - tailByteBudget).toLong())
-            tail.clear()
-            tail.write(bytes, bytes.size - tailByteBudget, bytes.size)
+    private fun ensureHeadCapacity(required: Int) {
+        if (headBuffer.size >= required) return
+        val newCapacity = maxOf(
+            required,
+            minOf(headByteBudget, maxOf(256, headBuffer.size * 2)),
+        )
+        headBuffer = headBuffer.copyOf(newCapacity)
+    }
+}
+
+private class RingBytes(
+    private val capacity: Int,
+) {
+    private val buffer: ByteArray = if (capacity > 0) ByteArray(capacity) else EmptyByteArray
+    private var start: Int = 0
+    var size: Int = 0
+        private set
+
+    fun append(bytes: ByteArray, offset: Int) {
+        val length = bytes.size - offset
+        if (length <= 0 || capacity == 0) return
+
+        if (length >= capacity) {
+            bytes.copyInto(
+                destination = buffer,
+                destinationOffset = 0,
+                startIndex = bytes.size - capacity,
+                endIndex = bytes.size,
+            )
+            start = 0
+            size = capacity
             return
         }
 
-        tail.write(bytes, offset, bytes.size)
-        val excessByteCount: Long = tail.size - tailByteBudget.toLong()
-        if (excessByteCount > 0L) {
-            tail.skip(excessByteCount)
-            omittedByteCount = omittedByteCount.saturatingPlus(excessByteCount)
+        if (size + length > capacity) {
+            val dropped = (size + length) - capacity
+            start = (start + dropped) % capacity
+            size -= dropped
         }
+
+        val writePos = (start + size) % capacity
+        val firstPart = minOf(length, capacity - writePos)
+        bytes.copyInto(
+            destination = buffer,
+            destinationOffset = writePos,
+            startIndex = offset,
+            endIndex = offset + firstPart,
+        )
+        if (firstPart < length) {
+            bytes.copyInto(
+                destination = buffer,
+                destinationOffset = 0,
+                startIndex = offset + firstPart,
+                endIndex = offset + length,
+            )
+        }
+        size += length
+    }
+
+    fun slice(tailOffset: Int, length: Int): ByteArray {
+        if (length <= 0 || capacity == 0) return EmptyByteArray
+        val out = ByteArray(length)
+        val readPos = (start + tailOffset) % capacity
+        val firstPart = minOf(length, capacity - readPos)
+        buffer.copyInto(
+            destination = out,
+            destinationOffset = 0,
+            startIndex = readPos,
+            endIndex = readPos + firstPart,
+        )
+        if (firstPart < length) {
+            buffer.copyInto(
+                destination = out,
+                destinationOffset = firstPart,
+                startIndex = 0,
+                endIndex = length - firstPart,
+            )
+        }
+        return out
     }
 }
 
 private fun Throwable.asStdoutBufferCancellation(): CancellationException =
     this as? CancellationException
-        ?: CancellationException(message ?: "Process output drain was aborted.")
+        ?: CancellationException(message ?: "Process output buffer was aborted.")
 
-private fun Long.saturatingPlus(other: Long): Long =
-    if (other > 0L && this > Long.MAX_VALUE - other) Long.MAX_VALUE else this + other
+private fun ULong.saturatingPlus(other: ULong): ULong =
+    if (this > ULong.MAX_VALUE - other) ULong.MAX_VALUE else this + other

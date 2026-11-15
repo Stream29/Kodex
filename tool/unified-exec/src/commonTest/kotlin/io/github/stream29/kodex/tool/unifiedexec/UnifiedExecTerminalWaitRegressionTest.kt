@@ -20,7 +20,8 @@ import io.github.stream29.kodex.utils.shellclient.ShellProcessCommand
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import io.github.stream29.kodex.utils.shellclient.ShellType
 import io.github.stream29.kodex.utils.shellclient.StdoutBuffer
-import io.github.stream29.kodex.utils.shellclient.StdoutBufferSnapshot
+import io.github.stream29.kodex.utils.shellclient.StdoutSlice
+import io.github.stream29.kodex.utils.shellclient.renderedBytes
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.CoroutineScope
@@ -51,7 +52,6 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -94,28 +94,36 @@ private data class WaitRegressionShellSettings(
     override val shell: Shell = unifiedExecTestShell,
 ) : ShellSettings
 
-private val EmptyControllableStdoutSnapshot: StdoutBufferSnapshot =
-    StdoutBufferSnapshot(head = ByteArray(0), tail = ByteArray(0), omittedByteCount = 0L)
-
 private class ControllableStdoutBuffer : StdoutBuffer {
-    private val builder: StringBuilder = StringBuilder()
+    private var bytes: ByteArray = ByteArray(0)
 
     fun append(text: String) {
-        builder.append(text)
+        bytes += text.encodeToByteArray()
     }
 
-    override suspend fun drain(): StdoutBufferSnapshot {
-        if (builder.isEmpty()) return EmptyControllableStdoutSnapshot
-        val bytes = builder.toString().encodeToByteArray()
-        builder.clear()
-        return StdoutBufferSnapshot(
-            head = bytes,
+    override suspend fun read(offset: ULong, limit: UInt): StdoutSlice {
+        val total = bytes.size.toULong()
+        if (offset >= total) {
+            return StdoutSlice(
+                head = ByteArray(0),
+                tail = ByteArray(0),
+                omittedByteCount = 0uL,
+                offset = total,
+                nextOffset = total,
+                totalByteCount = total,
+            )
+        }
+        val take = minOf(total - offset, limit.toULong())
+        val slice = bytes.copyOfRange(offset.toInt(), (offset + take).toInt())
+        return StdoutSlice(
+            head = slice,
             tail = ByteArray(0),
-            omittedByteCount = 0L,
+            omittedByteCount = 0uL,
+            offset = offset,
+            nextOffset = offset + take,
+            totalByteCount = total,
         )
     }
-
-    override suspend fun read(yieldTime: Duration): StdoutBufferSnapshot = drain()
 }
 
 private class ControllableProcessSession(
@@ -222,7 +230,6 @@ private class VirtualWaitHarness(
 ) {
     val tools: List<Tool> = UnifiedExecTools.createTools(client)
     val execTool: Tool = tools.single { tool -> (tool.spec as ResponsesApiTool).name == UnifiedExecTools.ExecCommandName }
-    val writeTool: Tool = tools.single { tool -> (tool.spec as ResponsesApiTool).name == UnifiedExecTools.WriteStdinName }
 
     suspend fun startYieldedSession(
         command: String = "interactive-lock-holder",
@@ -295,21 +302,6 @@ private suspend fun Tool.invokeExec(arguments: ExecCommandArguments): UnifiedExe
     }
 }
 
-private suspend fun Tool.invokeWrite(arguments: WriteStdinArguments): UnifiedExecOutput {
-    val event = assertIs<StableCommandExecutionToolEvent>(
-        handle(
-            PendingCommandExecutionToolEvent(
-                callId = "call_write_wait_regression",
-                action = PendingCommandExecutionAction.WriteStdin(arguments),
-            ),
-        ),
-    )
-    return when (val completed = event.result) {
-        is StableCommandExecutionResult.Output -> completed.value
-        is StableCommandExecutionResult.Failure -> fail("write_stdin tool failed: ${completed.message}")
-    }
-}
-
 private suspend fun realTimeUnifiedExecToolClient(
     workingDirectory: Path = Path("."),
 ): UnifiedExecToolClient =
@@ -348,7 +340,7 @@ private fun createPrivateTempDirectory(prefix: String): Path {
         "$prefix-${Random.nextLong().toULong().toString(16)}",
     )
     SystemFileSystem.createDirectories(directory, mustCreate = true)
-    return directory
+    return SystemFileSystem.resolve(directory)
 }
 
 private fun deleteDirectoryRecursively(path: Path) {
@@ -423,86 +415,48 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
         }
     }
 
-    test("empty write_stdin poll stays pending at 599999 ms and yields an alive session at 600000 ms") {
+    test("completed background session stays retained in activeSessions for 600000 ms and evicts afterwards") {
         runTest {
             withVirtualWaitHarness {
-                val (sessionId, session) = startYieldedSession(
-                    command = "long-running-task",
-                    initialStdout = "booted\n",
+                val (sessionId, rawSession) = startYieldedSession(
+                    command = "background-build",
+                    initialStdout = "boot\n",
                 )
-                session.appendStdout("still-working\n")
+                val managed = assertNotNull(client.activeSessions.value[sessionId])
+                val bootSlice = managed.readOutput(offset = 0uL)
+                assertEquals("boot\n", bootSlice.head.decodeToString())
+                assertNull(managed.exitCode.value)
 
-                val pollDeferred = async(start = CoroutineStart.UNDISPATCHED) {
-                    writeTool.invokeWrite(
-                        WriteStdinArguments(
-                            sessionId = sessionId,
-                            chars = "",
-                            yieldTimeMillis = TenMinuteYieldWindowMillis,
-                        ),
-                    )
-                }
-                runCurrent()
-                assertTrue(session.drainReceivedStdin().isEmpty())
+                managed.writeStdin("go\n")
+                assertEquals(listOf("go\n"), rawSession.drainReceivedStdin())
 
-                advanceTimeBy(TenMinuteBoundaryPendingMillis)
+                rawSession.appendStdout("done\n")
+                rawSession.completeExit(42)
                 runCurrent()
-                assertFalse(pollDeferred.isCompleted, "Empty write_stdin poll must stay suspended at 599999 ms.")
-                assertFalse(session.isClosed)
+
+                assertEquals(42, managed.exitCode.value)
+                assertTrue(sessionId in client.activeSessions.value)
+
+                advanceTimeBy(UnifiedExecCompletedSessionRetentionMillis - 1L)
+                runCurrent()
+                assertTrue(
+                    sessionId in client.activeSessions.value,
+                    "Completed background session must remain addressable at 599999 ms post-exit.",
+                )
+                val deltaSlice = managed.readOutput(offset = bootSlice.nextOffset)
+                assertEquals("done\n", deltaSlice.head.decodeToString())
 
                 advanceTimeBy(1L)
                 runCurrent()
-                assertTrue(pollDeferred.isCompleted, "Empty write_stdin poll must yield at 600000 ms.")
-                val output = pollDeferred.await()
-                assertNull(output.exitCode)
-                assertEquals(sessionId, output.sessionId)
-                assertEquals("still-working\n", output.output)
-                assertFalse(session.isClosed, "Ordinary empty-poll yield must keep the session open.")
-                assertTrue(session.scope.isActive)
-                assertTrue(sessionId in client.activeSessions.value)
+                assertFalse(
+                    sessionId in client.activeSessions.value,
+                    "Completed background session must be evicted at 600000 ms post-exit.",
+                )
             }
         }
     }
 
-    test("nonempty write_stdin stays pending at 599999 ms and yields an alive session at 600000 ms") {
-        runTest {
-            withVirtualWaitHarness {
-                val (sessionId, session) = startYieldedSession(
-                    command = "interactive-long-step",
-                )
-
-                val writeDeferred = async(start = CoroutineStart.UNDISPATCHED) {
-                    writeTool.invokeWrite(
-                        WriteStdinArguments(
-                            sessionId = sessionId,
-                            chars = "continue-after-lock\n",
-                            yieldTimeMillis = TenMinuteYieldWindowMillis,
-                        ),
-                    )
-                }
-                runCurrent()
-                assertEquals(listOf("continue-after-lock\n"), session.drainReceivedStdin())
-                session.appendStdout("step-started\n")
-
-                advanceTimeBy(TenMinuteBoundaryPendingMillis)
-                runCurrent()
-                assertFalse(writeDeferred.isCompleted, "Nonempty write_stdin must stay suspended at 599999 ms.")
-                assertFalse(session.isClosed)
-
-                advanceTimeBy(1L)
-                runCurrent()
-                assertTrue(writeDeferred.isCompleted, "Nonempty write_stdin must yield at 600000 ms.")
-                val output = writeDeferred.await()
-                assertNull(output.exitCode)
-                assertEquals(sessionId, output.sessionId)
-                assertEquals("step-started\n", output.output)
-                assertFalse(session.isClosed, "Ordinary nonempty-write yield must keep the session open.")
-                assertTrue(session.scope.isActive)
-                assertTrue(sessionId in client.activeSessions.value)
-            }
-        }
-    }
-
-    test("requests above 600000 ms clamp to the 600000 ms ceiling for exec_command and write_stdin") {
+    test("requests above 600000 ms clamp to the 600000 ms ceiling for exec_command") {
         runTest {
             withVirtualWaitHarness {
                 val execDeferred = async(start = CoroutineStart.UNDISPATCHED) {
@@ -521,45 +475,7 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
                 advanceTimeBy(1L)
                 runCurrent()
                 assertTrue(execDeferred.isCompleted)
-                val sessionId = assertNotNull(execDeferred.await().sessionId)
-
-                val emptyPollDeferred = async(start = CoroutineStart.UNDISPATCHED) {
-                    client.writeStdin(
-                        WriteStdinArguments(
-                            sessionId = sessionId,
-                            chars = "",
-                            yieldTimeMillis = 1_200_000L,
-                        ),
-                    )
-                }
-                runCurrent()
-                advanceTimeBy(TenMinuteBoundaryPendingMillis)
-                runCurrent()
-                assertFalse(emptyPollDeferred.isCompleted)
-
-                advanceTimeBy(1L)
-                runCurrent()
-                assertTrue(emptyPollDeferred.isCompleted)
-                assertEquals(sessionId, emptyPollDeferred.await().sessionId)
-
-                val nonEmptyWriteDeferred = async(start = CoroutineStart.UNDISPATCHED) {
-                    client.writeStdin(
-                        WriteStdinArguments(
-                            sessionId = sessionId,
-                            chars = "input\n",
-                            yieldTimeMillis = 1_200_000L,
-                        ),
-                    )
-                }
-                runCurrent()
-                advanceTimeBy(TenMinuteBoundaryPendingMillis)
-                runCurrent()
-                assertFalse(nonEmptyWriteDeferred.isCompleted)
-
-                advanceTimeBy(1L)
-                runCurrent()
-                assertTrue(nonEmptyWriteDeferred.isCompleted)
-                assertEquals(sessionId, nonEmptyWriteDeferred.await().sessionId)
+                assertNotNull(execDeferred.await().sessionId)
             }
         }
     }
@@ -603,90 +519,9 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
                 }
             }
         }
-
-        test("empty write_stdin with 600000 ms window returns in one call when process exits at ${earlyExitMillis} ms") {
-            runTest {
-                withVirtualWaitHarness {
-                    val (sessionId, session) = startYieldedSession(command = "poll-step-$earlyExitMillis")
-                    val startedAt = currentTime
-                    val pollDeferred = async(start = CoroutineStart.UNDISPATCHED) {
-                        writeTool.invokeWrite(
-                            WriteStdinArguments(
-                                sessionId = sessionId,
-                                chars = "",
-                                yieldTimeMillis = TenMinuteYieldWindowMillis,
-                            ),
-                        )
-                    }
-                    runCurrent()
-
-                    advanceTimeBy(earlyExitMillis - 1L)
-                    runCurrent()
-                    assertFalse(
-                        pollDeferred.isCompleted,
-                        "Empty write_stdin must not yield before $earlyExitMillis ms.",
-                    )
-
-                    advanceTimeBy(1L)
-                    session.appendStdout("poll-done-$earlyExitMillis\n")
-                    session.completeExit(0)
-                    runCurrent()
-
-                    assertTrue(pollDeferred.isCompleted)
-                    assertEquals(earlyExitMillis, currentTime - startedAt)
-                    val result = pollDeferred.await()
-                    assertEquals(0, result.exitCode)
-                    assertNull(result.sessionId)
-                    assertEquals("poll-done-$earlyExitMillis\n", result.output)
-                    assertTrue(session.isClosed)
-                    assertTrue(client.activeSessions.value.isEmpty())
-                }
-            }
-        }
-
-        test("nonempty write_stdin with 600000 ms window returns in one call when process exits at ${earlyExitMillis} ms") {
-            runTest {
-                withVirtualWaitHarness {
-                    val (sessionId, session) = startYieldedSession(command = "stdin-step-$earlyExitMillis")
-                    val startedAt = currentTime
-                    val writeDeferred = async(start = CoroutineStart.UNDISPATCHED) {
-                        writeTool.invokeWrite(
-                            WriteStdinArguments(
-                                sessionId = sessionId,
-                                chars = "go-$earlyExitMillis\n",
-                                yieldTimeMillis = TenMinuteYieldWindowMillis,
-                            ),
-                        )
-                    }
-                    runCurrent()
-                    assertEquals(listOf("go-$earlyExitMillis\n"), session.drainReceivedStdin())
-
-                    advanceTimeBy(earlyExitMillis - 1L)
-                    runCurrent()
-                    assertFalse(
-                        writeDeferred.isCompleted,
-                        "Nonempty write_stdin must not yield before $earlyExitMillis ms (including old 30s/300s caps).",
-                    )
-
-                    advanceTimeBy(1L)
-                    session.appendStdout("stdin-done-$earlyExitMillis\n")
-                    session.completeExit(0)
-                    runCurrent()
-
-                    assertTrue(writeDeferred.isCompleted)
-                    assertEquals(earlyExitMillis, currentTime - startedAt)
-                    val result = writeDeferred.await()
-                    assertEquals(0, result.exitCode)
-                    assertNull(result.sessionId)
-                    assertEquals("stdin-done-$earlyExitMillis\n", result.output)
-                    assertTrue(session.isClosed)
-                    assertTrue(client.activeSessions.value.isEmpty())
-                }
-            }
-        }
     }
 
-    test("phased stdout arrival does not end wait early and subsequent calls drain only remaining output") {
+    test("phased stdout arrival does not end wait early and cursor continuation reads only new output") {
         runTest {
             withVirtualWaitHarness {
                 val execDeferred = async(start = CoroutineStart.UNDISPATCHED) {
@@ -718,36 +553,19 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
                 assertNull(firstResult.exitCode)
                 assertEquals("chunk-1\nchunk-2\n", firstResult.output)
 
-                val followUpDeferred = async(start = CoroutineStart.UNDISPATCHED) {
-                    client.writeStdin(
-                        WriteStdinArguments(
-                            sessionId = sessionId,
-                            chars = "",
-                            yieldTimeMillis = TenMinuteYieldWindowMillis,
-                        ),
-                    )
-                }
-                runCurrent()
+                val managed = assertNotNull(client.activeSessions.value[sessionId])
+                val cursorAfterFirst = managed.readOutput(offset = 0uL).nextOffset
 
                 advanceTimeBy(15_000L)
                 session.appendStdout("chunk-3\n")
-                runCurrent()
-                assertFalse(followUpDeferred.isCompleted, "Intermediate output burst must not end write_stdin wait early.")
-
                 advanceTimeBy(25_000L)
                 session.appendStdout("chunk-4\n")
                 session.completeExit(42)
                 runCurrent()
 
-                assertTrue(followUpDeferred.isCompleted)
-                val finalResult = followUpDeferred.await()
-                assertEquals(42, finalResult.exitCode)
-                assertNull(finalResult.sessionId)
-                assertEquals("chunk-3\nchunk-4\n", finalResult.output)
-                assertFalse("chunk-1" in finalResult.output)
-                assertFalse("chunk-2" in finalResult.output)
-                assertTrue(session.isClosed)
-                assertTrue(client.activeSessions.value.isEmpty())
+                assertEquals(42, managed.exitCode.value)
+                val delta = managed.readOutput(offset = cursorAfterFirst).renderedBytes().decodeToString()
+                assertEquals("chunk-3\nchunk-4\n", delta)
             }
         }
     }
@@ -763,35 +581,6 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
                 assertTrue(yieldedSession.scope.isActive)
                 assertTrue(yieldedSessionId in client.activeSessions.value)
 
-                val cancelledWrite = async(start = CoroutineStart.UNDISPATCHED) {
-                    client.writeStdin(
-                        WriteStdinArguments(
-                            sessionId = yieldedSessionId,
-                            chars = "",
-                            yieldTimeMillis = TenMinuteYieldWindowMillis,
-                        ),
-                    )
-                }
-                runCurrent()
-                advanceTimeBy(50_000L)
-                runCurrent()
-                assertFalse(cancelledWrite.isCompleted)
-
-                cancelledWrite.cancelAndJoin()
-                runCurrent()
-                assertTrue(yieldedSession.isClosed, "Cancelling write_stdin must close the underlying session.")
-                assertFalse(yieldedSession.scope.isActive)
-                assertFalse(yieldedSessionId in client.activeSessions.value)
-                assertFailsWith<UnifiedExecToolException> {
-                    client.writeStdin(
-                        WriteStdinArguments(
-                            sessionId = yieldedSessionId,
-                            chars = "",
-                            yieldTimeMillis = UnifiedExecMinimumEmptyPollYieldTimeMillis,
-                        ),
-                    )
-                }
-
                 val cancelledExec = async(start = CoroutineStart.UNDISPATCHED) {
                     client.execCommand(
                         ExecCommandArguments(
@@ -802,7 +591,7 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
                 }
                 runCurrent()
                 val secondSession = shellClient.sessions.last()
-                val secondSessionId = client.activeSessions.value.keys.single()
+                val secondSessionId = (client.activeSessions.value.keys - yieldedSessionId).single()
                 advanceTimeBy(45_000L)
                 runCurrent()
                 assertFalse(cancelledExec.isCompleted)
@@ -811,16 +600,8 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
                 runCurrent()
                 assertTrue(secondSession.isClosed, "Cancelling exec_command must close the underlying session.")
                 assertFalse(secondSession.scope.isActive)
-                assertTrue(client.activeSessions.value.isEmpty())
-                assertFailsWith<UnifiedExecToolException> {
-                    client.writeStdin(
-                        WriteStdinArguments(
-                            sessionId = secondSessionId,
-                            chars = "",
-                            yieldTimeMillis = UnifiedExecMinimumEmptyPollYieldTimeMillis,
-                        ),
-                    )
-                }
+                assertEquals(setOf(yieldedSessionId), client.activeSessions.value.keys)
+                assertFalse(secondSessionId in client.activeSessions.value)
                 assertTrue(shellClient.isActive, "Cancelling individual calls must not cancel the shell client scope.")
             }
         }
@@ -870,7 +651,7 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
         }
     }
 
-    test("short yield window expires and follow-up long poll collects remaining output without duplication") {
+    test("short yield window expires and cursor read after writeStdin collects remaining output without duplication") {
         withTimeout(RealTimeSmokeTimeout) {
             val client = realTimeUnifiedExecToolClient()
             withWaitCleanup(cleanup = { client.closeAndAwaitSessions() }) {
@@ -883,31 +664,18 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                 )
                 val sessionId = assertNotNull(initial.sessionId)
                 assertNull(initial.exitCode)
+                val session = assertNotNull(client.activeSessions.value[sessionId])
+                val cursorAfterInitial = session.readOutput(offset = 0uL).nextOffset
 
-                val partial = client.writeStdin(
-                    WriteStdinArguments(
-                        sessionId = sessionId,
-                        chars = "resume\n",
-                        yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
-                    ),
-                )
-                assertNull(partial.exitCode)
-                assertEquals(sessionId, partial.sessionId)
+                session.writeStdin("resume\n")
+                assertEquals(0, session.exitCode.first { it != null })
 
-                val completed = client.writeStdin(
-                    WriteStdinArguments(
-                        sessionId = sessionId,
-                        chars = "",
-                        yieldTimeMillis = TenMinuteYieldWindowMillis,
-                    ),
-                )
-                assertEquals(0, completed.exitCode)
-                assertNull(completed.sessionId)
-
-                val combined = initial.output + partial.output + completed.output
-                assertEquals(1, Regex("ack:resume").findAll(combined).count(), "Combined output: $combined")
-                assertEquals(1, Regex("after-sleep").findAll(combined).count(), "Combined output: $combined")
-                assertTrue(client.activeSessions.value.isEmpty())
+                val delta = session.readOutput(offset = cursorAfterInitial).renderedBytes().decodeToString()
+                val full = session.readOutput(offset = 0uL).renderedBytes().decodeToString()
+                assertEquals(1, Regex("ack:resume").findAll(full).count(), "Full output: $full")
+                assertEquals(1, Regex("after-sleep").findAll(full).count(), "Full output: $full")
+                assertTrue("after-sleep" in delta, "Delta output: $delta")
+                assertTrue(sessionId in client.activeSessions.value)
             }
         }
     }
@@ -946,6 +714,7 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                     )
                     val holderSessionId = assertNotNull(holderInitial.sessionId)
                     assertNull(holderInitial.exitCode)
+                    val holderSession = assertNotNull(client.activeSessions.value[holderSessionId])
                     awaitFileExists(holderReadyFile)
 
                     val waiterCommand =
@@ -970,18 +739,12 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                         "Waiter command body must not execute while lock is held.",
                     )
 
-                    val holderFinal = client.writeStdin(
-                        WriteStdinArguments(
-                            sessionId = holderSessionId,
-                            chars = "release\n",
-                            yieldTimeMillis = TenMinuteYieldWindowMillis,
-                        ),
-                    )
-                    assertEquals(0, holderFinal.exitCode)
-                    assertNull(holderFinal.sessionId)
+                    holderSession.writeStdin("release\n")
+                    assertEquals(0, holderSession.exitCode.first { it != null })
+                    val holderFullOutput = holderSession.readOutput().renderedBytes().decodeToString()
                     assertTrue(
-                        "holder-released:release" in (holderInitial.output + holderFinal.output),
-                        "Holder output: ${holderInitial.output + holderFinal.output}",
+                        "holder-released:release" in holderFullOutput,
+                        "Holder output: $holderFullOutput",
                     )
 
                     val waiterResult = waiterDeferred.await()
@@ -989,7 +752,7 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                     assertNull(waiterResult.sessionId)
                     assertTrue("waiter-acquired" in waiterResult.output, "Waiter output: ${waiterResult.output}")
                     assertTrue(SystemFileSystem.exists(waiterRanFile))
-                    assertTrue(client.activeSessions.value.isEmpty())
+                    assertEquals(setOf(holderSessionId), client.activeSessions.value.keys)
                 }
                 assertFalse(SystemFileSystem.exists(tempDir))
             }
@@ -1028,6 +791,7 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                     )
                     val holderSessionId = assertNotNull(holderInitial.sessionId)
                     assertNull(holderInitial.exitCode)
+                    val holderSession = assertNotNull(client.activeSessions.value[holderSessionId])
                     awaitFileExists(holderReadyFile)
 
                     val waiterCommand =
@@ -1056,37 +820,20 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
 
                     waiterDeferred.cancelAndJoin()
                     assertTrue(waiterDeferred.isCancelled)
-                    // close() requests asynchronous termination; join owned cleanup before releasing the holder.
                     waiterJob.join()
 
                     assertEquals(setOf(holderSessionId), client.activeSessions.value.keys)
-                    assertFalse(client.activeSessions.value.getValue(holderSessionId).completed.value)
+                    assertNull(holderSession.exitCode.value)
                     assertFalse(SystemFileSystem.exists(waiterRanFile))
-                    assertFailsWith<UnifiedExecToolException> {
-                        client.writeStdin(
-                            WriteStdinArguments(
-                                sessionId = waiterSessionId,
-                                chars = "",
-                                yieldTimeMillis = UnifiedExecMinimumEmptyPollYieldTimeMillis,
-                            ),
-                        )
-                    }
 
-                    val holderFinal = client.writeStdin(
-                        WriteStdinArguments(
-                            sessionId = holderSessionId,
-                            chars = "still-holding\n",
-                            yieldTimeMillis = TenMinuteYieldWindowMillis,
-                        ),
-                    )
-                    assertEquals(0, holderFinal.exitCode)
-                    assertNull(holderFinal.sessionId)
+                    holderSession.writeStdin("still-holding\n")
+                    assertEquals(0, holderSession.exitCode.first { it != null })
+                    val holderFullOutput = holderSession.readOutput().renderedBytes().decodeToString()
                     assertTrue(
-                        "holder-alive:still-holding" in (holderInitial.output + holderFinal.output),
-                        "Holder output: ${holderInitial.output + holderFinal.output}",
+                        "holder-alive:still-holding" in holderFullOutput,
+                        "Holder output: $holderFullOutput",
                     )
                     assertFalse(SystemFileSystem.exists(waiterRanFile))
-                    assertTrue(client.activeSessions.value.isEmpty())
                 }
                 assertFalse(SystemFileSystem.exists(tempDir))
             }
