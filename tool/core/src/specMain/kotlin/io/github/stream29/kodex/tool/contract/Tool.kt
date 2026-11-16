@@ -16,11 +16,9 @@ public interface Tool : AutoCloseable {
     /**
      * Executes [pending] and returns its sole canonical completion.
      *
-     * The returned event owns the model-facing call/output projection. Runtime
-     * consumers must derive protocol items from it instead of maintaining a
-     * second raw output representation.
-     * Recoverable execution failures produce a matching failed completion;
-     * coroutine cancellation remains a cancellation signal and propagates.
+     * Domain-expected recoverable failures return a matching failed completion;
+     * unexpected exceptions propagate to the runtime caller for contextual
+     * logging and conversion, while coroutine cancellation propagates unchanged.
      */
     public suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool
 }
@@ -29,20 +27,9 @@ public interface Tool : AutoCloseable {
  * Creates a resource-free [Tool] that accepts one concrete pending clean-event
  * shape. [select] keeps the downcast at the contract boundary so tool business
  * logic receives its typed pending model directly.
- *
  */
 public expect fun <Pending : PendingToolEvent> typedTool(
     spec: ToolSpec,
     select: (PendingToolEvent) -> Pending?,
     handler: suspend (Pending) -> StableCleanEvent.CompletedTool,
 ): Tool
-
-/**
- * Executes a tool operation and converts a non-cancellation exception to a
- * matching failed completion. Cancellation and failures in the conversion
- * itself propagate to the caller.
- */
-public expect suspend fun toolCompletionOrFailure(
-    pending: PendingToolEvent,
-    operation: suspend () -> StableCleanEvent.CompletedTool,
-): StableCleanEvent.CompletedTool

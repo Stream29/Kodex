@@ -3,9 +3,9 @@ package io.github.stream29.kodex.tool.imagegeneration
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
-
-import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClient as RealOpenAiClient
+import io.github.stream29.kodex.openai.client.contract.OpenAiClient
+import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,8 +13,6 @@ import kotlinx.io.files.Path
 import kotlin.random.Random
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
-
-
 
 private suspend fun realOpenAiClient(): OpenAiClient =
     RealOpenAiClient(
@@ -41,20 +39,6 @@ private val png64x32: ByteArray
     get() = decodePng64x32()
 
 val imageGenerationToolIntegrationTest by testSuite {
-    testFixture { realOpenAiClient() } asParameterForEach {
-        test(
-            "run generates image against real endpoint",
-            testConfig = TestConfig.testScope(isEnabled = true, timeout = 300.seconds),
-        ) { client ->
-            val toolClient = ImageGenerationToolClient(client = client)
-            val output = withContext(Dispatchers.Default) {
-                toolClient.run(ImageGenToolArguments(prompt = "A tiny black square on a plain white background."))
-            }
-
-            assertTrue(output.result.isNotBlank(), "Expected generated image bytes.")
-        }
-    }
-
     testFixture {
         val testRoot = temporaryRoot()
         val openAiClient = realOpenAiClient()
@@ -67,7 +51,25 @@ val imageGenerationToolIntegrationTest by testSuite {
         deleteRecursively(root)
     } asContextForEach {
         test(
-            "run edits referenced image paths against real endpoint",
+            "generateToFile generates image against real endpoint",
+            testConfig = TestConfig.testScope(isEnabled = true, timeout = 300.seconds),
+        ) {
+            val toolClient = ImageGenerationToolClient(client = client)
+            val artifact = withContext(Dispatchers.Default) {
+                toolClient.generateToFile(
+                    ImageGenToolArguments(prompt = "A tiny black square on a plain white background."),
+                    Path(root, "generated"),
+                )
+            }
+
+            assertTrue(
+                SystemCoroutineFileSystem.readBytes(Path(artifact.path)).isNotEmpty(),
+                "Expected generated image bytes.",
+            )
+        }
+
+        test(
+            "generateToFile edits referenced image paths against real endpoint",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 300.seconds),
         ) {
             val imagePath = Path(root, "image.png")
@@ -76,17 +78,20 @@ val imageGenerationToolIntegrationTest by testSuite {
                 client = client,
                 workingDirectoryProvider = { root },
             )
-            val output = withContext(Dispatchers.Default) {
-                toolClient.run(
+            val artifact = withContext(Dispatchers.Default) {
+                toolClient.generateToFile(
                     ImageGenToolArguments(
                         prompt = "Keep the image simple and make the rectangle slightly brighter.",
                         referencedImagePaths = listOf("image.png"),
                     ),
+                    Path(root, "edited"),
                 )
             }
 
-            assertTrue(output.result.isNotBlank(), "Expected edited image bytes.")
+            assertTrue(
+                SystemCoroutineFileSystem.readBytes(Path(artifact.path)).isNotEmpty(),
+                "Expected edited image bytes.",
+            )
         }
     }
-
 }

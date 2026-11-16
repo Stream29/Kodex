@@ -17,7 +17,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 
-public actual fun CoroutineScope.McpStreamableHttpClient(): HttpClient {
+/**
+ * Creates one MCP Streamable HTTP client owned by this scope.
+ *
+ * The returned value is an ordinary Ktor [HttpClient]. Completing or cancelling
+ * the owning scope cancels the client and all of its in-flight requests.
+ *
+ * @throws IllegalArgumentException when the owning scope has no Job.
+ */
+internal fun CoroutineScope.McpStreamableHttpClient(): HttpClient {
     val ownerJob = requireNotNull(coroutineContext[Job]) {
         "McpStreamableHttpClient requires an owning CoroutineScope with a Job."
     }
@@ -30,7 +38,15 @@ public actual fun CoroutineScope.McpStreamableHttpClient(): HttpClient {
     }
 }
 
-public actual fun HttpClient.withMcpAuthorization(
+/**
+ * Creates a server-isolated client view with dynamic bearer authorization.
+ *
+ * The first callback may refresh an expiring token. A 401 requests one forced
+ * refresh and retries only when a token is available. Each returned client has
+ * its own interceptor, so credentials cannot be selected by URL or leak across
+ * same-endpoint server declarations.
+ */
+internal fun HttpClient.withMcpAuthorization(
     authorize: suspend (forceRefresh: Boolean) -> String?,
 ): HttpClient =
     config {}.also { client ->
@@ -53,7 +69,13 @@ public actual fun HttpClient.withMcpAuthorization(
         }
     }
 
-public actual fun HttpClient.openMcpStreamableHttpTransport(
+/**
+ * Creates an MCP transport using this client's engine and connection pool.
+ * Configuration headers are applied to requests; authorization uses the isolated
+ * view created by [withMcpAuthorization]. Closing the transport does not close
+ * the borrowed client: its scope/connection owner releases that client.
+ */
+internal fun HttpClient.openMcpStreamableHttpTransport(
     configuration: McpServerConfiguration.StreamableHttp,
 ): Transport = StreamableHttpClientTransport(
     client = this,

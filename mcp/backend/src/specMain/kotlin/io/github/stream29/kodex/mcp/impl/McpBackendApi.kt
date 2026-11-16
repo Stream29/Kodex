@@ -4,58 +4,51 @@ package io.github.stream29.kodex.mcp.impl
 
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpClient
-import io.github.stream29.kodex.mcp.contract.McpCodexImportSource
 import io.github.stream29.kodex.mcp.contract.McpConfigurationStore
-import io.github.stream29.kodex.mcp.contract.McpImportDecision
-import io.github.stream29.kodex.mcp.contract.McpImportPreview
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
-import io.github.stream29.kodex.mcp.contract.McpManagerEffect
 import io.github.stream29.kodex.mcp.contract.McpManager
 import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
-import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttempt
-import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttemptFactory
 import io.github.stream29.kodex.mcp.contract.McpOAuthTokenRefresher
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
-import io.github.stream29.kodex.mcp.contract.McpServerDraft
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpSettings
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.coroutines.CoroutineContext
+
+/** Prepares one listener-free browser OAuth login from an uninitialized server declaration. */
+public fun interface McpOAuthLoginPreparer {
+    /**
+     * Discovers/registers OAuth metadata and prepares PKCE without opening a callback listener.
+     *
+     * @throws Throwable if validation, discovery, or dynamic registration fails.
+     */
+    public suspend fun prepare(
+        configuration: McpServerConfiguration.StreamableHttp,
+    ): PreparedMcpOAuthLogin
+}
 
 /** Default application-wide [McpManager] implementation. */
 public expect class McpManagerImpl : McpManager {
     override val servers: StateFlow<List<McpManagedServerState>>
-    override val effects: Flow<McpManagerEffect>
 
-    override suspend fun add(draft: McpServerDraft)
-    override suspend fun edit(existingServerName: String, draft: McpServerDraft)
-    override suspend fun delete(serverName: String)
-    override suspend fun setEnabled(serverName: String, enabled: Boolean)
-    override suspend fun login(serverName: String)
-    override suspend fun cancelLogin(serverName: String)
     override suspend fun logout(serverName: String)
     override suspend fun reconnect(serverName: String)
-    override suspend fun previewCodexImport(filter: String): McpImportPreview
-    override suspend fun applyCodexImport(
-        previewId: Long,
-        decisions: Map<String, McpImportDecision>,
-    )
     override fun close()
 
     /**
-     * Runs browser authorization using [onPrepared] to deliver the prepared attempt.
+     * Runs browser authorization using [awaitAuthorizationCode] to publish the prepared login and
+     * receive the accepted authorization code.
      * @throws IllegalArgumentException If another attempt is active, the server cannot use OAuth,
      * or a redirect/identity check fails.
      * @throws IllegalStateException If the manager is closed, or the server is removed or stops
      * using HTTP during authorization.
-     * @throws Throwable If attempt creation, persistence, the callback, exchange or cleanup fails.
+     * @throws Throwable If preparation, persistence, callback waiting, or code exchange fails.
      */
     public suspend fun loginWithPreparedCallback(
         serverName: String,
         expectedRedirectUri: String? = null,
-        onPrepared: suspend (McpOAuthLoginAttempt) -> Unit,
+        awaitAuthorizationCode: suspend (PreparedMcpOAuthLogin) -> String,
     )
 
     /**
@@ -77,8 +70,7 @@ public expect class McpManagerImpl : McpManager {
 public expect fun CoroutineScope.McpManagerImpl(
     store: McpConfigurationStore,
     service: McpService,
-    codexImportSource: McpCodexImportSource,
-    loginAttemptFactory: McpOAuthLoginAttemptFactory,
+    loginPreparer: McpOAuthLoginPreparer,
 ): McpManagerImpl
 
 /**
@@ -91,8 +83,6 @@ public expect class McpServiceImpl : McpService, CoroutineScope {
     override val coroutineContext: CoroutineContext
     override val clients: StateFlow<Map<String, McpClient>>
     override val authentication: StateFlow<Map<String, McpAuthenticationState>>
-    override suspend fun invalidate(serverName: String)
-    override suspend fun refresh()
     override fun close()
 }
 
@@ -105,12 +95,8 @@ public expect fun CoroutineScope.McpServiceImpl(
     tokenRefresher: McpOAuthTokenRefresher? = null,
 ): McpServiceImpl
 
-/** Shared OAuth browser-login and token-refresh implementation for Streamable HTTP servers. */
-public expect class DefaultMcpOAuthClient : McpOAuthLoginAttemptFactory, McpOAuthTokenRefresher {
-    override suspend fun create(
-        configuration: McpServerConfiguration.StreamableHttp,
-    ): McpOAuthLoginAttempt
-
+/** Shared OAuth browser-login preparation and token-refresh implementation for Streamable HTTP servers. */
+public expect class DefaultMcpOAuthClient : McpOAuthLoginPreparer, McpOAuthTokenRefresher {
     /**
      * Discovers/registers and prepares PKCE without opening a callback listener.
      *
@@ -119,7 +105,7 @@ public expect class DefaultMcpOAuthClient : McpOAuthLoginAttemptFactory, McpOAut
      * @throws IllegalStateException if required metadata fields are missing, neither a client id
      * nor a registration endpoint is available, or dynamic registration is rejected.
      */
-    public suspend fun prepare(
+    override suspend fun prepare(
         configuration: McpServerConfiguration.StreamableHttp,
     ): PreparedMcpOAuthLogin
 

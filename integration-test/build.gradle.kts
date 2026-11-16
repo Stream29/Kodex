@@ -8,8 +8,6 @@ plugins {
 kotlin {
     sourceSets {
         commonTest.dependencies {
-            implementation(project(":agent-context-prefix"))
-            implementation(project(":agent-runtime-decorator-compact"))
             implementation(project(":agent-runtime-composition"))
             implementation(project(":agent-state-core"))
             implementation(project(":agent-state-test"))

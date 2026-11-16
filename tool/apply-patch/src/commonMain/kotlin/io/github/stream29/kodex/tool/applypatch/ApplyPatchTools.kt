@@ -13,7 +13,9 @@ import io.github.stream29.kodex.openai.FreeformTool
 import io.github.stream29.kodex.openai.FreeformToolFormat
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.contract.Tool
-import io.github.stream29.kodex.tool.contract.toolCompletionOrFailure
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.cancellation.CancellationException
 
 internal actual object ApplyPatchToolImplementation {
     public actual val spec: ToolSpec = FreeformTool(
@@ -25,9 +27,6 @@ internal actual object ApplyPatchToolImplementation {
             definition = ApplyPatchGrammar,
         ),
     )
-
-    public actual fun createTool(client: ApplyPatchToolClient): Tool =
-        ApplyPatchTool(client)
 }
 
 public actual class ApplyPatchTool actual constructor(
@@ -37,8 +36,9 @@ public actual class ApplyPatchTool actual constructor(
 
     public actual override fun close(): Unit = Unit
 
-    public actual override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
-        toolCompletionOrFailure(pending) {
+    public actual override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool {
+        currentCoroutineContext().ensureActive()
+        return try {
             when (pending) {
                 is PendingFunctionToolEvent -> {
                     val message = "apply_patch received function-call JSON payload"
@@ -56,8 +56,14 @@ public actual class ApplyPatchTool actual constructor(
                 is PendingPatchToolEvent -> handlePatch(pending)
 
                 else -> error("apply_patch requires a parsed pending patch event.")
-            }
+            }.also { currentCoroutineContext().ensureActive() }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Exception) {
+            currentCoroutineContext().ensureActive()
+            throw failure
         }
+    }
 
     private suspend fun handlePatch(
         pending: PendingPatchToolEvent,
@@ -80,5 +86,4 @@ public actual class ApplyPatchTool actual constructor(
             )
         }
     }
-
 }

@@ -4,6 +4,7 @@ import org.gradle.kotlin.dsl.kotlin
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
+import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
 
 internal fun Project.configureCoordinates() {
     group = "io.github.stream29"
@@ -63,5 +64,10 @@ internal fun KotlinMultiplatformExtension.configureCommonTests(project: Project)
     sourceSets.getByName("commonTest").dependencies {
         implementation(project.dependencies.kotlin("test"))
         implementation(libs.findLibrary("test-balloon-framework-core").get())
+    }
+    project.tasks.withType(KotlinNativeTest::class.java).configureEach {
+        if ((environment["TMPDIR"] as? String).isNullOrBlank()) {
+            environment("TMPDIR", System.getProperty("java.io.tmpdir"))
+        }
     }
 }

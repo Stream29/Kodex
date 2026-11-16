@@ -556,34 +556,6 @@ val openAiSubscriptionSerializationTest by testSuite {
         )
     }
 
-    test("function tool omits internal output schema from Responses wire") {
-        val outputSchema = ObjectPropertyDefinition(
-            properties = mapOf("image_url" to StringPropertyDefinition()),
-        )
-        val tool = ResponsesApiTool(
-            name = "view_image",
-            description = "View an image",
-            parameters = ObjectPropertyDefinition(),
-            outputSchema = outputSchema,
-        )
-
-        assertEquals(outputSchema, tool.outputSchema)
-        assertEquals(
-            json.parseToJsonElement(
-                """
-                    {
-                      "type": "function",
-                      "name": "view_image",
-                      "description": "View an image",
-                      "strict": false,
-                      "parameters": { "type": "object" }
-                    }
-                """.trimIndent(),
-            ),
-            encodeTool(tool),
-        )
-    }
-
     test("namespace tool serializes expected wire shape") {
         val tool = ResponsesApiNamespace(
             name = "mcp__demo__",

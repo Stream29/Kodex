@@ -8,10 +8,10 @@ import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpConfigurationStore
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
-import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttemptFactory
 import io.github.stream29.kodex.mcp.contract.McpOAuthTokenRefresher
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.impl.McpManagerImpl
+import io.github.stream29.kodex.mcp.impl.McpOAuthLoginPreparer
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
@@ -47,7 +47,7 @@ public expect suspend fun <R> withBackendGlobalState(
     client: OpenAiClient,
     authStore: OpenAiAuthStore,
     tokenRefresher: McpOAuthTokenRefresher,
-    loginAttemptFactory: McpOAuthLoginAttemptFactory,
+    loginPreparer: McpOAuthLoginPreparer,
     block: suspend CoroutineScope.(BackendGlobalState) -> R,
 ): R
 

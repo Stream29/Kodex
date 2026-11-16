@@ -9,6 +9,7 @@ import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.cli.settings.openBackendSettings
 import io.github.stream29.kodex.mcp.contract.*
+import io.github.stream29.kodex.mcp.impl.McpOAuthLoginPreparer
 import io.github.stream29.kodex.mcp.impl.PreparedMcpOAuthLogin
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
@@ -447,7 +448,7 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
                 ))
                 val settings = unified.backendStore
                 lateinit var fixture: OAuthFixture
-                val bridge = BackendMcpOAuthBridge { config ->
+                val preparer = McpOAuthLoginPreparer { config ->
                     fixture.mcpPreparations++
                     fixture.mcpPrepareGate()
                     val oauth = config.oauth as McpOAuthConfiguration.Uninitialized
@@ -466,7 +467,7 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
                 }
                 withBackendGlobalState(
                     settings, unified, root, root, Path(root, "codex"),
-                    mockOpenAiClient { listModels { awaitCancellation() } }, credentials, bridge,
+                    mockOpenAiClient { listModels { awaitCancellation() } }, credentials, preparer,
                     serviceFactory = { _, _ -> OAuthTestMcpService() },
                 ) { global ->
                     val oauth = BackendOAuth(this, credentials, login, global.mcpManager) { duration ->
@@ -580,8 +581,6 @@ private class OwnedIntegrationListener(override val redirectUri: String) : OAuth
 private class OAuthTestMcpService : McpService {
     override val clients = MutableStateFlow<Map<String, McpClient>>(emptyMap())
     override val authentication = MutableStateFlow<Map<String, McpAuthenticationState>>(emptyMap())
-    override suspend fun invalidate(serverName: String): Unit = error("No Replace command.")
-    override suspend fun refresh() = Unit
     override fun close() = Unit
 }
 private fun OAuthAuthorization.callback(redirect: String): String = URLBuilder(redirect).apply {

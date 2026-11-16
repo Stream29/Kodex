@@ -294,32 +294,12 @@ public interface KodexAgentState : CoroutineScope {
     public suspend fun consumeSteer(): List<StableIndexEvent.Steerable>
 
     /**
-     * Injects model-visible stable clean events without reopening a generic
-     * storage write API.
-     *
-     * User messages apply the same historical turn-boundary inference as
-     * [appendUserMessage]: a preceding non-commentary assistant message starts
-     * a new turn; consecutive user messages and assistant commentary do not.
-     *
-     * An empty [events] list is a no-op and returns the current visible index.
-     * Non-empty lists are persisted on the stable timeline as one atomic state
-     * transition in the supplied order. Pending calls must enter through a
-     * model response, and pending completion must use [completeToolCall].
-     * Storage failures propagate; committed prefixes are not rolled back.
-     *
-     * @throws KodexAgentStateInvalidTransitionException when a non-empty
-     * injection conflicts with an in-flight atomic operation.
-     * @throws CancellationException when admission or writing is cancelled.
-     */
-    public suspend fun injectHistory(events: List<StableIndexEvent.Steerable>): Int
-
-    /**
      * Appends one user message and updates the settings turn id when it starts
      * a new logical turn.
      *
      * A user message following an assistant commentary message continues the
      * current turn. A user message following an assistant final message starts
-     * a new turn. A user-role context injection must use [injectHistory].
+     * a new turn.
      * Storage failures propagate without compensating committed writes.
      *
      * @throws KodexAgentStateInvalidTransitionException when user append is not legal.

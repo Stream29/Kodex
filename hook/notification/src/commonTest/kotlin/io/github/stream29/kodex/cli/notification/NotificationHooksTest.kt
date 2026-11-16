@@ -25,7 +25,6 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.json.Json
 import kotlin.random.Random
 import kotlin.test.*
-import kotlin.time.Duration
 import kotlin.time.Instant
 
 private val event = Notification.Stop.UnhandledError(4, "literal $(touch unwanted)\n\"JSON\"")
@@ -196,6 +195,22 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
             }) { name, _ -> failed += name }
             assertEquals(listOf("slow", "next"), seen)
             assertEquals(listOf("slow"), failed)
+        }
+    }
+    test("notifyUnhandledErrorHooks selects stop_unhandled_error hooks and formats unhandled_error payload") {
+        runTest {
+            val hooks = listOf(
+                NotificationHook("skip", setOf(NotificationHookType.StopAssistantMessage), "skip"),
+                hook("report"),
+            )
+            val seen = mutableListOf<Pair<String, String>>()
+            notifyUnhandledErrorHooks("boom", hooks, Path("/home"), { command, input ->
+                seen += command.command to input
+            }) { _, failure -> throw failure }
+            assertEquals(
+                listOf("report" to """{"type":"unhandled_error","message":"boom"}"""),
+                seen,
+            )
         }
     }
 }

@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.mcp.impl
 
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.ReservedMcpServerNames
@@ -47,6 +48,16 @@ public actual fun validateMcpConfigurationUpdate(
         }
     }
 }
+
+internal fun McpServerConfiguration.persistedAuthenticationState(): McpAuthenticationState =
+    when (this) {
+        is McpServerConfiguration.Stdio -> McpAuthenticationState.NotConfigured
+        is McpServerConfiguration.StreamableHttp -> when (oauth) {
+            null -> McpAuthenticationState.NotConfigured
+            is McpOAuthConfiguration.Uninitialized -> McpAuthenticationState.LoginRequired
+            is McpOAuthConfiguration.Initialized -> McpAuthenticationState.Authorized
+        }
+    }
 
 private fun validateNames(names: Set<String>, kind: String) {
     val normalized = names.map(String::trim)

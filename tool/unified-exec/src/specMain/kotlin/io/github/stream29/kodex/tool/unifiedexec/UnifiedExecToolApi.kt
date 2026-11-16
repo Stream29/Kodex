@@ -8,8 +8,6 @@ import kotlinx.schema.json.ObjectPropertyDefinition
 
 public expect val ExecCommandParametersSchema: ObjectPropertyDefinition
 
-public expect val UnifiedExecOutputSchema: ObjectPropertyDefinition
-
 public object UnifiedExecTools {
     public const val ExecCommandName: String = "exec_command"
 
@@ -19,12 +17,12 @@ public object UnifiedExecTools {
     public val execCommandSpec: ResponsesApiTool
         get() = UnifiedExecToolImplementation.execCommandSpec
 
-    /** Creates the unified-exec model tools around [client]. */
-    public fun createTools(client: UnifiedExecClient): List<Tool> =
-        UnifiedExecToolImplementation.createTools(client)
+    /** Creates the unified-exec model tool around [client]. */
+    public fun createTool(client: UnifiedExecClient): Tool =
+        UnifiedExecToolImplementation.createTool(client)
 }
 
 internal expect object UnifiedExecToolImplementation {
     val execCommandSpec: ResponsesApiTool
-    fun createTools(client: UnifiedExecClient): List<Tool>
+    fun createTool(client: UnifiedExecClient): Tool
 }

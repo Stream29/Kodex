@@ -26,8 +26,8 @@ import io.github.stream29.kodex.openai.resolvedAutoCompactionTokenLimit
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import io.github.stream29.kodex.rpc.local.withLocalRpcClient
-import io.github.stream29.kodex.tool.imagegeneration.GeneratedImageArtifact
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
+import io.github.stream29.kodex.rpc.models.GeneratedImageArtifact
+import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.unifiedexec.KodexAgentIdEnvironmentVariable
 import io.github.stream29.kodex.tool.unifiedexec.KodexHomeEnvironmentVariable

@@ -2,12 +2,9 @@ package io.github.stream29.kodex.agentruntime.impl
 
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
-import io.github.stream29.kodex.agentruntime.decorator.compact.compactionRuntime
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.AgentStopEvent
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
-import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
-import io.github.stream29.kodex.agentruntime.decorator.tool.toolRuntime
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -20,6 +17,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.callId
 import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
@@ -27,7 +25,6 @@ import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
-import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventOutput
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
@@ -56,88 +53,65 @@ import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Clock
 
+internal interface ResumableAgentLayer : KodexAgentState {
+    suspend fun resume()
+}
+
 /** Builds the root Agent runtime. */
 public actual fun KodexAgentState.buildMasterAgentRuntime(
     dependencies: KodexAgentDependencies,
 ): AgentRuntime {
     val sessionLogger = RuntimeLogger.session(storage.uri)
     return try {
-        buildAgentRuntime(sessionLogger) { agentLogger ->
-            masterRuntimeLayer(
-                dependencies = dependencies,
-                logger = agentLogger,
-            )
-        }.also {
-            sessionLogger.info { "Session opened." }
+        val logger = sessionLogger.agent()
+        val runtime = try {
+            val fixedTools = fixedTools(dependencies)
+            val delegate = fixedTools.tools.closeOnFailure {
+                compactionRuntime(
+                    modelCatalog = dependencies.modelCatalog,
+                    logger = logger,
+                )
+                    .toolRuntime(
+                        tools = fixedTools.tools,
+                        logger = logger,
+                    )
+                    .also {
+                        coroutineContext.job.invokeOnCompletion {
+                            fixedTools.tools.closeAll(logger)
+                        }
+                    }
+            }
+            logger.info { "Agent runtime opened." }
             coroutineContext.job.invokeOnCompletion { failure ->
-                sessionLogger.logClosed(
+                logger.logClosed(
                     failure = failure,
-                    closedMessage = "Session closed.",
-                    failedMessage = "Session closed after a failure.",
+                    closedMessage = "Agent runtime closed.",
+                    failedMessage = "Agent runtime closed after a failure.",
                 )
             }
+            AgentRuntimeImpl(
+                delegate = delegate,
+                unifiedExecToolClient = fixedTools.unifiedExecToolClient,
+                logger = logger,
+            )
+        } catch (failure: Throwable) {
+            logger.error(failure) { "Agent runtime failed to open." }
+            throw failure
         }
+        sessionLogger.info { "Session opened." }
+        coroutineContext.job.invokeOnCompletion { failure ->
+            sessionLogger.logClosed(
+                failure = failure,
+                closedMessage = "Session closed.",
+                failedMessage = "Session closed after a failure.",
+            )
+        }
+        runtime
     } catch (failure: Throwable) {
         sessionLogger.error(failure) { "Session failed to open." }
         throw failure
     }
 }
-
-private fun KodexAgentState.masterRuntimeLayer(
-    dependencies: KodexAgentDependencies,
-    logger: KLogger,
-): AgentRuntimeLayer {
-    val fixedTools = fixedTools(dependencies)
-    return fixedTools.tools.closeOnFailure {
-        AgentRuntimeLayer(
-            delegate = compactionRuntime(
-                modelCatalog = dependencies.modelCatalog,
-                logger = logger,
-            )
-                .toolRuntime(
-                    tools = fixedTools.tools,
-                    logger = logger,
-                )
-                .also {
-                    coroutineContext.job.invokeOnCompletion {
-                        fixedTools.tools.closeAll(logger)
-                    }
-                },
-            unifiedExecToolClient = fixedTools.unifiedExecToolClient,
-        )
-    }
-}
-
-private fun KodexAgentState.buildAgentRuntime(
-    sessionLogger: KLogger,
-    buildLayer: (KLogger) -> AgentRuntimeLayer,
-): AgentRuntime {
-    val logger = sessionLogger.agent()
-    return try {
-        val layer = buildLayer(logger)
-        logger.info { "Agent runtime opened." }
-        coroutineContext.job.invokeOnCompletion { failure ->
-            logger.logClosed(
-                failure = failure,
-                closedMessage = "Agent runtime closed.",
-                failedMessage = "Agent runtime closed after a failure.",
-            )
-        }
-        AgentRuntimeImpl(
-            delegate = layer.delegate,
-            unifiedExecToolClient = layer.unifiedExecToolClient,
-            logger = logger,
-        )
-    } catch (failure: Throwable) {
-        logger.error(failure) { "Agent runtime failed to open." }
-        throw failure
-    }
-}
-
-private data class AgentRuntimeLayer(
-    val delegate: ResumableAgentLayer,
-    val unifiedExecToolClient: UnifiedExecToolClient,
-)
 
 @OptIn(ExperimentalAtomicApi::class)
 private class AgentRuntimeImpl(
@@ -172,7 +146,7 @@ private class AgentRuntimeImpl(
                     val unsupported = pending.events.filterNot { it is PendingAwaitEventToolEvent }
                     if (unsupported.isNotEmpty()) {
                         for (unmatched in unsupported) {
-                            val label = unmatched.loggingToolNameOrNull() ?: unmatched.callId
+                            val label = unmatched.loggingToolName() ?: unmatched.callId
                             completeToolCall(
                                 unmatched.toFailedToolEvent(
                                     "unsupported tool call: $label",
@@ -191,7 +165,6 @@ private class AgentRuntimeImpl(
                     }
                 }
                 if (!parkedOnAwaitEvent) {
-                    logger.logPendingHostToolCalls(delegate.state.value)
                     emitStopEventsOnNormalStop(before)
                 }
                 logger.info { "Agent turn completed." }
@@ -417,7 +390,7 @@ private class AgentRuntimeImpl(
     override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int {
         val pending = delegate.pendingToolFor(completed)
             ?: return delegate.completeToolCall(completed)
-        val toolName = pending.loggingToolNameOrNull()
+        val toolName = pending.loggingToolName()
             ?: return delegate.completeToolCall(completed)
         val toolLogger = logger.tool(toolName, pending.callId)
         return try {
@@ -472,31 +445,16 @@ private fun KLogger.logClosed(
     }
 }
 
-private fun KLogger.logPendingHostToolCalls(state: KodexAgentStateValue) {
-    val pending = state as? KodexAgentStateValue.ToolPending ?: return
-    pending.events.forEach { event ->
-        event.loggingToolNameOrNull()?.let { toolName ->
-            tool(toolName, event.callId).info {
-                "Tool call is awaiting host completion."
-            }
-        }
-    }
-}
-
 private fun ResumableAgentLayer.pendingToolFor(
     completed: StableCleanEvent.CompletedTool,
 ): PendingToolEvent? {
-    val callId = completed.toResponseHistoryItems()
-        .filterIsInstance<ResponseItem.ToolCallOutput>()
-        .singleOrNull()
-        ?.callId
-        ?: return null
+    val callId = completed.callId ?: return null
     return (state.value as? KodexAgentStateValue.ToolPending)
         ?.events
         ?.firstOrNull { pending -> pending.callId == callId }
 }
 
-private fun PendingToolEvent.loggingToolNameOrNull(): String? {
+internal fun PendingToolEvent.loggingToolName(): String? {
     val name = toolName ?: return null
     return toolNamespace?.let { namespace -> "$namespace.$name" } ?: name
 }

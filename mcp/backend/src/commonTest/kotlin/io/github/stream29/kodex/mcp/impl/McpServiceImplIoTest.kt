@@ -2,6 +2,7 @@ package io.github.stream29.kodex.mcp.impl
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
 import io.github.stream29.kodex.mcp.contract.McpClientState
@@ -56,7 +57,7 @@ import kotlinx.serialization.json.put
 val mcpServiceImplIoTest by testSuite(
     compartment = { TestCompartment.RealTime },
 ) {
-    test("settings reload only replaces changed clients and refresh only reloads tools") {
+    test("settings reload only replaces changed clients and retains healthy unchanged clients") {
         val fixture = McpServiceHttpFixture().start()
         val settings = MutableStateFlow(
             TestMcpSettings(
@@ -111,27 +112,11 @@ val mcpServiceImplIoTest by testSuite(
             assertNotSame(initialAlpha, reconfiguredClients.getValue("alpha"))
             assertSame(initialBeta, reconfiguredClients.getValue("beta"))
             assertEquals(McpClientState.Closed, initialAlpha.state.value)
+            assertEquals(2, fixture.initializeCount("alpha"))
             assertEquals(1, fixture.initializeCount("beta"))
             assertEquals(1, fixture.toolsListCount("beta"))
 
-            fixture.catalogVersion.value = 2
-            service.refresh()
-            assertEquals(2, fixture.initializeCount("alpha"))
-            assertEquals(1, fixture.initializeCount("beta"))
-            assertEquals(3, fixture.toolsListCount("alpha"))
-            assertEquals(2, fixture.toolsListCount("beta"))
-            val refreshedClients = service.clients.value
-            assertNotSame(
-                reconfiguredClients.getValue("alpha"),
-                refreshedClients.getValue("alpha"),
-            )
-            assertNotSame(
-                reconfiguredClients.getValue("beta"),
-                refreshedClients.getValue("beta"),
-            )
-            assertEquals(4, refreshedClients.allTools().size)
-
-            val alphaTool = refreshedClients.allTools().single { tool ->
+            val alphaTool = reconfiguredClients.allTools().single { tool ->
                 tool.serverName == "alpha" && tool.toolName == "echo"
             }
             assertEquals("alpha", alphaTool.serverName)
@@ -225,42 +210,60 @@ val mcpServiceImplIoTest by testSuite(
         }
     }
 
-    test("invalidation drops an identical connection and catalog before rebuilding") {
+    test("changing the enabled server set preserves runtime authentication failures of unchanged servers") {
         val fixture = McpServiceHttpFixture().start()
-        val service = CoroutineScope(currentCoroutineContext()).McpServiceImpl(
-            MutableStateFlow(
-                TestMcpSettings(
-                    mapOf("alpha" to fixture.configuration("alpha", "stable")),
-                ),
+        fixture.expectedAuthorization.value = "Bearer old-access-token"
+        val oauthConfig = fixture.configuration("oauth", "stable").copy(
+            oauth = testInitializedOAuth("old-access-token"),
+        )
+        val store = TestMcpConfigurationState(
+            mapOf(
+                "oauth" to oauthConfig,
+                "beta" to fixture.configuration("beta", "stable", enabled = false),
             ),
         )
+        val service = CoroutineScope(currentCoroutineContext()).McpServiceImpl(
+            settings = store.settings,
+            configurationStore = store,
+            tokenRefresher = { error("refresh rejected") },
+        )
         try {
-            val original = withTimeout(10.seconds) {
+            val oauthClient = withTimeout(10.seconds) {
                 service.clients.first { clients ->
-                    clients["alpha"]?.listTools()?.size == 1
-                }.getValue("alpha")
+                    clients["oauth"]?.listTools()?.size == 1
+                }.getValue("oauth")
             }
             withTimeout(10.seconds) {
-                original.state.first { state -> state == McpClientState.Healthy }
+                oauthClient.state.first { state -> state == McpClientState.Healthy }
             }
+            fixture.expectedAuthorization.value = "Bearer rotated"
+            val failedCall = oauthClient.listTools().single().call(buildJsonObject { put("name", "Ada") })
+            assertEquals(true, failedCall.isError)
+            assertEquals(
+                McpAuthenticationState.Failed("Token refresh failed."),
+                service.authentication.value["oauth"],
+            )
 
-            service.invalidate("alpha")
-
-            assertEquals(McpClientState.Closed, original.state.value)
-            assertTrue(service.clients.value["alpha"]?.listTools().orEmpty().isEmpty())
-            val rebuilt = withTimeout(10.seconds) {
+            fixture.expectedAuthorization.value = null
+            store.update { current ->
+                current + ("beta" to fixture.configuration("beta", "stable", enabled = true))
+            }
+            val betaClient = withTimeout(10.seconds) {
                 service.clients.first { clients ->
-                    clients["alpha"]?.let { client ->
-                        client !== original &&
-                            client.listTools().size == 1
-                    } == true
-                }.getValue("alpha")
+                    clients["beta"]?.listTools()?.size == 1
+                }.getValue("beta")
             }
             withTimeout(10.seconds) {
-                rebuilt.state.first { state -> state == McpClientState.Healthy }
+                betaClient.state.first { state -> state == McpClientState.Healthy }
             }
-            assertNotSame(original, rebuilt)
-            assertEquals(2, fixture.initializeCount("alpha"))
+            assertEquals(
+                McpAuthenticationState.Failed("Token refresh failed."),
+                service.authentication.value["oauth"],
+            )
+            assertEquals(
+                McpAuthenticationState.NotConfigured,
+                service.authentication.value["beta"],
+            )
         } finally {
             withContext(NonCancellable) {
                 service.close()

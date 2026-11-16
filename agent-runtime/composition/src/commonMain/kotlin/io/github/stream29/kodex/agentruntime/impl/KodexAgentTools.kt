@@ -4,8 +4,8 @@ import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.tool.applypatch.ApplyPatchTool
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchToolClient
-import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.plan.updatePlanTool
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolClient
@@ -44,24 +44,20 @@ internal fun KodexAgentState.fixedTools(
     )
     return unifiedExecClient.closeOnFailure {
         KodexAgentFixedTools(
-            tools = buildList {
-                add(
-                    ApplyPatchTools.createTool(
-                        ApplyPatchToolClient(
-                            workingDirectoryProvider = workingDirectoryProvider,
-                        ),
+            tools = listOf(
+                ApplyPatchTool(
+                    ApplyPatchToolClient(
+                        workingDirectoryProvider = workingDirectoryProvider,
                     ),
-                )
-                add(
-                    ReadMediaTools.createTool(
-                        ReadMediaToolClient(
-                            workingDirectoryProvider = workingDirectoryProvider,
-                        ),
+                ),
+                ReadMediaTools.createTool(
+                    ReadMediaToolClient(
+                        workingDirectoryProvider = workingDirectoryProvider,
                     ),
-                )
-                add(updatePlanTool())
-                addAll(UnifiedExecTools.createTools(unifiedExecClient))
-            },
+                ),
+                updatePlanTool(),
+                UnifiedExecTools.createTool(unifiedExecClient),
+            ),
             unifiedExecToolClient = unifiedExecClient,
         )
     }

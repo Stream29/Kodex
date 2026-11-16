@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.agentruntime.contract
 
+import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
@@ -40,7 +41,7 @@ public sealed interface AgentStopEvent {
 /**
  * A fully composed Agent runtime for one Session.
  *
- * It retains the [ResumableAgentLayer] state operations (including [steer] and
+ * It retains the [KodexAgentState] state operations (including [steer] and
  * [consumeSteer] delegated to [storage]) while coordinating one outer turn at
  * a time. Responding runtime layers observe [latestIndex] and [storage] to
  * preempt in-flight model requests when steer is queued and call [consumeSteer]
@@ -57,7 +58,7 @@ public sealed interface AgentStopEvent {
  * @property unifiedExecToolClient The session-scoped [UnifiedExecClient] shared
  * by this runtime's terminal tools.
  */
-public interface AgentRuntime : ResumableAgentLayer {
+public interface AgentRuntime : KodexAgentState {
     /**
      * Runs one outer turn through the composed runtime layers.
      *
@@ -87,7 +88,7 @@ public interface AgentRuntime : ResumableAgentLayer {
      * @throws kotlinx.coroutines.CancellationException when execution is cancelled;
      * any failed pending-tool cleanup remains available as a suppressed exception.
      */
-    public override suspend fun resume()
+    public suspend fun resume()
 
     /**
      * Runs explicit compaction within the same turn slot used by [resume].

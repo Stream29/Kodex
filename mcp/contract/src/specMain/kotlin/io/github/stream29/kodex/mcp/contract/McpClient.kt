@@ -7,8 +7,8 @@ import kotlinx.serialization.Serializable
  * Application-managed client for one configured MCP server.
  *
  * Each client generation has a fixed tool catalog. Connection loss only updates
- * [state]. An explicit refresh, successful reconnect, or settings update
- * publishes a replacement client generation with a refreshed catalog.
+ * [state]. A successful reconnect or settings update publishes a replacement
+ * client generation with a refreshed catalog.
  *
  * [McpService] owns the client's lifetime. Consumers observe [state] and may
  * request state transitions, but do not own or close the underlying SDK client.

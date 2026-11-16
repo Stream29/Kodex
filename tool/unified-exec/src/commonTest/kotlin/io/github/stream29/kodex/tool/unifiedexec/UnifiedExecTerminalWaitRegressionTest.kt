@@ -10,7 +10,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExe
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
-import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.utils.shellclient.ProcessException
 import io.github.stream29.kodex.utils.shellclient.ProcessSession
@@ -228,8 +227,7 @@ private class VirtualWaitHarness(
     val shellClient: ControllableShellClient,
     val client: UnifiedExecToolClient,
 ) {
-    val tools: List<Tool> = UnifiedExecTools.createTools(client)
-    val execTool: Tool = tools.single { tool -> (tool.spec as ResponsesApiTool).name == UnifiedExecTools.ExecCommandName }
+    val execTool: Tool = UnifiedExecTools.createTool(client)
 
     suspend fun startYieldedSession(
         command: String = "interactive-lock-holder",

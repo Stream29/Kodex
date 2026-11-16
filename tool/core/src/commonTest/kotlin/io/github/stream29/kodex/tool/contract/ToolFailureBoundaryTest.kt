@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.tool.contract
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
@@ -16,7 +15,6 @@ import kotlinx.schema.json.PropertyBuilder
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertIs
 
 private val testSpec = ResponsesApiTool(
     name = "test",
@@ -25,7 +23,7 @@ private val testSpec = ResponsesApiTool(
 )
 
 val toolFailureBoundaryTest by testSuite {
-    test("handler exception produces a sanitized completion with the original identity") {
+    test("handler exception propagates to runtime caller") {
         val tool = typedTool(
             spec = testSpec,
             select = { it as? PendingFunctionToolEvent },
@@ -38,17 +36,11 @@ val toolFailureBoundaryTest by testSuite {
             itemId = ResponseItemId("item-one"),
         )
 
-        val event = assertIs<StableTextToolEvent>(tool.handle(pending))
-        assertEquals(pending.callId, event.callId)
-        assertEquals(pending.itemId, event.itemId)
-        assertEquals(pending.name, event.name)
-        assertEquals(pending.namespace, event.namespace)
-        assertEquals(pending.arguments, event.arguments)
-        assertEquals(false, event.success)
-        assertEquals("Tool execution failed.", event.result)
+        val failure = assertFailsWith<IllegalStateException> { tool.handle(pending) }
+        assertEquals("private-marker", failure.message)
     }
 
-    test("selector mismatch becomes the matching custom failure") {
+    test("selector mismatch propagates IllegalArgumentException to runtime caller") {
         val tool = typedTool(
             spec = testSpec,
             select = { it as? PendingFunctionToolEvent },
@@ -60,11 +52,7 @@ val toolFailureBoundaryTest by testSuite {
             itemId = ResponseItemId("item-two"),
         )
 
-        val event = assertIs<StableCustomToolEvent>(tool.handle(pending))
-        assertEquals(pending.callId, event.callId)
-        assertEquals(pending.itemId, event.itemId)
-        assertEquals(pending.input, event.input)
-        assertEquals(false, event.success)
+        assertFailsWith<IllegalArgumentException> { tool.handle(pending) }
     }
 
     test("cancellation is propagated instead of converted") {

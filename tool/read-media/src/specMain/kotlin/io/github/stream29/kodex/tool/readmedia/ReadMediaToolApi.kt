@@ -28,17 +28,12 @@ public object ReadMediaTools {
     public val spec: ResponsesApiTool
         get() = ReadMediaToolImplementation.spec
 
-    public fun toolSpec(options: ReadMediaToolOptions = ReadMediaToolOptions()): ResponsesApiTool =
-        ReadMediaToolImplementation.toolSpec(options)
-
     public fun createTool(
         client: ReadMediaToolClient = ReadMediaToolClient(),
-        options: ReadMediaToolOptions = ReadMediaToolOptions(),
-    ): Tool = ReadMediaToolImplementation.createTool(client, options)
+    ): Tool = ReadMediaToolImplementation.createTool(client)
 }
 
 internal expect object ReadMediaToolImplementation {
     val spec: ResponsesApiTool
-    fun toolSpec(options: ReadMediaToolOptions): ResponsesApiTool
-    fun createTool(client: ReadMediaToolClient, options: ReadMediaToolOptions): Tool
+    fun createTool(client: ReadMediaToolClient): Tool
 }

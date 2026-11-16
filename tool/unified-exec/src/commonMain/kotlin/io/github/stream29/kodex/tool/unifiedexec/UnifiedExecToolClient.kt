@@ -73,7 +73,7 @@ public actual class UnifiedExecToolClient internal constructor(
                     session = session,
                 ).also { created ->
                     mutableSessions.update { current -> current + (created.sessionId to created) }
-                    created.retentionJob = launchRetentionWatcher(created)
+                    created.retentionJob = launchExitWatcher(created)
                 }
             }
         } catch (error: Throwable) {
@@ -87,7 +87,7 @@ public actual class UnifiedExecToolClient internal constructor(
             }
             outputFor(managed, read, started.elapsedNow(), arguments.maxOutputTokens)
         } catch (error: Throwable) {
-            cancelSession(managed)
+            removeAndClose(managed)
             throw error
         }
     }
@@ -115,7 +115,7 @@ public actual class UnifiedExecToolClient internal constructor(
         )
     }
 
-    private fun launchRetentionWatcher(managed: ManagedProcessSession): Job =
+    private fun launchExitWatcher(managed: ManagedProcessSession): Job =
         shellClient.launch(start = CoroutineStart.UNDISPATCHED) {
             val code = try {
                 managed.session.exitCode.await()
@@ -145,10 +145,6 @@ public actual class UnifiedExecToolClient internal constructor(
             evictIfSame(managed)
         }
         managed.session.close()
-    }
-
-    private suspend fun cancelSession(managed: ManagedProcessSession) {
-        removeAndClose(managed)
     }
 
     public actual override fun close() {
@@ -195,13 +191,6 @@ internal class ManagedProcessSession(
     internal var retentionJob: Job? = null
     private val mutableExitCode: MutableStateFlow<Int?> = MutableStateFlow(null)
     override val exitCode: StateFlow<Int?> = mutableExitCode.asStateFlow()
-
-    init {
-        session.scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            val code = session.exitCode.await()
-            mutableExitCode.value = code
-        }
-    }
 
     internal fun publishExitCode(code: Int) {
         mutableExitCode.value = code

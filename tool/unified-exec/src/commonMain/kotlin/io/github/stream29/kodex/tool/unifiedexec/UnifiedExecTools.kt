@@ -21,43 +21,40 @@ internal actual object UnifiedExecToolImplementation {
             description = renderExecCommandDescription(execCommandHostPlatform),
             strict = false,
             parameters = ExecCommandParametersSchema,
-            outputSchema = UnifiedExecOutputSchema,
         )
 
-    /** Creates the unified-exec model tools around [client]. */
-    public actual fun createTools(client: UnifiedExecClient): List<Tool> =
-        listOf(
-            CloseableUnifiedExecTool(
-                delegate = typedTool(
-                    spec = execCommandSpec,
-                    select = { event ->
-                        (event as? PendingCommandExecutionToolEvent)
-                            ?.takeIf { it.action is PendingCommandExecutionAction.ExecCommand }
-                    },
-                ) { pending ->
-                    val action = pending.action as PendingCommandExecutionAction.ExecCommand
-                    try {
-                        StableCommandExecutionToolEvent(
-                            callId = pending.callId,
-                            itemId = pending.itemId,
-                            action = StableCommandExecutionAction.ExecCommand(action.arguments),
-                            result = StableCommandExecutionResult.Output(
-                                client.execCommand(action.arguments),
-                            ),
-                        )
-                    } catch (failure: UnifiedExecToolException) {
-                        StableCommandExecutionToolEvent(
-                            callId = pending.callId,
-                            itemId = pending.itemId,
-                            action = StableCommandExecutionAction.ExecCommand(action.arguments),
-                            result = StableCommandExecutionResult.Failure(
-                                failure.message ?: "exec_command failed.",
-                            ),
-                        )
-                    }
+    /** Creates the unified-exec model tool around [client]. */
+    public actual fun createTool(client: UnifiedExecClient): Tool =
+        CloseableUnifiedExecTool(
+            delegate = typedTool(
+                spec = execCommandSpec,
+                select = { event ->
+                    (event as? PendingCommandExecutionToolEvent)
+                        ?.takeIf { it.action is PendingCommandExecutionAction.ExecCommand }
                 },
-                client = client,
-            ),
+            ) { pending ->
+                val action = pending.action as PendingCommandExecutionAction.ExecCommand
+                try {
+                    StableCommandExecutionToolEvent(
+                        callId = pending.callId,
+                        itemId = pending.itemId,
+                        action = StableCommandExecutionAction.ExecCommand(action.arguments),
+                        result = StableCommandExecutionResult.Output(
+                            client.execCommand(action.arguments),
+                        ),
+                    )
+                } catch (failure: UnifiedExecToolException) {
+                    StableCommandExecutionToolEvent(
+                        callId = pending.callId,
+                        itemId = pending.itemId,
+                        action = StableCommandExecutionAction.ExecCommand(action.arguments),
+                        result = StableCommandExecutionResult.Failure(
+                            failure.message ?: "exec_command failed.",
+                        ),
+                    )
+                }
+            },
+            client = client,
         )
 }
 

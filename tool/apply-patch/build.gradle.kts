@@ -14,6 +14,9 @@ kotlin {
                 api(project(":utils-patch"))
             }
         }
+        commonMain.dependencies {
+            implementation(libs.kotlinx.coroutines.core)
+        }
         commonTest.dependencies {
             implementation(project(":openai-json-codec"))
         }

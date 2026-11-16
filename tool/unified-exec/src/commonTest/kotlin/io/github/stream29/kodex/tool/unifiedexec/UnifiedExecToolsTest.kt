@@ -9,7 +9,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExe
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.openai.ResponsesApiTool
-import io.github.stream29.kodex.tool.builder.ToolBuilderJson
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.utils.shellclient.ProcessSession
 import io.github.stream29.kodex.utils.shellclient.Shell
@@ -40,6 +39,7 @@ import kotlinx.io.files.SystemFileSystem
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.schema.json.StringPropertyDefinition
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
 import kotlin.test.assertEquals
@@ -78,9 +78,6 @@ private suspend fun testUnifiedExecToolClient(
         settingsProvider = settings,
         workingDirectoryProvider = { workingDirectory },
     )
-
-private fun List<Tool>.toolNamed(name: String): Tool =
-    single { tool -> (tool.spec as ResponsesApiTool).name == name }
 
 private fun StableCommandExecutionToolEvent.requireUnifiedExecOutput(): UnifiedExecOutput =
     when (val completed = result) {
@@ -143,38 +140,44 @@ val unifiedExecToolsTest by testSuite {
             val arguments = ExecCommandArguments(
                 command = "echo managed-session",
                 name = "managed-label",
-                yieldTimeMillis = 10_000,
+                yieldTimeMillis = 0,
             )
             val cwd = Path("/workspace/project")
-            val managed = ManagedProcessSession(
-                sessionId = 1,
-                cwd = cwd,
-                arguments = arguments,
-                session = session,
+            val shellClient = object : ShellClient, CoroutineScope by processScope {
+                override suspend fun start(command: ShellProcessCommand): ProcessSession = session
+                override fun close() {
+                    session.close()
+                }
+            }
+            val client = UnifiedExecToolClient(
+                workingDirectoryProvider = { cwd },
+                settingsProvider = { TestShellSettings() },
+                shellClient = shellClient,
             )
-            val observed: UnifiedExecProcessSession = managed
 
             try {
-                assertEquals(1, observed.sessionId)
+                val execCall = async(start = CoroutineStart.UNDISPATCHED) {
+                    client.execCommand(arguments)
+                }
+                val observed = withTimeout(1.seconds) {
+                    client.activeSessions.first { it.isNotEmpty() }.values.single()
+                }
                 assertEquals(cwd, observed.cwd)
                 assertSame(arguments, observed.arguments)
                 assertNull(observed.exitCode.value)
 
                 session.complete(17)
 
-                withTimeout(1.seconds) {
-                    observed.exitCode.first { code -> code != null }
-                }
+                assertEquals(17, execCall.await().exitCode)
                 assertEquals(17, observed.exitCode.value)
             } finally {
-                session.close()
+                client.close()
             }
         }
     }
 
     test("UnifiedExecTools exposes only exec_command model tool without write_stdin") {
         assertEquals(UnifiedExecTools.ExecCommandName, UnifiedExecTools.execCommandSpec.name)
-        assertEquals(UnifiedExecOutputSchema, UnifiedExecTools.execCommandSpec.outputSchema)
         assertEquals(listOf("cmd", "yield_time_ms"), UnifiedExecTools.execCommandSpec.parameters.required)
         assertIs<StringPropertyDefinition>(
             requireNotNull(ExecCommandParametersSchema.properties?.get("name")),
@@ -196,8 +199,8 @@ val unifiedExecToolsTest by testSuite {
             shellClient = noOpShellClient,
         )
         try {
-            val specs = UnifiedExecTools.createTools(client).map { (it.spec as ResponsesApiTool).name }
-            assertEquals(listOf("exec_command"), specs)
+            val tool = UnifiedExecTools.createTool(client)
+            assertEquals("exec_command", (tool.spec as ResponsesApiTool).name)
         } finally {
             client.close()
         }
@@ -312,7 +315,7 @@ val unifiedExecToolsTest by testSuite {
     }
 
     test("exec_command decodes shell and optional name and requires yield_time_ms while retaining legacy WriteStdinArguments DTO") {
-        val arguments = ToolBuilderJson.decodeFromString<ExecCommandArguments>(
+        val arguments = Json.decodeFromString<ExecCommandArguments>(
             """{"cmd":"echo test","name":"dev-server","shell":"/opt/codex/bash","yield_time_ms":10000}""",
         )
 
@@ -324,17 +327,16 @@ val unifiedExecToolsTest by testSuite {
         assertEquals(10_000L, arguments.yieldTimeMillis)
 
         assertFailsWith<SerializationException> {
-            ToolBuilderJson.decodeFromString<ExecCommandArguments>("""{"cmd":"echo test"}""")
+            Json.decodeFromString<ExecCommandArguments>("""{"cmd":"echo test"}""")
         }
         assertFailsWith<SerializationException> {
-            ToolBuilderJson.decodeFromString<WriteStdinArguments>("""{"session_id":1,"chars":"hi"}""")
+            Json.decodeFromString<WriteStdinArguments>("""{"session_id":1,"chars":"hi"}""")
         }
     }
 
     testFixture { testUnifiedExecToolClient() } closeWith { close() } asParameterForEach {
         test("exec_command returns JSON output from a real process", testConfig = realIoTestConfig) { client ->
-            val tools = UnifiedExecTools.createTools(client)
-            val exec = tools.toolNamed(UnifiedExecTools.ExecCommandName)
+            val exec = UnifiedExecTools.createTool(client)
             val result = exec.exec(
                 ExecCommandArguments(
                     command = oneShotExecCommand,
@@ -394,7 +396,7 @@ val unifiedExecToolsTest by testSuite {
     test("exec commands run in a pseudoterminal", testConfig = realIoTestConfig) {
         val client = testUnifiedExecToolClient()
         try {
-            val exec = UnifiedExecTools.createTools(client).toolNamed(UnifiedExecTools.ExecCommandName)
+            val exec = UnifiedExecTools.createTool(client)
             val result = exec.exec(
                 ExecCommandArguments(
                     command = ttyProbeExecCommand,
@@ -481,7 +483,7 @@ val unifiedExecToolsTest by testSuite {
     test("yield returns a session for a still-running command with resolved cwd", testConfig = realIoTestConfig) {
         val client = testUnifiedExecToolClient(workingDirectory = SystemTemporaryDirectory)
         try {
-            val exec = UnifiedExecTools.createTools(client).toolNamed(UnifiedExecTools.ExecCommandName)
+            val exec = UnifiedExecTools.createTool(client)
             val output = exec.exec(
                 ExecCommandArguments(
                     command = interactiveExecCommand,

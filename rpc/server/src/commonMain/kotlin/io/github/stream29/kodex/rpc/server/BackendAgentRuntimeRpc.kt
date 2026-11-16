@@ -24,10 +24,10 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.getOrThrow
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.models.AgentStateValue
+import io.github.stream29.kodex.rpc.models.GeneratedImageArtifact
+import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.ShellSessionState
-import io.github.stream29.kodex.tool.imagegeneration.GeneratedImageArtifact
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenerationToolClient
 import io.github.stream29.kodex.tool.imagegeneration.imageArtifactDirectory
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs

@@ -16,7 +16,7 @@ internal fun KodexAgentSettings.toResponsesApiRequest(
 ): ResponsesApiRequest {
     return ResponsesApiRequest(
         model = model,
-        input = input.map(ResponseItem::toResponsesApiInput),
+        input = input,
         instructions = instructions,
         store = false,
         previousResponseId = previousResponseId,
@@ -31,19 +31,6 @@ internal fun KodexAgentSettings.toResponsesApiRequest(
         clientMetadata = clientMetadata,
     )
 }
-
-internal fun List<ResponseItem>.toResponsesApiInput(): List<ResponseItem> =
-    map(ResponseItem::toResponsesApiInput)
-
-private fun ResponseItem.toResponsesApiInput(): ResponseItem =
-    when (this) {
-        is ResponseItem.McpToolCallOutput -> ResponseItem.FunctionCallOutput(
-            callId = callId,
-            output = output.toFunctionCallOutputPayload(OpenAiJsonCodec),
-        )
-
-        else -> this
-    }
 
 internal fun CodexResponsesMetadata.toCodexClientMetadata(): CodexResponsesClientMetadata =
     CodexResponsesClientMetadata(

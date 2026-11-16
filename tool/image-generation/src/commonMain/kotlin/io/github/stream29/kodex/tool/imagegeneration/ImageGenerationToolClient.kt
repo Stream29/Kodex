@@ -9,8 +9,10 @@ import io.github.stream29.kodex.openai.ImageQuality
 import io.github.stream29.kodex.openai.ImageUrl
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResponseResultException
-import io.github.stream29.kodex.openai.getOrThrow
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
+import io.github.stream29.kodex.openai.getOrThrow
+import io.github.stream29.kodex.rpc.models.GeneratedImageArtifact
+import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
 import io.github.stream29.kodex.utils.images.PromptImageMode
 import io.github.stream29.kodex.utils.images.PromptImageTransformer
 import io.github.stream29.kodex.utils.images.codec.readPromptImage
@@ -27,12 +29,16 @@ public actual class ImageGenerationToolClient actual constructor(
     private val transformer: PromptImageTransformer,
     private val model: OpenAiModelId,
 ) {
-    public actual suspend fun run(arguments: ImageGenToolArguments): GeneratedImageOutput {
+    @OptIn(ExperimentalUuidApi::class)
+    public actual suspend fun generateToFile(
+        arguments: ImageGenToolArguments,
+        outputDirectory: Path,
+    ): GeneratedImageArtifact {
         val response = when (val request = requestFor(arguments)) {
             is ImageToolRequest.Generate -> client.generateImage(request.value)
             is ImageToolRequest.Edit -> client.editImage(request.value)
         }
-        val result = try {
+        val b64Json = try {
             response.getOrThrow()
         } catch (failure: OpenAiResponseResultException) {
             throw ImageGenerationToolException(
@@ -40,18 +46,10 @@ public actual class ImageGenerationToolClient actual constructor(
             )
         }.data.firstOrNull()?.b64Json
             ?: throw ImageGenerationToolException("image generation returned no image data")
-        return GeneratedImageOutput(result = result)
-    }
 
-    @OptIn(ExperimentalUuidApi::class)
-    public actual suspend fun generateToFile(
-        arguments: ImageGenToolArguments,
-        outputDirectory: Path,
-    ): GeneratedImageArtifact {
-        val output = run(arguments)
         val outputPath = Path(outputDirectory, "${Uuid.generateV7()}.png")
         fileSystem.createDirectories(outputDirectory)
-        fileSystem.writeBytes(outputPath, Base64.decode(output.result.trim()))
+        fileSystem.writeBytes(outputPath, Base64.decode(b64Json.trim()))
         return GeneratedImageArtifact(
             path = outputPath.toString(),
             mimeType = "image/png",

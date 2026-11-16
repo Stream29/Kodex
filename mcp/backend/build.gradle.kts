@@ -11,20 +11,16 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":mcp-contract"))
-            api(project(":utils-process-client"))
-            api(libs.mcp.kotlin.sdk.client)
-            api(libs.ktor.client.core)
             api(libs.kotlinx.coroutines.core)
         }
         commonMain.dependencies {
-            api(libs.kotlinx.coroutines.core)
-            implementation(libs.mcp.kotlin.sdk.client)
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-logging-backend-scope"))
+            implementation(project(":utils-oauth-loopback"))
             implementation(project(":utils-process-client"))
             implementation(project(":utils-read-write-mutex"))
-            implementation(libs.ktor.server.cio)
-            implementation(libs.ktor.server.core)
+            implementation(libs.mcp.kotlin.sdk.client)
+            implementation(libs.ktor.client.core)
             implementation(libs.ktor.sse)
             implementation(libs.ktor.utils)
             implementation(libs.kotlin.logging)
@@ -43,10 +39,10 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(project(":openai-json-codec"))
-            implementation(project(":utils-process-client"))
             implementation(libs.kotlinx.coroutines.test)
-            implementation(libs.kotlinx.serialization.json)
             implementation(libs.ktor.client.mock)
+            implementation(libs.ktor.server.cio)
+            implementation(libs.ktor.server.core)
         }
     }
 }

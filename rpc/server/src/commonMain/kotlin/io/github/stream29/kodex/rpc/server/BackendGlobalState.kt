@@ -8,12 +8,12 @@ import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
 import io.github.stream29.kodex.mcp.contract.McpConfigurationStore
-import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttemptFactory
 import io.github.stream29.kodex.mcp.contract.McpOAuthTokenRefresher
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpSettings
 import io.github.stream29.kodex.mcp.impl.McpManagerImpl
+import io.github.stream29.kodex.mcp.impl.McpOAuthLoginPreparer
 import io.github.stream29.kodex.mcp.impl.McpServiceImpl
 import io.github.stream29.kodex.mcp.impl.validateMcpConfigurationUpdate
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
@@ -46,10 +46,10 @@ public actual suspend fun <R> withBackendGlobalState(
     client: OpenAiClient,
     authStore: OpenAiAuthStore,
     tokenRefresher: McpOAuthTokenRefresher,
-    loginAttemptFactory: McpOAuthLoginAttemptFactory,
+    loginPreparer: McpOAuthLoginPreparer,
     block: suspend CoroutineScope.(BackendGlobalState) -> R,
 ): R = withBackendGlobalState(
-    store, unified, agentsHome, kodexHome, codexHome, client, authStore, loginAttemptFactory,
+    store, unified, agentsHome, kodexHome, codexHome, client, authStore, loginPreparer,
     serviceFactory = { settings, configurations ->
         McpServiceImpl(settings, configurations, tokenRefresher)
     },
@@ -64,7 +64,7 @@ internal suspend fun <R> withBackendGlobalState(
     codexHome: Path,
     client: OpenAiClient,
     authStore: OpenAiAuthStore,
-    loginAttemptFactory: McpOAuthLoginAttemptFactory,
+    loginPreparer: McpOAuthLoginPreparer,
     serviceFactory: CoroutineScope.(StateFlow<McpSettings>, McpConfigurationStore) -> McpService,
     block: suspend CoroutineScope.(BackendGlobalState) -> R,
 ): R = coroutineScope {
@@ -81,9 +81,9 @@ internal suspend fun <R> withBackendGlobalState(
         }
         service = owner.serviceFactory(mcpSettings, configurations)
         manager = owner.McpManagerImpl(
-            configurations, service,
-            codexImportSource = { readBackendCodexMcpSettings(codexHome) },
-            loginAttemptFactory = loginAttemptFactory,
+            store = configurations,
+            service = service,
+            loginPreparer = loginPreparer,
         )
         models = owner.ownedOpenAiModelCatalog(client, authStore)
         coroutineScope {

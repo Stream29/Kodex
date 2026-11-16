@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.tool.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import kotlinx.serialization.Serializable
 
 /**
@@ -25,12 +24,5 @@ public data class ToolName(
     public companion object {
         public fun plain(name: String): ToolName =
             ToolName(name = name)
-
-        public fun namespaced(namespace: String, name: String): ToolName =
-            ToolName(name = name, namespace = namespace)
     }
 }
-
-/** Returns whether this pending event targets [toolName], including its namespace. */
-public fun PendingToolEvent.matches(toolName: ToolName): Boolean =
-    toolName.name == this.toolName && toolName.namespace == toolNamespace

@@ -14,7 +14,7 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
  * - [submitUserMessage] -> `StableUserMessage`
  * - [submitAskUserAnswer] -> atomic `AskUserSnapshot` + `StableAskUserEvent`
  * - [submitScheduleTrigger] -> `StableScheduleEvent`
- * - [submitTerminalExited] -> `StableTerminalExitedEvent`
+ * - watched terminal exits -> `StableTerminalExitedEvent`
  *
  * Turn state inspection, background turn startup, and `stopEvents` emission remain owned by
  * `AgentRuntime` itself rather than duplicated in [AgentEventBus].
@@ -51,17 +51,6 @@ public interface AgentEventBus {
         agentId: Int,
         scheduleId: Long,
         description: String,
-    )
-
-    /**
-     * Delivers a watched background terminal completion (`StableTerminalExitedEvent`) to [agentId].
-     */
-    public suspend fun submitTerminalExited(
-        agentId: Int,
-        sessionId: Int,
-        name: String? = null,
-        command: String,
-        exitCode: Int,
     )
 }
 

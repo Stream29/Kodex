@@ -41,11 +41,6 @@ val pendingToolEventProjectionTest by testSuite {
             workdir = "Kodex",
             yieldTimeMillis = 10_000,
         )
-        val write = WriteStdinArguments(
-            sessionId = 7,
-            chars = "\u0003",
-            yieldTimeMillis = 250,
-        )
         val readMedia = ReadMediaToolArguments(path = "diagram.png", detail = MediaDetail.Original)
         val planArgs = UpdatePlanArgs(
             explanation = "Cut over model surface.",
@@ -70,15 +65,6 @@ val pendingToolEventProjectionTest by testSuite {
                 callId = "call_${AwaitEventTools.Name}",
                 itemId = ItemId,
                 arguments = awaitEvent,
-            ),
-            functionCall(
-                LegacyWriteStdinName,
-                WriteStdinArguments.serializer(),
-                write,
-            ) to PendingCommandExecutionToolEvent(
-                callId = "call_$LegacyWriteStdinName",
-                itemId = ItemId,
-                action = PendingCommandExecutionAction.WriteStdin(write),
             ),
             functionCall(
                 ReadMediaTools.Name,
@@ -182,24 +168,6 @@ val pendingToolEventProjectionTest by testSuite {
             ),
             ResponseItem.FunctionCall(
                 id = ItemId,
-                callId = "call_write_missing_yield",
-                name = LegacyWriteStdinName,
-                arguments = """{"session_id":7,"chars":""}""",
-            ),
-            ResponseItem.FunctionCall(
-                id = ItemId,
-                callId = "call_write_null_yield",
-                name = LegacyWriteStdinName,
-                arguments = """{"session_id":7,"chars":"","yield_time_ms":null}""",
-            ),
-            ResponseItem.FunctionCall(
-                id = ItemId,
-                callId = "call_write_bad_yield",
-                name = LegacyWriteStdinName,
-                arguments = """{"session_id":7,"chars":"hi","yield_time_ms":12.5}""",
-            ),
-            ResponseItem.FunctionCall(
-                id = ItemId,
                 callId = "call_await_bad_terminals",
                 name = AwaitEventTools.Name,
                 arguments = """{"terminals":"not-an-array"}""",
@@ -224,7 +192,7 @@ val pendingToolEventProjectionTest by testSuite {
         }
     }
 
-    test("round trips explicit exec_command and write_stdin yield_time_ms including 10000, 250, and 600000") {
+    test("round trips explicit exec_command yield_time_ms and projects legacy write_stdin as generic function call") {
         listOf(10_000L, 250L, 600_000L).forEach { yieldMillis ->
             val exec = ExecCommandArguments(command = "echo wait", yieldTimeMillis = yieldMillis)
             val execCall = functionCall(
@@ -242,19 +210,25 @@ val pendingToolEventProjectionTest by testSuite {
             assertEquals(execPending, execProjected.toPendingToolEvent())
 
             val write = WriteStdinArguments(sessionId = 9, chars = "", yieldTimeMillis = yieldMillis)
-            val writeCall = functionCall(
-                LegacyWriteStdinName,
-                WriteStdinArguments.serializer(),
-                write,
+            val persistedWritePending = PendingCommandExecutionToolEvent(
+                callId = "call_$LegacyWriteStdinName",
+                itemId = ItemId,
+                action = PendingCommandExecutionAction.WriteStdin(write),
             )
-            assertTrue(""""yield_time_ms":$yieldMillis""" in writeCall.arguments)
-            val writePending = assertIs<PendingCommandExecutionToolEvent>(writeCall.toPendingToolEvent())
-            assertEquals(PendingCommandExecutionAction.WriteStdin(write), writePending.action)
             val writeProjected = assertIs<ResponseItem.FunctionCall>(
-                writePending.toResponseHistoryItems().single(),
+                persistedWritePending.toResponseHistoryItems().single(),
             )
             assertTrue(""""yield_time_ms":$yieldMillis""" in writeProjected.arguments)
-            assertEquals(writePending, writeProjected.toPendingToolEvent())
+            assertEquals(
+                PendingFunctionToolEvent(
+                    callId = "call_$LegacyWriteStdinName",
+                    itemId = ItemId,
+                    name = LegacyWriteStdinName,
+                    namespace = null,
+                    arguments = OpenAiJsonCodec.parseToJsonElement(writeProjected.arguments),
+                ),
+                writeProjected.toPendingToolEvent(),
+            )
         }
     }
 

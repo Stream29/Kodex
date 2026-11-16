@@ -169,47 +169,6 @@ internal class McpClientOwner(
         }
     }
 
-    suspend fun refresh() {
-        val result = connectionLock.reader.withLock {
-            val client = activeClient
-            if (mutableState.value != McpClientState.Healthy || client == null) {
-                return@withLock null
-            }
-            runCatchingCancellable {
-                val catalog = client.readCatalog()
-                try {
-                    validateCatalog(catalog)
-                } catch (ambiguity: IllegalArgumentException) {
-                    // Reject while this connection's reader is still held, so
-                    // this failure cannot mark a later reconnected client failed.
-                    mutableState.compareAndSet(
-                        expect = McpClientState.Healthy,
-                        update = McpClientState.Failed(McpClientFailureReason.ToolCatalog),
-                    )
-                    throw ambiguity
-                }
-                catalog
-            }
-                .also { catalog ->
-                    catalog.exceptionOrNull()
-                        ?.takeIf(Throwable::isConnectionLoss)
-                        ?.let {
-                            mutableState.compareAndSet(
-                                expect = McpClientState.Healthy,
-                                update = McpClientState.Failed(McpClientFailureReason.ConnectionLost),
-                            )
-                        }
-                }
-        } ?: return
-
-        result.fold(
-            onSuccess = { catalog -> publishCatalog(this, catalog) },
-            onFailure = { failure ->
-                logger.warn(failure) { "Failed to refresh MCP server $serverName." }
-            },
-        )
-    }
-
     suspend fun <Value> call(
         block: suspend (Client) -> Value,
     ): McpClientCallResult<Value> =

@@ -4,35 +4,11 @@ package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
-import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttempt
-import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttemptFactory
-import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.impl.McpManagerImpl
-import io.github.stream29.kodex.mcp.impl.PreparedMcpOAuthLogin
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import kotlinx.coroutines.CoroutineScope
-
-/**
- * Supplies listener-free prepared attempts to the manager's existing commit/cleanup path.
- *
- * [prepare] creates the login preparation for the supplied server configuration. The callback
- * remains private implementation state; the frontend owns its
- * loopback listener and submits the resulting callback URL through the backend OAuth service.
- */
-public expect class BackendMcpOAuthBridge(
-    prepare: suspend (McpServerConfiguration.StreamableHttp) -> PreparedMcpOAuthLogin,
-) : McpOAuthLoginAttemptFactory {
-    /**
-     * Prepares one MCP attempt using the supplied callback.
-     *
-     * @throws Throwable if preparation fails; cancellation is propagated.
-     */
-    override suspend fun create(
-        configuration: McpServerConfiguration.StreamableHttp,
-    ): McpOAuthLoginAttempt
-}
 
 /**
  * Backend-owned OAuth attempt registry for OpenAI and MCP.

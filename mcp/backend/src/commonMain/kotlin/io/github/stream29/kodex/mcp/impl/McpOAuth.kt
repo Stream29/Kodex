@@ -4,13 +4,12 @@ package io.github.stream29.kodex.mcp.impl
 
 import io.github.stream29.kodex.mcp.contract.McpOAuthClient
 import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
-import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttempt
-import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttemptFactory
 import io.github.stream29.kodex.mcp.contract.McpOAuthTokenEndpointAuthMethod
 import io.github.stream29.kodex.mcp.contract.McpOAuthTokenRefresher
 import io.github.stream29.kodex.mcp.contract.McpSecret
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.streamablehttp.McpStreamableHttpClient
+import io.github.stream29.kodex.utils.oauthloopback.pkceS256CodeChallenge
 import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
@@ -33,14 +32,7 @@ import io.ktor.http.auth.parseAuthorizationHeader
 import io.ktor.http.contentType
 import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
-import io.ktor.server.cio.CIO
-import io.ktor.server.engine.EmbeddedServer
-import io.ktor.server.engine.embeddedServer
-import io.ktor.server.response.respondText
-import io.ktor.server.routing.get
-import io.ktor.server.routing.routing
 import io.ktor.util.generateNonceBlocking
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.json.Json
@@ -58,25 +50,14 @@ import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Shared OAuth browser-login and token-refresh implementation for Streamable
- * HTTP servers.
+ * Shared OAuth browser-login preparation and token-refresh implementation for
+ * Streamable HTTP servers.
  */
 public actual class DefaultMcpOAuthClient internal constructor(
-    private val scope: CoroutineScope,
     private val httpClient: HttpClient,
-) : McpOAuthLoginAttemptFactory, McpOAuthTokenRefresher {
-    actual override suspend fun create(
-        configuration: McpServerConfiguration.StreamableHttp,
-    ): McpOAuthLoginAttempt {
-        val prepared = prepare(configuration)
-        val callback = McpOAuthCallback.start(
-            scope, prepared.preparedConfiguration.client.redirectUri, prepared.state,
-        )
-        return DefaultMcpOAuthLoginAttempt(callback, prepared)
-    }
-
+) : McpOAuthLoginPreparer, McpOAuthTokenRefresher {
     /** Discovers/registers and prepares PKCE without opening a callback listener. */
-    public actual suspend fun prepare(
+    actual override suspend fun prepare(
         configuration: McpServerConfiguration.StreamableHttp,
     ): PreparedMcpOAuthLogin {
         val configuredOAuth = configuration.oauth as? McpOAuthConfiguration.Uninitialized
@@ -399,7 +380,6 @@ public actual class DefaultMcpOAuthClient internal constructor(
 /** Creates one OAuth client whose HTTP lifetime follows this scope. */
 public actual fun CoroutineScope.DefaultMcpOAuthClient(): DefaultMcpOAuthClient =
     DefaultMcpOAuthClient(
-        scope = this,
         httpClient = McpStreamableHttpClient(),
     )
 
@@ -411,25 +391,6 @@ public actual class PreparedMcpOAuthLogin actual constructor(
     private val exchange: suspend (String) -> McpOAuthConfiguration.Initialized,
 ) {
     public actual suspend fun exchangeCode(code: String): McpOAuthConfiguration.Initialized = exchange(code)
-}
-
-private class DefaultMcpOAuthLoginAttempt(
-    private val callback: McpOAuthCallback,
-    private val prepared: PreparedMcpOAuthLogin,
-) : McpOAuthLoginAttempt {
-    override val preparedConfiguration get() = prepared.preparedConfiguration
-    override val authorizationUrl get() = prepared.authorizationUrl
-    override suspend fun awaitInitialized(): McpOAuthConfiguration.Initialized {
-        try {
-            return prepared.exchangeCode(callback.awaitCode())
-        } finally {
-            callback.close()
-        }
-    }
-
-    override fun close() {
-        callback.close()
-    }
 }
 
 private suspend fun exchangeMcpAuthorizationCode(
@@ -471,83 +432,6 @@ private suspend fun exchangeMcpAuthorizationCode(
         },
     )
 }
-
-private class McpOAuthCallback private constructor(
-    private val server: EmbeddedServer<*, *>,
-    private val completion: CompletableDeferred<CallbackParameters>,
-) {
-    suspend fun awaitCode(): String {
-        val result = completion.await()
-        result.error?.let {
-            throw IllegalStateException("MCP OAuth authorization was not completed.")
-        }
-        return result.code
-            ?: throw IllegalStateException("The MCP OAuth callback did not contain a code.")
-    }
-
-    fun close() {
-        completion.cancel()
-        server.stop()
-    }
-
-    companion object {
-        suspend fun start(
-            scope: CoroutineScope,
-            redirectUri: String,
-            expectedState: String,
-        ): McpOAuthCallback {
-            val redirect = Url(redirectUri)
-            require(redirect.protocol.name == "http") {
-                "An MCP OAuth loopback redirect must use HTTP."
-            }
-            require(redirect.host == "127.0.0.1" || redirect.host == "localhost") {
-                "An MCP OAuth redirect must use a loopback host."
-            }
-            require(redirect.port > 0) { "An MCP OAuth redirect must specify a port." }
-            val path = redirect.encodedPath
-            val completion = CompletableDeferred<CallbackParameters>()
-            val server = scope.embeddedServer(
-                factory = CIO,
-                host = redirect.host,
-                port = redirect.port,
-            ) {
-                routing {
-                    get(path) {
-                        val parameters = CallbackParameters(
-                            state = call.request.queryParameters["state"],
-                            code = call.request.queryParameters["code"],
-                            error = call.request.queryParameters["error"],
-                        )
-                        val accepted = parameters.state == expectedState &&
-                            (parameters.code != null || parameters.error != null)
-                        if (accepted) completion.complete(parameters)
-                        call.respondText(
-                            text = if (accepted) {
-                                "Authorization received. You can return to Kodex."
-                            } else {
-                                "The authorization response was incomplete."
-                            },
-                            status = if (accepted) HttpStatusCode.OK else HttpStatusCode.BadRequest,
-                        )
-                    }
-                }
-            }
-            return try {
-                server.startSuspend(wait = false)
-                McpOAuthCallback(server, completion)
-            } catch (failure: Throwable) {
-                server.stop()
-                throw failure
-            }
-        }
-    }
-}
-
-private data class CallbackParameters(
-    val state: String?,
-    val code: String?,
-    val error: String?,
-)
 
 private data class ResolvedOAuthMetadata(
     val authorizationEndpoint: String,
@@ -597,7 +481,7 @@ private fun authorizationUrl(
             },
         )
         parameters.append("redirect_uri", oauth.client.redirectUri)
-        parameters.append("code_challenge", pkceCodeChallenge(verifier))
+        parameters.append("code_challenge", pkceS256CodeChallenge(verifier))
         parameters.append("code_challenge_method", "S256")
         parameters.append("state", state)
         if (oauth.scopes.isNotEmpty()) {
@@ -850,99 +734,6 @@ private fun basicAuthorization(clientId: String, clientSecret: String): String {
     return "Basic ${Base64.encode("$encodedClientId:$encodedClientSecret".encodeToByteArray())}"
 }
 
-private fun pkceCodeChallenge(codeVerifier: String): String =
-    Base64.UrlSafe.encode(sha256(codeVerifier.encodeToByteArray())).trimEnd('=')
-
-private fun sha256(input: ByteArray): ByteArray {
-    val bitLength = input.size.toLong() * 8L
-    val paddingLength = ((56 - (input.size + 1) % Sha256BlockSize) + Sha256BlockSize) %
-        Sha256BlockSize
-    val padded = ByteArray(input.size + 1 + paddingLength + Sha256LengthFieldSize)
-    input.copyInto(padded)
-    padded[input.size] = 0x80.toByte()
-    for (index in 0 until Sha256LengthFieldSize) {
-        padded[padded.lastIndex - index] = (bitLength ushr (index * 8)).toByte()
-    }
-
-    var a = 0x6a09e667
-    var b = 0xbb67ae85.toInt()
-    var c = 0x3c6ef372
-    var d = 0xa54ff53a.toInt()
-    var e = 0x510e527f
-    var f = 0x9b05688c.toInt()
-    var g = 0x1f83d9ab
-    var h = 0x5be0cd19
-    val words = IntArray(Sha256WordCount)
-
-    padded.asList().chunked(Sha256BlockSize).forEach { block ->
-        for (index in 0 until 16) {
-            val offset = index * 4
-            words[index] = ((block[offset].toInt() and 0xff) shl 24) or
-                ((block[offset + 1].toInt() and 0xff) shl 16) or
-                ((block[offset + 2].toInt() and 0xff) shl 8) or
-                (block[offset + 3].toInt() and 0xff)
-        }
-        for (index in 16 until Sha256WordCount) {
-            val smallSigma0 = words[index - 15].rotateRight(7) xor
-                words[index - 15].rotateRight(18) xor (words[index - 15] ushr 3)
-            val smallSigma1 = words[index - 2].rotateRight(17) xor
-                words[index - 2].rotateRight(19) xor (words[index - 2] ushr 10)
-            words[index] = words[index - 16] + smallSigma0 + words[index - 7] + smallSigma1
-        }
-
-        var workingA = a
-        var workingB = b
-        var workingC = c
-        var workingD = d
-        var workingE = e
-        var workingF = f
-        var workingG = g
-        var workingH = h
-        for (index in 0 until Sha256WordCount) {
-            val bigSigma1 =
-                workingE.rotateRight(6) xor workingE.rotateRight(11) xor workingE.rotateRight(25)
-            val choose = (workingE and workingF) xor (workingE.inv() and workingG)
-            val temporary1 =
-                workingH + bigSigma1 + choose + Sha256RoundConstants[index] + words[index]
-            val bigSigma0 =
-                workingA.rotateRight(2) xor workingA.rotateRight(13) xor workingA.rotateRight(22)
-            val majority =
-                (workingA and workingB) xor (workingA and workingC) xor (workingB and workingC)
-            val temporary2 = bigSigma0 + majority
-
-            workingH = workingG
-            workingG = workingF
-            workingF = workingE
-            workingE = workingD + temporary1
-            workingD = workingC
-            workingC = workingB
-            workingB = workingA
-            workingA = temporary1 + temporary2
-        }
-
-        a += workingA
-        b += workingB
-        c += workingC
-        d += workingD
-        e += workingE
-        f += workingF
-        g += workingG
-        h += workingH
-    }
-
-    return intArrayOf(a, b, c, d, e, f, g, h).flatMap { value ->
-        listOf(
-            (value ushr 24).toByte(),
-            (value ushr 16).toByte(),
-            (value ushr 8).toByte(),
-            value.toByte(),
-        )
-    }.toByteArray()
-}
-
-private fun Int.rotateRight(bitCount: Int): Int =
-    (this ushr bitCount) or (this shl (Int.SIZE_BITS - bitCount))
-
 private val OAuthJson = Json { ignoreUnknownKeys = true }
 
 private val Whitespace = Regex("\\s+")
@@ -962,73 +753,3 @@ private val OAuthChallengeRequest: String =
     """.trimIndent()
 private const val StateLength: Int = 64
 private const val CodeVerifierLength: Int = 96
-private const val Sha256BlockSize: Int = 64
-private const val Sha256LengthFieldSize: Int = 8
-private const val Sha256WordCount: Int = 64
-
-private val Sha256RoundConstants: IntArray = intArrayOf(
-    0x428a2f98,
-    0x71374491,
-    0xb5c0fbcf.toInt(),
-    0xe9b5dba5.toInt(),
-    0x3956c25b,
-    0x59f111f1,
-    0x923f82a4.toInt(),
-    0xab1c5ed5.toInt(),
-    0xd807aa98.toInt(),
-    0x12835b01,
-    0x243185be,
-    0x550c7dc3,
-    0x72be5d74,
-    0x80deb1fe.toInt(),
-    0x9bdc06a7.toInt(),
-    0xc19bf174.toInt(),
-    0xe49b69c1.toInt(),
-    0xefbe4786.toInt(),
-    0x0fc19dc6,
-    0x240ca1cc,
-    0x2de92c6f,
-    0x4a7484aa,
-    0x5cb0a9dc,
-    0x76f988da,
-    0x983e5152.toInt(),
-    0xa831c66d.toInt(),
-    0xb00327c8.toInt(),
-    0xbf597fc7.toInt(),
-    0xc6e00bf3.toInt(),
-    0xd5a79147.toInt(),
-    0x06ca6351,
-    0x14292967,
-    0x27b70a85,
-    0x2e1b2138,
-    0x4d2c6dfc,
-    0x53380d13,
-    0x650a7354,
-    0x766a0abb,
-    0x81c2c92e.toInt(),
-    0x92722c85.toInt(),
-    0xa2bfe8a1.toInt(),
-    0xa81a664b.toInt(),
-    0xc24b8b70.toInt(),
-    0xc76c51a3.toInt(),
-    0xd192e819.toInt(),
-    0xd6990624.toInt(),
-    0xf40e3585.toInt(),
-    0x106aa070,
-    0x19a4c116,
-    0x1e376c08,
-    0x2748774c,
-    0x34b0bcb5,
-    0x391c0cb3,
-    0x4ed8aa4a,
-    0x5b9cca4f,
-    0x682e6ff3,
-    0x748f82ee,
-    0x78a5636f,
-    0x84c87814.toInt(),
-    0x8cc70208.toInt(),
-    0x90befffa.toInt(),
-    0xa4506ceb.toInt(),
-    0xbef9a3f7.toInt(),
-    0xc67178f2.toInt(),
-)

@@ -5,7 +5,6 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
@@ -69,7 +68,7 @@ val agentStateHardCutoverTest by testSuite {
             }
         }
 
-        test("injected user messages use final versus commentary turn boundaries") {
+        test("appended user messages use final versus commentary turn boundaries") {
             for (phase in listOf(MessagePhase.FinalAnswer, MessagePhase.Commentary)) {
                 val storage = InMemoryKodexAgentStorage(
                     KodexAgentSettings(OpenAiModelId("test")),
@@ -85,12 +84,8 @@ val agentStateHardCutoverTest by testSuite {
                         ),
                     )
                 }
-                agent.injectHistory(
-                    listOf(
-                        StableUserMessage(listOf(ContentItem.InputText("second"))),
-                        StableUserMessage(listOf(ContentItem.InputText("third"))),
-                    ),
-                )
+                agent.appendUserMessage(listOf(ContentItem.InputText("second")))
+                agent.appendUserMessage(listOf(ContentItem.InputText("third")))
                 val nextTurn = storage.getSettingsAt(3).turnId
                 if (phase == MessagePhase.FinalAnswer) assertNotEquals(initialTurn, nextTurn)
                 else assertEquals(initialTurn, nextTurn)

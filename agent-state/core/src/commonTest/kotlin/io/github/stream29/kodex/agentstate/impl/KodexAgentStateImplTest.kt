@@ -290,7 +290,7 @@ val kodexAgentStateImplTest by testSuite {
             assertEquals(assistantEvent("Answer"), source.getIndexEntryExact(3))
         }
 
-        test("user append and clean injection write only stable history") {
+        test("user append and modify write only stable history") {
             val storage = storage()
             val agent = KodexAgentState(
                 client = mockOpenAiClient(),
@@ -302,7 +302,13 @@ val kodexAgentStateImplTest by testSuite {
             val assistant = assistantEvent("Prior answer.")
 
             assertEquals(1, agent.appendUserMessage(userMessage("Implement.").content))
-            assertEquals(3, agent.injectHistory(listOf(developer, assistant)))
+            assertEquals(
+                3,
+                agent.modify {
+                    it.commit(developer)
+                    it.commit(assistant)
+                },
+            )
 
             assertEquals(
                 listOf(userEvent("Implement."), developer, assistant),
@@ -326,7 +332,7 @@ val kodexAgentStateImplTest by testSuite {
                 storage = storage,
             )
 
-            agent.injectHistory(listOf(event))
+            agent.modify { it.commit(event) }
 
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             val reloaded = KodexAgentState(
@@ -904,7 +910,7 @@ val kodexAgentStateImplTest by testSuite {
                 ),
             )
 
-            agent.injectHistory(listOf(firstUser))
+            agent.modify { it.commit(firstUser) }
             agent.forcedCompact()
             agent.modify { mutable ->
                 mutable.commit(planUpdate)

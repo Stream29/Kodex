@@ -63,7 +63,7 @@ private class RepositoryAgentEventBus(
         )
     }
 
-    override suspend fun submitTerminalExited(
+    private suspend fun submitTerminalExited(
         agentId: Int,
         sessionId: Int,
         name: String?,

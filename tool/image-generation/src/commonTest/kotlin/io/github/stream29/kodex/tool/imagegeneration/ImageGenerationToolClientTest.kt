@@ -5,6 +5,7 @@ import io.github.stream29.kodex.openai.ImageData
 import io.github.stream29.kodex.openai.ImageResponse
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
@@ -16,35 +17,16 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 val imageGenerationToolClientTest by testSuite {
-    test("run generates image with mock client") {
-        val toolClient = ImageGenerationToolClient(
-            client = mockOpenAiClient {
-                generateImage { request ->
-                    assertEquals("draw", request.prompt)
-                    OpenAiResult.Success(
-                        ImageResponse(
-                            created = 1,
-                            data = listOf(ImageData("generated-image")),
-                        ),
-                    )
-                }
-            },
-        )
-
-        val output = toolClient.run(ImageGenToolArguments(prompt = "draw"))
-
-        assertEquals(GeneratedImageOutput(result = "generated-image"), output)
-    }
-
     test("too many referenced images fail before calling api") {
         val toolClient = ImageGenerationToolClient(client = mockOpenAiClient())
 
         assertFailsWith<ImageGenerationToolException> {
-            toolClient.run(
+            toolClient.generateToFile(
                 ImageGenToolArguments(
                     prompt = "edit",
                     referencedImagePaths = List(ImageGenMaxEditImages + 1) { "/tmp/$it.png" },
                 ),
+                Path("/tmp/unused"),
             )
         }
     }
@@ -53,11 +35,12 @@ val imageGenerationToolClientTest by testSuite {
         val toolClient = ImageGenerationToolClient(client = mockOpenAiClient())
 
         assertFailsWith<ImageGenerationToolException> {
-            toolClient.run(
+            toolClient.generateToFile(
                 ImageGenToolArguments(
                     prompt = "edit",
                     numLastImagesToInclude = 1,
                 ),
+                Path("/tmp/unused"),
             )
         }
     }
@@ -68,7 +51,8 @@ val imageGenerationToolClientTest by testSuite {
         try {
             val toolClient = ImageGenerationToolClient(
                 client = mockOpenAiClient {
-                    generateImage {
+                    generateImage { request ->
+                        assertEquals("draw", request.prompt)
                         OpenAiResult.Success(
                             ImageResponse(
                                 created = 1,
@@ -78,21 +62,19 @@ val imageGenerationToolClientTest by testSuite {
                     }
                 },
             )
-            val outDir = imageArtifactDirectory(root, "42")
+            val outDir = imageArtifactDirectory(root, "session/42")
+            assertEquals(Path(root, "media", "generated", "session_42"), outDir)
             val artifact = toolClient.generateToFile(ImageGenToolArguments(prompt = "draw"), outDir)
             assertEquals("image/png", artifact.mimeType)
             assertTrue(artifact.path.endsWith(".png"))
             assertContentEquals(bytes, SystemCoroutineFileSystem.readBytes(Path(artifact.path)))
         } finally {
             if (SystemCoroutineFileSystem.exists(root)) {
-                SystemCoroutineFileSystem.list(outDirOrRoot(root)).forEach { _ -> }
                 deleteDir(root)
             }
         }
     }
 }
-
-private fun outDirOrRoot(root: Path): Path = root
 
 private suspend fun deleteDir(path: Path) {
     val meta = SystemCoroutineFileSystem.metadataOrNull(path) ?: return

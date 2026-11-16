@@ -41,12 +41,11 @@ import kotlin.random.Random
 import kotlin.test.*
 
 val backendGlobalStateTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
-    test("complete snapshot preserves secrets and a same-value import never writes or invalidates") {
-        withGlobalFixture { global, service, fs, _ ->
+    test("complete snapshot preserves secrets and a same-value import never writes") {
+        withGlobalFixture { global, _, fs, _ ->
             val initial = global.settings.value
             assertTrue(global.compareAndSetSettings(initial, initial))
             assertEquals(0, fs.moves)
-            assertEquals(0, service.invalidations)
             assertFalse(fs.exists(global.store.settingsPath))
             val config = assertIs<McpServerConfiguration.StreamableHttp>(initial.mcpServers["alpha"])
             assertEquals(McpSecret("header-secret"), config.headers["Authorization"])
@@ -118,14 +117,13 @@ val backendGlobalStateTest by testSuite(testConfig = TestConfig.testScope(isEnab
         }
     }
     test("failed file replacement publishes neither settings nor fake connection success") {
-        withGlobalFixture { global, service, fs, _ ->
+        withGlobalFixture { global, _, fs, _ ->
             val initial = global.settings.value
             fs.fail = true
             assertFailsWith<IllegalStateException> {
                 global.compareAndSetSettings(initial, initial.copy(authSource = KodexAuthSource.Kodex))
             }
             assertEquals(initial, global.settings.value)
-            assertEquals(0, service.invalidations)
             fs.fail = false
             assertTrue(global.compareAndSetSettings(initial, initial.copy(authSource = KodexAuthSource.Kodex)))
         }
@@ -242,7 +240,7 @@ val backendGlobalStateTest by testSuite(testConfig = TestConfig.testScope(isEnab
                 store, unified, root, root, root, mockOpenAiClient { listModels { awaitCancellation() } },
                 InMemoryOpenAiAuthStore(OpenAiSubscriptionAuthState("test-token")),
                 tokenRefresher = { error("No initialized credentials in this test.") },
-                loginAttemptFactory = { error("No login in this test.") },
+                loginPreparer = { error("No login in this test.") },
             ) { global ->
                 global.mcpServers.first { it.singleOrNull()?.enabled == false }
                 assertTrue(global.mcpService.clients.value.isEmpty())
@@ -280,7 +278,7 @@ private suspend fun withGlobalFixture(
         withBackendGlobalState(
             store, unified, Path(root, "agents"), root, Path(root, "codex"), client,
             InMemoryOpenAiAuthStore(OpenAiSubscriptionAuthState("test-token")),
-            loginAttemptFactory = { error("No browser login in this fixture.") },
+            loginPreparer = { error("No browser login in this fixture.") },
             serviceFactory = { _, _ -> service },
         ) { global -> block(global, service, fs, root) }
         assertTrue(service.closed)
@@ -292,10 +290,7 @@ private suspend fun withGlobalFixture(
 private class GlobalTestMcpService : McpService {
     override val clients = MutableStateFlow<Map<String, McpClient>>(emptyMap())
     override val authentication = MutableStateFlow<Map<String, McpAuthenticationState>>(emptyMap())
-    var invalidations = 0
     var closed = false
-    override suspend fun invalidate(serverName: String) { invalidations++ }
-    override suspend fun refresh() = Unit
     override fun close() { closed = true }
 }
 

@@ -10,7 +10,7 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(project(":openai-models"))
-                api(project(":tool-image-generation-contract"))
+                api(project(":rpc-models"))
                 api(project(":openai-client"))
                 api(project(":utils-images"))
                 api(project(":utils-kotlinx-io-coroutines"))
@@ -18,9 +18,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.coroutines.test)
             implementation(project(":openai-client-test"))
-            implementation(project(":openai-json-codec"))
         }
     }
 }

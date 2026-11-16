@@ -21,11 +21,9 @@ import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.readmedia.ReadMediaTools
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
-import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
 import io.github.stream29.kodex.utils.applypatch.parsePatch
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 
 /** Converts one provider-issued local tool call at the AgentState boundary. */
 public actual fun ResponseItem.ToolCall.toPendingToolEvent(): PendingToolEvent =
@@ -59,15 +57,6 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
                     callId = callId,
                     itemId = id,
                     arguments = arguments,
-                )
-            }
-
-        namespace == null && name == LegacyWriteStdinToolName ->
-            typed(WriteStdinArguments.serializer()) { arguments ->
-                PendingCommandExecutionToolEvent(
-                    callId = callId,
-                    itemId = id,
-                    action = PendingCommandExecutionAction.WriteStdin(arguments),
                 )
             }
 
@@ -174,5 +163,3 @@ private fun <Arguments> ResponseItem.FunctionCall.decodeArguments(
     } catch (_: IllegalArgumentException) {
         null
     }
-
-private const val LegacyWriteStdinToolName: String = "write_stdin"

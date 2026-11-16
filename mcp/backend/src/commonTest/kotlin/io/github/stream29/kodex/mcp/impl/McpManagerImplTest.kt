@@ -1,280 +1,88 @@
 package io.github.stream29.kodex.mcp.impl
 
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientState
-import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpConfigurationStore
-import io.github.stream29.kodex.mcp.contract.McpImportDecision
-import io.github.stream29.kodex.mcp.contract.McpImportItemKind
-import io.github.stream29.kodex.mcp.contract.McpManagerEffect
 import io.github.stream29.kodex.mcp.contract.McpOAuthClient
 import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
-import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttempt
 import io.github.stream29.kodex.mcp.contract.McpSecret
-import io.github.stream29.kodex.mcp.contract.McpSecretDraft
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
-import io.github.stream29.kodex.mcp.contract.McpServerDraft
 import io.github.stream29.kodex.mcp.contract.McpService
-import io.github.stream29.kodex.mcp.contract.McpStdioDraft
-import io.github.stream29.kodex.mcp.contract.McpStreamableHttpDraft
 import io.github.stream29.kodex.mcp.contract.McpTool
-import io.github.stream29.kodex.mcp.contract.McpTransportKind
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runCurrent
-import kotlinx.io.files.Path
-import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 val mcpManagerImplTest by testSuite {
-    test("add rename and import reject reserved CLI domain names while allowing punctuation variants") {
-        val configuration = McpServerConfiguration.Stdio("never-run", enabled = false)
-        val initial = mapOf("a-b" to configuration, "gamma" to configuration)
-        val store = TestMcpConfigurationStore(initial)
-        val manager = testScope.backgroundScope.McpManagerImpl(
-            store = store,
-            service = TestMcpService(),
-            codexImportSource = {
-                listOf(
-                    McpCodexImportCandidate.Supported(serverName = "terminal", configuration = configuration),
-                    McpCodexImportCandidate.Supported(serverName = "a_b", configuration = configuration),
-                )
-            },
-            loginAttemptFactory = { error("Login is not expected.") },
-        )
-        try {
-            val reservedDraft = McpServerDraft.Stdio(
-                serverName = "terminal", enabled = false,
-                configuration = McpStdioDraft(command = "never-run"),
-            )
-            assertFailsWith<IllegalArgumentException> { manager.add(reservedDraft) }
-            assertEquals(initial, store.configurations.value)
-            assertFailsWith<IllegalArgumentException> { manager.edit("gamma", reservedDraft) }
-            assertEquals(initial, store.configurations.value)
-            val preview = manager.previewCodexImport("")
-            assertEquals(
-                McpImportItemKind.Unsupported,
-                preview.items.single { it.serverName == "terminal" }.kind,
-            )
-            assertFalse(preview.items.single { it.serverName == "terminal" }.selectable)
-            assertFailsWith<IllegalArgumentException> {
-                manager.applyCodexImport(preview.id, mapOf("terminal" to McpImportDecision.Import))
-            }
-            assertEquals(initial, store.configurations.value)
-            manager.applyCodexImport(preview.id, mapOf("a_b" to McpImportDecision.Import))
-            assertEquals(setOf("a-b", "a_b", "gamma"), store.configurations.value.keys)
-        } finally {
-            manager.close()
-        }
-    }
-
-    test("editsPreserveSecretsWhileRenameResetsOAuthState") {
+    test("servers state redacts secrets and exposes sorted secret names and OAuth summary") {
         val initialized = initializedOAuth()
         val store = TestMcpConfigurationStore(
             mapOf(
                 "alpha" to McpServerConfiguration.StreamableHttp(
                     url = "https://alpha.example.test/mcp",
-                    headers = mapOf("Authorization" to McpSecret("header-secret")),
+                    headers = mapOf(
+                        "X-Trace" to McpSecret("trace-secret"),
+                        "Authorization" to McpSecret("header-secret"),
+                    ),
                     oauth = initialized,
                 ),
-            ),
-        )
-        val manager = testScope.backgroundScope.McpManagerImpl(
-            store = store,
-            service = TestMcpService(),
-            codexImportSource = { emptyList() },
-            loginAttemptFactory = { error("Login is not expected.") },
-        )
-        testScope.runCurrent()
-
-        assertFalse("header-secret" in manager.servers.value.toString())
-        assertFalse("access-token" in manager.servers.value.toString())
-        assertEquals(listOf("Authorization"), manager.servers.value.single().headerNames)
-
-        manager.edit(
-            existingServerName = "alpha",
-            draft = McpServerDraft.StreamableHttp(
-                serverName = "alpha",
-                configuration = McpStreamableHttpDraft(
-                    url = "https://alpha.example.test/mcp",
-                    headers = mapOf("Authorization" to McpSecretDraft.Keep),
-                    oauth = initialized.toDraft(),
-                ),
-            ),
-        )
-        val edited = assertIs<McpServerConfiguration.StreamableHttp>(
-            store.configurations.value.getValue("alpha"),
-        )
-        assertEquals(McpSecret("header-secret"), edited.headers.getValue("Authorization"))
-        assertEquals(initialized, edited.oauth)
-
-        manager.edit(
-            existingServerName = "alpha",
-            draft = McpServerDraft.StreamableHttp(
-                serverName = "alpha",
-                configuration = McpStreamableHttpDraft(
-                    url = "https://retargeted.example.test/mcp",
-                    headers = mapOf("Authorization" to McpSecretDraft.Keep),
-                    oauth = initialized.toDraft(),
-                ),
-            ),
-        )
-        val retargeted = assertIs<McpServerConfiguration.StreamableHttp>(
-            store.configurations.value.getValue("alpha"),
-        )
-        assertIs<McpOAuthConfiguration.Uninitialized>(retargeted.oauth)
-        assertEquals(
-            McpSecret("client-secret"),
-            assertIs<McpOAuthConfiguration.Uninitialized>(retargeted.oauth).client.clientSecret,
-        )
-
-        manager.edit(
-            existingServerName = "alpha",
-            draft = McpServerDraft.StreamableHttp(
-                serverName = "beta",
-                enabled = false,
-                configuration = McpStreamableHttpDraft(
-                    url = "https://alpha.example.test/mcp",
-                    headers = mapOf("Authorization" to McpSecretDraft.Keep),
-                    oauth = initialized.toDraft(),
-                ),
-            ),
-        )
-        val renamed = assertIs<McpServerConfiguration.StreamableHttp>(
-            store.configurations.value.getValue("beta"),
-        )
-        assertFalse(renamed.enabled)
-        assertIs<McpOAuthConfiguration.Uninitialized>(renamed.oauth)
-        assertEquals(
-            McpSecret("client-secret"),
-            assertIs<McpOAuthConfiguration.Uninitialized>(renamed.oauth).client.clientSecret,
-        )
-        assertFalse("alpha" in store.configurations.value)
-
-        manager.delete("beta")
-        assertEquals(emptyMap(), store.configurations.value)
-        manager.close()
-    }
-
-    test("invalidDraftNeverWritesPartialSettings") {
-        val store = TestMcpConfigurationStore()
-        val manager = testScope.backgroundScope.McpManagerImpl(
-            store = store,
-            service = TestMcpService(),
-            codexImportSource = { emptyList() },
-            loginAttemptFactory = { error("Login is not expected.") },
-        )
-
-        assertFailsWith<IllegalArgumentException> {
-            manager.add(
-                McpServerDraft.Stdio(
-                    serverName = " ",
-                    configuration = McpStdioDraft(command = "server"),
-                ),
-            )
-        }
-        assertEquals(0, store.successfulUpdateCount)
-        assertEquals(emptyMap(), store.configurations.value)
-
-        manager.add(
-            McpServerDraft.Stdio(
-                serverName = "stdio",
-                configuration = McpStdioDraft(
-                    command = "server",
+                "beta" to McpServerConfiguration.Stdio(
+                    command = "stdio-mcp",
                     environment = mapOf(
-                        "TOKEN" to McpSecretDraft.Replace("environment-secret"),
+                        "Z_TOKEN" to McpSecret("env-z"),
+                        "A_TOKEN" to McpSecret("env-a"),
                     ),
-                    workingDirectory = Path("workspace"),
                 ),
             ),
         )
-        assertEquals(1, store.successfulUpdateCount)
-        assertFalse("environment-secret" in manager.servers.value.toString())
-        manager.close()
-    }
-
-    test("importPreviewFiltersAndCommitsConflictChoicesAtomically") {
-        val existing = McpServerConfiguration.Stdio(command = "existing")
-        val store = TestMcpConfigurationStore(mapOf("conflict" to existing))
-        val importedOauth = initializedOAuth()
-        val service = TestMcpService()
         val manager = testScope.backgroundScope.McpManagerImpl(
             store = store,
-            service = service,
-            codexImportSource = {
-                supportedCodexImports(
-                    "conflict" to McpServerConfiguration.Stdio(command = "replacement"),
-                    "new-http" to McpServerConfiguration.StreamableHttp(
-                        url = "https://new.example.test/mcp",
-                        oauth = importedOauth,
-                    ),
-                    "unmatched" to McpServerConfiguration.Stdio(command = "unmatched"),
-                ) + McpCodexImportCandidate.Unsupported(
-                    serverName = "unsupported",
-                    transport = McpTransportKind.StreamableHttp,
-                    detail = "Unsupported fields: bearer_token_env_var.",
-                )
-            },
-            loginAttemptFactory = { error("Login is not expected.") },
+            service = TestMcpService(),
+            loginPreparer = { error("Login is not expected.") },
         )
-
-        val filtered = manager.previewCodexImport("new")
-        assertEquals(listOf("new-http"), filtered.items.map { it.serverName })
-        assertFalse("access-token" in filtered.toString())
-
-        val preview = manager.previewCodexImport()
-        assertEquals(
-            mapOf(
-                "conflict" to McpImportItemKind.Conflict,
-                "new-http" to McpImportItemKind.New,
-                "unmatched" to McpImportItemKind.New,
-                "unsupported" to McpImportItemKind.Unsupported,
-            ),
-            preview.items.associate { it.serverName to it.kind },
-        )
-        assertFalse(preview.items.single { it.serverName == "unsupported" }.selectable)
-        val writesBeforeImport = store.successfulUpdateCount
-        manager.applyCodexImport(
-            previewId = preview.id,
-            decisions = mapOf(
-                "conflict" to McpImportDecision.Replace,
-                "new-http" to McpImportDecision.Import,
-                "unmatched" to McpImportDecision.Skip,
-            ),
-        )
-
-        assertEquals(writesBeforeImport + 1, store.successfulUpdateCount)
-        assertEquals(
-            McpServerConfiguration.Stdio(command = "replacement"),
-            store.configurations.value.getValue("conflict"),
-        )
-        val imported = assertIs<McpServerConfiguration.StreamableHttp>(
-            store.configurations.value.getValue("new-http"),
-        )
-        assertIs<McpOAuthConfiguration.Uninitialized>(imported.oauth)
-        assertFalse("unmatched" in store.configurations.value)
         testScope.runCurrent()
-        assertEquals(listOf("conflict"), service.invalidatedServerNames)
-        assertFailsWith<IllegalArgumentException> {
-            manager.applyCodexImport(preview.id, emptyMap())
-        }
+
+        val snapshotText = manager.servers.value.toString()
+        assertFalse("header-secret" in snapshotText)
+        assertFalse("trace-secret" in snapshotText)
+        assertFalse("access-token" in snapshotText)
+        assertFalse("client-secret" in snapshotText)
+        assertFalse("env-a" in snapshotText)
+        assertFalse("env-z" in snapshotText)
+
+        val alpha = manager.servers.value.single { it.serverName == "alpha" }
+        assertEquals(listOf("Authorization", "X-Trace"), alpha.headerNames)
+        assertEquals(McpAuthenticationState.Authorized, alpha.authentication)
+        assertEquals(true, alpha.oauth?.hasClientSecret)
+
+        val beta = manager.servers.value.single { it.serverName == "beta" }
+        assertEquals(listOf("A_TOKEN", "Z_TOKEN"), beta.environmentNames)
+        assertEquals(McpAuthenticationState.NotConfigured, beta.authentication)
         manager.close()
     }
 
-    test("browserLoginPublishesEffectPersistsCredentialsAndLogsOut") {
-        val uninitialized = initializedOAuth().toUninitialized()
+    test("loginWithPreparedCallback persists dynamic registration commits credentials and logs out") {
+        val uninitialized = McpOAuthConfiguration.Uninitialized(
+            client = McpOAuthClient(),
+        )
+        val registered = uninitialized.copy(
+            client = uninitialized.client.copy(clientId = "registered-client"),
+            resource = "https://oauth.example.test/mcp",
+            scopes = listOf("tools.read"),
+        )
         val store = TestMcpConfigurationStore(
             mapOf(
                 "oauth" to McpServerConfiguration.StreamableHttp(
@@ -283,28 +91,59 @@ val mcpManagerImplTest by testSuite {
                 ),
             ),
         )
-        val attempt = TestMcpOAuthLoginAttempt(uninitialized)
+        val codeGate = CompletableDeferred<String>()
+        var exchangedCode: String? = null
         val manager = testScope.backgroundScope.McpManagerImpl(
             store = store,
             service = TestMcpService(),
-            codexImportSource = { emptyList() },
-            loginAttemptFactory = { attempt },
+            loginPreparer = {
+                PreparedMcpOAuthLogin(
+                    preparedConfiguration = registered,
+                    state = "test-state",
+                    authorizationUrl = "https://issuer.example.test/authorize?state=test-state",
+                    exchange = { code ->
+                        exchangedCode = code
+                        initializedOAuth().copy(
+                            client = registered.client,
+                            resource = registered.resource,
+                            scopes = registered.scopes,
+                        )
+                    },
+                )
+            },
         )
         testScope.runCurrent()
 
-        val loginJob = launch { manager.login("oauth") }
+        var observedPrepared: PreparedMcpOAuthLogin? = null
+        val loginJob = launch {
+            manager.loginWithPreparedCallback(
+                serverName = "oauth",
+                expectedRedirectUri = uninitialized.client.redirectUri,
+            ) { prepared ->
+                observedPrepared = prepared
+                codeGate.await()
+            }
+        }
         testScope.runCurrent()
+
+        assertEquals(registered, observedPrepared?.preparedConfiguration)
+        assertEquals(
+            registered,
+            assertIs<McpServerConfiguration.StreamableHttp>(
+                store.configurations.value.getValue("oauth"),
+            ).oauth,
+        )
         assertEquals(
             McpAuthenticationState.Authorizing,
             manager.servers.value.single().authentication,
         )
-        val effect = assertIs<McpManagerEffect.OpenAuthorizationUrl>(manager.effects.first())
-        assertEquals("oauth", effect.serverName)
-        assertEquals(attempt.authorizationUrl, effect.url)
+        assertFailsWith<IllegalArgumentException> { manager.logout("oauth") }
 
-        attempt.result.complete(initializedOAuth())
+        codeGate.complete("accepted-code")
         loginJob.join()
         testScope.runCurrent()
+
+        assertEquals("accepted-code", exchangedCode)
         assertIs<McpOAuthConfiguration.Initialized>(
             assertIs<McpServerConfiguration.StreamableHttp>(
                 store.configurations.value.getValue("oauth"),
@@ -329,49 +168,45 @@ val mcpManagerImplTest by testSuite {
         manager.close()
     }
 
-    test("browserLoginPersistsDynamicRegistrationBeforeOpeningTheBrowser") {
-        val uninitialized = McpOAuthConfiguration.Uninitialized(
-            client = McpOAuthClient(),
-        )
-        val prepared = uninitialized.copy(
-            client = uninitialized.client.copy(clientId = "registered-client"),
-            resource = "https://oauth.example.test/mcp",
-            scopes = listOf("tools.read"),
-        )
-        val store = TestMcpConfigurationStore(
-            mapOf(
-                "oauth" to McpServerConfiguration.StreamableHttp(
-                    url = "https://oauth.example.test/mcp",
-                    oauth = uninitialized,
-                ),
+    test("commitConfigurationChange cancels active login when server is removed") {
+        val uninitialized = initializedOAuth().toUninitialized()
+        val initial = mapOf(
+            "oauth" to McpServerConfiguration.StreamableHttp(
+                url = "https://oauth.example.test/mcp",
+                oauth = uninitialized,
             ),
         )
-        val attempt = TestMcpOAuthLoginAttempt(prepared)
+        val store = TestMcpConfigurationStore(initial)
+        val waiting = CompletableDeferred<String>()
         val manager = testScope.backgroundScope.McpManagerImpl(
             store = store,
             service = TestMcpService(),
-            codexImportSource = { emptyList() },
-            loginAttemptFactory = { attempt },
+            loginPreparer = {
+                PreparedMcpOAuthLogin(
+                    preparedConfiguration = uninitialized,
+                    state = "state",
+                    authorizationUrl = "https://issuer.example.test/authorize?state=state",
+                    exchange = { initializedOAuth() },
+                )
+            },
         )
         testScope.runCurrent()
 
-        val loginJob = launch { manager.login("oauth") }
+        val loginJob = launch {
+            manager.loginWithPreparedCallback("oauth") { waiting.await() }
+        }
         testScope.runCurrent()
+        assertTrue(loginJob.isActive)
 
-        assertEquals(
-            prepared,
-            assertIs<McpServerConfiguration.StreamableHttp>(
-                store.configurations.value.getValue("oauth"),
-            ).oauth,
+        assertTrue(
+            manager.commitConfigurationChange(initial, emptyMap()) {
+                store.configurations.value = emptyMap()
+                true
+            },
         )
-        attempt.result.complete(
-            initializedOAuth().copy(
-                client = prepared.client,
-                resource = prepared.resource,
-                scopes = prepared.scopes,
-            ),
-        )
-        loginJob.join()
+        testScope.runCurrent()
+        assertTrue(loginJob.isCancelled)
+        assertEquals(emptyList(), manager.servers.value)
         manager.close()
     }
 
@@ -382,8 +217,7 @@ val mcpManagerImplTest by testSuite {
                 mapOf("server" to McpServerConfiguration.Stdio(command = "server")),
             ),
             service = TestMcpService(mapOf("server" to client)),
-            codexImportSource = { emptyList() },
-            loginAttemptFactory = { error("Login is not expected.") },
+            loginPreparer = { error("Login is not expected.") },
         )
 
         manager.reconnect("server")
@@ -398,7 +232,6 @@ private class TestMcpConfigurationStore(
 ) : McpConfigurationStore {
     private val mutex = Mutex()
     override val configurations = MutableStateFlow(initial)
-    var successfulUpdateCount: Int = 0
 
     override suspend fun update(
         transform: (Map<String, McpServerConfiguration>) -> Map<String, McpServerConfiguration>,
@@ -406,7 +239,6 @@ private class TestMcpConfigurationStore(
         mutex.withLock {
             val updated = transform(configurations.value)
             configurations.value = updated
-            successfulUpdateCount += 1
             updated
         }
 }
@@ -417,12 +249,7 @@ private class TestMcpService(
     override val clients: StateFlow<Map<String, McpClient>> = MutableStateFlow(initialClients)
     override val authentication: StateFlow<Map<String, McpAuthenticationState>> =
         MutableStateFlow(emptyMap())
-    val invalidatedServerNames = mutableListOf<String>()
-    override suspend fun invalidate(serverName: String) {
-        invalidatedServerNames += serverName
-    }
 
-    override suspend fun refresh(): Unit = Unit
     override fun close(): Unit = Unit
 }
 
@@ -439,31 +266,6 @@ private class TestMcpClient(
     }
 }
 
-private class TestMcpOAuthLoginAttempt(
-    override val preparedConfiguration: McpOAuthConfiguration.Uninitialized,
-) : McpOAuthLoginAttempt {
-    override val authorizationUrl: String = "https://issuer.example.test/authorize?state=test"
-    val result = CompletableDeferred<McpOAuthConfiguration.Initialized>()
-    var closed: Boolean = false
-
-    override suspend fun awaitInitialized(): McpOAuthConfiguration.Initialized = result.await()
-
-    override fun close() {
-        closed = true
-        result.cancel(CancellationException("Authorization attempt closed."))
-    }
-}
-
-private fun supportedCodexImports(
-    vararg servers: Pair<String, McpServerConfiguration>,
-): List<McpCodexImportCandidate> =
-    servers.map { (name, configuration) ->
-        McpCodexImportCandidate.Supported(
-            serverName = name,
-            configuration = configuration,
-        )
-    }
-
 private fun initializedOAuth(): McpOAuthConfiguration.Initialized =
     McpOAuthConfiguration.Initialized(
         client = McpOAuthClient(
@@ -479,17 +281,6 @@ private fun initializedOAuth(): McpOAuthConfiguration.Initialized =
         accessToken = McpSecret("access-token"),
         refreshToken = McpSecret("refresh-token"),
         expiresAtEpochSeconds = 1_800_000_000,
-    )
-
-private fun McpOAuthConfiguration.Initialized.toDraft() =
-    io.github.stream29.kodex.mcp.contract.McpOAuthDraft(
-        clientId = client.clientId,
-        clientSecret = McpSecretDraft.Keep,
-        redirectUri = client.redirectUri,
-        authorizationEndpoint = client.authorizationEndpoint,
-        tokenEndpoint = client.tokenEndpoint,
-        resource = resource,
-        scopes = scopes,
     )
 
 private fun McpOAuthConfiguration.Initialized.toUninitialized() =

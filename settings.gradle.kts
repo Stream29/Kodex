@@ -106,11 +106,7 @@ fun Settings.moduleTree(name: String, block: ModuleTreeScope.() -> Unit) {
 }
 
 moduleTree("agent-context") {
-    module("agents-md")
-    module("prefix")
-    module("prompt-dsl")
     module("settings")
-    module("skill")
 }
 
 moduleTree("agent-eventbus") {
@@ -124,10 +120,6 @@ moduleTree("agent-schedule") {
 moduleTree("agent-runtime") {
     module("composition")
     module("contract")
-    moduleTree("decorator") {
-        module("compact")
-        module("tool")
-    }
 }
 
 moduleTree("agent-session") {
@@ -137,7 +129,6 @@ moduleTree("agent-session") {
 }
 
 moduleTree("agent-state") {
-    module("context-window")
     module("contract")
     module("core")
     module("test")
@@ -341,9 +332,7 @@ moduleTree("tool") {
     module("apply-patch")
     module("await-event")
     module("core")
-    moduleTree("image-generation") {
-        module("contract")
-    }
+    module("image-generation")
     module("plan")
     moduleTree("read-media") {
         module("contract")

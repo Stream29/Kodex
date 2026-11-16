@@ -11,12 +11,10 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(libs.kotlinx.serialization.core)
-                api(project(":openai-models"))
-                api(libs.kotlinx.schema.json)
             }
         }
         commonTest.dependencies {
-            implementation(project(":openai-json-codec"))
+            implementation(libs.kotlinx.serialization.json)
         }
     }
 }

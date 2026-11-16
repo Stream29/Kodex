@@ -16,7 +16,6 @@ public expect class ApplyPatchToolClient(
     workingDirectoryProvider: suspend () -> Path = { Path(".") },
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ) {
-    public suspend fun apply(patch: String): PatchApplyResult
     public suspend fun apply(patch: Patch): PatchApplyResult
 }
 
@@ -25,14 +24,10 @@ public object ApplyPatchTools {
 
     public val spec: ToolSpec
         get() = ApplyPatchToolImplementation.spec
-
-    public fun createTool(client: ApplyPatchToolClient = ApplyPatchToolClient()): Tool =
-        ApplyPatchToolImplementation.createTool(client)
 }
 
 internal expect object ApplyPatchToolImplementation {
     val spec: ToolSpec
-    fun createTool(client: ApplyPatchToolClient): Tool
 }
 
 public expect class ApplyPatchTool(

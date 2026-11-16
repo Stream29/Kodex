@@ -115,22 +115,19 @@ val mcpRouteAdmissionTest by testSuite(compartment = { TestCompartment.RealTime 
         }
     }
 
-    test("invalid catalog on refresh and reconnect retains previous catalog and reports ToolCatalog") {
+    test("invalid catalog on reconnect retains previous catalog and reports ToolCatalog") {
         withOfflineOwners(listOf("server" to listOf("echo"))) { owners, catalogs, transports ->
             val owner = owners.single()
             owner.reconnect()
             val previous = catalogs.getValue("server")
             transports.getValue("server").single().toolNames = listOf("dup", "dup")
-            owner.refresh()
-            assertSame(previous, catalogs.getValue("server"))
-            assertEquals(McpClientState.Failed(McpClientFailureReason.ToolCatalog), owner.state.value)
-            val unavailable = previous.listTools().single().call(JsonObject(emptyMap()))
-            assertTrue(unavailable.isError == true)
-            assertTrue(transports.getValue("server").single().calledNames.isEmpty())
             owner.reconnect()
             assertSame(previous, catalogs.getValue("server"))
             assertEquals(McpClientState.Failed(McpClientFailureReason.ToolCatalog), owner.state.value)
             assertTrue(transports.getValue("server").last().closed)
+            val unavailable = previous.listTools().single().call(JsonObject(emptyMap()))
+            assertTrue(unavailable.isError == true)
+            assertTrue(transports.getValue("server").last().calledNames.isEmpty())
             transports.getValue("server").last().toolNames = listOf("echo")
             owner.reconnect()
             assertEquals(McpClientState.Healthy, owner.state.value)

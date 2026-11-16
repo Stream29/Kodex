@@ -36,7 +36,6 @@ kotlin {
                 api(project(":agent-storage-clean-models"))
                 api(project(":agent-storage-core"))
                 api(project(":openai-models"))
-                api(project(":tool-image-generation-contract"))
                 api(project(":tool-request-user-input"))
                 api(project(":utils-kotlinx-io-serialization"))
                 api(libs.kotlinx.coroutines.core)

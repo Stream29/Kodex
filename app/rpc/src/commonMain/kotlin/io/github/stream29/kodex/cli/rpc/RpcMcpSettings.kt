@@ -2,10 +2,10 @@
 
 package io.github.stream29.kodex.cli.rpc
 
-import io.github.stream29.kodex.app.settings.toSettingsState
-import io.github.stream29.kodex.app.settings.contract.McpServerSettingsState
 import io.github.stream29.kodex.app.mcpsettings.McpImportHandle
 import io.github.stream29.kodex.app.mcpsettings.McpWriteAdmission
+import io.github.stream29.kodex.app.settings.contract.McpServerSettingsState
+import io.github.stream29.kodex.app.settings.toSettingsState
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
 import io.github.stream29.kodex.mcp.contract.McpImportItem
@@ -13,6 +13,7 @@ import io.github.stream29.kodex.mcp.contract.McpImportItemKind
 import io.github.stream29.kodex.mcp.contract.McpImportPreview
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpServerDraft
+import io.github.stream29.kodex.mcp.contract.ReservedMcpServerNames
 import io.github.stream29.kodex.mcp.contract.toConfiguration
 import io.github.stream29.kodex.mcp.contract.validatedName
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
@@ -90,7 +91,7 @@ public actual class RpcMcpSettings actual constructor(
         val candidates = rpc.getCodexMcpSettings()
         owner.ensureActive()
         check(nextPreview < Long.MAX_VALUE)
-        val value = Import(++nextPreview, candidates, baseline)
+        val value = CodexMcpImport(++nextPreview, candidates, baseline)
         return object : McpImportHandle {
             private var released = false
             override val preview: McpImportPreview = value.present("")
@@ -111,15 +112,9 @@ public actual class RpcMcpSettings actual constructor(
         }
     }
 
-    private suspend fun applyImport(value: Import, decisions: Map<String, McpImportDecision>): Boolean {
+    private suspend fun applyImport(value: CodexMcpImport, decisions: Map<String, McpImportDecision>): Boolean {
         owner.ensureActive()
-        val selected = decisions.filterValues { it != McpImportDecision.Skip }
-        val configurations = selected.mapValues { (name, decision) ->
-            val candidate = value.candidates.singleOrNull { it.serverName == name } as? McpCodexImportCandidate.Supported
-                ?: error("The selected declaration is not importable.")
-            require(decision != McpImportDecision.Import || value.baseline[name] == null)
-            candidate.configuration
-        }
+        val configurations = value.resolveConfigurations(decisions)
         if (configurations.isEmpty()) return true
         val names = configurations.keys
         return global.settings.editField(
@@ -137,24 +132,62 @@ public actual class RpcMcpSettings actual constructor(
     public actual override fun close() { owner.cancel() }
 }
 
-private class Import(
+internal class CodexMcpImport(
     val id: Long,
     val candidates: List<McpCodexImportCandidate>,
     val baseline: Map<String, McpServerConfiguration>,
 ) {
     fun present(filter: String): McpImportPreview = McpImportPreview(
-        id, filter, candidates.filter { it.serverName.contains(filter, ignoreCase = true) }.map {
+        id,
+        filter,
+        candidates.filter { it.serverName.contains(filter, ignoreCase = true) }.map {
             when (it) {
-                is McpCodexImportCandidate.Supported -> McpImportItem(
-                    it.serverName, it.transport,
-                    if (it.serverName in baseline) McpImportItemKind.Conflict else McpImportItemKind.New,
-                    it.configuration.enabled, selectable = true,
-                )
+                is McpCodexImportCandidate.Supported -> {
+                    val trimmedName = it.serverName.trim()
+                    if (trimmedName in ReservedMcpServerNames) {
+                        McpImportItem(
+                            serverName = it.serverName,
+                            transport = it.transport,
+                            kind = McpImportItemKind.Unsupported,
+                            enabled = null,
+                            selectable = false,
+                            detail = "Server name '$trimmedName' is reserved by Kodex.",
+                        )
+                    } else {
+                        McpImportItem(
+                            serverName = it.serverName,
+                            transport = it.transport,
+                            kind = if (it.serverName in baseline) McpImportItemKind.Conflict else McpImportItemKind.New,
+                            enabled = it.configuration.enabled,
+                            selectable = true,
+                        )
+                    }
+                }
                 is McpCodexImportCandidate.Unsupported -> McpImportItem(
-                    it.serverName, it.transport, McpImportItemKind.Unsupported, enabled = null,
-                    selectable = false, detail = it.detail,
+                    serverName = it.serverName,
+                    transport = it.transport,
+                    kind = McpImportItemKind.Unsupported,
+                    enabled = null,
+                    selectable = false,
+                    detail = it.detail,
                 )
             }
         },
     )
+
+    fun resolveConfigurations(
+        decisions: Map<String, McpImportDecision>,
+    ): Map<String, McpServerConfiguration> {
+        val selected = decisions.filterValues { it != McpImportDecision.Skip }
+        return selected.mapValues { (name, decision) ->
+            val trimmedName = name.trim()
+            require(trimmedName !in ReservedMcpServerNames) {
+                "Server name '$trimmedName' is reserved by Kodex."
+            }
+            val candidate = candidates.singleOrNull { it.serverName == name } as? McpCodexImportCandidate.Supported
+                ?: error("The selected declaration is not importable.")
+            require(decision != McpImportDecision.Import || baseline[name] == null)
+            candidate.configuration
+        }
+    }
 }

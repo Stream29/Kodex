@@ -8,7 +8,6 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
@@ -16,18 +15,13 @@ import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
-import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponseItem
-import io.github.stream29.kodex.openai.ResponsesApiRequest
-import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
-import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
-import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
@@ -41,9 +35,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration.Companion.milliseconds
@@ -249,7 +240,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val sourceIndex = repository.createInitialized(settings("Source"))
             val source = repository.open(sourceIndex)
-            source.runtime.injectHistory(listOf(userMessage()))
+            source.runtime.modify { it.commit(userMessage()) }
 
             val targetIndex = repository.createFork(sourceIndex)
             val target = repository.open(targetIndex)

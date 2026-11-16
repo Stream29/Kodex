@@ -15,6 +15,7 @@ import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.sqlite.openVerifiedKodexDatabase
 import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
 import io.github.stream29.kodex.cli.notification.collectNotificationHooks
+import io.github.stream29.kodex.cli.notification.notifyUnhandledErrorHooks
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.settings.*
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
@@ -85,7 +86,7 @@ public actual suspend fun <R> withBackendServices(
             api,
             auth,
             mcpOAuth,
-            BackendMcpOAuthBridge(mcpOAuth::prepare),
+            mcpOAuth,
         ) { global ->
             val account = BackendAccountState(owner, auth, api)
             val oauth = BackendOAuth(owner, auth, loginClient, global.mcpManager)
@@ -114,7 +115,7 @@ public actual suspend fun <R> withBackendServices(
                 reportCleanupFailure = { BackendLogger.warn { "OAuth resource cleanup failed." } },
             )
             val errors = FrontendErrorQueue(owner, { unified.current.frontend.hooks }) { hooks, message ->
-                collectNotificationHooks(emptyFlow(), { hooks }, home, flowOf(message))
+                notifyUnhandledErrorHooks(message, hooks, home)
             }
             val effects = BackendFrontendEffectsImpl(owned, oauth, errors)
             val dependencies = KodexAgentDependencies(

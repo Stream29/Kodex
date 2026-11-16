@@ -7,14 +7,12 @@ import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
 import io.github.stream29.kodex.mcp.contract.McpSecret
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.streamablehttp.McpStreamableHttpClient
+import io.github.stream29.kodex.utils.oauthloopback.pkceS256CodeChallenge
 import io.ktor.client.request.get
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.Url
-import io.ktor.network.selector.SelectorManager
-import io.ktor.network.sockets.InetSocketAddress
-import io.ktor.network.sockets.aSocket
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
@@ -29,20 +27,14 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -52,19 +44,19 @@ import kotlinx.serialization.json.jsonPrimitive
 val mcpOAuthIoTest by testSuite(
     compartment = { TestCompartment.RealTime },
 ) {
-    test("real loopback OAuth login exchanges and refreshes tokens") {
+    test("real loopback OAuth login prepares PKCE exchanges code and refreshes tokens") {
         val fixture = McpOAuthFixture().start()
-        val callbackPort = reserveLoopbackPort()
         val scope = CoroutineScope(currentCoroutineContext())
         val oauthClient = scope.DefaultMcpOAuthClient()
-        val browser = scope.McpStreamableHttpClient()
+        val browser = scope.McpStreamableHttpClient().config { followRedirects = false }
+        val redirectUri = "http://127.0.0.1:8765/callback"
         val configuration = McpServerConfiguration.StreamableHttp(
             url = "${fixture.origin}/mcp",
             oauth = McpOAuthConfiguration.Uninitialized(
                 client = McpOAuthClient(
                     clientId = ClientId,
                     clientSecret = McpSecret(ClientSecret),
-                    redirectUri = "http://127.0.0.1:$callbackPort/callback",
+                    redirectUri = redirectUri,
                     authorizationEndpoint = "${fixture.origin}/authorize",
                     tokenEndpoint = "${fixture.origin}/token",
                 ),
@@ -74,20 +66,17 @@ val mcpOAuthIoTest by testSuite(
         )
 
         try {
-            val attempt = oauthClient.create(configuration)
-            val initialized = async { attempt.awaitInitialized() }
+            val prepared = oauthClient.prepare(configuration)
+            val authorizationUrl = Url(prepared.authorizationUrl)
+            assertEquals(redirectUri, authorizationUrl.parameters["redirect_uri"])
+            assertEquals(prepared.state, authorizationUrl.parameters["state"])
+            val codeChallenge = assertNotNull(authorizationUrl.parameters["code_challenge"])
 
-            val authorizationUrl = Url(attempt.authorizationUrl)
-            val redirectUri = checkNotNull(authorizationUrl.parameters["redirect_uri"])
-            val rejected = browser.get(
-                "$redirectUri?code=wrong-code&state=wrong-state",
-            )
-            assertEquals(HttpStatusCode.BadRequest, rejected.status)
-            assertFalse(initialized.isCompleted)
-
-            val browserResponse = browser.get(attempt.authorizationUrl)
-            assertEquals(HttpStatusCode.OK, browserResponse.status)
-            val tokens = withTimeout(10.seconds) { initialized.await() }
+            val browserResponse = browser.get(prepared.authorizationUrl)
+            assertEquals(HttpStatusCode.Found, browserResponse.status)
+            val callbackUrl = Url(checkNotNull(browserResponse.headers[HttpHeaders.Location]))
+            assertEquals(prepared.state, callbackUrl.parameters["state"])
+            val tokens = prepared.exchangeCode(checkNotNull(callbackUrl.parameters["code"]))
 
             assertEquals(McpSecret("access-one"), tokens.accessToken)
             assertEquals(McpSecret("refresh-one"), tokens.refreshToken)
@@ -107,7 +96,8 @@ val mcpOAuthIoTest by testSuite(
             assertEquals(AuthorizationCode, exchange["code"])
             assertEquals(ClientId, exchange["client_id"])
             assertEquals(ClientSecret, exchange["client_secret"])
-            assertNotNull(exchange["code_verifier"])
+            val codeVerifier = assertNotNull(exchange["code_verifier"])
+            assertEquals(codeChallenge, pkceS256CodeChallenge(codeVerifier))
             assertEquals("${fixture.origin}/mcp", exchange["resource"])
             val refresh = tokenRequests[1]
             assertEquals("refresh_token", refresh["grant_type"])
@@ -124,11 +114,10 @@ val mcpOAuthIoTest by testSuite(
 
     test("discovers a challenged resource and dynamically registers the OAuth client") {
         val fixture = DiscoverableMcpOAuthFixture().start()
-        val callbackPort = reserveLoopbackPort()
         val scope = CoroutineScope(currentCoroutineContext())
         val oauthClient = scope.DefaultMcpOAuthClient()
-        val browser = scope.McpStreamableHttpClient()
-        val redirectUri = "http://127.0.0.1:$callbackPort/callback"
+        val browser = scope.McpStreamableHttpClient().config { followRedirects = false }
+        val redirectUri = "http://127.0.0.1:8765/callback"
         val configuration = McpServerConfiguration.StreamableHttp(
             url = "${fixture.origin}/mcp",
             oauth = McpOAuthConfiguration.Uninitialized(
@@ -137,8 +126,8 @@ val mcpOAuthIoTest by testSuite(
         )
 
         try {
-            val attempt = oauthClient.create(configuration)
-            val prepared = attempt.preparedConfiguration
+            val preparedLogin = oauthClient.prepare(configuration)
+            val prepared = preparedLogin.preparedConfiguration
 
             assertEquals(DynamicClientId, prepared.client.clientId)
             assertEquals("${fixture.origin}/mcp", prepared.resource)
@@ -159,14 +148,16 @@ val mcpOAuthIoTest by testSuite(
                 registration.keys,
             )
 
-            val authorizationUrl = Url(attempt.authorizationUrl)
+            val authorizationUrl = Url(preparedLogin.authorizationUrl)
             assertEquals(DynamicClientId, authorizationUrl.parameters["client_id"])
             assertEquals("${fixture.origin}/mcp", authorizationUrl.parameters["resource"])
             assertEquals(DynamicScope, authorizationUrl.parameters["scope"])
 
-            val initialized = async { attempt.awaitInitialized() }
-            assertEquals(HttpStatusCode.OK, browser.get(attempt.authorizationUrl).status)
-            val tokens = withTimeout(10.seconds) { initialized.await() }
+            val browserResponse = browser.get(preparedLogin.authorizationUrl)
+            assertEquals(HttpStatusCode.Found, browserResponse.status)
+            val callbackUrl = Url(checkNotNull(browserResponse.headers[HttpHeaders.Location]))
+            assertEquals(preparedLogin.state, callbackUrl.parameters["state"])
+            val tokens = preparedLogin.exchangeCode(checkNotNull(callbackUrl.parameters["code"]))
 
             assertEquals(DynamicClientId, tokens.client.clientId)
             assertEquals(McpSecret("dynamic-access"), tokens.accessToken)
@@ -185,20 +176,19 @@ val mcpOAuthIoTest by testSuite(
 
     test("rejects discovered authorization metadata without PKCE S256") {
         val fixture = DiscoverableMcpOAuthFixture(advertisePkce = false).start()
-        val callbackPort = reserveLoopbackPort()
         val oauthClient = CoroutineScope(currentCoroutineContext()).DefaultMcpOAuthClient()
         val configuration = McpServerConfiguration.StreamableHttp(
             url = "${fixture.origin}/mcp",
             oauth = McpOAuthConfiguration.Uninitialized(
                 client = McpOAuthClient(
-                    redirectUri = "http://127.0.0.1:$callbackPort/callback",
+                    redirectUri = "http://127.0.0.1:8765/callback",
                 ),
             ),
         )
 
         try {
             val failure = assertFailsWith<IllegalArgumentException> {
-                oauthClient.create(configuration)
+                oauthClient.prepare(configuration)
             }
 
             assertTrue(failure.message.orEmpty().contains("PKCE S256"))
@@ -376,13 +366,6 @@ private class DiscoverableMcpOAuthFixture(
         server.stopSuspend(100, 2_000)
     }
 }
-
-private suspend fun reserveLoopbackPort(): Int =
-    SelectorManager(Dispatchers.IO).use { selector ->
-        aSocket(selector).tcp().bind(Host, 0).use { socket ->
-            (socket.localAddress as InetSocketAddress).port
-        }
-    }
 
 private const val Host: String = "127.0.0.1"
 private const val ClientId: String = "test-client"

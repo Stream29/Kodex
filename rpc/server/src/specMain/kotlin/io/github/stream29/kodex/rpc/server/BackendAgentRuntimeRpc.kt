@@ -13,10 +13,10 @@ import io.github.stream29.kodex.openai.SearchResponse
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.models.AgentStateValue
+import io.github.stream29.kodex.rpc.models.GeneratedImageArtifact
+import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.ShellSessionState
-import io.github.stream29.kodex.tool.imagegeneration.GeneratedImageArtifact
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice

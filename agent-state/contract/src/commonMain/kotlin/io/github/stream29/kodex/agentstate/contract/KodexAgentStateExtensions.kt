@@ -11,21 +11,6 @@ import io.github.stream29.kodex.agentstate.impl.KodexAgentStateInvalidTransition
 import kotlinx.coroutines.CancellationException
 
 /**
- * Replaces only the thread name in the latest settings snapshot.
- * The read and unconditional update are separate operations; use State CAS
- * instead when conflict detection is required.
- *
- * @throws CancellationException when storage reading or updating is cancelled.
- * @throws IllegalArgumentException when no initial settings can be updated.
- */
-public actual suspend fun KodexAgentState.updateThreadName(threadName: String): Int {
-    val currentSettings = requireNotNull(storage.getSettingsAt(latestIndex.value)) {
-        "Initial settings are required before updating agent settings."
-    }
-    return updateSettings(currentSettings.copy(threadName = threadName))
-}
-
-/**
  * Updates the active plan and completes its pending `update_plan` call.
  *
  * [completed] must match a pending `update_plan` call. The settings update and

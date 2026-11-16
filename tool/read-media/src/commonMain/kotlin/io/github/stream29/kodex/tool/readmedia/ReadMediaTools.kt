@@ -10,23 +10,19 @@ import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.typedTool
 
 internal actual object ReadMediaToolImplementation {
-    public actual val spec: ResponsesApiTool = toolSpec(ReadMediaToolOptions())
-
-    public actual fun toolSpec(options: ReadMediaToolOptions): ResponsesApiTool =
+    public actual val spec: ResponsesApiTool =
         ResponsesApiTool(
             name = ReadMediaTools.Name,
             description = ReadMediaTools.Description,
             strict = false,
-            parameters = readMediaParametersSchema(options),
-            outputSchema = ReadMediaOutputSchema,
+            parameters = readMediaParametersSchema(),
         )
 
     public actual fun createTool(
         client: ReadMediaToolClient,
-        options: ReadMediaToolOptions,
     ): Tool =
         typedTool(
-            spec = toolSpec(options),
+            spec = spec,
             select = { it as? PendingReadMediaToolEvent },
         ) { pending ->
             try {

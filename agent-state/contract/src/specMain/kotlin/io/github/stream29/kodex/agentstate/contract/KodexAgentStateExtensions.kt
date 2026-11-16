@@ -5,16 +5,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import kotlinx.coroutines.CancellationException
 
 /**
- * Replaces only the thread name in the latest settings snapshot.
- * The read and unconditional update are separate operations; use State CAS
- * instead when conflict detection is required.
- *
- * @throws CancellationException when storage reading or updating is cancelled.
- * @throws IllegalArgumentException when no initial settings can be updated.
- */
-public expect suspend fun KodexAgentState.updateThreadName(threadName: String): Int
-
-/**
  * Updates the active plan and completes its pending `update_plan` call.
  *
  * [completed] must match a pending `update_plan` call. The settings update and

@@ -2,8 +2,8 @@
 
 package io.github.stream29.kodex.mcp.impl
 
-import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
+import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpConfigurationStore
 import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
 import io.github.stream29.kodex.mcp.contract.McpOAuthTokenRefresher
@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -65,7 +66,7 @@ public actual class McpServiceImpl internal constructor(
         launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 settings
-                    .map { snapshot -> snapshot.mcpServers.enabledConfigurations() }
+                    .map { snapshot -> snapshot.mcpServers }
                     .distinctUntilChanged()
                     .collect { reconcileSettings() }
             } finally {
@@ -75,50 +76,31 @@ public actual class McpServiceImpl internal constructor(
         }
     }
 
-    /** Refreshes catalogs through every currently healthy client. */
-    actual override suspend fun refresh() {
-        coroutineContext.ensureActive()
-        val owners = transitionMutex.withLock {
-            serviceState.owners.values.toList()
-        }
-        owners.forEach { owner -> owner.refresh() }
-    }
-
-    actual override suspend fun invalidate(serverName: String) {
-        coroutineContext.ensureActive()
-        val retiredOwner = transitionMutex.withLock {
-            val owner = serviceState.owners[serverName]
-            serviceState = serviceState.copy(
-                identities = serviceState.identities - serverName,
-                owners = serviceState.owners - serverName,
-            )
-            clients.value = clients.value - serverName
-            owner
-        }
-        withContext(NonCancellable) {
-            retiredOwner?.close()
-        }
-        launch {
-            reconcileSettings()
-        }
-    }
-
     /** Cancels this service; its lifecycle coroutine then closes every client owner. */
     actual override fun close() {
         cancel()
     }
 
     private suspend fun reconcileSettings() {
-        authentication.value = settings.value.mcpServers.mapValues { (_, configuration) ->
-            configuration.persistedAuthenticationState()
-        }
         val reconciliation = transitionMutex.withLock {
             coroutineContext.ensureActive()
-            val configurations = settings.value.mcpServers.enabledConfigurations()
+            val allConfigurations = settings.value.mcpServers
+            val previousAll = serviceState.allConfigurations
+            authentication.update { currentAuth ->
+                allConfigurations.mapValues { (name, configuration) ->
+                    if (configuration.enabled && previousAll[name] == configuration) {
+                        currentAuth[name] ?: configuration.persistedAuthenticationState()
+                    } else {
+                        configuration.persistedAuthenticationState()
+                    }
+                }
+            }
+            val configurations = allConfigurations.enabledConfigurations()
             val identities = configurations.mapValues { (_, configuration) ->
                 configuration.connectionIdentity()
             }
             if (identities == serviceState.identities) {
+                serviceState = serviceState.copy(allConfigurations = allConfigurations)
                 serviceState.owners.forEach { (name, owner) ->
                     configurations[name]?.let(owner::updateConfiguration)
                 }
@@ -168,6 +150,7 @@ public actual class McpServiceImpl internal constructor(
             }
 
             serviceState = McpServiceState(
+                allConfigurations = allConfigurations,
                 identities = identities,
                 owners = nextOwners,
             )
@@ -293,7 +276,7 @@ public actual class McpServiceImpl internal constructor(
         serverName: String,
         state: McpAuthenticationState,
     ) {
-        authentication.value = authentication.value + (serverName to state)
+        authentication.update { current -> current + (serverName to state) }
     }
 
     private suspend fun publishCatalog(
@@ -355,6 +338,7 @@ private fun Map<String, McpServerConfiguration>.enabledConfigurations():
         .associate(Map.Entry<String, McpServerConfiguration>::toPair)
 
 private data class McpServiceState(
+    val allConfigurations: Map<String, McpServerConfiguration> = emptyMap(),
     val identities: Map<String, McpConnectionIdentity> = emptyMap(),
     val owners: Map<String, McpClientOwner> = emptyMap(),
 )
@@ -412,15 +396,5 @@ private fun McpServerConfiguration.hasRunnableAuthentication(): Boolean =
     this !is McpServerConfiguration.StreamableHttp ||
         oauth == null ||
         oauth is McpOAuthConfiguration.Initialized
-
-private fun McpServerConfiguration.persistedAuthenticationState(): McpAuthenticationState =
-    when (this) {
-        is McpServerConfiguration.Stdio -> McpAuthenticationState.NotConfigured
-        is McpServerConfiguration.StreamableHttp -> when (oauth) {
-            null -> McpAuthenticationState.NotConfigured
-            is McpOAuthConfiguration.Uninitialized -> McpAuthenticationState.LoginRequired
-            is McpOAuthConfiguration.Initialized -> McpAuthenticationState.Authorized
-        }
-    }
 
 private const val OAuthRefreshSkewSeconds: Long = 30

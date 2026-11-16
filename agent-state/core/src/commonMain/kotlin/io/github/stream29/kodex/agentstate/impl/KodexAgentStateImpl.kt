@@ -11,7 +11,6 @@ import io.github.stream29.kodex.agentstate.contract.canCompact
 import io.github.stream29.kodex.agentstate.contract.canRequestResponseApi
 import io.github.stream29.kodex.agentstate.tool.toPendingToolEvent
 import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -32,6 +31,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountDiagnostics
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.callId
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.codexRequestWindowId
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
@@ -73,7 +73,6 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -84,8 +83,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlin.uuid.ExperimentalUuidApi
@@ -207,7 +204,7 @@ private class KodexAgentStateImpl(
             val windowId = settings.codexRequestWindowId(threadId)
             client.createResponse(
                 model = settings.model,
-                input = (contextPrefix + durableInput).toResponsesApiInput(),
+                input = contextPrefix + durableInput,
                 instructions = settings.instructions,
                 store = false,
                 previousResponseId = settings.previousResponseId,
@@ -455,49 +452,6 @@ private class KodexAgentStateImpl(
     }
 
     @OptIn(ExperimentalUuidApi::class)
-    override suspend fun injectHistory(events: List<StableIndexEvent.Steerable>): Int {
-        if (events.isEmpty()) {
-            return latestIndex.value
-        }
-        return mutate(
-            validate = {},
-            inFlight = KodexAgentStateValue.ExternalWrite,
-        ) {
-            val timestamp = now()
-            val firstIndex = storage.latestIndex() + 1
-            var currentSettings = storage.getSettingsAt(storage.latestIndex())
-            var previousMessageStartsNewTurn = storage.startsNewTurnBefore(firstIndex)
-            var index = storage.latestIndex()
-            for (event in events) {
-                val isUserTurnInput = event is StableUserMessage ||
-                    event is StableAskUserEvent ||
-                    event is StableScheduleEvent ||
-                    event is StableTerminalExitedEvent
-                val startsNewTurn = isUserTurnInput &&
-                    previousMessageStartsNewTurn
-                val commits = buildList<AgentCommit> {
-                    if (startsNewTurn) {
-                        currentSettings = currentSettings.copy(
-                            turnId = Uuid.generateV7().toString(),
-                        )
-                        add(currentSettings)
-                    }
-                    add(event)
-                }
-                index = storage.commit(commits, timestamp)
-                previousMessageStartsNewTurn = when {
-                    event is StableAssistantMessage -> event.startsNewTurn()
-                    isUserTurnInput -> false
-                    else -> previousMessageStartsNewTurn
-                }
-            }
-            latestIndex.value = index
-            state.value = storage.stateAt(index)
-            index
-        }
-    }
-
-    @OptIn(ExperimentalUuidApi::class)
     override suspend fun appendUserMessage(content: List<ContentItem>): Int =
         mutate(
             validate = KodexAgentStateValue::requireCanAppendUserMessage,
@@ -531,13 +485,15 @@ private class KodexAgentStateImpl(
             },
             inFlight = KodexAgentStateValue.ExternalWrite,
         ) {
-            val output = completed.requireProjectedOutput()
-            pendingEvents.requireEvent(output.callId)
+            val callId = requireNotNull(completed.callId) {
+                "Completed local tool events must carry a call id."
+            }
+            pendingEvents.requireEvent(callId)
             val nextState = toolPendingState(
-                pendingEvents.filterNot { event -> event.callId == output.callId },
+                pendingEvents.filterNot { event -> event.callId == callId },
             )
             val previousLatest = storage.latestIndex()
-            val remainingPending = storage.unstableWithoutPendingToolCall(previousLatest, output.callId)
+            val remainingPending = storage.unstableWithoutPendingToolCall(previousLatest, callId)
             val index = storage.commit(
                 listOf(
                     completed,
@@ -1042,14 +998,6 @@ private fun ResponseItem.HistoryItem.toIndependentStableCleanEvent(): StableClea
         is ResponseItem.ContextCompaction,
         -> error("Response item ${this::class.simpleName} requires a dedicated clean-history path.")
     }
-
-private fun StableCleanEvent.CompletedTool.requireProjectedOutput(): ResponseItem.ToolCallOutput =
-    toResponseHistoryItems()
-        .filterIsInstance<ResponseItem.ToolCallOutput>()
-        .singleOrNull()
-        ?: throw IllegalArgumentException(
-            "Completed local tool events must project exactly one tool output.",
-        )
 
 private fun toolPendingState(events: List<PendingToolEvent>): KodexAgentStateValue {
     return if (events.isEmpty()) {

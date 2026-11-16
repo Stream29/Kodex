@@ -13,11 +13,12 @@ kotlin {
                 api(project(":agent-context-settings"))
                 api(project(":agent-storage-core"))
                 api(project(":openai-client"))
+                api(project(":openai-model-catalog"))
                 api(libs.kotlinx.coroutines.core)
             }
         }
         commonMain.dependencies {
-            implementation(project(":agent-context-prefix"))
+            implementation(project(":agent-context"))
             implementation(project(":tool-apply-patch"))
             implementation(project(":tool-await-event"))
             implementation(project(":tool-read-media"))
@@ -27,12 +28,11 @@ kotlin {
             implementation(project(":utils-coroutines"))
         }
         commonTest.dependencies {
-            implementation(project(":agent-context-prefix"))
+            implementation(project(":agent-context"))
             implementation(project(":agent-storage-core"))
             implementation(project(":agent-storage-in-memory"))
             implementation(project(":openai-client-test"))
             implementation(project(":utils-kotlinx-io-coroutines"))
-            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }

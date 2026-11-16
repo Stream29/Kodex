@@ -15,23 +15,4 @@ public interface McpService : AutoCloseable {
 
     /** Latest sanitized persistent/runtime authentication state by server name. */
     public val authentication: StateFlow<Map<String, McpAuthenticationState>>
-
-    /**
-     * Discards one server's current owner and catalog, then reconciles it from
-     * the latest settings snapshot.
-     *
-     * This is used when a management operation semantically replaces a server
-     * even if its resulting connection identity is structurally unchanged.
-     */
-    public suspend fun invalidate(serverName: String): Unit
-
-    /**
-     * Refreshes catalogs through healthy connections.
-     *
-     * Each successful catalog replaces that client's published generation.
-     * Failures retain the previous generation; a detected connection loss also
-     * updates that client's connection state. Malformed catalogs reject the
-     * candidate catalog and publish [McpClientFailureReason.ToolCatalog].
-     */
-    public suspend fun refresh()
 }

@@ -6,9 +6,9 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpd
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.appendPlanUpdate
 import io.github.stream29.kodex.openai.UpdatePlanArgs
-import io.github.stream29.kodex.tool.builder.ToolBuilderJson
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.typedTool
+import kotlinx.serialization.json.Json
 
 public actual fun KodexAgentState.updatePlanTool(): Tool =
     typedTool(
@@ -29,7 +29,7 @@ public actual fun KodexAgentState.updatePlanTool(): Tool =
                 callId = pending.callId,
                 itemId = pending.itemId,
                 name = PlanTools.Name,
-                arguments = ToolBuilderJson.encodeToJsonElement(
+                arguments = Json.encodeToJsonElement(
                     UpdatePlanArgs.serializer(),
                     pending.arguments,
                 ),

@@ -5,17 +5,13 @@ package io.github.stream29.kodex.rpc.server
 import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
 import io.github.stream29.kodex.cli.auth.prepareOpenAiLogin
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
-import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttempt
-import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttemptFactory
-import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.impl.McpManagerImpl
-import io.github.stream29.kodex.mcp.impl.PreparedMcpOAuthLogin
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
-import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
+import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.ktor.http.Url
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -32,24 +28,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration
-
-/** Supplies listener-free attempts to the original manager's commit/cleanup path. */
-public actual class BackendMcpOAuthBridge actual constructor(
-    private val prepare: suspend (McpServerConfiguration.StreamableHttp) -> PreparedMcpOAuthLogin,
-) : McpOAuthLoginAttemptFactory {
-    actual override suspend fun create(configuration: McpServerConfiguration.StreamableHttp): McpOAuthLoginAttempt =
-        RemoteMcpAttempt(prepare(configuration))
-}
-
-private class RemoteMcpAttempt(val prepared: PreparedMcpOAuthLogin) : McpOAuthLoginAttempt {
-    val code = CompletableDeferred<String>()
-    override val authorizationUrl get() = prepared.authorizationUrl
-    override val preparedConfiguration get() = prepared.preparedConfiguration
-    override suspend fun awaitInitialized() = prepared.exchangeCode(code.await())
-    override fun close() { code.cancel() }
-}
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Backend-private attempt registry. Handles are unique across target kinds;
@@ -109,7 +89,7 @@ public actual class BackendOAuth internal constructor(
                             is OAuthTarget.OpenAi -> {
                                 val generation = credentials.beginLogin(target.source)
                                 val prepared = prepareOpenAiLogin(openAi, redirectUri)
-                                ready(entry, prepared.state, prepared.authorizationUrl, entry.code)
+                                ready(entry, prepared.state, prepared.authorizationUrl)
                                 when (val result = prepared.exchangeCode(entry.code.await())) {
                                     is OpenAiResult.Success ->
                                         credentials.commitLogin(target.source, generation, result.value)
@@ -117,13 +97,12 @@ public actual class BackendOAuth internal constructor(
                                         error("OpenAI login failed: ${result.error.message}")
                                 }
                             }
-                            is OAuthTarget.Mcp -> mcp.loginWithPreparedCallback(target.serverName, redirectUri) { raw ->
-                                val remote = raw as? RemoteMcpAttempt
-                                    ?: error("The backend MCP manager requires listener-free attempts.")
-                                require(remote.preparedConfiguration.client.redirectUri == redirectUri) {
+                            is OAuthTarget.Mcp -> mcp.loginWithPreparedCallback(target.serverName, redirectUri) { prepared ->
+                                require(prepared.preparedConfiguration.client.redirectUri == redirectUri) {
                                     "The callback address does not match the MCP configuration."
                                 }
-                                ready(entry, remote.prepared.state, remote.authorizationUrl, remote.code)
+                                ready(entry, prepared.state, prepared.authorizationUrl)
+                                entry.code.await()
                             }
                         }
                     } catch (failure: Throwable) {
@@ -171,7 +150,7 @@ public actual class BackendOAuth internal constructor(
                 attempt.work.cancel()
                 error("Browser authorization was not completed.")
             }
-            requireNotNull(attempt.delivery).complete(result)
+            attempt.code.complete(result)
             attempt.work
         }
         work.await()
@@ -217,14 +196,12 @@ public actual class BackendOAuth internal constructor(
         attempt: Attempt,
         state: String,
         url: String,
-        delivery: CompletableDeferred<String>,
     ) {
         mutex.withLock {
             currentCoroutineContext().ensureActive()
             check(attempts[attempt.id] === attempt)
             check(attempt.phase == AttemptPhase.Preparing)
             attempt.state = state
-            attempt.delivery = delivery
             attempt.phase = AttemptPhase.Waiting
             attempt.expiry = owner.launch {
                 waitForCallbackDeadline(10.minutes)
@@ -261,7 +238,6 @@ private class Attempt(val id: Long, val target: OAuthTarget, val redirectUri: St
     lateinit var work: Deferred<Unit>
     var phase = AttemptPhase.Preparing
     var state: String? = null
-    var delivery: CompletableDeferred<String>? = null
     var expiry: Job? = null
 }
 

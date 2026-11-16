@@ -5,7 +5,6 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstate.contract.updateThreadName
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
@@ -189,7 +188,9 @@ val agentTitleGenerationTest by testSuite(compartment = { TestCompartment.RealTi
             )
             root.runtime.appendUserMessage(listOf(ContentItem.InputText("Keep this explicit title.")))
             withTimeout(5.seconds) { generationStarted.await() }
-            val renamedAt = root.runtime.updateThreadName("Manual title")
+            val renamedAt = root.runtime.updateSettings(
+                root.storage.getSettingsAt(root.runtime.latestIndex.value).copy(threadName = "Manual title"),
+            )
             release.complete(Unit)
             job.await().join()
             assertEquals("Manual title", root.storage.getSettingsAt(renamedAt).threadName)

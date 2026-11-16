@@ -21,3 +21,25 @@ public sealed interface StableCleanEvent : CleanOpenAiEvent, AgentCommit {
     @Serializable
     public sealed interface CompletedTool : StableCleanEvent
 }
+
+/**
+ * Direct O(1) call identifier for completed local tool events, or `null` for
+ * hosted provider tool events ([StableServerToolSearch], [StableWebSearchCall],
+ * [StableImageGenerationCall]).
+ */
+public val StableCleanEvent.CompletedTool.callId: String?
+    get() = when (this) {
+        is StablePlanUpdate -> callId
+        is StableCommandExecutionToolEvent -> callId
+        is StablePatchToolEvent -> callId
+        is StableReadMediaToolEvent -> callId
+        is StableAwaitEventToolEvent -> callId
+        is StableInvalidToolCall -> callId
+        is StableJsonToolEvent -> callId
+        is StableTextToolEvent -> callId
+        is StableCustomToolEvent -> callId
+        is StableServerToolSearch,
+        is StableWebSearchCall,
+        is StableImageGenerationCall,
+        -> null
+    }

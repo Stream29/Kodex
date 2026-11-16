@@ -89,7 +89,6 @@ kotlin {
             implementation(project(":agent-storage-clean-models"))
             implementation(project(":agent-storage-core"))
             implementation(project(":app-rpc"))
-            implementation(project(":tool-image-generation-contract"))
             implementation(project(":tool-unified-exec"))
             implementation(project(":utils-kauri"))
             implementation(project(":utils-shell-client"))

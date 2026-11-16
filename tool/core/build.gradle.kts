@@ -13,16 +13,14 @@ kotlin {
                 api(project(":agent-storage-clean-models"))
                 api(project(":openai-models"))
                 api(libs.kotlinx.serialization.core)
-                api(libs.kotlinx.serialization.json)
             }
         }
         commonMain.dependencies {
-            implementation(libs.kotlinx.serialization.json)
-            implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
-            implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.serialization.json)
         }
     }
 }

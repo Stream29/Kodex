@@ -27,28 +27,3 @@ public actual val ExecCommandParametersSchema: ObjectPropertyDefinition =
             string { description = ExecCommandShellDescription }
         }
     }
-
-public actual val UnifiedExecOutputSchema: ObjectPropertyDefinition =
-    PropertyBuilder().obj {
-        additionalProperties = false
-        property("chunk_id") {
-            string { description = "Chunk identifier included when the response reports one." }
-        }
-        property("wall_time_seconds") {
-            required = true
-            number { description = "Elapsed wall time spent waiting for output in seconds." }
-        }
-        property("exit_code") {
-            integer { description = "Process exit code when the command finished during this call." }
-        }
-        property("session_id") {
-            integer { description = "Session identifier of the background terminal session when the process is still running." }
-        }
-        property("original_token_count") {
-            integer { description = "Approximate token count before output truncation." }
-        }
-        property("output") {
-            required = true
-            string { description = "Command output text, possibly truncated." }
-        }
-    }
