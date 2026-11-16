@@ -127,44 +127,40 @@ public val migrateToV0_7_2Test by testSuite {
             assertNoStaging(home)
         }
 
-        for (afterMove in listOf(false, true)) {
-            test("publish interruption ${if (afterMove) "after" else "before"} atomic move recovers on reentry") { home ->
-                emptySession(home, 0)
-                record(home, 0, "settings", 0, Settings)
-                record(home, 0, "timestamp", 0, Created)
-                record(home, 0, "index", 1, UserOne)
-                record(home, 0, "work", 2, LegacyCompactionOne)
-                migrateToV0_7_0(home, fs)
-                migrateToV0_7_1(home, fs)
-                record(home, 0, "index", 2, LegacyCompactionOne)
-                fs.writeString(Path(home, "version.json"), "\"0.7.1\"")
-                val failing = object : CoroutineFileSystem by fs {
-                    override suspend fun atomicMove(source: Path, destination: Path) {
-                        if (destination == Path(home, "kodex.db")) {
-                            assertRollbackJournal(source)
-                            assertFalse(fs.exists(Path(home, "$Staging-wal")))
-                            assertFalse(fs.exists(Path(home, "$Staging-shm")))
-                            if (afterMove) fs.atomicMove(source, destination)
-                            throw IOException("injected 0.7.2 publish failure")
-                        }
-                        fs.atomicMove(source, destination)
+        test("mirror sync interruption after in-place SQLite commit recovers on reentry without re-migrating database") { home ->
+            emptySession(home, 0)
+            record(home, 0, "settings", 0, Settings)
+            record(home, 0, "timestamp", 0, Created)
+            record(home, 0, "index", 1, UserOne)
+            record(home, 0, "work", 2, LegacyCompactionOne)
+            migrateToV0_7_0(home, fs)
+            migrateToV0_7_1(home, fs)
+            record(home, 0, "index", 2, LegacyCompactionOne)
+            fs.writeString(Path(home, "version.json"), "\"0.7.1\"")
+            val targetMirror = Path(home, "sessions", "0", "index", "2.json")
+            val failing = object : CoroutineFileSystem by fs {
+                override suspend fun writeString(path: Path, content: String, append: Boolean, mustCreate: Boolean) {
+                    if (path == targetMirror) {
+                        assertRollbackJournal(Path(home, "kodex.db"))
+                        throw IOException("injected 0.7.2 mirror sync failure")
                     }
+                    fs.writeString(path, content, append, mustCreate)
                 }
-                assertFailsWith<IOException> { upgrade(home, failing) }
-                assertTrue(fs.exists(Path(home, "kodex.db")))
-                assertEquals("\"0.7.1\"", fs.readString(Path(home, "version.json")))
-                assertNoStaging(home)
-                upgrade(home, if (afterMove) noRepublish(home) else fs)
-                assertEquals("\"0.7.2\"", fs.readString(Path(home, "version.json")))
-                val mirrorTwo = OpenAiJsonCodec.decodeFromString(
-                    CleanIndexEntry.serializer(),
-                    fs.readString(Path(home, "sessions", "0", "index", "2.json")),
-                ) as StableContextCompaction
-                assertEquals(
-                    listOf(StableUserMessage(listOf(ContentItem.InputText("first user")))),
-                    mirrorTwo.retainedItems,
-                )
             }
+            assertFailsWith<IOException> { upgrade(home, failing) }
+            assertTrue(fs.exists(Path(home, "kodex.db")))
+            assertEquals("\"0.7.1\"", fs.readString(Path(home, "version.json")))
+            assertNoStaging(home)
+            upgrade(home)
+            assertEquals("\"0.7.2\"", fs.readString(Path(home, "version.json")))
+            val mirrorTwo = OpenAiJsonCodec.decodeFromString(
+                CleanIndexEntry.serializer(),
+                fs.readString(targetMirror),
+            ) as StableContextCompaction
+            assertEquals(
+                listOf(StableUserMessage(listOf(ContentItem.InputText("first user")))),
+                mirrorTwo.retainedItems,
+            )
         }
 
         test("migrates all 7 retired tool events, tool_search invalid calls, unstable pending ask, fork/revert, and settings.yml hooks") { home ->
@@ -369,13 +365,6 @@ private suspend fun assertRollbackJournal(path: Path) {
 
 private inline fun database(home: Path, block: (SqliteConnection) -> Unit) =
     openSqliteConnection(Path(home, "kodex.db")).use(block)
-
-private fun noRepublish(home: Path): CoroutineFileSystem = object : CoroutineFileSystem by fs {
-    override suspend fun atomicMove(source: Path, destination: Path) {
-        check(destination != Path(home, "kodex.db")) { "Matching 0.7.2 database must be reused" }
-        fs.atomicMove(source, destination)
-    }
-}
 
 private suspend fun CoroutineScope.upgrade(home: Path, fileSystem: CoroutineFileSystem = fs) {
     prepareKodexHome(home, MigrationVersion("0.7.2"), KodexHomeMigrations, fileSystem).closeAndJoin()

@@ -132,10 +132,23 @@ private fun replaceYamlKey(map: YamlMap, key: String, value: YamlNode): YamlMap 
         YamlPath.root,
     )
 
+internal fun mayContainRetiredUnstableItem(payloadJson: String): Boolean =
+    payloadJson.length > 2 && (
+        "image_view" in payloadJson ||
+            "request_user_input" in payloadJson ||
+            "suggest_subagent_task" in payloadJson ||
+            "\"mcp\"" in payloadJson ||
+            "web_search" in payloadJson ||
+            "image_generation" in payloadJson ||
+            "tool_search" in payloadJson
+        )
+
 internal fun rewriteLegacyCommitsForAgent(
     agentId: Long,
     rawAgentCommits: List<CommitRecord>,
     path: Path,
+    externalMaxIndex: Long? = null,
+    externalHasCleanEventAtIndex: ((Long) -> Boolean)? = null,
 ): List<CommitRecord> {
     if (rawAgentCommits.isEmpty()) return emptyList()
     val resultByKey = linkedMapOf<Pair<Long, String>, CommitRecord>()
@@ -277,7 +290,9 @@ internal fun rewriteLegacyCommitsForAgent(
     }
 
     if (pendingTailUnstable != null) {
-        var maxIndex = resultByKey.keys.maxOfOrNull { it.first } ?: pendingTailUnstable.index
+        var maxIndex = externalMaxIndex ?: (resultByKey.keys.maxOfOrNull { it.first } ?: pendingTailUnstable.index)
+        val localMax = resultByKey.keys.maxOfOrNull { it.first } ?: pendingTailUnstable.index
+        if (localMax > maxIndex) maxIndex = localMax
         if (pendingTailUnstable.index > maxIndex) {
             maxIndex = pendingTailUnstable.index
         }
@@ -288,7 +303,10 @@ internal fun rewriteLegacyCommitsForAgent(
             allocateAskId = { nextAskId++ },
             currentMaxIndex = maxIndex,
             putCommit = ::putCommit,
-            hasCleanEventAtIndex = { idx -> AgentCommitType.CleanEventTypes.any { (idx to it.wireName) in resultByKey } },
+            hasCleanEventAtIndex = { idx ->
+                AgentCommitType.CleanEventTypes.any { (idx to it.wireName) in resultByKey } ||
+                    (externalHasCleanEventAtIndex?.invoke(idx) == true)
+            },
             path = path,
         )
     }
@@ -558,6 +576,7 @@ private fun rewriteToolSearchInvocationObject(obj: JsonObject): JsonObject {
 }
 
 private fun rewriteInvalidToolCallCommit(commit: CommitRecord, path: Path): CommitRecord {
+    if ("tool_search" !in commit.payloadJson) return commit
     val obj = parseCommitObject(commit, path)
     val rewritten = rewriteToolSearchInvocationObject(obj)
     if (rewritten === obj) return commit
@@ -709,6 +728,7 @@ private fun parseUnstableArray(commit: CommitRecord, path: Path): JsonArray =
     }
 
 private fun rewriteHistoricalUnstableCommit(commit: CommitRecord, path: Path): CommitRecord {
+    if (!mayContainRetiredUnstableItem(commit.payloadJson)) return commit
     val rawArray = parseUnstableArray(commit, path)
     var changed = false
     val updatedElements = rawArray.map { element ->
@@ -743,6 +763,10 @@ private fun applyTailUnstableMigration(
     hasCleanEventAtIndex: (Long) -> Boolean,
     path: Path,
 ) {
+    if (!mayContainRetiredUnstableItem(tailCommit.payloadJson)) {
+        putCommit(tailCommit)
+        return
+    }
     val rawArray = parseUnstableArray(tailCommit, path)
     val keptElements = mutableListOf<JsonElement>()
     val retiredPending = mutableListOf<RetiredPendingToolInfo>()
