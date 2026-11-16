@@ -48,15 +48,10 @@ CREATE TABLE agent_commits (
             'text_tool_event',
             'custom_tool_event',
             'settings',
-            'timestamp',
             'llm_request_meta_legacy',
             'llm_request_meta_initialization',
             'llm_request_meta_compaction',
             'llm_request_meta_response',
-            'token_count_legacy',
-            'token_count_initialization',
-            'token_count_compaction',
-            'token_count_response',
             'unstable',
             'steer',
             'ask_user'
@@ -94,7 +89,7 @@ LEFT JOIN agent_commits AS st
 """
 
 /**
- * Creates Phase 1 sessions, agents, six timelines and the ordinary session_catalog view in an empty DB.
+ * Creates Phase 1 sessions, agents, agent_commits and the ordinary session_catalog view in an empty DB.
  * Global settings remain in settings.yml. Creation is one short transaction; user_version becomes 1.
  * @throws io.github.stream29.kodex.utils.sqlite.SqliteFailure on constraint or schema creation failure.
  */

@@ -18,6 +18,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(project(":agent-storage-core"))
+            implementation(project(":agent-storage-in-memory"))
             implementation(project(":agent-state-contract"))
             implementation(project(":utils-coroutines"))
             implementation(libs.kotlinx.coroutines.test)

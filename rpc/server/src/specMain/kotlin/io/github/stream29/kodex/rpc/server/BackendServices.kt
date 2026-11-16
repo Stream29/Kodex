@@ -34,7 +34,7 @@ import kotlin.time.Duration.Companion.seconds
  * consumers. The default factories use [OpenAiLoginClient], [OpenAiClient] and
  * [OpenAiSessionTitleGenerator]. Settings, authentication, model and global-service initialization
  * does not create `kodex.db` on an empty Home; `kodex.db` is shared between [BackendServices.schedules]
- * and the `KodexRootSessionRepository` (arming persisted schedules immediately when `kodex.db`
+ * and the `KodexSessionRepository` (arming persisted schedules immediately when `kodex.db`
  * already exists on disk, while deferring database creation on an untouched Home until first
  * Session/catalog, event, or schedule persistence access).
  *

@@ -17,7 +17,6 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(project(":app-rpc-test-support"))
-            implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-core"))
             implementation(project(":app-component-application-preferences-viewmodel"))

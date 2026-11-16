@@ -6,6 +6,7 @@ import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
@@ -18,6 +19,8 @@ import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
 import io.github.stream29.kodex.agentstorage.contract.getAskUsersAt
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
+import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.app.migration.KodexHomeMigrations
@@ -65,6 +68,10 @@ public val migrateToV0_7_2Test by testSuite {
                 assertFalse("'image_view_tool_event'" in sql)
                 assertFalse("'request_user_input_tool_event'" in sql)
                 assertFalse("'mcp_tool_event'" in sql)
+                assertFalse("'timestamp'" in sql)
+                assertFalse("'token_count_response'" in sql)
+                val scheduleColumns = db.query("PRAGMA table_info(schedules)").mapNotNull { it.getOrNull(1) as? String }
+                assertFalse("trigger_at" in scheduleColumns)
                 for (table in listOf("sessions", "agents", "agent_commits", "schedules", "session_catalog")) {
                     assertEquals(listOf(listOf(0L)), db.query("SELECT count(*) FROM $table"))
                 }
@@ -312,6 +319,79 @@ public val migrateToV0_7_2Test by testSuite {
                     assertEquals(2, forkStorage.getAskUsersAt(forkStorage.latestIndex()).size)
                     forkStorage.revert(11)
                     assertEquals(1, forkStorage.getAskUsersAt(forkStorage.latestIndex()).size)
+                }
+            }
+        }
+
+        test("upgrades 0.7.0 through 0.7.1 to 0.7.2 normalizing token_count rows dropping schedules.trigger_at and removing retired mirror dirs") { home ->
+            for (session in listOf(2, 9, 15)) emptySession(home, session)
+            fs.writeString(Path(home, "sessions", "9", "archive.mark"), "")
+            record(home, 2, "settings", 0, Settings)
+            record(home, 2, "timestamp", 0, Created)
+            record(home, 2, "token-count", 0, """{"kind":"initialization","total_tokens":0}""")
+            record(home, 2, "index", 1, UserOne)
+            record(home, 2, "token-count", 1, """{"kind":"legacy","total_tokens":10}""")
+            record(home, 2, "index", 2, AssistantOne)
+            record(home, 2, "token-count", 2, """{"kind":"compaction","total_tokens":20}""")
+            record(home, 2, "index", 7, UserTwo)
+            record(home, 2, "settings", 7, Settings)
+            record(home, 2, "timestamp", 7, Updated)
+            record(home, 2, "token-count", 7, """{"kind":"response","total_tokens":42}""")
+            migrateToV0_7_0(home, fs)
+            migrateToV0_7_1(home, fs)
+            database(home) { db ->
+                db.execute(
+                    """
+                    CREATE TABLE schedules (
+                        schedule_id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (schedule_id >= 1),
+                        agent_id INTEGER NOT NULL CHECK (agent_id BETWEEN 0 AND 2147483647),
+                        trigger_at_epoch_seconds INTEGER NOT NULL,
+                        trigger_at_nanoseconds INTEGER NOT NULL CHECK (trigger_at_nanoseconds BETWEEN 0 AND 999999999),
+                        trigger_at TEXT NOT NULL,
+                        cron TEXT,
+                        description TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    ) STRICT
+                    """.trimIndent(),
+                )
+                db.execute(
+                    "INSERT INTO schedules VALUES (1, 2, 1763201100, 500000000, '2025-11-15T10:05:00.500Z', NULL, 'legacy', '2025-11-15T10:00:00Z')",
+                )
+            }
+            fs.writeString(Path(home, "version.json"), "\"0.7.1\"")
+
+            upgrade(home)
+            assertEquals("\"0.7.2\"", fs.readString(Path(home, "version.json")))
+
+            database(home) { db ->
+                assertEquals(
+                    listOf(
+                        listOf(0L, "llm_request_meta_initialization"),
+                        listOf(1L, "llm_request_meta_legacy"),
+                        listOf(2L, "llm_request_meta_compaction"),
+                        listOf(7L, "llm_request_meta_response"),
+                    ),
+                    db.query("""SELECT "index", type FROM agent_commits WHERE agent_id = 2 AND type LIKE 'llm_request_meta_%' ORDER BY "index""""),
+                )
+                assertTrue(db.query("SELECT 1 FROM agent_commits WHERE type LIKE 'token_count_%' OR type = 'timestamp'").isEmpty())
+                val scheduleColumns = db.query("PRAGMA table_info(schedules)").mapNotNull { it.getOrNull(1) as? String }
+                assertFalse("trigger_at" in scheduleColumns)
+                assertEquals(listOf(listOf(1L, 1763201100L, 500000000L)), db.query("SELECT schedule_id, trigger_at_epoch_seconds, trigger_at_nanoseconds FROM schedules"))
+            }
+            assertFalse(fs.exists(Path(home, "sessions", "2", "timestamp")))
+            assertFalse(fs.exists(Path(home, "sessions", "2", "token-count")))
+
+            testKodexAgentDependencies().use { dependencies ->
+                SqliteKodexSessionRepository(home, dependencies).use { repository ->
+                    assertEquals(listOf(2, 9, 15), repository.entries.value)
+                    assertEquals(listOf(2, 15), repository.listEntries(false).map { it.entryIndex })
+                    assertEquals(listOf(2, 9, 15), repository.listEntries(true).map { it.entryIndex })
+                    val storage = repository.open(2).storage
+                    assertEquals("migration", storage.getSettingsAt(7).threadName)
+                    assertEquals(LlmRequestMeta.Response(totalTokens = 42L), storage.getLlmRequestMetaAtOrNull(7))
+                    assertEquals(Instant.parse("2026-10-25T12:00:00.123456789Z"), repository.getEntry(2).createdAt)
+                    assertEquals(Instant.parse("2026-10-25T12:00:07.987654321Z"), repository.getEntry(2).lastActivityAt)
+                    kotlin.test.assertNull(repository.getEntry(15).createdAt)
                 }
             }
         }

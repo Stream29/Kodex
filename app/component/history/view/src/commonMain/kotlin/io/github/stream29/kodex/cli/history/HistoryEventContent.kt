@@ -175,7 +175,12 @@ private fun StableReasoning.renderReasoning() {
         expansionKey = item.id?.value ?: "reasoning",
         headerStyle = TextStyle.Dim,
     ) {
-        if (display.isNotBlank()) DetailText(display, TextStyle.Dim)
+        val summary = item.summary.joinToString(separator = "\n") { part ->
+            when (part) {
+                is io.github.stream29.kodex.openai.ReasoningItemReasoningSummary.SummaryText -> part.text
+            }
+        }
+        if (summary.isNotBlank()) DetailText(summary, TextStyle.Dim)
     }
 }
 

@@ -19,3 +19,8 @@ public interface ObservableKodexAgentStorage : KodexAgentStorage {
     /** Published tail of this storage, or `-1` when empty. */
     public val latestIndexFlow: StateFlow<Int>
 }
+
+/** Mutable storage view exposing observable backend cache and tail metadata. */
+public interface MutableObservableKodexAgentStorage :
+    MutableKodexAgentStorage,
+    ObservableKodexAgentStorage

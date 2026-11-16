@@ -9,42 +9,25 @@ import co.touchlab.sqliter.DatabaseConnection
 import co.touchlab.sqliter.NO_VERSION_CHECK
 import co.touchlab.sqliter.SynchronousFlag
 import co.touchlab.sqliter.createDatabaseManager
-import co.touchlab.sqliter.interop.Logger
 import co.touchlab.sqliter.sqlite3.*
 import kotlinx.cinterop.*
 import kotlinx.io.files.Path
 
-public actual fun sqlite3Version(): String = sqlite3_libversion()!!.toKString()
-
 public actual fun openSqliteConnection(
     path: Path,
     readOnly: Boolean,
-    diagnostic: (String) -> Unit,
-): SqliteConnection = openConnection(path = path.toString(), inMemory = false, readOnly = readOnly, diagnostic = diagnostic)
+): SqliteConnection = openConnection(path = path.toString(), inMemory = false, readOnly = readOnly)
 
-public actual fun openInMemorySqliteConnection(
-    diagnostic: (String) -> Unit,
-): SqliteConnection = openConnection(path = null, inMemory = true, readOnly = false, diagnostic = diagnostic)
+public actual fun openInMemorySqliteConnection(): SqliteConnection =
+    openConnection(path = null, inMemory = true, readOnly = false)
 
 private fun openConnection(
     path: String?,
     inMemory: Boolean,
     readOnly: Boolean,
-    diagnostic: (String) -> Unit,
 ): SqliteConnection {
     val normalized = path?.replace('\\', '/')
     val split = normalized?.lastIndexOf('/') ?: -1
-    val logger = object : Logger {
-        override val vActive: Boolean = false
-        override val eActive: Boolean = true
-        override fun trace(message: String) = emit(message, null)
-        override fun vWrite(message: String) = emit(message, null)
-        override fun eWrite(message: String, exception: Throwable?) = emit(message, exception)
-        private fun emit(message: String, exception: Throwable?) {
-            val detail = exception?.message?.takeIf { it.isNotBlank() }
-            runCatching { diagnostic(if (detail == null) message else "$message: $detail") }
-        }
-    }
     val configuration = DatabaseConfiguration(
         name = if (inMemory) null else normalized!!.substring(split + 1),
         version = NO_VERSION_CHECK,
@@ -56,7 +39,6 @@ private fun openConnection(
             busyTimeout = 1000,
             synchronousFlag = SynchronousFlag.FULL,
         ),
-        loggingConfig = DatabaseConfiguration.Logging(logger = logger, verboseDataCalls = false),
     )
     val connection = try {
         createDatabaseManager(configuration).createSingleThreadedConnection()
@@ -91,27 +73,8 @@ private fun sqliteFailure(
     )
 }
 
-private class CallbackState {
-    var authorizer: ((Int, String?, String?, String?, String?) -> Boolean)? = null
-    var progress: (() -> Boolean)? = null
-}
-
-private fun authorize(
-    context: COpaquePointer?, action: Int, first: CPointer<ByteVar>?, second: CPointer<ByteVar>?,
-    database: CPointer<ByteVar>?, source: CPointer<ByteVar>?,
-): Int = try {
-    val callback = context!!.asStableRef<CallbackState>().get().authorizer
-    if (callback == null || callback(action, first?.toKString(), second?.toKString(), database?.toKString(), source?.toKString())) SQLITE_OK else SQLITE_DENY
-} catch (_: Throwable) { SQLITE_DENY }
-
-private fun progress(context: COpaquePointer?): Int = try {
-    if (context!!.asStableRef<CallbackState>().get().progress?.invoke() == true) 1 else 0
-} catch (_: Throwable) { 1 }
-
 private class NativeConnection(private val delegate: DatabaseConnection) : SqliteConnection {
     private val pointer = delegate.getDbPointer()
-    private val state = CallbackState()
-    private val reference = StableRef.create(state)
     private val statements = mutableSetOf<NativeStatement>()
     private var closed = false
     private var inTransaction = false
@@ -157,6 +120,11 @@ private class NativeConnection(private val delegate: DatabaseConnection) : Sqlit
             buildList { while (statement.step()) add(statement.columns()) }
         }
 
+    override fun changes(): Int {
+        check(!closed) { "SQLite connection closed" }
+        return sqlite3_changes(pointer)
+    }
+
     override fun <T> transaction(block: () -> T): T {
         check(!inTransaction) { "Nested SQLite transaction" }
         execute("BEGIN IMMEDIATE")
@@ -171,35 +139,14 @@ private class NativeConnection(private val delegate: DatabaseConnection) : Sqlit
         } finally { inTransaction = false }
     }
 
-    override fun setAuthorizer(callback: ((Int, String?, String?, String?, String?) -> Boolean)?) {
-        check(!closed)
-        val code = sqlite3_set_authorizer(pointer, if (callback == null) null else staticCFunction(::authorize), if (callback == null) null else reference.asCPointer())
-        if (code != SQLITE_OK) throw sqliteFailure("authorizer", code, pointer)
-        state.authorizer = callback
-    }
-
-    override fun setProgressHandler(instructions: Int, shouldAbort: (() -> Boolean)?) {
-        check(!closed)
-        require(instructions > 0)
-        sqlite3_progress_handler(pointer, if (shouldAbort == null) 0 else instructions, if (shouldAbort == null) null else staticCFunction(::progress), if (shouldAbort == null) null else reference.asCPointer())
-        state.progress = shouldAbort
-    }
-
-    override fun interrupt() { check(!closed); sqlite3_interrupt(pointer) }
-
     override fun close() {
         if (closed) return
-        sqlite3_progress_handler(pointer, 0, null, null)
-        sqlite3_set_authorizer(pointer, null, null)
-        state.authorizer = null
-        state.progress = null
         var primary: Throwable? = null
         statements.toList().forEach { statement ->
             try { statement.close() } catch (failure: Throwable) {
                 if (primary == null) primary = failure else primary.addSuppressed(failure)
             }
         }
-        reference.dispose()
         closed = true
         try { delegate.close() } catch (cause: Throwable) {
             val failure = sqliteFailure("close", SQLITE_ERROR, cause = cause)

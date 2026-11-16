@@ -20,7 +20,6 @@ kotlin {
         }
         nativeTest.dependencies {
             implementation(project(":app-rpc-test-support"))
-            implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":app-component-history-viewmodel"))
             implementation(project(":app-component-session-viewmodel"))

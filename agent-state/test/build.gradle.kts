@@ -9,6 +9,7 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(project(":agent-context-settings"))
+                api(project(":agent-storage-in-memory"))
                 api(project(":mcp-contract"))
                 api(libs.kotlinx.coroutines.core)
             }

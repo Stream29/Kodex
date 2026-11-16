@@ -13,15 +13,14 @@ kotlin {
                 api(libs.kotlinx.coroutines.core)
                 api(project(":agent-storage-clean-models"))
                 api(project(":openai-models"))
-                api(libs.kotlinx.serialization.json)
             }
         }
         commonMain.dependencies {
             implementation(project(":openai-json-codec"))
             implementation(libs.kotlinx.coroutines.core)
-            implementation(project(":utils-read-write-mutex"))
         }
         commonTest.dependencies {
+            implementation(project(":agent-storage-in-memory"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

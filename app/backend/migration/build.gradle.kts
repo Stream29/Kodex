@@ -86,4 +86,14 @@ tasks.withType<AbstractTestTask>().configureEach {
     filter.excludeTestsMatching(
         "*migrateToV0_4_3Test*does not activate the future skill at application version*",
     )
+    // Published v0_7_0 and v0_7_1 suites remain byte-for-byte frozen. These two
+    // assertions open un-upgraded 0.7.0/0.7.1 databases directly with the current
+    // 0.7.2+ SqliteKodexSessionRepository; full 0.7.0 -> 0.7.1 -> 0.7.2 repository
+    // readback is covered in MigrateToV0_7_2Test.
+    filter.excludeTestsMatching(
+        "*migrateToV0_7_0Test*active archived sparse and empty sessions preserve all payloads files and provider identities*",
+    )
+    filter.excludeTestsMatching(
+        "*migrateToV0_7_1Test*upgrades 0.7.0 database by backfilling created_at removing timestamp and compaction_point and enabling llm_request_meta*",
+    )
 }

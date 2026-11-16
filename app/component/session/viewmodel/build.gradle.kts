@@ -26,7 +26,6 @@ kotlin {
             implementation(project(":agent-session-sqlite"))
             implementation(project(":utils-sqlite"))
             implementation(project(":app-component-history-viewmodel"))
-            implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":openai-client-test"))
             implementation(libs.kotlinx.coroutines.test)

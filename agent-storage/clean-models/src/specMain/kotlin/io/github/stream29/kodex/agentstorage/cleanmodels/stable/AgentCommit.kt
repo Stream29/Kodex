@@ -1,5 +1,4 @@
 @file:OptIn(kotlin.time.ExperimentalTime::class)
-@file:Suppress("DEPRECATION")
 
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
@@ -10,7 +9,6 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlin.time.Instant
 
@@ -94,10 +92,6 @@ public enum class AgentCommitType(
     @SerialName("settings")
     Settings("settings", "settings"),
 
-    @SerialName("timestamp")
-    @Deprecated("Eliminated in 2026-11-08 schema optimization. Timestamps are native to each commit.")
-    Timestamp("timestamp", "timestamp"),
-
     @SerialName("llm_request_meta_legacy")
     LlmRequestMetaLegacy("llm_request_meta_legacy", "llm-request-meta"),
 
@@ -110,22 +104,6 @@ public enum class AgentCommitType(
     @SerialName("llm_request_meta_response")
     LlmRequestMetaResponse("llm_request_meta_response", "llm-request-meta"),
 
-    @SerialName("token_count_legacy")
-    @Deprecated("Use LlmRequestMetaLegacy", ReplaceWith("LlmRequestMetaLegacy"))
-    TokenCountLegacy("token_count_legacy", "llm-request-meta"),
-
-    @SerialName("token_count_initialization")
-    @Deprecated("Use LlmRequestMetaInitialization", ReplaceWith("LlmRequestMetaInitialization"))
-    TokenCountInitialization("token_count_initialization", "llm-request-meta"),
-
-    @SerialName("token_count_compaction")
-    @Deprecated("Use LlmRequestMetaCompaction", ReplaceWith("LlmRequestMetaCompaction"))
-    TokenCountCompaction("token_count_compaction", "llm-request-meta"),
-
-    @SerialName("token_count_response")
-    @Deprecated("Use LlmRequestMetaResponse", ReplaceWith("LlmRequestMetaResponse"))
-    TokenCountResponse("token_count_response", "llm-request-meta"),
-
     @SerialName("unstable")
     Unstable("unstable", "unstable"),
 
@@ -136,13 +114,8 @@ public enum class AgentCommitType(
     AskUser("ask_user", "ask-user");
 
     public companion object {
-        private val byWireName: Map<String, AgentCommitType> = buildMap {
-            AgentCommitType.entries.forEach { put(it.wireName, it) }
-            put("token_count_legacy", LlmRequestMetaLegacy)
-            put("token_count_initialization", LlmRequestMetaInitialization)
-            put("token_count_compaction", LlmRequestMetaCompaction)
-            put("token_count_response", LlmRequestMetaResponse)
-        }
+        private val byWireName: Map<String, AgentCommitType> =
+            AgentCommitType.entries.associateBy { it.wireName }
 
         public val All: Set<AgentCommitType> = entries.toSet()
 
@@ -158,20 +131,6 @@ public enum class AgentCommitType(
             AgentMessage,
             PlanUpdate,
             ContextCompaction,
-        )
-
-        public val IndexEventTypes: Set<AgentCommitType> = IndexTypes
-
-        public val SteerableIndexEventTypes: Set<AgentCommitType> = setOf(
-            UserMessage,
-            EventAskUser,
-            EventSchedule,
-            EventTerminalExited,
-            AssistantMessage,
-            AssistantMessageCommentary,
-            AssistantMessageFinal,
-            DeveloperMessage,
-            AgentMessage,
         )
 
         public val TurnStartBoundaryTypes: Set<AgentCommitType> = setOf(
@@ -205,25 +164,16 @@ public enum class AgentCommitType(
             CustomToolEvent,
         )
 
-        public val CleanEventTypes: Set<AgentCommitType> = IndexEventTypes + WorkTypes
+        public val CleanEventTypes: Set<AgentCommitType> = IndexTypes + WorkTypes
 
         public val LlmRequestMetaTypes: Set<AgentCommitType> = setOf(
             LlmRequestMetaLegacy,
             LlmRequestMetaInitialization,
             LlmRequestMetaCompaction,
             LlmRequestMetaResponse,
-            TokenCountLegacy,
-            TokenCountInitialization,
-            TokenCountCompaction,
-            TokenCountResponse,
         )
 
-        @Deprecated("Use LlmRequestMetaTypes", ReplaceWith("LlmRequestMetaTypes"))
-        public val TokenCountTypes: Set<AgentCommitType> get() = LlmRequestMetaTypes
-
         public val SettingsTypes: Set<AgentCommitType> = setOf(Settings)
-        @Deprecated("Eliminated in 2026-11-08 schema optimization. Timestamps are native to each commit.")
-        public val TimestampTypes: Set<AgentCommitType> = setOf(Timestamp)
         public val UnstableTypes: Set<AgentCommitType> = setOf(Unstable)
         public val SteerTypes: Set<AgentCommitType> = setOf(Steer)
         public val AskUserTypes: Set<AgentCommitType> = setOf(AskUser)
@@ -266,7 +216,6 @@ public sealed interface AgentCommit {
             is StableTextToolEvent -> AgentCommitType.TextToolEvent
             is StableCustomToolEvent -> AgentCommitType.CustomToolEvent
             is KodexAgentSettings -> AgentCommitType.Settings
-            is CommitTimestamp -> AgentCommitType.Timestamp
             is LlmRequestMeta.Legacy -> AgentCommitType.LlmRequestMetaLegacy
             is LlmRequestMeta.Initialization -> AgentCommitType.LlmRequestMetaInitialization
             is LlmRequestMeta.Compaction -> AgentCommitType.LlmRequestMetaCompaction
@@ -305,16 +254,6 @@ public data class IndexedAgentCommit(
 }
 
 /**
- * Persisted timestamp commit at a logical storage index.
- */
-@Serializable
-@SerialName("timestamp")
-@Deprecated("Eliminated in 2026-11-08 schema optimization. Timestamps are native to each commit.")
-public data class CommitTimestamp(
-    public val instant: Instant,
-) : AgentCommit
-
-/**
  * Persisted snapshot of pending unstable events at a logical storage index.
  */
 @Serializable
@@ -349,7 +288,6 @@ public fun AgentCommit.encodePayloadJson(json: Json = OpenAiJsonCodec): String =
         is StableIndexEvent -> json.encodeToString(StableIndexEvent.serializer(), this)
         is StableWorkEvent -> json.encodeToString(StableWorkEvent.serializer(), this)
         is KodexAgentSettings -> json.encodeToString(KodexAgentSettings.serializer(), this)
-        is CommitTimestamp -> json.encodeToString(Instant.serializer(), instant)
         is LlmRequestMeta -> json.encodeToString(LlmRequestMeta.serializer(), this)
         is UnstableSnapshot -> json.encodeToString(UnstableEventListSerializer, events)
         is SteerSnapshot -> json.encodeToString(SteerableEventListSerializer, events)
@@ -367,24 +305,20 @@ public fun AgentCommitType.decodePayloadJson(
         in AgentCommitType.IndexTypes -> json.decodeFromString(StableIndexEvent.serializer(), payloadJson)
         in AgentCommitType.WorkTypes -> json.decodeFromString(StableWorkEvent.serializer(), payloadJson)
         AgentCommitType.Settings -> json.decodeFromString(KodexAgentSettings.serializer(), payloadJson)
-        AgentCommitType.Timestamp -> CommitTimestamp(json.decodeFromString(Instant.serializer(), payloadJson))
-        AgentCommitType.LlmRequestMetaLegacy, AgentCommitType.TokenCountLegacy ->
+        AgentCommitType.LlmRequestMetaLegacy ->
             json.decodeFromString(LlmRequestMeta.Legacy.serializer(), payloadJson)
-        AgentCommitType.LlmRequestMetaInitialization, AgentCommitType.TokenCountInitialization ->
+        AgentCommitType.LlmRequestMetaInitialization ->
             json.decodeFromString(LlmRequestMeta.Initialization.serializer(), payloadJson)
-        AgentCommitType.LlmRequestMetaCompaction, AgentCommitType.TokenCountCompaction ->
+        AgentCommitType.LlmRequestMetaCompaction ->
             json.decodeFromString(LlmRequestMeta.Compaction.serializer(), payloadJson)
-        AgentCommitType.LlmRequestMetaResponse, AgentCommitType.TokenCountResponse ->
+        AgentCommitType.LlmRequestMetaResponse ->
             json.decodeFromString(LlmRequestMeta.Response.serializer(), payloadJson)
         AgentCommitType.Unstable -> UnstableSnapshot(json.decodeFromString(UnstableEventListSerializer, payloadJson))
         AgentCommitType.Steer -> SteerSnapshot(json.decodeFromString(SteerableEventListSerializer, payloadJson))
         AgentCommitType.AskUser -> AskUserSnapshot(json.decodeFromString(AskUserEntryListSerializer, payloadJson))
         else -> error("Unhandled AgentCommitType: $this")
     }
-    require(
-        decoded.commitType == this ||
-            (this in AgentCommitType.LlmRequestMetaTypes && decoded.commitType in AgentCommitType.LlmRequestMetaTypes)
-    ) {
+    require(decoded.commitType == this) {
         "Commit payload type mismatch: expected $wireName, decoded ${decoded.commitType.wireName}"
     }
     return decoded

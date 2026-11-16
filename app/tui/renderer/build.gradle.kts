@@ -58,7 +58,6 @@ kotlin {
             implementation(project(":app-backend-settings"))
             implementation(project(":app-tui-path-picker"))
             implementation(project(":utils-kotlinx-io-coroutines"))
-            implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-core"))
             implementation(project(":utils-coroutines"))

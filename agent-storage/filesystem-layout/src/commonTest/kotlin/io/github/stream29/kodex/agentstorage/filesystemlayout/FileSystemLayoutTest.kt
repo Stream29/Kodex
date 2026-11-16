@@ -67,20 +67,16 @@ public val fileSystemLayoutTest by testSuite {
             val timeline = timelineDirectory(root, "work")
             val payload = byteArrayOf(1, 2, 3, 4)
 
-            writeRecord(timeline, 3, payload)
+            SystemCoroutineFileSystem.writeBytes(recordPath(timeline, 3), payload)
             assertContentEquals(payload, readRecord(timeline, 3))
             assertContentEquals(byteArrayOf(1, 2), readRecordPrefix(timeline, 3, 2))
             assertContentEquals(payload, readRecordPrefix(timeline, 3, 20))
 
-            moveRecord(timeline, 3, 5)
+            SystemCoroutineFileSystem.writeString(latestIndexPath(timeline), "3")
+            assertEquals(3, readLatestIndex(timeline))
+
+            deleteRecord(timeline, 3)
             assertFalse(SystemCoroutineFileSystem.exists(recordPath(timeline, 3)))
-            assertContentEquals(payload, readRecord(timeline, 5))
-
-            writeLatestIndex(timeline, 5)
-            assertEquals(5, readLatestIndex(timeline))
-
-            deleteRecord(timeline, 5)
-            assertFalse(SystemCoroutineFileSystem.exists(recordPath(timeline, 5)))
         }
 
         test("rejects missing declared timeline") { root ->

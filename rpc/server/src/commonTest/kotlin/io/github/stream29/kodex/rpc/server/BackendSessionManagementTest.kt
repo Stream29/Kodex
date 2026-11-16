@@ -5,11 +5,10 @@ package io.github.stream29.kodex.rpc.server
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
-import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
+import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
@@ -101,10 +100,8 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
                     temporary.runtime.modify {
                         it.commit(KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = "init-without-timestamp"))
                         it.commit(
-                            listOf(
-                                KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = "late"),
-                                CommitTimestamp(timestamp),
-                            ),
+                            KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = "late"),
+                            timestamp,
                         )
                     }
                 } finally {
@@ -242,7 +239,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
         coroutineScope {
             val original = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             try {
-                val failingRepository = object : KodexRootSessionRepository by original {
+                val failingRepository = object : KodexSessionRepository by original {
                     override suspend fun open(entryIndex: Int): KodexAgentSession = error("load failed")
                 }
                 val management = testSessionManagement(failingRepository)
@@ -263,7 +260,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             val release = CompletableDeferred<Unit>()
             val original = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             try {
-                val delayedRepository = object : KodexRootSessionRepository by original {
+                val delayedRepository = object : KodexSessionRepository by original {
                     override suspend fun open(entryIndex: Int): KodexAgentSession {
                         val session = original.open(entryIndex)
                         opened.complete(session)
@@ -303,7 +300,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
 }
 
 private fun testSessionManagement(
-    repository: KodexRootSessionRepository,
+    repository: KodexSessionRepository,
     newSessionDefaults: () -> KodexNewSessionSettings = ::testNewSessionDefaults,
     titleSettings: () -> SessionTitleSettings = { SessionTitleSettings(enabled = false) },
     titleGenerator: SessionTitleGenerator = SessionTitleGenerator { _, _, _ -> error("unused") },

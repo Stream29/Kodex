@@ -8,7 +8,7 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
@@ -124,7 +124,7 @@ val historyViewportAndScrollEffectTest by testSuite {
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 // UpdateLatestTurn's duration is a FIFO barrier after Invalidate, not a transient effect probe.
-                storage.commit(listOf(navigationMessage("1"), CommitTimestamp(Clock.System.now())))
+                storage.commit(navigationMessage("1"), Clock.System.now())
                 for (index in 2..20) storage.commit(navigationMessage("$index"))
             }
             val entered = CompletableDeferred<Unit>()
@@ -225,7 +225,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                     val runtime = repository.open(repository.create()).runtime
                     runtime.modify { storage ->
                         storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                        storage.commit(listOf(navigationMessage("1"), CommitTimestamp(Clock.System.now())))
+                        storage.commit(navigationMessage("1"), Clock.System.now())
                         for (index in 2..20) storage.commit(navigationMessage("$index"))
                     }
                     val entered = CompletableDeferred<Unit>()
@@ -361,7 +361,7 @@ val historyViewportAndScrollEffectTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify {
                 it.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                it.commit(listOf(navigationMessage("1"), CommitTimestamp(Clock.System.now())))
+                it.commit(navigationMessage("1"), Clock.System.now())
                 for (index in 2..8) it.commit(navigationMessage("$index"))
             }
             val latest = MutableStateFlow(8)
@@ -442,7 +442,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 for (index in 1..20) {
                     if (index in setOf(3, 9, 20)) storage.commit(navigationMessage("$index"))
-                    else storage.commit(CommitTimestamp(Clock.System.now()))
+                    else storage.commit(LlmRequestMeta.Response(0L), Clock.System.now())
                 }
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
@@ -583,7 +583,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 for (i in 1..1_200) {
                     if (i % 3 == 0) storage.commit(navigationMessage("${i / 3}"))
-                    else storage.commit(CommitTimestamp(Clock.System.now()))
+                    else storage.commit(LlmRequestMeta.Response(0L), Clock.System.now())
                 }
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())

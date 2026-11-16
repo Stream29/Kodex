@@ -10,8 +10,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCom
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
@@ -65,16 +65,12 @@ val historyIndexViewModelTest by testSuite {
             state.value = KodexAgentStateValue.ExternalWrite
             storage.revert(1)
             storage.commit(
-                listOf(
-                    StableUserMessage(listOf(ContentItem.InputText("message"))),
-                    CommitTimestamp(time + 1.seconds),
-                ),
+                StableUserMessage(listOf(ContentItem.InputText("message"))),
+                time + 1.seconds,
             )
             storage.commit(
-                listOf(
-                    StableContextCompaction(encryptedContent = "enc"),
-                    CommitTimestamp(time + 2.seconds),
-                ),
+                StableContextCompaction(encryptedContent = "enc"),
+                time + 2.seconds,
             )
             state.value = KodexAgentStateValue.Empty
             val refreshed = withContext(Dispatchers.Default.limitedParallelism(1)) {
@@ -112,13 +108,13 @@ val historyIndexViewModelTest by testSuite {
             try {
                 assertEquals(emptyList(), viewModel.awaitIndexes(emptyList()).indexes)
 
-                storage.commit(CommitTimestamp(kotlin.time.Instant.DISTANT_PAST))
+                storage.commit(LlmRequestMeta.Response(0L), kotlin.time.Instant.DISTANT_PAST)
                 storage.commit(
                     StableUserMessage(
                         content = listOf(ContentItem.InputText("question\nwith   spaces")),
                     ),
                 )
-                storage.commit(CommitTimestamp(kotlin.time.Instant.DISTANT_PAST))
+                storage.commit(LlmRequestMeta.Response(0L), kotlin.time.Instant.DISTANT_PAST)
                 latestIndex.value = 3
                 val firstWindow = viewModel.awaitIndexes(listOf(2))
                 assertEquals(
@@ -126,7 +122,7 @@ val historyIndexViewModelTest by testSuite {
                     assertNotNull(firstWindow.entryAtOrNull(2)).summary,
                 )
 
-                storage.commit(CommitTimestamp(kotlin.time.Instant.DISTANT_PAST))
+                storage.commit(LlmRequestMeta.Response(0L), kotlin.time.Instant.DISTANT_PAST)
                 storage.commit(
                     StableAssistantMessage(
                         content = listOf(ContentItem.OutputText("answer")),
@@ -157,7 +153,7 @@ val historyIndexViewModelTest by testSuite {
                         content = listOf(ContentItem.InputText("rewritten")),
                     ),
                 )
-                storage.commit(CommitTimestamp(kotlin.time.Instant.DISTANT_PAST))
+                storage.commit(LlmRequestMeta.Response(0L), kotlin.time.Instant.DISTANT_PAST)
                 cacheNonce.value = 13L
                 val refreshed = viewModel.awaitGenerationAtLeast(13)
                 assertEquals(

@@ -2,7 +2,7 @@
 
 package io.github.stream29.kodex.rpc.server
 
-import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
+import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
@@ -10,15 +10,15 @@ import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import kotlinx.io.files.Path
 
 /**
- * Management operations over [KodexRootSessionRepository].
+ * Management operations over [KodexSessionRepository].
  *
  * [createSession] automatically attaches one-shot session-title generation
  * (`attachSessionTitleGeneration`) onto the newly created Session.
- * [keepSessionAlive] delegates directly to [KodexRootSessionRepository.open], which activates
+ * [keepSessionAlive] delegates directly to [KodexSessionRepository.open], which activates
  * unloaded entries and renews residency TTL.
  */
 public expect class BackendSessionManagement(
-    repository: KodexRootSessionRepository,
+    repository: KodexSessionRepository,
     newSessionDefaults: () -> KodexNewSessionSettings,
     titleSettings: () -> SessionTitleSettings,
     titleGenerator: SessionTitleGenerator,

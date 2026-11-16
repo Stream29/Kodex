@@ -7,7 +7,6 @@ import io.github.stream29.kodex.openai.ResponseItemId
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.encodeToJsonElement
 
 internal val StableToolJson: Json = Json
 
@@ -56,12 +55,6 @@ internal fun stableFunctionCall(
         namespace = namespace,
         arguments = StableToolJson.encodeToString(JsonElement.serializer(), arguments),
     )
-
-internal fun <Value> stableJsonElement(
-    serializer: SerializationStrategy<Value>,
-    value: Value,
-): JsonElement =
-    StableToolJson.encodeToJsonElement(serializer, value)
 
 internal fun stableFunctionOutput(
     callId: String,

@@ -107,22 +107,25 @@ public actual class SqliteAgentStorage actual constructor(
         decodeIndexedRows(rows).takeLast(limit)
     }
 
-    @Suppress("DEPRECATION")
-    public actual override suspend fun commit(commits: List<AgentCommit>): Int {
-        val legacyTimestamp = (commits.firstOrNull { it is io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp } as? io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp)?.instant
-        return commit(commits, legacyTimestamp ?: Clock.System.now())
-    }
+    public actual override suspend fun commit(commits: List<AgentCommit>): Int =
+        commit(commits, Clock.System.now())
 
-    public actual override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int {
+    public actual override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int =
+        commitWithMirrorPayloads(commits, timestamp).first
+
+    public actual suspend fun commitWithMirrorPayloads(
+        commits: List<AgentCommit>,
+        timestamp: Instant,
+    ): Pair<Int, List<Pair<String, String>>> {
         validateCommitBatch(commits)
         val sorted = commits.sortedBy { it.commitType.ordinal }
         val encoded = sorted.map { commit ->
-            commit.commitType.wireName to commit.encodePayloadJson(OpenAiJsonCodec)
+            Triple(commit.commitType.wireName, commit.commitType.legacyTimelineName, commit.encodePayloadJson(OpenAiJsonCodec))
         }
         val timestampStr = timestamp.toString()
-        return write {
+        val index = write {
             val nextIndex = tailUnsafe() + 1
-            for ((wireType, payloadJson) in encoded) {
+            for ((wireType, _, payloadJson) in encoded) {
                 connection.execute(
                     """INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at) VALUES (?, ?, ?, ?, ?)""",
                     listOf(sqlAgentId, wireType, nextIndex.toLong(), payloadJson, timestampStr),
@@ -130,6 +133,7 @@ public actual class SqliteAgentStorage actual constructor(
             }
             nextIndex
         }
+        return index to encoded.map { (_, timelineName, payloadJson) -> timelineName to payloadJson }
     }
 
     public actual override suspend fun revert(untilExclusive: Int) {
@@ -159,9 +163,6 @@ private fun typeFilterClause(types: Set<AgentCommitType>): Pair<String, List<Str
 }
 
 private fun boundedIndexScanLimit(limit: Int, types: Set<AgentCommitType>): Long {
-    // At any single index there is at most one commit per legacyTimelineName category.
-    // Fetching (limit + categoryCount - 1) rows in index order guarantees all matching
-    // rows at the boundary index are present before ordinal sorting and truncation.
     val categoryCount = types.mapTo(mutableSetOf()) { it.legacyTimelineName }.size.coerceAtLeast(1)
     return limit.toLong() + (categoryCount - 1).toLong()
 }

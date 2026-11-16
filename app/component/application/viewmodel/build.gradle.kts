@@ -38,7 +38,6 @@ kotlin {
             implementation(project(":openai-client"))
             implementation(project(":app-rpc-test-support"))
             implementation(project(":agent-storage-core"))
-            implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":openai-client-test"))
             implementation(libs.kotlinx.coroutines.test)

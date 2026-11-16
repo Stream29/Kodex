@@ -5,7 +5,7 @@ package io.github.stream29.kodex.cli.history
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
@@ -97,8 +97,8 @@ private suspend fun withPagingModel(block: suspend (AgentHistoryViewModel) -> Un
     runtime.modify { storage ->
         storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
         for (index in 1..1_000) {
-            storage.commit(CommitTimestamp(Instant.DISTANT_PAST))
-            storage.commit(CommitTimestamp(Instant.DISTANT_PAST))
+            storage.commit(LlmRequestMeta.Response(0L), Instant.DISTANT_PAST)
+            storage.commit(LlmRequestMeta.Response(0L), Instant.DISTANT_PAST)
             storage.commit(StableUserMessage(listOf(ContentItem.InputText("$index"))))
         }
     }

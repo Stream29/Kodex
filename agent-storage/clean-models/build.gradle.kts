@@ -12,7 +12,6 @@ kotlin {
             dependencies {
                 api(libs.kotlinx.io.core)
                 api(libs.kotlinx.serialization.json)
-                api(libs.kotlinx.schema.json)
                 api(project(":openai-json-codec"))
                 api(project(":openai-models"))
                 api(project(":utils-kotlinx-io-serialization"))
@@ -26,9 +25,6 @@ kotlin {
         commonTest.dependencies {
             implementation(project(":openai-json-codec"))
             implementation(project(":utils-patch"))
-        }
-        nativeTest.dependencies {
-            implementation(project(":utils-kotlinx-io-coroutines"))
         }
     }
 }

@@ -798,8 +798,11 @@ private fun applyTailUnstableMigration(
         return
     }
 
-    // Preserve a valid historical unstable snapshot at tailCommit.index if new completion indices follow.
-    putCommit(rewriteHistoricalUnstableCommit(tailCommit, path))
+    val firstTargetOverwritesTail = tailCommit.index >= currentMaxIndex && !hasCleanEventAtIndex(tailCommit.index)
+    if (!firstTargetOverwritesTail) {
+        // Preserve a valid historical unstable snapshot at tailCommit.index if new completion indices follow.
+        putCommit(rewriteHistoricalUnstableCommit(tailCommit, path))
+    }
 
     val validKeptUnstableJson = OpenAiJsonCodec.encodeToString(
         ListSerializer(UnstableCleanEvent.serializer()),
@@ -810,7 +813,7 @@ private fun applyTailUnstableMigration(
     var cursorIndex = tailCommit.index
 
     for ((i, retired) in retiredPending.withIndex()) {
-        val targetIndex = if (i == 0 && tailCommit.index >= currentMaxIndex && !hasCleanEventAtIndex(tailCommit.index)) {
+        val targetIndex = if (i == 0 && firstTargetOverwritesTail) {
             tailCommit.index
         } else {
             maxOf(cursorIndex, currentMaxIndex) + 1

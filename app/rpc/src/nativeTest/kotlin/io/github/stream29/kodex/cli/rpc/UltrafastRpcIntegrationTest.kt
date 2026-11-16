@@ -2,7 +2,7 @@ package io.github.stream29.kodex.cli.rpc
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import kotlinx.coroutines.*
@@ -73,7 +73,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 finish.complete(Unit)
                 binding.state.first { it == AgentStateValue.AssistantMessage }
                 binding.running.first { !it }
-                val snapshot = binding.tokenCount.first { it is TokenCountSnapshot.Response } as TokenCountSnapshot.Response
+                val snapshot = binding.tokenCount.first { it is LlmRequestMeta.Response } as LlmRequestMeta.Response
                 assertEquals("ultrafast", snapshot.diagnostics?.requestedServiceTier)
                 assertEquals("default", snapshot.diagnostics?.serviceTier)
                 assertEquals("captured", snapshot.diagnostics?.requestedModel)
@@ -119,12 +119,12 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 assertEquals("fixture operation failed", failures.first { it.size == 1 }.single().message)
                 assertNull(agent.notification.value)
                 finish.complete(Unit)
-                binding.tokenCount.first { it is TokenCountSnapshot.Response }
+                binding.tokenCount.first { it is LlmRequestMeta.Response }
                 binding.running.first { !it }
                 yield(); yield()
                 assertNull(agent.notification.value)
                 assertEquals(1, failures.value.size)
-                assertEquals("priority", (binding.tokenCount.value as? TokenCountSnapshot.Response)?.diagnostics?.serviceTier)
+                assertEquals("priority", (binding.tokenCount.value as? LlmRequestMeta.Response)?.diagnostics?.serviceTier)
                 assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
             } finally {
                 finish.complete(Unit)
@@ -145,7 +145,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 agent.submit(listOf(ContentItem.InputText("test response")))
                 binding.state.first { it == AgentStateValue.AssistantMessage }
                 binding.running.first { !it }
-                val snapshot = binding.tokenCount.first { it is TokenCountSnapshot.Response } as TokenCountSnapshot.Response
+                val snapshot = binding.tokenCount.first { it is LlmRequestMeta.Response } as LlmRequestMeta.Response
                 assertEquals(ServiceTier.Ultrafast, requests.single().serviceTier)
                 assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
                 assertEquals("ultrafast", snapshot.diagnostics?.requestedServiceTier)

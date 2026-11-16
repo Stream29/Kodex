@@ -6,6 +6,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.*
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.sqlite.*
@@ -58,7 +59,7 @@ val sqliteRepositoryTest by testSuite {
                         Instant.fromEpochSeconds(123, 456),
                     )
                     assertEquals(1, appendedIndex)
-                    val observable = session.storage as ObservableKodexAgentStorage
+                    val observable = session.storage
                     assertEquals(1, observable.latestIndexFlow.value)
                     val nonce = observable.cacheNonce.value
                     val second = repository.createFork(first)
@@ -73,13 +74,22 @@ val sqliteRepositoryTest by testSuite {
                     session.storage.revert(1)
                     assertNotEquals(nonce, observable.cacheNonce.value)
                     assertEquals(0, observable.latestIndexFlow.value)
+                    session.storage.steer(listOf(StableUserMessage(listOf(ContentItem.InputText("steered")))))
+                    assertEquals(
+                        listOf(StableUserMessage(listOf(ContentItem.InputText("steered")))),
+                        session.storage.consumeSteer(),
+                    )
                     repository.getEntry(first).archive()
                     assertEquals(listOf(second), repository.listEntries(false).map { it.entryIndex })
                     assertEquals(listOf(first, second), repository.list())
                     repository.getEntry(first).unarchive()
                     repository.closeAndJoin()
                     assertEquals("0", fs.readString(Path(root, "sessions", "0", "settings", "latest.json")))
-                    assertEquals("-1", fs.readString(Path(root, "sessions", "0", "index", "latest.json")))
+                    assertEquals("2", fs.readString(Path(root, "sessions", "0", "steer", "latest.json")))
+                    assertTrue(fs.exists(Path(root, "sessions", "0", "steer", "1.json")))
+                    assertEquals("[]", fs.readString(Path(root, "sessions", "0", "steer", "2.json")))
+                    assertEquals("2", fs.readString(Path(root, "sessions", "0", "index", "latest.json")))
+                    assertTrue(fs.exists(Path(root, "sessions", "0", "index", "2.json")))
                     assertEquals("0", fs.readString(Path(root, "sessions", "0", "llm-request-meta", "latest.json")))
                     fs.writeString(Path(root, "sessions", "0", "settings", "latest.json"), "corrupted")
                     fs.writeString(Path(root, "sessions", "0", "lock.json"), "corrupted")
@@ -109,7 +119,7 @@ val sqliteRepositoryTest by testSuite {
                 testKodexAgentDependencies().use { dependencies ->
                     SqliteKodexSessionRepository(root, dependencies).use { repository ->
                         val session = repository.open(0)
-                        val observable = session.storage as ObservableKodexAgentStorage
+                        val observable = session.storage
                         val nonce = observable.cacheNonce.value
                         db.execute("""CREATE TRIGGER reject_init BEFORE INSERT ON agent_commits WHEN NEW.type = 'llm_request_meta_initialization' AND NEW."index" = 0 BEGIN SELECT RAISE(ABORT, 'injected'); END""")
                         assertFailsWith<SqliteFailure> { session.runtime.modify { it.initialize(settings("failed")) } }

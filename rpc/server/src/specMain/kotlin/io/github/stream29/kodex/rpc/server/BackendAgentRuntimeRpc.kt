@@ -26,7 +26,7 @@ import kotlinx.io.files.Path
 /**
  * RPC runtime adapter over [KodexSessionRepository.openSessions] and [AgentEventBus].
  *
- * Reads and commands require an already-open Session (`getOpen(sessionIndex)`), failing with
+ * Reads and commands require an already-open Session (`openSessions.value[sessionIndex]`), failing with
  * `SessionNotActive` without implicitly opening unloaded entries or acquiring an untouched
  * repository. Accepted commands execute in the owning Session's [kotlinx.coroutines.CoroutineScope]
  * so cancelling an RPC waiter does not cancel accepted work. Stop notifications are emitted by

@@ -9,8 +9,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountDiagnostics
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrAfter
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
@@ -33,7 +33,7 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
         withTimeout(15.seconds) {
             val backend = TokenCountTestService(
                 listOf(0, 5, 10_000, 50_000).associateWith {
-                    TokenCountSnapshot.Legacy(it.toLong())
+                    LlmRequestMeta.Legacy(it.toLong())
                 },
             )
             withInMemoryRpc(
@@ -43,7 +43,7 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
                 val ownerJob = Job(coroutineContext[Job])
                 try {
                     val view = CoroutineScope(coroutineContext + ownerJob).rpcCachedAgentStorage(7, rpc)
-                    val last = view.getLastCommitsIn(0..49_999, AgentCommitType.TokenCountTypes, limit = 1).single()
+                    val last = view.getLastCommitsIn(0..49_999, AgentCommitType.LlmRequestMetaTypes, limit = 1).single()
                     assertEquals(10_000, last.index)
                     assertEquals(1, backend.lastQueries)
                     assertEquals(0, backend.countQueries)
@@ -64,11 +64,11 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
                 val rpc = RestoringRpcClient(client).withService<AgentStorageRpc>()
                 val nonce = rpc.getCacheNonce(7)
                 assertEquals(5, rpc.getLatestIndex(7))
-                assertEquals(emptyList(), rpc.getFirstCommitsIn(7, nonce, 4, 4, AgentCommitType.TokenCountTypes))
-                assertEquals(3, rpc.countCommitsIn(7, nonce, 0, 5, AgentCommitType.TokenCountTypes))
+                assertEquals(emptyList(), rpc.getFirstCommitsIn(7, nonce, 4, 4, AgentCommitType.LlmRequestMetaTypes))
+                assertEquals(3, rpc.countCommitsIn(7, nonce, 0, 5, AgentCommitType.LlmRequestMetaTypes))
                 assertEquals(
                     backend.entries.map { IndexedAgentCommit(it.key, it.value) },
-                    rpc.getFirstCommitsIn(7, nonce, 0, 5, AgentCommitType.TokenCountTypes),
+                    rpc.getFirstCommitsIn(7, nonce, 0, 5, AgentCommitType.LlmRequestMetaTypes),
                 )
 
                 val ownerJob = Job(coroutineContext[Job])
@@ -82,8 +82,8 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
                     }
                     assertEquals(before + backend.entries.size, backend.exactReads)
                     assertEquals<AgentCommit?>(backend.entries.getValue(2), view.getLlmRequestMetaAtOrNull(4))
-                    assertEquals(2, view.getCommitAtOrBefore(4, AgentCommitType.TokenCountTypes)?.index)
-                    assertEquals(5, view.getCommitAtOrAfter(4, AgentCommitType.TokenCountTypes)?.index)
+                    assertEquals(2, view.getCommitAtOrBefore(4, AgentCommitType.LlmRequestMetaTypes)?.index)
+                    assertEquals(5, view.getCommitAtOrAfter(4, AgentCommitType.LlmRequestMetaTypes)?.index)
                     assertEquals(nonce, view.cacheNonce.value)
                     assertEquals(5, view.latestIndex())
                 } finally {
@@ -91,7 +91,7 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
                 }
                 assertEquals(
                     listOf(IndexedAgentCommit(5, backend.entries.getValue(5))),
-                    rpc.getFirstCommitsIn(7, nonce, 5, 5, AgentCommitType.TokenCountTypes),
+                    rpc.getFirstCommitsIn(7, nonce, 5, 5, AgentCommitType.LlmRequestMetaTypes),
                 )
             }
         }
@@ -99,10 +99,10 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
 }
 
 private class TokenCountTestService(
-    val entries: Map<Int, TokenCountSnapshot> = mapOf(
-        0 to TokenCountSnapshot.Legacy(0),
-        2 to TokenCountSnapshot.Response(0, usage = TokenUsage(0, 0, 0)),
-        5 to TokenCountSnapshot.Response(
+    val entries: Map<Int, LlmRequestMeta> = mapOf(
+        0 to LlmRequestMeta.Legacy(0),
+        2 to LlmRequestMeta.Response(0, usage = TokenUsage(0, 0, 0)),
+        5 to LlmRequestMeta.Response(
             totalTokens = 120,
             usage = TokenUsage(100, 20, 120),
             diagnostics = TokenCountDiagnostics(requestId = "request", turnStateReceived = true),

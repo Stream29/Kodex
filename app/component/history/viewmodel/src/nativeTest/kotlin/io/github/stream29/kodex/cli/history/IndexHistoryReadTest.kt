@@ -4,7 +4,7 @@ package io.github.stream29.kodex.cli.history
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
@@ -33,7 +33,7 @@ val indexHistoryReadTest by testSuite {
                 if (position == 1 || position % 7 == 0) storage.commit(historyUser("$position"))
                 else storage.commit(historyWork(index))
             } else {
-                storage.commit(CommitTimestamp(Instant.fromEpochSeconds(0)))
+                storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(0))
             }
         }
         val expected = storage.readAllHistory(2_100).items
@@ -61,7 +61,7 @@ val indexHistoryReadTest by testSuite {
         val mutable = historyStorage()
         mutable.commit(historyUser("prompt"))
         for (index in 2..200) {
-            mutable.commit(listOf(historyWork(index), CommitTimestamp(Instant.fromEpochSeconds(index.toLong()))))
+            mutable.commit(historyWork(index), Instant.fromEpochSeconds(index.toLong()))
         }
         val counted = CountingHistoryStorage(mutable)
         val page = counted.readHistoryPage(fromInclusive = 200, snapshotIndex = 200)

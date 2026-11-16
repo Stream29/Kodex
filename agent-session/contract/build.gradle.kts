@@ -17,5 +17,8 @@ kotlin {
                 api(libs.kotlinx.coroutines.core)
             }
         }
+        commonMain.dependencies {
+            implementation(project(":utils-coroutines"))
+        }
     }
 }

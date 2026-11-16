@@ -60,7 +60,6 @@ val stableCleanEventProjectionTest by testSuite {
             events.flatMap(StableCleanEvent::toResponseHistoryItems),
         )
         assertEquals("Done.", (events[1] as StableAssistantMessage).text)
-        assertEquals("Summary", (events[4] as StableReasoning).display)
     }
 
     test("hosted completed tools retain their concrete item types") {

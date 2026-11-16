@@ -12,6 +12,7 @@ import io.github.stream29.kodex.agentschedule.contract.nextCronTriggerAt
 import io.github.stream29.kodex.agentschedule.sqlite.SqliteScheduleRepository
 import io.github.stream29.kodex.agentsession.contract.*
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
+import io.github.stream29.kodex.agentsession.sqlite.openVerifiedKodexDatabase
 import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
 import io.github.stream29.kodex.cli.notification.collectNotificationHooks
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
@@ -283,7 +284,7 @@ internal class LazySqliteBackendPersistence(
         notificationsShared.tryEmit(notification)
     }
 
-    val sessionRepository: KodexRootSessionRepository = object : KodexRootSessionRepository {
+    val sessionRepository: KodexSessionRepository = object : KodexSessionRepository {
         override val coroutineContext: CoroutineContext
             get() = persistenceScope.coroutineContext
         override val entries: StateFlow<List<Int>> = lazyEntries.asStateFlow()
@@ -291,11 +292,10 @@ internal class LazySqliteBackendPersistence(
         override val stopEvents: Flow<IndexedAgentStopEvent> = lazyStopEvents.asSharedFlow()
 
         override suspend fun list(): List<Int> = acquire().first.list()
-        override suspend fun listEntries(): List<KodexRootSessionEntry> = acquire().first.listEntries()
-        override suspend fun listEntries(includeArchived: Boolean): List<KodexRootSessionEntry> =
+        override suspend fun listEntries(includeArchived: Boolean): List<KodexSessionEntry> =
             acquire().first.listEntries(includeArchived)
 
-        override suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry =
+        override suspend fun getEntry(entryIndex: Int): KodexSessionEntry =
             acquire().first.getEntry(entryIndex)
 
         override suspend fun create(): Int {
@@ -394,26 +394,7 @@ internal class LazySqliteBackendPersistence(
             if (existingSessions != null && existingSchedules != null) {
                 return@withLock existingSessions to existingSchedules
             }
-            SystemCoroutineFileSystem.createDirectories(home)
-            val resolvedHome = SystemCoroutineFileSystem.resolve(home)
-            val dbPath = Path(resolvedHome, "kodex.db")
-            val dbMetadata = SystemCoroutineFileSystem.metadataOrNull(dbPath)
-            val hasExistingDb = dbMetadata != null && dbMetadata.isRegularFile && dbMetadata.size > 0L
-            val hasExistingHomeState =
-                SystemCoroutineFileSystem.exists(Path(resolvedHome, "version.json")) ||
-                    SystemCoroutineFileSystem.exists(Path(resolvedHome, "sessions")) ||
-                    SystemCoroutineFileSystem.exists(Path(resolvedHome, ".migrations"))
-            if (!hasExistingDb && hasExistingHomeState) {
-                throw IOException("Authoritative SQLite session database is missing for existing Kodex Home: $dbPath")
-            }
-            val connection = withContext(Dispatchers.IO) {
-                openSqliteConnection(dbPath).closeOnFailure { conn ->
-                    if (hasExistingDb && (conn.query("PRAGMA user_version").single().single() as Long) == 0L) {
-                        throw IOException("Authoritative SQLite session database is uninitialized: $dbPath")
-                    }
-                    conn
-                }
-            }
+            val (resolvedHome, connection) = openVerifiedKodexDatabase(home, SystemCoroutineFileSystem)
             try {
                 val sessions = persistenceScope.SqliteKodexSessionRepository(
                     root = resolvedHome,

@@ -27,7 +27,6 @@ kotlin {
             implementation(project(":agent-storage-core"))
         }
         nativeTest.dependencies {
-            implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
         }
     }

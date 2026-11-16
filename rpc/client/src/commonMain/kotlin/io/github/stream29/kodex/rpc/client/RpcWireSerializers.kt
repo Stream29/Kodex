@@ -6,7 +6,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
@@ -54,8 +53,6 @@ public actual val RpcWireSerializers: SerializersModule = SerializersModule {
     contextual(ResponsesStreamEvent::class, ResponsesStreamEvent.serializer())
     contextual(AgentCommit::class, AgentCommit.serializer())
     contextual(LlmRequestMeta::class, LlmRequestMeta.serializer())
-    @Suppress("DEPRECATION")
-    contextual(TokenCountSnapshot::class, TokenCountSnapshot.serializer())
     contextual(StableCleanEvent.CompletedTool::class, StableCleanEvent.CompletedTool.serializer())
     contextual(StableIndexEvent.Steerable::class, StableIndexEvent.Steerable.serializer())
     contextual(CleanIndexEntry::class, CleanIndexEntry.serializer())

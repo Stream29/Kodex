@@ -44,7 +44,7 @@ public actual class BackendAgentStorageRpc actual constructor(
     }
 
     private fun cache(sessionIndex: Int): ObservableKodexAgentStorage =
-        openSession(sessionIndex).storage as ObservableKodexAgentStorage
+        openSession(sessionIndex).storage
 
     private suspend fun operationScopeFor(session: KodexAgentSession): CoroutineScope =
         scopesMutex.withLock {
@@ -70,7 +70,7 @@ public actual class BackendAgentStorageRpc actual constructor(
         block: suspend ObservableKodexAgentStorage.() -> R,
     ): R {
         val session = openSession(sessionIndex)
-        val storage = session.storage as ObservableKodexAgentStorage
+        val storage = session.storage
         if (storage.cacheNonce.value != nonce) throw CacheNonceMismatch()
         return try {
             storage.block()
@@ -90,12 +90,12 @@ public actual class BackendAgentStorageRpc actual constructor(
 
     actual override fun getCacheNonceFlow(sessionIndex: Int): Flow<Long> = flow {
         val session = openSession(sessionIndex)
-        emitAll(session.observeActive(checkAdmission, (session.storage as ObservableKodexAgentStorage).cacheNonce))
+        emitAll(session.observeActive(checkAdmission, session.storage.cacheNonce))
     }
 
     actual override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int> = flow {
         val session = openSession(sessionIndex)
-        emitAll(session.observeActive(checkAdmission, (session.storage as ObservableKodexAgentStorage).latestIndexFlow))
+        emitAll(session.observeActive(checkAdmission, session.storage.latestIndexFlow))
     }
 
     actual override suspend fun countCommitsIn(

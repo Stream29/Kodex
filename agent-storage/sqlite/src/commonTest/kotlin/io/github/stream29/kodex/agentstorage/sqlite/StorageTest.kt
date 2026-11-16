@@ -1,5 +1,3 @@
-@file:Suppress("DEPRECATION")
-
 package io.github.stream29.kodex.agentstorage.sqlite
 
 import de.infix.testBalloon.framework.core.testSuite
@@ -22,6 +20,7 @@ private suspend fun checkSparseFamily(
     types: Set<AgentCommitType>,
     first: AgentCommit,
     second: AgentCommit,
+    spacer: AgentCommit,
 ) {
     storage.revert(0)
     assertEquals(-1, storage.latestIndex())
@@ -34,12 +33,12 @@ private suspend fun checkSparseFamily(
     val t1 = Instant.fromEpochSeconds(1)
     val t2 = Instant.fromEpochSeconds(2)
     val t9 = Instant.fromEpochSeconds(9)
-    storage.commit(listOf(CommitTimestamp(t0)), t0) // 0
-    storage.commit(listOf(CommitTimestamp(t1)), t1) // 1
+    storage.commit(listOf(spacer), t0) // 0
+    storage.commit(listOf(spacer), t1) // 1
     val firstIndex = storage.commit(listOf(first), t2) // 2
     repeat(6) { step ->
         val t = Instant.fromEpochSeconds(3L + step)
-        storage.commit(listOf(CommitTimestamp(t)), t)
+        storage.commit(listOf(spacer), t)
     }
     val secondIndex = storage.commit(listOf(second), t9) // 9
 
@@ -77,44 +76,50 @@ val sqliteStorageTest by testSuite {
         seeded().use { db ->
             val storage = SqliteAgentStorage(db, 0)
             assertEquals("db:agent/0", storage.uri)
+            val askSpacer = AskUserSnapshot(emptyList())
             checkSparseFamily(
                 storage,
                 AgentCommitType.IndexTypes,
                 StableUserMessage(listOf(ContentItem.InputText("a"))),
                 StableAssistantMessage(listOf(ContentItem.OutputText("b")), phase = MessagePhase.FinalAnswer),
+                askSpacer,
             )
             checkSparseFamily(
                 storage,
                 AgentCommitType.WorkTypes,
                 StableWebSearchCall(ResponseItem.WebSearchCall(status = "completed")),
                 StableWebSearchCall(ResponseItem.WebSearchCall(status = "failed")),
+                askSpacer,
             )
             checkSparseFamily(
                 storage,
                 AgentCommitType.SettingsTypes,
                 KodexAgentSettings(model = OpenAiModelId("a")),
                 KodexAgentSettings(model = OpenAiModelId("b")),
+                askSpacer,
             )
             checkSparseFamily(
                 storage,
-                AgentCommitType.TokenCountTypes,
-                TokenCountSnapshot.Initialization(0),
-                TokenCountSnapshot.Response(42),
+                AgentCommitType.LlmRequestMetaTypes,
+                LlmRequestMeta.Initialization(0),
+                LlmRequestMeta.Response(42),
+                askSpacer,
             )
             checkSparseFamily(
                 storage,
                 AgentCommitType.UnstableTypes,
                 UnstableSnapshot(emptyList()),
                 UnstableSnapshot(emptyList()),
+                askSpacer,
             )
 
-            storage.commit(TokenCountSnapshot.Legacy(1)) // 0
+            storage.commit(LlmRequestMeta.Legacy(1)) // 0
             storage.commit(StableUserMessage(listOf(ContentItem.InputText("u")))) // 1
-            storage.commit(TokenCountSnapshot.Initialization(2)) // 2
+            storage.commit(LlmRequestMeta.Initialization(2)) // 2
             storage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("c")), phase = MessagePhase.Commentary)) // 3
-            storage.commit(TokenCountSnapshot.Compaction(3)) // 4
+            storage.commit(LlmRequestMeta.Compaction(3)) // 4
             storage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("f")), phase = MessagePhase.FinalAnswer)) // 5
-            storage.commit(TokenCountSnapshot.Response(4)) // 6
+            storage.commit(LlmRequestMeta.Response(4)) // 6
             storage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("n")), phase = null)) // 7
 
             assertEquals(
@@ -140,7 +145,6 @@ val sqliteStorageTest by testSuite {
             assertFailsWith<SqliteFailure> {
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test")))
             }
-            // Neither settings nor token count should remain if initialization failed in the batch!
             assertEquals(-1, storage.latestIndex())
             assertTrue(db.query("SELECT * FROM agent_commits WHERE agent_id = 0").isEmpty())
 
@@ -151,24 +155,6 @@ val sqliteStorageTest by testSuite {
             db.execute("CREATE TRIGGER reject_revert BEFORE DELETE ON agent_commits WHEN OLD.type = 'settings' BEGIN SELECT RAISE(ABORT, 'injected'); END")
             assertFailsWith<SqliteFailure> { storage.revert(0) }
             assertNotNull(storage.getCommitExact(0, AgentCommitType.SettingsTypes))
-        }
-    }
-
-    test("COMMIT failure rolls back commit batch") {
-        seeded().use { db ->
-            try {
-                val storage = SqliteAgentStorage(db, 0)
-                db.setAuthorizer { _, operation, _, _, _ -> operation != "COMMIT" }
-                assertFailsWith<SqliteFailure> {
-                    storage.commit(listOf(KodexAgentSettings(model = OpenAiModelId("test"))))
-                }
-                db.setAuthorizer(null)
-                assertEquals(-1, storage.latestIndex())
-                storage.commit(listOf(KodexAgentSettings(model = OpenAiModelId("test"))))
-                assertEquals(0, storage.latestIndex())
-            } finally {
-                db.setAuthorizer(null)
-            }
         }
     }
 

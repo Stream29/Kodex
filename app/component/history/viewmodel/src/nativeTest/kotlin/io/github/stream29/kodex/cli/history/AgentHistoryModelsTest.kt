@@ -5,7 +5,7 @@ package io.github.stream29.kodex.cli.history
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
@@ -180,7 +180,7 @@ val agentHistoryModelsTest by testSuite {
                         1 -> storage.commit(userMessage("one"))
                         4 -> storage.commit(userMessage("four"))
                         9 -> storage.commit(userMessage("nine"))
-                        else -> storage.commit(CommitTimestamp(Instant.fromEpochSeconds(0)))
+                        else -> storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(0))
                     }
                 }
             }
@@ -213,7 +213,7 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.commit(CommitTimestamp(Instant.fromEpochSeconds(0)))
+                storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(0))
                 storage.commit(textTool("older"))
                 storage.commit(textTool("newer"))
                 storage.commit(userMessage("breaker"))
@@ -300,7 +300,7 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.commit(CommitTimestamp(Instant.fromEpochSeconds(0)))
+                storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(0))
                 storage.commit(textTool("older"))
                 storage.commit(textTool("newer"))
             }
@@ -473,12 +473,12 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.commit(listOf(userMessage("one"), CommitTimestamp(Instant.fromEpochSeconds(100))))
-                storage.commit(CommitTimestamp(Instant.fromEpochSeconds(101)))
-                storage.commit(CommitTimestamp(Instant.fromEpochSeconds(102)))
-                storage.commit(listOf(userMessage("four"), CommitTimestamp(Instant.fromEpochSeconds(111))))
-                for (i in 5..8) storage.commit(CommitTimestamp(Instant.fromEpochSeconds(111)))
-                storage.commit(listOf(userMessage("nine"), CommitTimestamp(Instant.fromEpochSeconds(125))))
+                storage.commit(userMessage("one"), Instant.fromEpochSeconds(100))
+                storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(101))
+                storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(102))
+                storage.commit(userMessage("four"), Instant.fromEpochSeconds(111))
+                for (i in 5..8) storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(111))
+                storage.commit(userMessage("nine"), Instant.fromEpochSeconds(125))
             }
             val model = createAgentHistoryViewModel(
                 agentState = runtime,
@@ -512,24 +512,20 @@ val agentHistoryModelsTest by testSuite {
                 )
                 storage.initialize(firstTurn)
                 val turnStart = storage.getCommitExact(0)!!.createdAt
-                storage.commit(listOf(CommitTimestamp(turnStart + 10.seconds), userMessage("first")))
-                storage.commit(listOf(CommitTimestamp(turnStart + 30.seconds), textTool("first-tool")))
+                storage.commit(userMessage("first"), turnStart + 10.seconds)
+                storage.commit(textTool("first-tool"), turnStart + 30.seconds)
                 storage.commit(
-                    listOf(
-                        CommitTimestamp(turnStart + 40.seconds),
-                        StableAssistantMessage(
-                            content = listOf(ContentItem.OutputText("first answer")),
-                        ),
+                    StableAssistantMessage(
+                        content = listOf(ContentItem.OutputText("first answer")),
                     ),
+                    turnStart + 40.seconds,
                 )
-                storage.commit(listOf(CommitTimestamp(turnStart + 50.seconds), userMessage("second")))
+                storage.commit(userMessage("second"), turnStart + 50.seconds)
                 storage.commit(
-                    listOf(
-                        CommitTimestamp(turnStart + 60.seconds),
-                        StableAssistantMessage(
-                            content = listOf(ContentItem.OutputText("second answer")),
-                        ),
+                    StableAssistantMessage(
+                        content = listOf(ContentItem.OutputText("second answer")),
                     ),
+                    turnStart + 60.seconds,
                 )
             }
             val model = createAgentHistoryViewModel(
@@ -561,24 +557,20 @@ val agentHistoryModelsTest by testSuite {
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 val turnStart = storage.getCommitExact(0)!!.createdAt
-                storage.commit(listOf(CommitTimestamp(turnStart + 1.seconds), userMessage("first")))
+                storage.commit(userMessage("first"), turnStart + 1.seconds)
                 storage.commit(
-                    listOf(
-                        CommitTimestamp(turnStart + 2.seconds),
-                        StableAssistantMessage(
-                            content = listOf(ContentItem.OutputText("final")),
-                        ),
+                    StableAssistantMessage(
+                        content = listOf(ContentItem.OutputText("final")),
                     ),
+                    turnStart + 2.seconds,
                 )
-                storage.commit(listOf(CommitTimestamp(turnStart + 3.seconds), userMessage("steer one")))
-                storage.commit(listOf(CommitTimestamp(turnStart + 4.seconds), userMessage("steer two")))
+                storage.commit(userMessage("steer one"), turnStart + 3.seconds)
+                storage.commit(userMessage("steer two"), turnStart + 4.seconds)
                 storage.commit(
-                    listOf(
-                        CommitTimestamp(turnStart + 5.seconds),
-                        StableAssistantMessage(
-                            content = listOf(ContentItem.OutputText("next final")),
-                        ),
+                    StableAssistantMessage(
+                        content = listOf(ContentItem.OutputText("next final")),
                     ),
+                    turnStart + 5.seconds,
                 )
             }
             val model = createAgentHistoryViewModel(
@@ -695,9 +687,7 @@ val agentHistoryModelsTest by testSuite {
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
                 model.awaitReady(itemCount = 0, hasOlder = false)
-                withTimeout(5.seconds) {
-                    model.pendingTools.first { events -> events == listOf(pending) }
-                }
+                awaitState(model.pendingTools) { events -> events == listOf(pending) }
                 assertEquals(listOf(pending), model.pendingTools.value)
             } finally {
                 model.close()

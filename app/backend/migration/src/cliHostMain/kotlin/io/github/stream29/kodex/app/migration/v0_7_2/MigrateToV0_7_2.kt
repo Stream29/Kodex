@@ -14,7 +14,15 @@ import io.github.stream29.kodex.agentstorage.filesystemlayout.latestIndexPath
 import io.github.stream29.kodex.agentstorage.filesystemlayout.recordPath
 import io.github.stream29.kodex.agentstorage.filesystemlayout.timelineDirectory
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.PlanItemArg
+import io.github.stream29.kodex.openai.StepStatus
+import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 import io.github.stream29.kodex.utils.sqlite.SqliteFailure
@@ -36,6 +44,7 @@ internal suspend fun migrateToV0_7_2(home: Path, fileSystem: CoroutineFileSystem
     }
     if (fileSystem.exists(target) && matchesPublishedV0_7_2(target)) {
         reconcileMirrorsOnReentry(home, target, fileSystem)
+        cleanupLegacyMirrorTimelines(home, fileSystem)
         return@withContext
     }
     fileSystem.createDirectories(home)
@@ -68,11 +77,12 @@ internal suspend fun migrateToV0_7_2(home: Path, fileSystem: CoroutineFileSystem
     }
     cleanupWalSidecars(home, fileSystem)
     applyMirrorDeltas(home, mirrorDeltas, fileSystem)
+    cleanupLegacyMirrorTimelines(home, fileSystem)
 }
 
 private const val FallbackTimestamp = "1970-01-01T00:00:00Z"
 private const val MaxCompactionRetainedHistoryTokens: Int = 64_000
-private const val ApproximateBytesPerToken: Int = 4
+private const val ApproximateCharactersPerToken: Int = 4
 
 private val RetiredToolCommitTypes: Set<String> = setOf(
     "image_view_tool_event",
@@ -163,15 +173,10 @@ CREATE TABLE agent_commits (
             'text_tool_event',
             'custom_tool_event',
             'settings',
-            'timestamp',
             'llm_request_meta_legacy',
             'llm_request_meta_initialization',
             'llm_request_meta_compaction',
             'llm_request_meta_response',
-            'token_count_legacy',
-            'token_count_initialization',
-            'token_count_compaction',
-            'token_count_response',
             'unstable',
             'steer',
             'ask_user'
@@ -191,7 +196,6 @@ CREATE TABLE IF NOT EXISTS schedules (
     agent_id INTEGER NOT NULL CHECK (agent_id BETWEEN 0 AND 2147483647),
     trigger_at_epoch_seconds INTEGER NOT NULL,
     trigger_at_nanoseconds INTEGER NOT NULL CHECK (trigger_at_nanoseconds BETWEEN 0 AND 999999999),
-    trigger_at TEXT NOT NULL,
     cron TEXT,
     description TEXT NOT NULL,
     created_at TEXT NOT NULL
@@ -283,7 +287,25 @@ private suspend fun upgradeExistingDatabaseInPlace(
         db.execute("PRAGMA schema_version = ${currentSchemaVersion + 1}")
         db.execute("PRAGMA writable_schema = RESET")
 
+        val scheduleColumns = db.query("PRAGMA table_info(schedules)").mapNotNull { it.getOrNull(1) as? String }
+        if ("trigger_at" in scheduleColumns) {
+            db.execute("ALTER TABLE schedules DROP COLUMN trigger_at")
+        }
         v0_7_2SchedulesSchema.split(';').filter { it.isNotBlank() }.forEach { db.execute(it) }
+
+        db.execute("DELETE FROM agent_commits WHERE type IN ('timestamp', 'compaction_point')")
+        db.execute(
+            """
+            UPDATE OR REPLACE agent_commits
+            SET type = 'llm_request_meta_' || substr(type, 13)
+            WHERE type IN (
+                'token_count_legacy',
+                'token_count_initialization',
+                'token_count_compaction',
+                'token_count_response'
+            )
+            """.trimIndent(),
+        )
 
         if (agentIds.isNotEmpty()) {
             migrateAgentsInPlace(db, agentIds, sourcePath, mirrorDeltas)
@@ -385,7 +407,6 @@ private suspend fun migrateAgentsInPlace(
                             WHERE agent_id = ? AND "index" = ?
                               AND type NOT IN (
                                   'settings', 'unstable', 'steer', 'ask_user',
-                                  'token_count_legacy', 'token_count_initialization', 'token_count_compaction', 'token_count_response',
                                   'llm_request_meta_legacy', 'llm_request_meta_initialization', 'llm_request_meta_compaction', 'llm_request_meta_response'
                               )
                             LIMIT 1
@@ -639,11 +660,69 @@ private fun CompactionRetainedItem.approximateTokenCount(): Int =
     when (this) {
         is StableUserMessage -> content.approximateTokenCount()
         is StableAskUserEvent ->
-            encodePayloadJson(OpenAiJsonCodec).approximateTokenCount()
+            (
+                24L +
+                    askId.toLong().decimalDigitCount() +
+                    arguments.approximateTokenCount() +
+                    response.approximateTokenCount()
+                ).toApproximateTokenCount()
         is StablePlanUpdate ->
-            encodePayloadJson(OpenAiJsonCodec).approximateTokenCount()
+            arguments.approximateTokenCount() +
+                PlanUpdatedOutput.approximateTokenCount()
     }
     .coerceAtLeast(1)
+
+private fun UpdatePlanArgs.approximateTokenCount(): Int =
+    (
+        16L +
+            (explanation?.approximateTokenCount()?.toLong() ?: 0L) +
+            plan.sumOf(PlanItemArg::approximateTokenCount)
+        ).toApproximateTokenCount()
+
+private fun PlanItemArg.approximateTokenCount(): Long =
+    24L +
+        step.approximateTokenCount() +
+        when (status) {
+            StepStatus.Pending -> 2L
+            StepStatus.InProgress -> 3L
+            StepStatus.Completed -> 3L
+        }
+
+private fun RequestUserInputArgs.approximateTokenCount(): Int =
+    (
+        24L +
+            questions.sumOf(RequestUserInputQuestion::approximateTokenCount) +
+            (autoResolutionMs?.decimalDigitCount() ?: 0L)
+        ).toApproximateTokenCount()
+
+private fun RequestUserInputQuestion.approximateTokenCount(): Long =
+    32L +
+        id.approximateTokenCount() +
+        header.approximateTokenCount() +
+        question.approximateTokenCount() +
+        (if (isOther) 12L else 0L) +
+        (if (isSecret) 12L else 0L) +
+        (options?.let { values ->
+            12L +
+                values.sumOf(RequestUserInputQuestionOption::approximateTokenCount) +
+                (values.size - 1).coerceAtLeast(0)
+        } ?: 0L)
+
+private fun RequestUserInputQuestionOption.approximateTokenCount(): Long =
+    16L + label.approximateTokenCount() + description.approximateTokenCount()
+
+private fun RequestUserInputResponse.approximateTokenCount(): Int =
+    (
+        16L +
+            answers.entries.sumOf { (key, answer) ->
+                4L + key.approximateTokenCount() + answer.approximateTokenCount()
+            }
+        ).toApproximateTokenCount()
+
+private fun RequestUserInputAnswer.approximateTokenCount(): Long =
+    16L +
+        answers.sumOf { answer -> answer.approximateTokenCount() } +
+        (answers.size - 1).coerceAtLeast(0)
 
 private fun List<ContentItem>.approximateTokenCount(): Int =
     sumOf { item ->
@@ -654,11 +733,29 @@ private fun List<ContentItem>.approximateTokenCount(): Int =
         }
     }
 
-private fun String.approximateTokenCount(): Int {
-    val bytes = encodeToByteArray().size
-    if (bytes == 0) return 0
-    return (bytes + ApproximateBytesPerToken - 1) / ApproximateBytesPerToken
+private fun String.approximateTokenCount(): Int =
+    ((length.toLong() + ApproximateCharactersPerToken - 1) / ApproximateCharactersPerToken)
+        .coerceAtMost(Int.MAX_VALUE.toLong())
+        .toInt()
+
+private fun Long.toApproximateTokenCount(): Int =
+    coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+
+private fun Long.decimalDigitCount(): Long {
+    var value = this
+    var digits = 1L
+    if (value < 0) {
+        digits += 1
+        value = -value
+    }
+    while (value >= 10) {
+        value /= 10
+        digits += 1
+    }
+    return digits
 }
+
+private const val PlanUpdatedOutput: String = "Plan updated"
 
 private val SyncedMirrorTimelines: Set<String> = setOf("index", "work", "unstable", "ask-user")
 
@@ -766,6 +863,32 @@ private suspend fun reconcileMirrorsOnReentry(
     }
 }
 
+private suspend fun cleanupLegacyMirrorTimelines(
+    home: Path,
+    fileSystem: CoroutineFileSystem,
+) {
+    val sessionsRoot = Path(home, "sessions")
+    if (fileSystem.metadataOrNull(sessionsRoot)?.isDirectory != true) return
+    for (sessionDir in fileSystem.list(sessionsRoot)) {
+        currentCoroutineContext().ensureActive()
+        if (fileSystem.metadataOrNull(sessionDir)?.isDirectory != true) continue
+        for (retiredTimeline in listOf("timestamp", "token-count")) {
+            val dir = timelineDirectory(sessionDir, retiredTimeline)
+            deleteTree(fileSystem, dir)
+        }
+    }
+}
+
+private suspend fun deleteTree(fileSystem: CoroutineFileSystem, path: Path) {
+    val metadata = fileSystem.metadataOrNull(path) ?: return
+    if (metadata.isDirectory) {
+        for (child in fileSystem.list(path)) {
+            deleteTree(fileSystem, child)
+        }
+    }
+    fileSystem.delete(path, mustExist = false)
+}
+
 private suspend fun matchesPublishedV0_7_2(path: Path): Boolean {
     try {
         openSqliteConnection(path, readOnly = true).use { db ->
@@ -803,7 +926,8 @@ private suspend fun verifyV0_7_2SchemaMetadata(db: SqliteConnection) {
     verify(createdAtColumn != null && createdAtColumn[2] == "TEXT" && createdAtColumn[3] == 1L)
     val schedulesSql = db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedules'")
         .singleOrNull()?.singleOrNull() as? String ?: ""
-    verify("AUTOINCREMENT" in schedulesSql.uppercase())
+    val scheduleColumns = db.query("PRAGMA table_info(schedules)").mapNotNull { it.getOrNull(1) as? String }
+    verify("AUTOINCREMENT" in schedulesSql.uppercase() && "trigger_at" !in scheduleColumns)
     val tableSql = db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_commits'")
         .singleOrNull()?.singleOrNull() as? String ?: ""
     verify(
@@ -815,9 +939,14 @@ private suspend fun verifyV0_7_2SchemaMetadata(db: SqliteConnection) {
             "'event_terminal_exited'" in tableSql &&
             "'await_event_tool_event'" in tableSql &&
             "'read_media_tool_event'" in tableSql &&
+            "'timestamp'" !in tableSql &&
+            "'token_count_response'" !in tableSql &&
             "'image_view_tool_event'" !in tableSql &&
             "'request_user_input_tool_event'" !in tableSql &&
             "'mcp_tool_event'" !in tableSql &&
             "'compaction_point'" !in tableSql,
+    )
+    verify(
+        db.query("SELECT 1 FROM agent_commits WHERE type LIKE 'token_count_%' OR type = 'timestamp' LIMIT 1").isEmpty(),
     )
 }

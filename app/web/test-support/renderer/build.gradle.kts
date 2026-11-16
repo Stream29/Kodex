@@ -66,6 +66,7 @@ kotlin {
             implementation(project(":app-component-settings-view"))
             implementation(project(":app-component-request-user-input-view"))
             implementation(project(":agent-storage-core"))
+            implementation(project(":agent-storage-in-memory"))
             implementation(project(":agent-state-contract"))
             implementation(project(":app-component-history-viewmodel"))
         }

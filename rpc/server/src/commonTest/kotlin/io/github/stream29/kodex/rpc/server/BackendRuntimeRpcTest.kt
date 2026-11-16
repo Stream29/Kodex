@@ -5,7 +5,7 @@ package io.github.stream29.kodex.rpc.server
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
-import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
+import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -55,7 +55,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                         listOf(
                             StableReasoning(ResponseItem.Reasoning(encryptedContent = "test-reasoning")),
                             UnstableSnapshot(emptyList()),
-                            TokenCountSnapshot.Response(
+                            LlmRequestMeta.Response(
                                 0,
                                 TokenUsage(0, 0, 0),
                                 TokenCountDiagnostics(requestId = "test", turnStateReceived = true),
@@ -68,8 +68,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 checkTimeline(index, rpc, storage, AgentCommitType.IndexTypes) { it as CleanIndexEntry }
                 checkTimeline(index, rpc, storage, AgentCommitType.WorkTypes) { it as StableWorkEvent }
                 checkTimeline(index, rpc, storage, AgentCommitType.SettingsTypes) { it as KodexAgentSettings }
-                checkTimeline(index, rpc, storage, AgentCommitType.TimestampTypes) { (it as CommitTimestamp).instant }
-                checkTimeline(index, rpc, storage, AgentCommitType.TokenCountTypes) { it as TokenCountSnapshot }
+                checkTimeline(index, rpc, storage, AgentCommitType.LlmRequestMetaTypes) { it as LlmRequestMeta }
                 checkTimeline(index, rpc, storage, AgentCommitType.UnstableTypes) { (it as UnstableSnapshot).events }
                 val nonce = rpc.getCacheNonce(index)
                 assertEquals(
@@ -184,7 +183,14 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 assertEquals(active, rpc.getState(index))
                 assertTrue(rpc.getRunningTurn(index))
                 assertFailsWith<NoMatchException> { rpc.currentFlow(index, active.nonce xor 1).first() }
-                val values = async(start = CoroutineStart.UNDISPATCHED) { rpc.currentFlow(index, active.nonce).take(2).toList() }
+                val liveSubscribed = CompletableDeferred<Unit>()
+                val values = async(start = CoroutineStart.UNDISPATCHED) {
+                    rpc.currentFlow(index, active.nonce)
+                        .onEach { liveSubscribed.complete(Unit) }
+                        .take(2)
+                        .toList()
+                }
+                liveSubscribed.await()
                 waiter.cancelAndJoin()
                 assertTrue(repository.openSessions.value.getValue(index).runtime.runningTurn.value != null)
                 release.complete(Unit)
@@ -633,7 +639,7 @@ internal suspend fun runtimeFixture(
     client: OpenAiClient = mockOpenAiClient(),
     generator: SessionTitleGenerator = SessionTitleGenerator { _, _, _ -> error("Titles disabled in fixture") },
     settings: SessionTitleSettings = SessionTitleSettings(enabled = false),
-    block: suspend CoroutineScope.(KodexRootSessionRepository, Int, BackendAgentRuntimeRpc) -> Unit,
+    block: suspend CoroutineScope.(KodexSessionRepository, Int, BackendAgentRuntimeRpc) -> Unit,
 ) = withTimeout(30.seconds) {
     val root = Path(SystemTemporaryDirectory, "kodex-rpc-runtime-${Random.nextLong()}")
     val repoOwner = CoroutineScope(coroutineContext + SupervisorJob())

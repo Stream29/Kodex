@@ -116,12 +116,12 @@ private data class ExactCacheKey(
 
 private val SingleCommitCategorySets: Set<Set<AgentCommitType>> = setOf(
     AgentCommitType.IndexTypes,
-    AgentCommitType.IndexEventTypes,
     AgentCommitType.WorkTypes,
     AgentCommitType.SettingsTypes,
     AgentCommitType.LlmRequestMetaTypes,
     AgentCommitType.UnstableTypes,
     AgentCommitType.SteerTypes,
+    AgentCommitType.AskUserTypes,
 )
 
 private class RpcCachedAgentStorage(

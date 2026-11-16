@@ -7,14 +7,21 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.ext.appendSteer
-import io.github.stream29.kodex.agentstorage.contract.ext.consumeSteerQueue
+import io.github.stream29.kodex.openai.MessagePhase
 import kotlin.time.Clock
 import kotlin.time.Instant
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * Persisted commit history for one agent thread.
@@ -106,19 +113,64 @@ public interface MutableKodexAgentStorage : KodexAgentStorage {
      *
      * An empty [events] list is a no-op and returns [latestIndex].
      */
-    public suspend fun steer(events: List<StableIndexEvent.Steerable>): Int =
-        appendSteer(events)
+    public suspend fun steer(events: List<StableIndexEvent.Steerable>): Int {
+        val currentLatest = latestIndex()
+        require(currentLatest >= 0) { "Steer updates require an existing state index." }
+        if (events.isEmpty()) return currentLatest
+        val existing = getSteerAt(currentLatest)
+        return commit(SteerSnapshot(existing + events))
+    }
 
     /**
      * Atomically consumes all currently queued [SteerSnapshot] events into the stable timeline.
-     *
-     * Returns an empty list without writing when the current steer queue is empty. When non-empty,
-     * commits the queued [StableIndexEvent.Steerable] events (rotating `turnId` in
-     * [KodexAgentSettings] when a user message starts a new turn) together with an empty
-     * `SteerSnapshot(emptyList())`, and returns the consumed events in order.
      */
-    public suspend fun consumeSteer(): List<StableIndexEvent.Steerable> =
-        consumeSteerQueue()
+    @OptIn(ExperimentalUuidApi::class)
+    public suspend fun consumeSteer(): List<StableIndexEvent.Steerable> {
+        val currentLatest = latestIndex()
+        if (currentLatest < 0) return emptyList()
+        val pendingTools = getUnstableAtOrNull(currentLatest).orEmpty()
+            .filterIsInstance<PendingToolEvent>()
+        require(pendingTools.isEmpty()) {
+            "Cannot consume steer while local tool calls are pending."
+        }
+        val events = getSteerAt(currentLatest)
+        if (events.isEmpty()) return emptyList()
+        val timestamp = Clock.System.now()
+        var currentSettings = getSettingsAt(currentLatest)
+        var previousMessageStartsNewTurn = startsNewTurnBefore(currentLatest + 1)
+        for ((i, event) in events.withIndex()) {
+            val isUserTurnInput = event is StableUserMessage ||
+                event is StableAskUserEvent ||
+                event is StableScheduleEvent ||
+                event is StableTerminalExitedEvent
+            val startsNewTurn = isUserTurnInput && previousMessageStartsNewTurn
+            val commits = buildList<AgentCommit> {
+                if (startsNewTurn) {
+                    currentSettings = currentSettings.copy(
+                        turnId = Uuid.generateV7().toString(),
+                    )
+                    add(currentSettings)
+                }
+                add(event)
+                add(SteerSnapshot(events.drop(i + 1)))
+            }
+            commit(commits, timestamp)
+            previousMessageStartsNewTurn = when {
+                event is StableAssistantMessage -> event.phase != MessagePhase.Commentary
+                isUserTurnInput -> false
+                else -> previousMessageStartsNewTurn
+            }
+        }
+        return events
+    }
+}
+
+private suspend fun KodexAgentStorage.startsNewTurnBefore(index: Int): Boolean {
+    if (index <= 0) return false
+    val last = getLastCommitsIn(0 until index, AgentCommitType.TurnStartBoundaryTypes, limit = 1)
+        .lastOrNull()
+        ?.commit
+    return (last as? StableAssistantMessage)?.let { it.phase != MessagePhase.Commentary } ?: false
 }
 
 /** Validates that [commits] is non-empty and contains at most one commit per timeline family. */
@@ -195,18 +247,12 @@ public suspend fun KodexAgentStorage.getUnstableAtOrNull(index: Int): List<Unsta
     return (getCommitAtOrBefore(index, AgentCommitType.UnstableTypes)?.commit as? UnstableSnapshot)?.events
 }
 
-public suspend fun KodexAgentStorage.getSteerAtOrNull(index: Int): List<StableIndexEvent.Steerable>? {
+public suspend fun KodexAgentStorage.getSteerAt(index: Int): List<StableIndexEvent.Steerable> {
     require(index >= 0) { "Index $index must be non-negative." }
-    return (getCommitAtOrBefore(index, AgentCommitType.SteerTypes)?.commit as? SteerSnapshot)?.events
+    return (getCommitAtOrBefore(index, AgentCommitType.SteerTypes)?.commit as? SteerSnapshot)?.events ?: emptyList()
 }
 
-public suspend fun KodexAgentStorage.getSteerAt(index: Int): List<StableIndexEvent.Steerable> =
-    getSteerAtOrNull(index) ?: emptyList()
-
-public suspend fun KodexAgentStorage.getAskUsersAtOrNull(index: Int): List<AskUserEntry>? {
+public suspend fun KodexAgentStorage.getAskUsersAt(index: Int): List<AskUserEntry> {
     require(index >= 0) { "Index $index must be non-negative." }
-    return (getCommitAtOrBefore(index, AgentCommitType.AskUserTypes)?.commit as? AskUserSnapshot)?.entries
+    return (getCommitAtOrBefore(index, AgentCommitType.AskUserTypes)?.commit as? AskUserSnapshot)?.entries ?: emptyList()
 }
-
-public suspend fun KodexAgentStorage.getAskUsersAt(index: Int): List<AskUserEntry> =
-    getAskUsersAtOrNull(index) ?: emptyList()

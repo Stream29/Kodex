@@ -1,18 +1,16 @@
 package io.github.stream29.kodex.agentsession.sqlite
 
+import io.github.stream29.kodex.agentsession.contract.ScopedObservableAgentStorage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
-import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.agentstorage.filesystemlayout.deleteRecord
 import io.github.stream29.kodex.agentstorage.filesystemlayout.latestIndexPath
 import io.github.stream29.kodex.agentstorage.filesystemlayout.recordPath
 import io.github.stream29.kodex.agentstorage.filesystemlayout.storedRecordIndexes
 import io.github.stream29.kodex.agentstorage.filesystemlayout.timelineDirectory
+import io.github.stream29.kodex.agentstorage.sqlite.SqliteAgentStorage
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -21,16 +19,11 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.IOException
 import kotlinx.io.files.Path
-import kotlin.random.Random
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -75,110 +68,28 @@ internal class SequentialMirrorQueue(
     }
 }
 
-internal class CachedSqliteAgentStorage(
-    private val owner: CoroutineScope,
-    private val source: MutableKodexAgentStorage,
-    initialLatestIndex: Int,
-) : MutableKodexAgentStorage, ObservableKodexAgentStorage {
-    private val nonce = MutableStateFlow(Random.nextLong())
-    private val tail = MutableStateFlow(initialLatestIndex)
-
-    override val agentId: Int? get() = source.agentId
-    override val uri: String get() = source.uri
-    override val cacheNonce: StateFlow<Long> = nonce.asStateFlow()
-    override val latestIndexFlow: StateFlow<Int> = tail.asStateFlow()
-
-    private fun backing(): MutableKodexAgentStorage {
-        check(owner.isActive) { "Session storage is closed" }
-        return source
-    }
-
-    override suspend fun latestIndex(): Int = backing().latestIndex()
-
-    override suspend fun countCommitsIn(
-        range: IntRange,
-        types: Set<AgentCommitType>,
-    ): Int = backing().countCommitsIn(range, types)
-
-    override suspend fun getFirstCommitsIn(
-        range: IntRange,
-        types: Set<AgentCommitType>,
-        limit: Int,
-    ): List<IndexedAgentCommit> = backing().getFirstCommitsIn(range, types, limit)
-
-    override suspend fun getLastCommitsIn(
-        range: IntRange,
-        types: Set<AgentCommitType>,
-        limit: Int,
-    ): List<IndexedAgentCommit> = backing().getLastCommitsIn(range, types, limit)
-
-    @Suppress("DEPRECATION")
-    override suspend fun commit(commit: AgentCommit): Int {
-        val legacyTimestamp = (commit as? io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp)?.instant
-        return commit(listOf(commit), legacyTimestamp ?: Clock.System.now())
-    }
-
-    override suspend fun commit(commit: AgentCommit, timestamp: Instant): Int = commit(listOf(commit), timestamp)
-
-    @Suppress("DEPRECATION")
-    override suspend fun commit(commits: List<AgentCommit>): Int {
-        val legacyTimestamp = (commits.firstOrNull { it is io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp } as? io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp)?.instant
-        return commit(commits, legacyTimestamp ?: Clock.System.now())
-    }
-
-    override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int {
-        currentCoroutineContext().ensureActive()
-        return withContext(NonCancellable) {
-            val index = backing().commit(commits, timestamp)
-            tail.value = index
-            index
-        }
-    }
-
-    override suspend fun revert(untilExclusive: Int) {
-        currentCoroutineContext().ensureActive()
-        withContext(NonCancellable) {
-            val previous = tail.value
-            val hadSteer = previous >= 0 && backing().getSteerAt(previous).isNotEmpty()
-            backing().revert(untilExclusive)
-            val latest = if (previous < untilExclusive) previous else backing().latestIndex()
-            if (latest != previous || hadSteer) {
-                tail.value = latest
-                var nextNonce = Random.nextLong()
-                while (nextNonce == nonce.value) nextNonce = Random.nextLong()
-                nonce.value = nextNonce
-            }
-        }
-    }
-}
-
 internal class FileMirrorKodexAgentStorage(
-    private val delegate: CachedSqliteAgentStorage,
+    private val source: SqliteAgentStorage,
+    private val observable: ScopedObservableAgentStorage,
     private val directory: Path,
     private val fileSystem: CoroutineFileSystem,
     private val mirrorQueue: SequentialMirrorQueue,
-) : MutableKodexAgentStorage, ObservableKodexAgentStorage by delegate {
-    @Suppress("DEPRECATION")
-    override suspend fun commit(commit: AgentCommit): Int {
-        val legacyTimestamp = (commit as? io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp)?.instant
-        return commit(listOf(commit), legacyTimestamp ?: Clock.System.now())
-    }
+) : MutableObservableKodexAgentStorage, ObservableKodexAgentStorage by observable {
+    override suspend fun commit(commit: AgentCommit): Int =
+        commit(listOf(commit), Clock.System.now())
 
-    override suspend fun commit(commit: AgentCommit, timestamp: Instant): Int = commit(listOf(commit), timestamp)
+    override suspend fun commit(commit: AgentCommit, timestamp: Instant): Int =
+        commit(listOf(commit), timestamp)
 
-    @Suppress("DEPRECATION")
-    override suspend fun commit(commits: List<AgentCommit>): Int {
-        val legacyTimestamp = (commits.firstOrNull { it is io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp } as? io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp)?.instant
-        return commit(commits, legacyTimestamp ?: Clock.System.now())
-    }
+    override suspend fun commit(commits: List<AgentCommit>): Int =
+        commit(commits, Clock.System.now())
 
     override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int {
         currentCoroutineContext().ensureActive()
+        observable.checkOpen()
         return withContext(NonCancellable) {
-            val index = delegate.commit(commits, timestamp)
-            val encoded = commits.map { commit ->
-                commit.commitType.legacyTimelineName to commit.encodePayloadJson()
-            }
+            val (index, encoded) = source.commitWithMirrorPayloads(commits, timestamp)
+            observable.publishCommittedIndex(index)
             mirrorQueue.enqueue {
                 for ((timelineName, payloadJson) in encoded) {
                     writeMirrorRecordAtomically(directory, timelineName, index, payloadJson, fileSystem)
@@ -191,7 +102,7 @@ internal class FileMirrorKodexAgentStorage(
     override suspend fun revert(untilExclusive: Int) {
         currentCoroutineContext().ensureActive()
         withContext(NonCancellable) {
-            delegate.revert(untilExclusive)
+            observable.revert(untilExclusive)
             mirrorQueue.enqueue {
                 revertMirrorDirectory(directory, untilExclusive, fileSystem)
             }
@@ -203,8 +114,6 @@ internal val MirrorTimelineDirectories: List<String> = listOf(
     "index",
     "work",
     "settings",
-    "timestamp",
-    "token-count",
     "llm-request-meta",
     "unstable",
     "steer",

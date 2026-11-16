@@ -27,10 +27,9 @@ kotlin {
             implementation(project(":utils-coroutines"))
         }
         commonTest.dependencies {
-            implementation(project(":agent-storage-sqlite"))
-            implementation(project(":utils-sqlite"))
             implementation(project(":agent-context-prefix"))
             implementation(project(":agent-storage-core"))
+            implementation(project(":agent-storage-in-memory"))
             implementation(project(":openai-client-test"))
             implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(libs.kotlinx.coroutines.test)

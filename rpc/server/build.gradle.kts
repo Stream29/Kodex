@@ -52,8 +52,6 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(project(":app-rpc-system"))
-            implementation(project(":agent-schedule-in-memory"))
-            implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-sqlite"))
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-core"))

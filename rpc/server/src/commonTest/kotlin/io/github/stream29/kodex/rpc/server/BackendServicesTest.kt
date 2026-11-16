@@ -182,8 +182,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                     AgentCommitType.IndexTypes,
                     AgentCommitType.WorkTypes,
                     AgentCommitType.SettingsTypes,
-                    AgentCommitType.TimestampTypes,
-                    AgentCommitType.TokenCountTypes,
+                    AgentCommitType.LlmRequestMetaTypes,
                     AgentCommitType.UnstableTypes,
                 )) {
                     storage.getFirstCommitsIn(index, nonce, 0, 1, types)

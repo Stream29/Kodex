@@ -3,9 +3,8 @@
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
-import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
+import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
@@ -32,7 +31,7 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 public actual class BackendSessionManagement actual constructor(
-    private val repository: KodexRootSessionRepository,
+    private val repository: KodexSessionRepository,
     private val newSessionDefaults: () -> KodexNewSessionSettings,
     private val titleSettings: () -> SessionTitleSettings,
     private val titleGenerator: SessionTitleGenerator,
@@ -127,9 +126,7 @@ public actual class BackendSessionManagement actual constructor(
                 require(source.runtime.runningTurn.value == null) { "Cannot fork a running Agent." }
                 source.runtime.modify { sourceStorage ->
                     require(source.runtime.runningTurn.value == null) { "Cannot fork a running Agent." }
-                    if (nonce != null &&
-                        (source.runtime.storage as ObservableKodexAgentStorage).cacheNonce.value != nonce
-                    ) throw CacheNonceMismatch()
+                    if (nonce != null && source.storage.cacheNonce.value != nonce) throw CacheNonceMismatch()
                     val latest = sourceStorage.latestIndex()
                     require(latest >= 0) { "Cannot fork an uninitialized Session." }
                     val until = boundary ?: (latest + 1)

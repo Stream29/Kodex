@@ -18,8 +18,8 @@ import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
@@ -434,7 +434,7 @@ val minimalAgentConversationTest by testSuite {
             assertIs<StableAssistantMessage>(storage.getCommitExact(3, AgentCommitType.IndexTypes)?.commit)
             assertEquals(OpenAiModelId("test-model"), checkNotNull(storage.getSettingsAt(2)).model)
             assertTrue(checkNotNull(storage.getCommitExact(3)?.createdAt) > Instant.fromEpochSeconds(0))
-            assertEquals(0, storage.getCommitAtOrBefore(storage.latestIndex(), AgentCommitType.TokenCountTypes)?.index)
+            assertEquals(0, storage.getCommitAtOrBefore(storage.latestIndex(), AgentCommitType.LlmRequestMetaTypes)?.index)
         }
     }
 }
@@ -581,7 +581,7 @@ val openAiForcedCompactProbeTest by testSuite {
                     promptCacheKey = "kodex-forced-compact-probe",
                 ),
             )
-            storage.commit(CommitTimestamp(Instant.DISTANT_PAST))
+            storage.commit(LlmRequestMeta.Initialization(0L), Instant.DISTANT_PAST)
             storage.commit(
                 StableUserMessage(
                     userMessage(

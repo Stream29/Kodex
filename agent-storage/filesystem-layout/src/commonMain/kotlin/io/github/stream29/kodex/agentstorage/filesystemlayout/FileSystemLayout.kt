@@ -3,8 +3,8 @@ package io.github.stream29.kodex.agentstorage.filesystemlayout
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import kotlinx.io.Buffer
 import kotlinx.io.IOException
-import kotlinx.io.readByteArray
 import kotlinx.io.files.Path
+import kotlinx.io.readByteArray
 
 public actual suspend fun requireStorageLayout(
     storageDirectory: Path,
@@ -71,27 +71,6 @@ public actual suspend fun readRecordPrefix(
     }
 }
 
-public actual suspend fun writeRecord(
-    timelineDirectory: Path,
-    index: Int,
-    content: ByteArray,
-    fileSystem: CoroutineFileSystem,
-) {
-    fileSystem.writeBytes(recordPath(timelineDirectory, index), content)
-}
-
-public actual suspend fun moveRecord(
-    timelineDirectory: Path,
-    sourceIndex: Int,
-    targetIndex: Int,
-    fileSystem: CoroutineFileSystem,
-) {
-    fileSystem.atomicMove(
-        recordPath(timelineDirectory, sourceIndex),
-        recordPath(timelineDirectory, targetIndex),
-    )
-}
-
 public actual suspend fun deleteRecord(
     timelineDirectory: Path,
     index: Int,
@@ -115,15 +94,6 @@ public actual suspend fun readLatestIndex(
         throw IOException("Latest pointer must be at least -1: $path")
     }
     return value
-}
-
-public actual suspend fun writeLatestIndex(
-    timelineDirectory: Path,
-    index: Int,
-    fileSystem: CoroutineFileSystem,
-) {
-    require(index >= EmptyIndex) { "Latest index must be at least -1: $index" }
-    fileSystem.writeString(latestIndexPath(timelineDirectory), index.toString())
 }
 
 private suspend fun requireDirectory(

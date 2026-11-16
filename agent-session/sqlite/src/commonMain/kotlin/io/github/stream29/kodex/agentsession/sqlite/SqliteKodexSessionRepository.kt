@@ -9,7 +9,7 @@ import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
-import io.github.stream29.kodex.agentstorage.contract.*
+import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.sqlite.*
 import io.github.stream29.kodex.utils.coroutines.CoroutineCloseable
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
@@ -26,14 +26,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.io.IOException
 import kotlinx.io.files.Path
-import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Instant
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
@@ -47,18 +44,24 @@ public actual class SqliteKodexSessionRepository internal constructor(
     private val mutex: Mutex,
     private val ownsConnection: Boolean,
     initialEntries: List<Int>,
-    private val sessionTtl: Duration,
-    private val origin: TimeMark,
-    private val onTurnActiveRenewal: suspend () -> Unit,
-    private val turnRenewalInterval: () -> Duration,
+    sessionTtl: Duration,
+    origin: TimeMark,
+    onTurnActiveRenewal: suspend () -> Unit,
+    turnRenewalInterval: () -> Duration,
     reportMirrorFailure: (Throwable) -> Unit,
-) : KodexRootSessionRepository, CoroutineCloseable, CoroutineScope by scope {
+) : KodexSessionRepository, CoroutineCloseable, CoroutineScope by scope {
     private val lifecycleMutex = Mutex()
-    private val openRoots = linkedMapOf<Int, OpenSqliteSessionHandle>()
+    private val residency = SessionResidencyTable(
+        scope = this,
+        mutex = lifecycleMutex,
+        sessionTtl = sessionTtl,
+        origin = origin,
+        onTurnActiveRenewal = onTurnActiveRenewal,
+        turnRenewalInterval = turnRenewalInterval,
+    )
     private val mirrorScope = CoroutineScope(scope.coroutineContext.minusKey(Job) + SupervisorJob())
     private val mirror = SequentialMirrorQueue(mirrorScope, reportMirrorFailure)
     private val mutableEntries = MutableStateFlow(initialEntries)
-    private val mutableOpenSessions = MutableStateFlow<Map<Int, KodexAgentSession>>(emptyMap())
     private val mutableStopEvents = MutableSharedFlow<IndexedAgentStopEvent>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -66,7 +69,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
     )
 
     public actual override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
-    public actual override val openSessions: StateFlow<Map<Int, KodexAgentSession>> = mutableOpenSessions.asStateFlow()
+    public actual override val openSessions: StateFlow<Map<Int, KodexAgentSession>> = residency.openSessions
     public actual override val stopEvents: Flow<IndexedAgentStopEvent> = mutableStopEvents.asSharedFlow()
 
     private var closed = false
@@ -77,11 +80,9 @@ public actual class SqliteKodexSessionRepository internal constructor(
             withContext(NonCancellable) {
                 lifecycleMutex.withLock {
                     mutex.withLock { closed = true }
-                    val handles = openRoots.values.toList()
-                    openRoots.clear()
-                    mutableOpenSessions.value = emptyMap()
+                    val handles = residency.detachAllLocked()
                     for (handle in handles) {
-                        drainHandleJobs(handle, currentCoroutineContext()[Job])
+                        residency.drainDetached(handle)
                     }
                     try {
                         mirror.closeAndDrain()
@@ -119,20 +120,18 @@ public actual class SqliteKodexSessionRepository internal constructor(
         inventory()
     }
 
-    public actual override suspend fun listEntries(): List<KodexRootSessionEntry> = listEntries(true)
-
-    public actual override suspend fun listEntries(includeArchived: Boolean): List<KodexRootSessionEntry> = withDbLock {
+    public actual override suspend fun listEntries(includeArchived: Boolean): List<KodexSessionEntry> = withDbLock {
         requireOpen()
-        val activeSessions = mutableOpenSessions.value
+        val activeSessions = openSessions.value
         connection.query(
             "SELECT * FROM session_catalog " + (if (includeArchived) "" else "WHERE archived = 0 ") + "ORDER BY session_id",
         ).map { row -> entry(row, activeSessions) }
     }
 
-    public actual override suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry = withDbLock {
+    public actual override suspend fun getEntry(entryIndex: Int): KodexSessionEntry = withDbLock {
         requireOpen()
         requireEntry(entryIndex)
-        val activeSessions = mutableOpenSessions.value
+        val activeSessions = openSessions.value
         entry(
             connection.query("SELECT * FROM session_catalog WHERE session_id = ?", listOf(entryIndex.toLong())).single(),
             activeSessions,
@@ -144,10 +143,10 @@ public actual class SqliteKodexSessionRepository internal constructor(
     private fun entry(
         row: List<Any?>,
         activeSessions: Map<Int, KodexAgentSession>,
-    ): KodexRootSessionEntry {
+    ): KodexSessionEntry {
         val index = (row[0] as Long).toInt()
         val owner = activeSessions[index]?.takeIf { it.coroutineContext[Job]?.isActive == true }
-        return object : KodexRootSessionEntry {
+        return object : KodexSessionEntry {
             override val entryIndex = index
             override val archived = row[1] == 1L
             override val threadName = row[2] as String?
@@ -226,15 +225,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
             requireOpen()
             requireEntry(entryIndex)
         }
-        openRoots[entryIndex]?.let { existing ->
-            if (existing.session.coroutineContext[Job]?.isActive == true) {
-                renewLocked(existing)
-                return@withLock existing.session
-            }
-            withContext(NonCancellable) {
-                closeHandleLocked(entryIndex, existing)
-            }
-        }
+        residency.reuseOrCleanupLocked(entryIndex)?.let { return@withLock it }
 
         val storageScope = CoroutineScope(coroutineContext.minusKey(Job) + SupervisorJob())
         val sessionScope = supervisorChildScope()
@@ -255,8 +246,8 @@ public actual class SqliteKodexSessionRepository internal constructor(
                         listOf(entryIndex.toLong()),
                     ).single().single() as Long
                 ).toInt()
-                val cached = CachedSqliteAgentStorage(storageScope, storage, initialLatestIndex)
-                FileMirrorKodexAgentStorage(cached, targetDirectory, fileSystem, mirror)
+                val observable = ScopedObservableAgentStorage(storageScope, storage, initialLatestIndex)
+                FileMirrorKodexAgentStorage(storage, observable, targetDirectory, fileSystem, mirror)
             }
             val state = sessionScope.KodexAgentState(
                 client = dependencies.client,
@@ -271,7 +262,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
             }
             val session = SqliteSession(sessionScope, cache, runtime)
             withDbLock { requireOpen() }
-            installHandleLocked(entryIndex, session, storageScope).session
+            residency.installLocked(entryIndex, session, storageScope)
         } catch (failure: Throwable) {
             withContext(NonCancellable) {
                 sessionScope.cancelAndJoin()
@@ -282,19 +273,11 @@ public actual class SqliteKodexSessionRepository internal constructor(
     }
 
     public actual override suspend fun closeSession(entryIndex: Int): Unit = lifecycleMutex.withLock {
-        val handle = openRoots[entryIndex] ?: return@withLock
-        withContext(NonCancellable) {
-            closeHandleLocked(entryIndex, handle)
-        }
+        residency.closeLocked(entryIndex)
     }
 
     public actual override suspend fun closeAllSessions(): Unit = lifecycleMutex.withLock {
-        if (openRoots.isEmpty()) return@withLock
-        withContext(NonCancellable) {
-            for ((index, handle) in openRoots.toList()) {
-                closeHandleLocked(index, handle)
-            }
-        }
+        residency.closeAllLocked()
     }
 
     public actual override suspend fun delete(entryIndex: Int): Unit = lifecycleMutex.withLock {
@@ -302,12 +285,10 @@ public actual class SqliteKodexSessionRepository internal constructor(
             requireOpen()
             requireEntry(entryIndex)
         }
-        val handle = openRoots.remove(entryIndex)?.also {
-            publishOpenSessionsLocked()
-        }
+        val handle = residency.detachLocked(entryIndex)
         if (handle != null) {
             withContext(NonCancellable) {
-                drainHandleJobs(handle, currentCoroutineContext()[Job])
+                residency.drainDetached(handle)
             }
         }
         withDbLock {
@@ -330,166 +311,18 @@ public actual class SqliteKodexSessionRepository internal constructor(
             cleanup.join()
         }
     }
-
-    private fun installHandleLocked(
-        entryIndex: Int,
-        session: SqliteSession,
-        storageScope: CoroutineScope,
-    ): OpenSqliteSessionHandle {
-        val initialDeadline = if (sessionTtl.isFinite()) origin.elapsedNow() + sessionTtl else Duration.INFINITE
-        val handle = OpenSqliteSessionHandle(
-            session = session,
-            storageScope = storageScope,
-            deadline = initialDeadline,
-        )
-        openRoots[entryIndex] = handle
-        publishOpenSessionsLocked()
-
-        handle.renewalJob = launch {
-            session.runtime.runningTurn.collectLatest { turn ->
-                if (turn != null) {
-                    while (true) {
-                        val renewed = lifecycleMutex.withLock {
-                            if (openRoots[entryIndex] !== handle ||
-                                session.coroutineContext[Job]?.isActive != true ||
-                                session.runtime.runningTurn.value !== turn
-                            ) {
-                                false
-                            } else {
-                                renewLocked(handle)
-                                true
-                            }
-                        }
-                        if (!renewed) return@collectLatest
-                        onTurnActiveRenewal()
-                        delay(nextRenewalDelay())
-                    }
-                }
-            }
-        }
-
-        handle.expiryJob = if (sessionTtl.isFinite()) {
-            launch {
-                while (true) {
-                    val remaining = lifecycleMutex.withLock {
-                        if (openRoots[entryIndex] !== handle) return@launch
-                        handle.deadline - origin.elapsedNow()
-                    }
-                    if (remaining.isPositive()) {
-                        delay(remaining)
-                    }
-                    val expired = lifecycleMutex.withLock {
-                        if (openRoots[entryIndex] !== handle) return@launch
-                        if (session.runtime.runningTurn.value != null) {
-                            renewLocked(handle)
-                            false
-                        } else if (handle.deadline > origin.elapsedNow()) {
-                            false
-                        } else {
-                            closeHandleLocked(entryIndex, handle)
-                            true
-                        }
-                    }
-                    if (expired) return@launch
-                }
-            }
-        } else {
-            null
-        }
-
-        handle.completionWatcher = launch {
-            session.coroutineContext.job.join()
-            lifecycleMutex.withLock {
-                if (openRoots[entryIndex] === handle) {
-                    withContext(NonCancellable) {
-                        openRoots.remove(entryIndex)
-                        publishOpenSessionsLocked()
-                        handle.renewalJob?.cancelJobAndJoin()
-                        handle.expiryJob?.cancelJobAndJoin()
-                        handle.storageScope.cancelAndJoin()
-                    }
-                }
-            }
-        }
-
-        return handle
-    }
-
-    private fun renewLocked(handle: OpenSqliteSessionHandle) {
-        if (sessionTtl.isFinite()) {
-            handle.deadline = maxOf(handle.deadline, origin.elapsedNow() + sessionTtl)
-        }
-    }
-
-    private fun nextRenewalDelay(): Duration {
-        val candidate = minOf(DefaultKodexSessionRenewalInterval, turnRenewalInterval())
-        return if (sessionTtl.isFinite()) {
-            minOf(candidate, (sessionTtl / 3).coerceAtLeast(1.milliseconds))
-        } else {
-            candidate.coerceAtLeast(1.milliseconds)
-        }
-    }
-
-    private suspend fun closeHandleLocked(entryIndex: Int, handle: OpenSqliteSessionHandle) {
-        val caller = currentCoroutineContext()[Job]
-        if (openRoots[entryIndex] === handle) {
-            openRoots.remove(entryIndex)
-            publishOpenSessionsLocked()
-        }
-        drainHandleJobs(handle, caller)
-    }
-
-    private suspend fun drainHandleJobs(handle: OpenSqliteSessionHandle, caller: Job?) =
-        withContext(NonCancellable) {
-            if (handle.completionWatcher !== caller) {
-                handle.completionWatcher?.cancelJobAndJoin()
-            }
-            if (handle.renewalJob !== caller) {
-                handle.renewalJob?.cancelJobAndJoin()
-            }
-            if (handle.expiryJob !== caller) {
-                handle.expiryJob?.cancelJobAndJoin()
-            }
-            handle.session.cancelAndJoin()
-            handle.storageScope.cancelAndJoin()
-        }
-
-    private fun publishOpenSessionsLocked() {
-        mutableOpenSessions.value = openRoots
-            .filterValues { it.session.coroutineContext[Job]?.isActive == true }
-            .mapValues { it.value.session }
-    }
-}
-
-private class OpenSqliteSessionHandle(
-    val session: SqliteSession,
-    val storageScope: CoroutineScope,
-    var deadline: Duration,
-) {
-    var renewalJob: Job? = null
-    var expiryJob: Job? = null
-    var completionWatcher: Job? = null
 }
 
 private class SqliteSession(
     scope: CoroutineScope,
-    override val storage: MutableKodexAgentStorage,
+    override val storage: MutableObservableKodexAgentStorage,
     override val runtime: AgentRuntime,
 ) : KodexAgentSession, CoroutineScope by scope
 
-public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
+public actual suspend fun openVerifiedKodexDatabase(
     root: Path,
-    dependencies: KodexAgentDependencies,
     fileSystem: CoroutineFileSystem,
-    valueCacheSize: Int,
-    sessionTtl: Duration,
-    timeSource: TimeSource,
-    onTurnActiveRenewal: suspend () -> Unit,
-    turnRenewalInterval: () -> Duration,
-    reportMirrorFailure: (Throwable) -> Unit,
-): SqliteKodexSessionRepository {
-    require(valueCacheSize > 0)
-    require(sessionTtl.isPositive()) { "sessionTtl must be positive: $sessionTtl" }
+): Pair<Path, SqliteConnection> {
     fileSystem.createDirectories(root)
     val resolvedRoot = fileSystem.resolve(root)
     val dbPath = Path(resolvedRoot, "kodex.db")
@@ -502,32 +335,52 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     if (!hasExistingDb && hasExistingHomeState) {
         throw IOException("Authoritative SQLite session database is missing for existing Kodex Home: $dbPath")
     }
-    return supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
-        withContext(Dispatchers.IO) {
-            openSqliteConnection(dbPath).closeOnFailure { connection ->
-                if (hasExistingDb && (connection.query("PRAGMA user_version").single().single() as Long) == 0L) {
-                    throw IOException("Authoritative SQLite session database is uninitialized: $dbPath")
-                }
-                ensureSqlitePhaseOneSchema(connection)
-                val initialEntries = querySessionInventory(connection)
-                currentCoroutineContext().ensureActive()
-                scope.coroutineContext.ensureActive()
-                SqliteKodexSessionRepository(
-                    scope = scope,
-                    root = resolvedRoot,
-                    dependencies = dependencies,
-                    fileSystem = fileSystem,
-                    connection = connection,
-                    mutex = Mutex(),
-                    ownsConnection = true,
-                    initialEntries = initialEntries,
-                    sessionTtl = sessionTtl,
-                    origin = timeSource.markNow(),
-                    onTurnActiveRenewal = onTurnActiveRenewal,
-                    turnRenewalInterval = turnRenewalInterval,
-                    reportMirrorFailure = reportMirrorFailure,
-                )
+    val connection = withContext(Dispatchers.IO) {
+        openSqliteConnection(dbPath).closeOnFailure { conn ->
+            if (hasExistingDb && (conn.query("PRAGMA user_version").single().single() as Long) == 0L) {
+                throw IOException("Authoritative SQLite session database is uninitialized: $dbPath")
             }
+            conn
+        }
+    }
+    return resolvedRoot to connection
+}
+
+public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
+    root: Path,
+    dependencies: KodexAgentDependencies,
+    fileSystem: CoroutineFileSystem,
+    sessionTtl: Duration,
+    timeSource: TimeSource,
+    onTurnActiveRenewal: suspend () -> Unit,
+    turnRenewalInterval: () -> Duration,
+    reportMirrorFailure: (Throwable) -> Unit,
+): SqliteKodexSessionRepository {
+    require(sessionTtl.isPositive()) { "sessionTtl must be positive: $sessionTtl" }
+    val (resolvedRoot, openedConnection) = openVerifiedKodexDatabase(root, fileSystem)
+    return openedConnection.closeOnFailure { connection ->
+        supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
+            val initialEntries = withContext(Dispatchers.IO) {
+                ensureSqlitePhaseOneSchema(connection)
+                querySessionInventory(connection)
+            }
+            currentCoroutineContext().ensureActive()
+            scope.coroutineContext.ensureActive()
+            SqliteKodexSessionRepository(
+                scope = scope,
+                root = resolvedRoot,
+                dependencies = dependencies,
+                fileSystem = fileSystem,
+                connection = connection,
+                mutex = Mutex(),
+                ownsConnection = true,
+                initialEntries = initialEntries,
+                sessionTtl = sessionTtl,
+                origin = timeSource.markNow(),
+                onTurnActiveRenewal = onTurnActiveRenewal,
+                turnRenewalInterval = turnRenewalInterval,
+                reportMirrorFailure = reportMirrorFailure,
+            )
         }
     }
 }
@@ -538,14 +391,12 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     mutex: Mutex,
     dependencies: KodexAgentDependencies,
     fileSystem: CoroutineFileSystem,
-    valueCacheSize: Int,
     sessionTtl: Duration,
     timeSource: TimeSource,
     onTurnActiveRenewal: suspend () -> Unit,
     turnRenewalInterval: () -> Duration,
     reportMirrorFailure: (Throwable) -> Unit,
 ): SqliteKodexSessionRepository {
-    require(valueCacheSize > 0)
     require(sessionTtl.isPositive()) { "sessionTtl must be positive: $sessionTtl" }
     fileSystem.createDirectories(root)
     val resolvedRoot = fileSystem.resolve(root)

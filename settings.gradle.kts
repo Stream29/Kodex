@@ -118,7 +118,6 @@ moduleTree("agent-eventbus") {
 
 moduleTree("agent-schedule") {
     module("contract")
-    module("in-memory")
     module("sqlite")
 }
 
@@ -134,7 +133,6 @@ moduleTree("agent-runtime") {
 moduleTree("agent-session") {
     module("sqlite")
     module("contract")
-    module("in-memory")
     module("test")
 }
 
@@ -150,6 +148,7 @@ moduleTree("agent-storage") {
     module("clean-models")
     module("core")
     module("filesystem-layout")
+    module("in-memory")
 }
 
 moduleTree("app") {

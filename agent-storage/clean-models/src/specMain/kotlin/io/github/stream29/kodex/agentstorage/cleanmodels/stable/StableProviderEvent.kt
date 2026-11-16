@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
-import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import kotlinx.serialization.SerialName
@@ -12,13 +11,6 @@ import kotlinx.serialization.Serializable
 public data class StableReasoning(
     public val item: ResponseItem.Reasoning,
 ) : StableWorkEvent {
-    public val display: String
-        get() = item.summary.joinToString(separator = "\n") { part ->
-            when (part) {
-                is ReasoningItemReasoningSummary.SummaryText -> part.text
-            }
-        }
-
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(item)
 }

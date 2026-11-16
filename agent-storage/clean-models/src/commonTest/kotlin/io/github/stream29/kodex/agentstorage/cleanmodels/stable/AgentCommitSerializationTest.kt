@@ -92,8 +92,8 @@ val agentCommitSerializationTest by testSuite {
         }
     }
 
-    test("token count snapshots round-trip across all four subtypes and preserve type discriminator") {
-        val response = TokenCountSnapshot.Response(
+    test("llm request meta snapshots round-trip across all four subtypes and preserve type discriminator") {
+        val response = LlmRequestMeta.Response(
             totalTokens = 9_007_199_254_740_993L,
             usage = TokenUsage(
                 inputTokens = 100,
@@ -117,26 +117,26 @@ val agentCommitSerializationTest by testSuite {
                 turnStateAdopted = true,
             ),
         )
-        val snapshots = listOf<TokenCountSnapshot>(
-            TokenCountSnapshot.Legacy(0),
-            TokenCountSnapshot.Initialization(0),
-            TokenCountSnapshot.Compaction(10),
+        val snapshots = listOf<LlmRequestMeta>(
+            LlmRequestMeta.Legacy(0),
+            LlmRequestMeta.Initialization(0),
+            LlmRequestMeta.Compaction(10),
             response,
         )
         for (snapshot in snapshots) {
             val payload = snapshot.encodePayloadJson()
             assertEquals(snapshot, snapshot.commitType.decodePayloadJson(payload))
-            assertEquals(snapshot, OpenAiJsonCodec.decodeFromString(TokenCountSnapshot.serializer(), payload))
+            assertEquals(snapshot, OpenAiJsonCodec.decodeFromString(LlmRequestMeta.serializer(), payload))
             assertEquals(snapshot, OpenAiJsonCodec.decodeFromString(AgentCommit.serializer(), payload))
         }
 
-        val missing = Json.decodeFromString<TokenCountSnapshot>("""{"type":"token_count_response","total_tokens":0}""")
-        val reported = (missing as TokenCountSnapshot.Response).copy(
+        val missing = Json.decodeFromString<LlmRequestMeta>("""{"type":"llm_request_meta_response","total_tokens":0}""")
+        val reported = (missing as LlmRequestMeta.Response).copy(
             usage = TokenUsage(0, 0, 0, TokenUsageInputDetails(0), TokenUsageOutputDetails(0)),
             diagnostics = TokenCountDiagnostics(turnStateSent = false),
         )
-        assertEquals(TokenCountSnapshot.Response(0), missing)
-        assertNotEquals<TokenCountSnapshot>(missing, reported)
+        assertEquals(LlmRequestMeta.Response(0), missing)
+        assertNotEquals<LlmRequestMeta>(missing, reported)
     }
 
     test("all agent commit families round-trip through native AgentCommit polymorphism and payload helpers") {
@@ -164,9 +164,8 @@ val agentCommitSerializationTest by testSuite {
                 result = StableAwaitEventResult.Output(AwaitEventOutput(Instant.parse("2026-11-15T10:00:00Z"))),
             ),
             KodexAgentSettings(model = OpenAiModelId("gpt-5")),
-            CommitTimestamp(Instant.parse("2026-11-05T12:00:00Z")),
-            TokenCountSnapshot.Initialization(0),
-            TokenCountSnapshot.Response(42),
+            LlmRequestMeta.Initialization(0),
+            LlmRequestMeta.Response(42),
             UnstableSnapshot(
                 listOf(
                     PendingPlanUpdate("c1", null, UpdatePlanArgs("plan", emptyList())),

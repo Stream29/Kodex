@@ -33,20 +33,6 @@ public expect suspend fun readRecordPrefix(
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ): ByteArray
 
-public expect suspend fun writeRecord(
-    timelineDirectory: Path,
-    index: Int,
-    content: ByteArray,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-)
-
-public expect suspend fun moveRecord(
-    timelineDirectory: Path,
-    sourceIndex: Int,
-    targetIndex: Int,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-)
-
 public expect suspend fun deleteRecord(
     timelineDirectory: Path,
     index: Int,
@@ -60,9 +46,3 @@ public expect suspend fun readLatestIndex(
     timelineDirectory: Path,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ): Int
-
-public expect suspend fun writeLatestIndex(
-    timelineDirectory: Path,
-    index: Int,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-)

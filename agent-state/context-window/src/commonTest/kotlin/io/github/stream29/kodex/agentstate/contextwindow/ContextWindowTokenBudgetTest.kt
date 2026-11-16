@@ -4,7 +4,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -46,7 +46,7 @@ val contextWindowTokenBudgetTest by testSuite {
                 autoCompactionTokenLimit = 800L,
             ),
         )
-        storage.commit(TokenCountSnapshot.Response(760L))
+        storage.commit(LlmRequestMeta.Response(760L))
 
         assertEquals(40L, testState(storage).tokensUntilCompaction(testCatalog()))
     }
@@ -58,7 +58,7 @@ val contextWindowTokenBudgetTest by testSuite {
                 autoCompactionTokenLimit = 800L,
             ),
         )
-        storage.commit(TokenCountSnapshot.Compaction(0L))
+        storage.commit(LlmRequestMeta.Compaction(0L))
 
         assertEquals(800L, testState(storage).tokensUntilCompaction(testCatalog()))
     }

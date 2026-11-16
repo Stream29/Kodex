@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS schedules (
     agent_id INTEGER NOT NULL CHECK (agent_id BETWEEN 0 AND 2147483647),
     trigger_at_epoch_seconds INTEGER NOT NULL,
     trigger_at_nanoseconds INTEGER NOT NULL CHECK (trigger_at_nanoseconds BETWEEN 0 AND 999999999),
-    trigger_at TEXT NOT NULL,
     cron TEXT,
     description TEXT NOT NULL,
     created_at TEXT NOT NULL
@@ -93,17 +92,15 @@ public actual class SqliteScheduleRepository internal constructor(
                     agent_id,
                     trigger_at_epoch_seconds,
                     trigger_at_nanoseconds,
-                    trigger_at,
                     cron,
                     description,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
                 listOf(
                     agentId.toLong(),
                     triggerAt.epochSeconds,
                     triggerAt.nanosecondsOfSecond.toLong(),
-                    triggerAt.toString(),
                     normalizedCron,
                     description,
                     createdAt.toString(),
@@ -125,7 +122,7 @@ public actual class SqliteScheduleRepository internal constructor(
     public actual override suspend fun list(agentId: Int): List<ScheduleRecord> = read {
         val rows = connection.query(
             """
-            SELECT schedule_id, agent_id, trigger_at, cron, description, created_at
+            SELECT schedule_id, agent_id, trigger_at_epoch_seconds, trigger_at_nanoseconds, cron, description, created_at
             FROM schedules
             WHERE agent_id = ?
             ORDER BY trigger_at_epoch_seconds ASC, trigger_at_nanoseconds ASC, schedule_id ASC
@@ -138,7 +135,7 @@ public actual class SqliteScheduleRepository internal constructor(
     public actual override suspend fun listDue(now: Instant): List<ScheduleRecord> = read {
         val rows = connection.query(
             """
-            SELECT schedule_id, agent_id, trigger_at, cron, description, created_at
+            SELECT schedule_id, agent_id, trigger_at_epoch_seconds, trigger_at_nanoseconds, cron, description, created_at
             FROM schedules
             WHERE trigger_at_epoch_seconds < ?
                OR (trigger_at_epoch_seconds = ? AND trigger_at_nanoseconds <= ?)
@@ -153,40 +150,30 @@ public actual class SqliteScheduleRepository internal constructor(
         scheduleId: Long,
         nextTriggerAt: Instant,
     ): Boolean = write {
-        val exists = connection.query(
-            "SELECT 1 FROM schedules WHERE schedule_id = ?",
-            listOf(scheduleId),
-        ).isNotEmpty()
-        if (!exists) return@write false
         connection.execute(
             """
             UPDATE schedules
             SET trigger_at_epoch_seconds = ?,
-                trigger_at_nanoseconds = ?,
-                trigger_at = ?
+                trigger_at_nanoseconds = ?
             WHERE schedule_id = ?
             """.trimIndent(),
             listOf(
                 nextTriggerAt.epochSeconds,
                 nextTriggerAt.nanosecondsOfSecond.toLong(),
-                nextTriggerAt.toString(),
                 scheduleId,
             ),
         )
+        if (connection.changes() == 0) return@write false
         mutableNextTriggerAt.value = queryEarliestTriggerUnsafe(connection)
         true
     }
 
     public actual override suspend fun delete(scheduleId: Long): Boolean = write {
-        val exists = connection.query(
-            "SELECT 1 FROM schedules WHERE schedule_id = ?",
-            listOf(scheduleId),
-        ).isNotEmpty()
-        if (!exists) return@write false
         connection.execute(
             "DELETE FROM schedules WHERE schedule_id = ?",
             listOf(scheduleId),
         )
+        if (connection.changes() == 0) return@write false
         mutableNextTriggerAt.value = queryEarliestTriggerUnsafe(connection)
         true
     }
@@ -203,48 +190,10 @@ public actual suspend fun SqliteScheduleRepository(
             withContext(Dispatchers.IO) {
                 requireAccess()
                 connection.transaction {
-                    val existingSchedulesSql = connection.query(
-                        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedules'",
-                    ).singleOrNull()?.singleOrNull() as? String
-                    if (existingSchedulesSql != null && "AUTOINCREMENT" !in existingSchedulesSql.uppercase()) {
-                        connection.execute("DROP INDEX IF EXISTS idx_schedules_trigger_at")
-                        connection.execute("DROP INDEX IF EXISTS idx_schedules_agent_id")
-                        connection.execute("ALTER TABLE schedules RENAME TO schedules_legacy")
-                        SqliteSchedulesSchema.split(';')
-                            .map(String::trim)
-                            .filter(String::isNotEmpty)
-                            .forEach(connection::execute)
-                        connection.execute(
-                            """
-                            INSERT INTO schedules (
-                                schedule_id,
-                                agent_id,
-                                trigger_at_epoch_seconds,
-                                trigger_at_nanoseconds,
-                                trigger_at,
-                                cron,
-                                description,
-                                created_at
-                            ) SELECT
-                                schedule_id,
-                                agent_id,
-                                trigger_at_epoch_seconds,
-                                trigger_at_nanoseconds,
-                                trigger_at,
-                                cron,
-                                description,
-                                created_at
-                            FROM schedules_legacy
-                            ORDER BY schedule_id ASC
-                            """.trimIndent(),
-                        )
-                        connection.execute("DROP TABLE schedules_legacy")
-                    } else {
-                        SqliteSchedulesSchema.split(';')
-                            .map(String::trim)
-                            .filter(String::isNotEmpty)
-                            .forEach(connection::execute)
-                    }
+                    SqliteSchedulesSchema.split(';')
+                        .map(String::trim)
+                        .filter(String::isNotEmpty)
+                        .forEach(connection::execute)
                     queryEarliestTriggerUnsafe(connection)
                 }
             }
@@ -261,19 +210,21 @@ public actual suspend fun SqliteScheduleRepository(
 private fun queryEarliestTriggerUnsafe(connection: SqliteConnection): Instant? =
     connection.query(
         """
-        SELECT trigger_at
+        SELECT trigger_at_epoch_seconds, trigger_at_nanoseconds
         FROM schedules
         ORDER BY trigger_at_epoch_seconds ASC, trigger_at_nanoseconds ASC, schedule_id ASC
         LIMIT 1
         """.trimIndent(),
-    ).firstOrNull()?.firstOrNull()?.let { raw -> Instant.parse(raw as String) }
+    ).firstOrNull()?.let { row ->
+        Instant.fromEpochSeconds(row[0] as Long, (row[1] as Long).toInt())
+    }
 
 private fun decodeScheduleRow(row: List<Any?>): ScheduleRecord =
     ScheduleRecord(
         scheduleId = row[0] as Long,
         agentId = (row[1] as Long).toInt(),
-        triggerAt = Instant.parse(row[2] as String),
-        cron = row[3] as? String,
-        description = row[4] as String,
-        createdAt = Instant.parse(row[5] as String),
+        triggerAt = Instant.fromEpochSeconds(row[2] as Long, (row[3] as Long).toInt()),
+        cron = row[4] as? String,
+        description = row[5] as String,
+        createdAt = Instant.parse(row[6] as String),
     )
