@@ -3,7 +3,6 @@ package io.github.stream29.kodex.rpc.client
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
@@ -53,7 +52,6 @@ public actual val RpcWireSerializers: SerializersModule = SerializersModule {
     contextual(ResponsesStreamEvent::class, ResponsesStreamEvent.serializer())
     contextual(AgentCommit::class, AgentCommit.serializer())
     contextual(LlmRequestMeta::class, LlmRequestMeta.serializer())
-    contextual(StableCleanEvent.CompletedTool::class, StableCleanEvent.CompletedTool.serializer())
     contextual(StableIndexEvent.Steerable::class, StableIndexEvent.Steerable.serializer())
     contextual(CleanIndexEntry::class, CleanIndexEntry.serializer())
     contextual(StableWorkEvent::class, StableWorkEvent.serializer())

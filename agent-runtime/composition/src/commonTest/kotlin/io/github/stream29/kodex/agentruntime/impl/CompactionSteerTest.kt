@@ -42,7 +42,7 @@ import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.TokenUsage
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
-import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.kodex.openai.modelcatalog.ownedOpenAiModelCatalog
 import io.github.stream29.kodex.tool.contract.typedTool
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.CancellationException
@@ -772,7 +772,7 @@ private suspend fun CoroutineScope.withSteerRuntime(
         storage = storage,
         contextSettings = TestAgentContextSettings,
     )
-    val modelCatalog = OpenAiModelCatalog(
+    val modelCatalog = ownedOpenAiModelCatalog(
         client = mockOpenAiClient { listModels { OpenAiResult.Success(ModelsResponse()) } },
     )
     try {

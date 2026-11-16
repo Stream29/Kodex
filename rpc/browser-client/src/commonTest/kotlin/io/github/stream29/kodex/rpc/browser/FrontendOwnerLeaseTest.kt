@@ -11,7 +11,6 @@ import kotlin.test.*
 
 private val leaseCapabilities = FrontendHostCapabilities(
     FrontendCapabilityStatus.Ready, FrontendCapabilityStatus.Ready,
-    FrontendCapabilityStatus.Ready, FrontendCapabilityStatus.Ready,
 )
 private fun renewed(capabilities: FrontendHostCapabilities = leaseCapabilities) =
     LocalFrontendHostReply.OwnerRenewed(LocalFrontendHostOwnerLeaseMillis, capabilities)
@@ -78,22 +77,23 @@ internal val frontendOwnerLeaseTest by testSuite {
             val draft = Any()
             val retainedDraft = draft
             val application = launch { awaitCancellation() }
+            val refreshedCapabilities = FrontendHostCapabilities(
+                FrontendCapabilityStatus.Ready,
+                FrontendCapabilityStatus.ServiceFailed,
+            )
             val run = startLease {
                 if (it == 1) throw FrontendHostTransientFailure()
-                renewed()
+                renewed(refreshedCapabilities)
             }
             advanceTimeBy(20_000); runCurrent()
             assertEquals(listOf(20_000L), run.calls)
             assertTrue(application.isActive)
             assertFalse(run.ended.isCompleted)
             assertSame(retainedDraft, draft)
-            assertEquals(leaseCapabilities.copy(
-                oauthCallbacks = FrontendCapabilityStatus.Negotiating,
-                frontendErrorObservation = FrontendCapabilityStatus.Negotiating,
-            ), run.capabilities.value)
+            assertEquals(leaseCapabilities, run.capabilities.value)
             advanceTimeBy(1_000); runCurrent()
             assertEquals(listOf(20_000L, 21_000L), run.calls)
-            assertEquals(leaseCapabilities, run.capabilities.value)
+            assertEquals(refreshedCapabilities, run.capabilities.value)
             assertTrue(application.isActive)
             assertFalse(run.ended.isCompleted)
             run.job.cancelAndJoin()
@@ -126,7 +126,7 @@ internal val frontendOwnerLeaseTest by testSuite {
             advanceTimeBy(30_000); runCurrent()
             assertEquals(1, cancelledRequests)
             assertFalse(run.ended.isCompleted)
-            assertEquals(FrontendCapabilityStatus.Negotiating, run.capabilities.value.oauthCallbacks)
+            assertEquals(leaseCapabilities, run.capabilities.value)
             advanceTimeBy(1_000); runCurrent()
             assertEquals(listOf(20_000L, 31_000L), run.calls)
             assertEquals(leaseCapabilities, run.capabilities.value)
@@ -194,10 +194,9 @@ internal val frontendOwnerLeaseTest by testSuite {
                 LocalFrontendHostReply.Failure(LocalFrontendHostFailure.Unauthorized),
                 LocalFrontendHostReply.Failure(LocalFrontendHostFailure.IncompatibleProtocol),
                 LocalFrontendHostReply.Failure(LocalFrontendHostFailure.ServiceFailed),
-                LocalFrontendHostReply.ErrorObserved(LocalErrorObservationAdmission.Admitted),
                 LocalFrontendHostReply.OwnerRenewed(60_001, leaseCapabilities),
-                renewed(leaseCapabilities.copy(oauthCallbacks = FrontendCapabilityStatus.OwnerClosed)),
-                renewed(leaseCapabilities.copy(frontendErrorObservation = FrontendCapabilityStatus.BackendOffline)),
+                renewed(leaseCapabilities.copy(directoryBrowsing = FrontendCapabilityStatus.OwnerClosed)),
+                renewed(leaseCapabilities.copy(contextPathEvaluation = FrontendCapabilityStatus.BackendOffline)),
             )
             for (reply in replies) {
                 val run = startLease(initialRequestStarted = currentTime) { reply }
@@ -234,7 +233,12 @@ internal val frontendOwnerLeaseTest by testSuite {
         for (status in listOf(FrontendCapabilityStatus.OwnerClosed, FrontendCapabilityStatus.BackendOffline)) {
             assertFailsWith<FrontendHostRejected> {
                 FrontendOwnerLease(0, 60_000, MutableStateFlow(
-                    leaseCapabilities.copy(frontendErrorObservation = status),
+                    leaseCapabilities.copy(directoryBrowsing = status),
+                )) { 0 }
+            }
+            assertFailsWith<FrontendHostRejected> {
+                FrontendOwnerLease(0, 60_000, MutableStateFlow(
+                    leaseCapabilities.copy(contextPathEvaluation = status),
                 )) { 0 }
             }
         }
@@ -247,32 +251,19 @@ internal val frontendOwnerLeaseTest by testSuite {
             FrontendOwnerLease(0, 60_000, MutableStateFlow(leaseCapabilities)) { 60_000 }
         }
     }
-    test("reply correlation rejects a different operation reservation binding or attempt without payload diagnostics") {
-        val reservation = LocalOAuthReservation("r".repeat(64))
-        val other = LocalOAuthReservation("s".repeat(64))
-        val binding = LocalOAuthBinding(1, "private-state-marker", "https://provider/private-url-marker")
+    test("reply correlation rejects mismatched lease operations without payload diagnostics") {
         val mismatches = listOf(
             LocalFrontendHostRequest.RenewOwner to LocalFrontendHostReply.OwnerClosed,
-            LocalFrontendHostRequest.ObserveError(null) to renewed(),
-            LocalFrontendHostRequest.CloseCallback(reservation) to LocalFrontendHostReply.CallbackClosed(other),
-            LocalFrontendHostRequest.AwaitCallback(reservation) to LocalFrontendHostReply.CallbackReceived(other, 1, "private-callback-marker"),
-            LocalFrontendHostRequest.BindCallback(reservation, binding) to LocalFrontendHostReply.CallbackBound(
-                reservation, LocalOAuthBinding(2, binding.state, binding.authorizationUrl),
-            ),
-            LocalFrontendHostRequest.BindCallback(reservation, binding) to LocalFrontendHostReply.CallbackBound(
-                reservation, LocalOAuthBinding(1, "other", binding.authorizationUrl),
-            ),
-            LocalFrontendHostRequest.BindCallback(reservation, binding) to LocalFrontendHostReply.CallbackBound(
-                reservation, LocalOAuthBinding(1, binding.state, "https://provider/other"),
-            ),
-            LocalFrontendHostRequest.OpenRegisteredAuthorization(reservation, 1) to
-                LocalFrontendHostReply.AuthorizationOpened(reservation, 2),
+            LocalFrontendHostRequest.CloseOwner to renewed(),
         )
         for ((request, reply) in mismatches) {
-            val failure = assertFailsWith<FrontendHostInvalidResponse> { validateHostReply(request, reply) }
-            assertFalse(failure.toString().contains("private-"))
+            assertFailsWith<FrontendHostInvalidResponse> { validateHostReply(request, reply) }
         }
-        val reply = LocalFrontendHostReply.CallbackBound(reservation, binding)
-        assertSame(reply, validateHostReply(LocalFrontendHostRequest.BindCallback(reservation, binding), reply))
+        val renewedReply = renewed()
+        assertSame(renewedReply, validateHostReply(LocalFrontendHostRequest.RenewOwner, renewedReply))
+        assertSame(
+            LocalFrontendHostReply.OwnerClosed,
+            validateHostReply(LocalFrontendHostRequest.CloseOwner, LocalFrontendHostReply.OwnerClosed),
+        )
     }
 }

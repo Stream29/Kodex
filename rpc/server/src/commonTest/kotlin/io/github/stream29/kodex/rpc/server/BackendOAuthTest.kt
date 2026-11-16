@@ -7,7 +7,7 @@ import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
-import io.github.stream29.kodex.cli.settings.openBackendSettings
+import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
 import io.github.stream29.kodex.mcp.contract.*
 import io.github.stream29.kodex.mcp.impl.McpOAuthLoginPreparer
 import io.github.stream29.kodex.mcp.impl.PreparedMcpOAuthLogin
@@ -26,7 +26,6 @@ import io.ktor.http.URLBuilder
 import io.ktor.http.Url
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
@@ -438,7 +437,7 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
         coroutineScope {
             val credentials = BackendFileSystemAuthStore(root, Path(root, "codex"), selected, login, authFiles)
             try {
-                val unified = io.github.stream29.kodex.cli.settings.UnifiedSettingsStore.open(root, BackendSettings(
+                val unified = UnifiedSettingsStore.open(root, BackendSettings(
                     KodexAuthSource.Codex, Shell(ShellType.Sh, Path("/bin/sh")), AgentContextSourceSettings(),
                     KodexNewSessionSettings(), SessionTitleSettings(),
                     mapOf("server" to McpServerConfiguration.StreamableHttp(
@@ -446,7 +445,6 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
                             McpOAuthClient(redirectUri = McpRedirect)), enabled = false,
                     )),
                 ))
-                val settings = unified.backendStore
                 lateinit var fixture: OAuthFixture
                 val preparer = McpOAuthLoginPreparer { config ->
                     fixture.mcpPreparations++
@@ -466,7 +464,7 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
                     }
                 }
                 withBackendGlobalState(
-                    settings, unified, root, root, Path(root, "codex"),
+                    unified, root, root, Path(root, "codex"),
                     mockOpenAiClient { listModels { awaitCancellation() } }, credentials, preparer,
                     serviceFactory = { _, _ -> OAuthTestMcpService() },
                 ) { global ->
@@ -592,6 +590,9 @@ private const val OpenAiRedirect = "http://localhost:1455/auth/callback"
 private const val McpRedirect = "http://localhost:8765/callback"
 private val OpenAiTarget = OAuthTarget.OpenAi(KodexAuthSource.Codex)
 private val McpTarget = OAuthTarget.Mcp("server")
+private suspend fun BackendOAuth.start(target: OAuthTarget, redirectUri: String): OAuthAuthorization =
+    begin(target, redirectUri) {}.authorization.await()
+
 private suspend fun removeOAuthTree(path: Path) {
     val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
     if (metadata.isDirectory) SystemCoroutineFileSystem.list(path).forEach { removeOAuthTree(it) }

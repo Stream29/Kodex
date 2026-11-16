@@ -6,6 +6,7 @@ package io.github.stream29.kodex.rpc.server
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
+import io.github.stream29.kodex.agentruntime.contract.AgentStopEvent
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRepository
 import io.github.stream29.kodex.agentschedule.contract.nextCronTriggerAt
@@ -14,12 +15,14 @@ import io.github.stream29.kodex.agentsession.contract.*
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.sqlite.openVerifiedKodexDatabase
 import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
-import io.github.stream29.kodex.cli.notification.collectNotificationHooks
 import io.github.stream29.kodex.cli.notification.notifyUnhandledErrorHooks
+import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.settings.*
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.impl.DefaultMcpOAuthClient
+import io.github.stream29.kodex.openai.client.OpenAiClient
+import io.github.stream29.kodex.openai.client.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient as Client
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient as LoginClient
@@ -28,25 +31,23 @@ import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
-import io.github.stream29.kodex.utils.coroutines.closeOnFailure
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.default
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
-import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.io.IOException
 import kotlinx.io.files.Path
 import kotlinx.rpc.RpcServer
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 public actual suspend fun <R> withBackendServices(
@@ -56,10 +57,35 @@ public actual suspend fun <R> withBackendServices(
     defaults: BackendSettings,
     createLoginClient: () -> LoginClient,
     createClient: (OpenAiAuthStore) -> Client,
-    createTitleGenerator: (Client) -> SessionTitleGenerator,
     renewBackend: suspend () -> Unit,
     backendRenewalInterval: () -> Duration,
     checkAdmission: () -> Unit,
+    block: suspend CoroutineScope.(BackendServices) -> R,
+): R = withBackendServicesWithTitleGenerator(
+    home = home,
+    codexHome = codexHome,
+    agentsHome = agentsHome,
+    defaults = defaults,
+    createLoginClient = createLoginClient,
+    createClient = createClient,
+    createTitleGenerator = { OpenAiSessionTitleGenerator(it) },
+    renewBackend = renewBackend,
+    backendRenewalInterval = backendRenewalInterval,
+    checkAdmission = checkAdmission,
+    block = block,
+)
+
+internal suspend fun <R> withBackendServicesWithTitleGenerator(
+    home: Path,
+    codexHome: Path,
+    agentsHome: Path,
+    defaults: BackendSettings = defaultBackendSettings(),
+    createLoginClient: () -> LoginClient = { OpenAiLoginClient() },
+    createClient: (OpenAiAuthStore) -> Client = { OpenAiClient(it) },
+    createTitleGenerator: (Client) -> SessionTitleGenerator = { OpenAiSessionTitleGenerator(it) },
+    renewBackend: suspend () -> Unit = {},
+    backendRenewalInterval: () -> Duration = { 20.seconds },
+    checkAdmission: () -> Unit = {},
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R = coroutineScope {
     val owner = supervisorChildScope()
@@ -78,7 +104,6 @@ public actual suspend fun <R> withBackendServices(
         val api = createClient(auth).also { client = it }
         val mcpOAuth = owner.DefaultMcpOAuthClient()
         withBackendGlobalState(
-            store,
             unified,
             agentsHome,
             home,
@@ -153,9 +178,6 @@ public actual suspend fun <R> withBackendServices(
                     newSessionDefaults = { store.settings.value.newSession },
                     titleSettings = { store.settings.value.sessionTitle },
                     titleGenerator = createTitleGenerator(api),
-                    reportBackgroundFailure = {
-                        BackendLogger.error(it) { "Background Session operation failed." }
-                    },
                     checkAdmission = persistence::ensureAdmission,
                 )
                 val service = BackendGlobalRpc(
@@ -164,7 +186,6 @@ public actual suspend fun <R> withBackendServices(
                     account = account,
                     effects = effects,
                     sessions = management,
-                    notifications = persistence.notifications,
                     schedules = persistence.scheduleRepository,
                     home = home,
                     checkAdmission = persistence::ensureAdmission,
@@ -212,8 +233,8 @@ public actual suspend fun <R> withBackendServices(
 public actual class BackendServices internal constructor(
     public actual val global: GlobalRpc,
     public actual val runtime: AgentRuntimeRpc,
-    public actual val eventBus: AgentEventBus,
-    public actual val schedules: ScheduleRepository,
+    internal val eventBus: AgentEventBus,
+    internal val schedules: ScheduleRepository,
     public actual val settings: BackendGlobalState,
     public actual val notifications: Flow<Notification>,
     private val persistence: LazySqliteBackendPersistence,
@@ -226,14 +247,17 @@ public actual class BackendServices internal constructor(
     public actual fun register(server: RpcServer) {
         server.registerService(GlobalRpc::class) { global }
         server.registerService(AgentRuntimeRpc::class) { runtime }
-        server.registerService(AgentStorageRpc::class) {
-            BackendAgentStorageRpc(
-                repository = persistence.sessionRepository,
-                checkAdmission = persistence::ensureAdmission,
-            )
-        }
     }
 }
+
+/** Projects [IndexedAgentStopEvent]s emitted by a Session repository into RPC [Notification]s. */
+internal fun Flow<IndexedAgentStopEvent>.toNotifications(): Flow<Notification> =
+    map { (entryIndex, stopEvent) ->
+        when (stopEvent) {
+            is AgentStopEvent.AssistantMessage -> Notification.Stop.AssistantMessage(entryIndex, stopEvent.message)
+            is AgentStopEvent.UnhandledError -> Notification.Stop.UnhandledError(entryIndex, stopEvent.message)
+        }
+    }
 
 public actual fun defaultBackendSettings(): BackendSettings = BackendSettings(
     authSource = KodexAuthSource.Codex,
@@ -266,11 +290,6 @@ internal class LazySqliteBackendPersistence(
 
     private val lazyEntries = MutableStateFlow<List<Int>>(emptyList())
     private val lazyOpenSessions = MutableStateFlow<Map<Int, KodexAgentSession>>(emptyMap())
-    private val lazyStopEvents = MutableSharedFlow<IndexedAgentStopEvent>(
-        replay = 0,
-        extraBufferCapacity = 64,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
     private val notificationsShared = MutableSharedFlow<Notification>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -290,7 +309,7 @@ internal class LazySqliteBackendPersistence(
             get() = persistenceScope.coroutineContext
         override val entries: StateFlow<List<Int>> = lazyEntries.asStateFlow()
         override val openSessions: StateFlow<Map<Int, KodexAgentSession>> = lazyOpenSessions.asStateFlow()
-        override val stopEvents: Flow<IndexedAgentStopEvent> = lazyStopEvents.asSharedFlow()
+        override val stopEvents: Flow<IndexedAgentStopEvent> = emptyFlow()
 
         override suspend fun list(): List<Int> = acquire().first.list()
         override suspend fun listEntries(includeArchived: Boolean): List<KodexSessionEntry> =
@@ -429,17 +448,9 @@ internal class LazySqliteBackendPersistence(
                         sessions.openSessions.collect { lazyOpenSessions.value = it }
                     }
                     persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
-                        sessions.stopEvents.collect { stop ->
-                            lazyStopEvents.tryEmit(stop)
-                        }
-                    }
-                    persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
                         sessions.stopEvents.toNotifications().collect { notification ->
                             notificationsShared.tryEmit(notification)
                         }
-                    }
-                    persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
-                        schedules.nextTriggerAt.collect { lazyNextTriggerAt.value = it }
                     }
                     sessions to schedules
                 } catch (error: Throwable) {

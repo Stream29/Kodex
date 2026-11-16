@@ -19,7 +19,6 @@ import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
@@ -28,7 +27,6 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -198,44 +196,6 @@ val authenticatedModelCatalogTest by testSuite(testConfig = TestConfig.testScope
                 assertEquals(second, catalog.models.value)
             } finally {
                 nextFailure.complete(Unit)
-                catalog.close()
-            }
-        }
-    }
-
-    test("explicit refresh rejects an account change while its response is in flight") {
-        runTest {
-            val auth = CatalogAuth(authenticated("first"))
-            val releaseManual = CompletableDeferred<Unit>()
-            val stale = listOf(remoteModel(slug = "manual-old-account"))
-            val fresh = listOf(remoteModel(ultrafast = true))
-            var calls = 0
-            val client = mockOpenAiClient {
-                listModels {
-                    calls++
-                    if (calls == 2) {
-                        releaseManual.await()
-                        OpenAiResult.Success(ModelsResponse(stale))
-                    } else {
-                        OpenAiResult.Success(ModelsResponse(fresh))
-                    }
-                }
-            }
-            val catalog = backgroundScope.ownedOpenAiModelCatalog(client, auth)
-            try {
-                runCurrent()
-                val manual = async { catalog.refresh() }
-                runCurrent()
-                assertEquals(2, calls)
-                auth.state.value = authenticated("second")
-                runCurrent()
-                assertEquals(3, calls)
-                releaseManual.complete(Unit)
-                runCurrent()
-                assertFailsWith<CancellationException> { manual.await() }
-                assertEquals(fresh, catalog.models.value)
-            } finally {
-                releaseManual.complete(Unit)
                 catalog.close()
             }
         }

@@ -34,8 +34,7 @@ internal fun RpcFixture(token: String, onBack: () -> Unit) {
         try {
             withFixtureConnection(token) { cwd, connected ->
                 connection = connected
-                val host = FixtureHost(cwd)
-                withFrontendApplication(connected, cwd, host) { app ->
+                withFrontendApplication(connected, cwd) { app ->
                     try {
                         fixture = app
                         status = "Connected — real DTOs, Native temporary Home, offline model"
@@ -77,10 +76,10 @@ internal fun RpcFixture(token: String, onBack: () -> Unit) {
             val discarded by connected.discardedReplies.collectAsState()
             val attempts by connected.writeAttempts.collectAsState()
             UiText("Fixture connection: $state; generation=$generation; discarded replies=$discarded")
-            UiText("Fixture write attempts: appends=${attempts.appends}; resumes=${attempts.resumes}")
+            UiText("Fixture write attempts: submits=${attempts.submits}; resumes=${attempts.resumes}")
             UiActions {
                 UiAction("Drop fixture transport", onClick = { scope.launch { connected.dropTransport() } })
-                UiAction("Discard next accepted append reply", onClick = { connected.discardNextAppendReply = true })
+                UiAction("Discard next accepted submit reply", onClick = { connected.discardNextSubmitReply = true })
             }
         }
         fixture?.let { app ->

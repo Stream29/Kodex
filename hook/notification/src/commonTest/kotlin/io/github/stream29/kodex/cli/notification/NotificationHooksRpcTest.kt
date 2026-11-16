@@ -44,8 +44,9 @@ val notificationHooksRpcTest by testSuite(compartment = { TestCompartment.RealTi
             }
             try {
                 awaitSubscription()
-                runtime.appendUserMessage(index, listOf(ContentItem.InputText("actual question")))
-                runtime.resume(index)
+                runtime.submit(index, listOf(ContentItem.InputText("actual question")))
+                runtime.getStateFlow(index).first { it == AgentStateValue.AssistantMessage }
+                runtime.getRunningTurnFlow(index).first { !it }
                 assertEquals(AgentStateValue.AssistantMessage, runtime.getState(index))
                 assertFalse(runtime.getRunningTurn(index))
                 collected.await()
@@ -77,8 +78,9 @@ val notificationHooksRpcTest by testSuite(compartment = { TestCompartment.RealTi
             }
             try {
                 awaitSubscription()
-                runtime.appendUserMessage(index, listOf(ContentItem.InputText("actual question")))
-                runtime.resume(index)
+                runtime.submit(index, listOf(ContentItem.InputText("actual question")))
+                runtime.getStateFlow(index).first { it == AgentStateValue.AssistantMessage }
+                runtime.getRunningTurnFlow(index).first { !it }
                 assertEquals(AgentStateValue.AssistantMessage, runtime.getState(index))
                 assertFalse(runtime.getRunningTurn(index))
                 collected.await() // includes the real ten-second timeout and process exit wait
@@ -177,20 +179,20 @@ private suspend fun withNotificationRpc(
                 global.getModelsFlow().first()
                 val index = global.createSession(root)
                 val probeIndex = global.createSession(root)
+                global.keepSessionAlive(index)
+                global.keepSessionAlive(probeIndex)
                 val ready = CompletableDeferred<Unit>()
-                val selected = global.getNotificationFlow()
+                val selected = backend.notifications
                     .onEach { notification ->
                         if (notification.targetSessionIndex == probeIndex) ready.complete(Unit)
                     }
                     .filter { it.targetSessionIndex == index }
                 val awaitSubscription: suspend () -> Unit = {
-                    // Notification RPC intentionally has no subscription-ready acknowledgement.
-                    // A real Stop on an excluded Session proves the no-replay stream is online;
-                    // retry probes only until observed, never rely on a fixed startup sleep.
                     withTimeout(10.seconds) {
                         while (!ready.isCompleted) {
-                            runtime.appendUserMessage(probeIndex, listOf(ContentItem.InputText(SubscriptionProbe)))
-                            runtime.resume(probeIndex)
+                            runtime.submit(probeIndex, listOf(ContentItem.InputText(SubscriptionProbe)))
+                            runtime.getStateFlow(probeIndex).first { it == AgentStateValue.AssistantMessage }
+                            runtime.getRunningTurnFlow(probeIndex).first { !it }
                             if (!ready.isCompleted) delay(10)
                         }
                     }

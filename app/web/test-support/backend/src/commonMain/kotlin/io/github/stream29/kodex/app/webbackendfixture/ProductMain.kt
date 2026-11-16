@@ -12,6 +12,7 @@ import io.github.stream29.kodex.backend.LocalFrontendHostJson
 import io.github.stream29.kodex.backend.LocalFrontendPairingOffer
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import io.github.stream29.kodex.rpc.control.BackendControlClient
 import io.github.stream29.kodex.rpc.control.backendControlRequest
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
@@ -122,13 +123,15 @@ public actual fun productMain(): Unit = runBlocking {
         }
     }
     suspend fun reportReady() {
-        withTimeout(30_000) {
-            while (true) {
-                val endpoint = BackendInstance.discover(home)
-                if (endpoint != null && runCatching {
-                    backendControlRequest(endpoint, "status")["phase"]?.jsonPrimitive?.content == "ready"
-                }.getOrDefault(false)) break
-                delay(50)
+        BackendControlClient().use { controlClient ->
+            withTimeout(30_000) {
+                while (true) {
+                    val endpoint = BackendInstance.discover(home)
+                    if (endpoint != null && runCatching {
+                        controlClient.request(endpoint, "status")["phase"]?.jsonPrimitive?.content == "ready"
+                    }.getOrDefault(false)) break
+                    delay(50)
+                }
             }
         }
         println("PRODUCT_BROWSER_READY $home/.locks/backend/connection.json; enter restart or an empty line to stop")

@@ -1,22 +1,11 @@
 package io.github.stream29.kodex.openai
+
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.descriptors.SerialDescriptor
-import kotlinx.serialization.encoding.Decoder
-import kotlinx.serialization.encoding.Encoder
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonDecoder
-import kotlinx.serialization.json.JsonEncoder
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * @property reasoning Reasoning controls, including an explicit default effort.
- * @property input Nullable because callers may send commands without explicit
- * conversation input; `null` means no input payload is sent.
  * @property commands Nullable because callers may use settings-only requests;
  * `null` means no command group is sent.
  * @property settings Nullable because hosted search settings are optional;
@@ -30,45 +19,11 @@ public data class SearchRequest(
     public val model: OpenAiModelId,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val reasoning: Reasoning = Reasoning(),
-    public val input: SearchInput? = null,
     public val commands: SearchCommands? = null,
     public val settings: SearchSettings? = null,
     @SerialName("max_output_tokens")
     public val maxOutputTokens: Long? = null,
 )
-
-@Serializable(with = SearchInputSerializer::class)
-public sealed interface SearchInput {
-    public data class Text(public val text: String) : SearchInput
-    public data class Items(public val items: List<ResponseItem>) : SearchInput
-}
-
-public object SearchInputSerializer : kotlinx.serialization.KSerializer<SearchInput> {
-    private val itemsSerializer = ListSerializer(ResponseItem.serializer())
-
-    override val descriptor: SerialDescriptor = kotlinx.serialization.json.JsonElement.serializer().descriptor
-
-    override fun serialize(encoder: Encoder, value: SearchInput) {
-        require(encoder is JsonEncoder) {
-            "SearchInput can only be encoded as JSON."
-        }
-        val element = when (value) {
-            is SearchInput.Text -> JsonPrimitive(value.text)
-            is SearchInput.Items -> encoder.json.encodeToJsonElement(itemsSerializer, value.items)
-        }
-        encoder.encodeJsonElement(element)
-    }
-
-    override fun deserialize(decoder: Decoder): SearchInput {
-        require(decoder is JsonDecoder) {
-            "SearchInput can only be decoded as JSON."
-        }
-        return when (val element = decoder.decodeJsonElement()) {
-            is JsonArray -> SearchInput.Items(decoder.json.decodeFromJsonElement(itemsSerializer, element))
-            else -> SearchInput.Text(element.jsonPrimitive.contentOrNull.orEmpty())
-        }
-    }
-}
 
 /**
  * @property searchQuery Nullable because the search command group is optional;
@@ -293,109 +248,14 @@ public enum class SearchResponseLength {
 }
 
 /**
- * @property userLocation Nullable because location hints are optional; `null`
- * means send no location hint.
- * @property searchContextSize Nullable because context size is optional; `null`
- * means use the backend default.
- * @property filters Nullable because domain filters are optional; `null` means
- * send no filters.
- * @property imageSettings Nullable because image search settings are optional;
- * `null` means use backend defaults.
- * @property allowedCallers Nullable because caller filtering is optional; `null`
- * means do not restrict callers.
  * @property externalWebAccess Nullable because live-web control is optional;
  * `null` means use the backend default.
  */
 @Serializable
 public data class SearchSettings(
-    @SerialName("user_location")
-    public val userLocation: ApproximateLocation? = null,
-    @SerialName("search_context_size")
-    public val searchContextSize: SearchContextSize? = null,
-    public val filters: SearchFilters? = null,
-    @SerialName("image_settings")
-    public val imageSettings: SearchImageSettings? = null,
-    @SerialName("allowed_callers")
-    public val allowedCallers: List<AllowedCaller>? = null,
     @SerialName("external_web_access")
     public val externalWebAccess: Boolean? = null,
 )
-
-/**
- * @property country Nullable because approximate locations may be partial;
- * `null` means the country is unknown or intentionally omitted.
- * @property region Nullable because approximate locations may be partial;
- * `null` means the region is unknown or intentionally omitted.
- * @property city Nullable because approximate locations may be partial; `null`
- * means the city is unknown or intentionally omitted.
- * @property timezone Nullable because approximate locations may be partial;
- * `null` means the timezone is unknown or intentionally omitted.
- */
-@Serializable
-public data class ApproximateLocation(
-    public val type: LocationType = LocationType.Approximate,
-    public val country: String? = null,
-    public val region: String? = null,
-    public val city: String? = null,
-    public val timezone: String? = null,
-)
-
-@Serializable
-public enum class LocationType {
-    @SerialName("approximate")
-    Approximate,
-}
-
-@Serializable
-public enum class SearchContextSize {
-    @SerialName("low")
-    Low,
-
-    @SerialName("medium")
-    Medium,
-
-    @SerialName("high")
-    High,
-}
-
-/**
- * @property allowedDomains Nullable because allow-list filtering is optional;
- * `null` means no allow-list is sent.
- * @property blockedDomains Nullable because block-list filtering is optional;
- * `null` means no block-list is sent.
- */
-@Serializable
-public data class SearchFilters(
-    @SerialName("allowed_domains")
-    public val allowedDomains: List<String>? = null,
-    @SerialName("blocked_domains")
-    public val blockedDomains: List<String>? = null,
-)
-
-/**
- * @property maxResults Nullable because image result count is optional; `null`
- * means use the backend default.
- * @property caption Nullable because caption generation is optional; `null`
- * means use the backend default.
- */
-@Serializable
-public data class SearchImageSettings(
-    @SerialName("max_results")
-    public val maxResults: Int? = null,
-    public val caption: Boolean? = null,
-)
-
-@Serializable
-public enum class AllowedCaller {
-    @SerialName("direct")
-    Direct,
-
-    @SerialName("shell")
-    Shell,
-
-    @SerialName("code_interpreter")
-    CodeInterpreter,
-}
 
 /**
  * @property encryptedOutput Nullable because not every response carries encrypted

@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.cli.settings
 
+import com.charleskorn.kaml.Yaml
+import com.charleskorn.kaml.YamlMap
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
@@ -16,10 +18,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** Valid codec/default assertions ported from the retired combined-store suite. */
+/** Valid codec/default assertions for the unified settings store. */
 val settingsCompatibilityEvidenceTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("loading reload and clearing MCP never consult Codex configuration or old Hooks") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val codex = Path(directory, "codex")
             writeFixture(Path(codex, "config.toml"), "this is invalid TOML")
             writeFixture(Path(codex, "hooks.json"), "this is invalid JSON")
@@ -27,25 +29,27 @@ val settingsCompatibilityEvidenceTest by testSuite(compartment = { TestCompartme
                 newSession = KodexNewSessionSettings(model = OpenAiModelId("compiled-model")),
                 mcpServers = mapOf("compiled" to McpServerConfiguration.Stdio(command = "unused")),
             )
-            val backend = openBackendSettings(directory, defaults)
-            val frontend = openCliFrontendSettings(directory)
-            assertEquals(defaults, backend.settings.value)
-            assertEquals(defaults, backend.reload())
-            assertEquals(emptyList(), frontend.reload().hooks)
-            backend.update { it.copy(mcpServers = emptyMap()) }
-            assertEquals(emptyMap(), backend.reload().mcpServers)
-            assertEquals(emptyMap(), openBackendSettings(directory, defaults).settings.value.mcpServers)
+            val unified = UnifiedSettingsStore.open(directory, defaults)
+            assertEquals(defaults, unified.backendSettings.value)
+            assertEquals(defaults, unified.readCandidate().backend)
+            assertEquals(emptyList(), unified.frontendSettings.value.hooks)
+            unified.backendStore.update { it.copy(mcpServers = emptyMap()) }
+            assertEquals(emptyMap(), unified.readCandidate().backend.mcpServers)
+            assertEquals(emptyMap(), UnifiedSettingsStore.open(directory, defaults).backendSettings.value.mcpServers)
         }
     }
 
     test("legacy ultra reasoning normalizes to max in the actual backend file codec") {
-        withSplitSettingsDirectory { directory ->
-            val path = Path(directory, "settings.backend.yml")
-            writeFixture(path, "new_session: {reasoning_effort: ultra}\nsession_title: {reasoning_effort: ultra}\n")
-            val store = openBackendSettings(directory, backendDefaults())
-            assertEquals(ReasoningEffort.Max, store.settings.value.newSession.reasoningEffort)
-            assertEquals(ReasoningEffort.Max, store.settings.value.sessionTitle.reasoningEffort)
-            store.update { it }
+        withSettingsDirectory { directory ->
+            val path = Path(directory, "settings.yml")
+            writeFixture(
+                path,
+                "backend:\n  new_session: {reasoning_effort: ultra}\n  session_title: {reasoning_effort: ultra}\n",
+            )
+            val unified = UnifiedSettingsStore.open(directory, backendDefaults())
+            assertEquals(ReasoningEffort.Max, unified.backendSettings.value.newSession.reasoningEffort)
+            assertEquals(ReasoningEffort.Max, unified.backendSettings.value.sessionTitle.reasoningEffort)
+            unified.backendStore.update { it }
             val text = SystemCoroutineFileSystem.readString(path)
             assertFalse("reasoning_effort: ultra" in text)
             assertEquals(2, text.lineSequence().count { it.trim() == "reasoning_effort: max" })
@@ -53,48 +57,48 @@ val settingsCompatibilityEvidenceTest by testSuite(compartment = { TestCompartme
     }
 
     test("missing question mode retains opening defaults and compiled AskUser on reopening") {
-        withSplitSettingsDirectory { directory ->
-            val path = Path(directory, "settings.backend.yml")
-            writeFixture(path, "new_session: {model: configured-model}\n")
+        withSettingsDirectory { directory ->
+            val path = Path(directory, "settings.yml")
+            writeFixture(path, "backend:\n  new_session: {model: configured-model}\n")
             val compiled = backendDefaults()
             assertEquals(
                 RequestUserInputMode.AskUser,
-                openBackendSettings(directory, compiled).settings.value.newSession.requestUserInputMode,
+                UnifiedSettingsStore.open(directory, compiled).backendSettings.value.newSession.requestUserInputMode,
             )
             val supplied = compiled.copy(
                 newSession = compiled.newSession.copy(requestUserInputMode = RequestUserInputMode.NoQuestion),
             )
             assertEquals(
                 RequestUserInputMode.NoQuestion,
-                openBackendSettings(directory, supplied).settings.value.newSession.requestUserInputMode,
+                UnifiedSettingsStore.open(directory, supplied).backendSettings.value.newSession.requestUserInputMode,
             )
         }
     }
 
-    test("backend updates canonicalize only its file and preserve configured values without creating context files") {
-        withSplitSettingsDirectory { directory ->
-            val path = Path(directory, "settings.backend.yml")
-            val frontendPath = Path(directory, "settings.frontend.cli.yml")
-            val frontendText = "future_frontend: preserve\n"
-            writeFixture(frontendPath, frontendText)
-            writeFixture(path, "schema_version: 2\nobsolete: preserve-until-update\nnew_session: {model: configured-model, mode: plan}\n")
+    test("backend updates canonicalize settings.yml while preserving frontend values without creating context files") {
+        withSettingsDirectory { directory ->
+            val path = Path(directory, "settings.yml")
+            writeFixture(
+                path,
+                "backend:\n  schema_version: 2\n  obsolete: preserve-until-update\n  new_session: {model: configured-model, mode: plan}\nfrontend:\n  new_line_key: enter\n",
+            )
             val contextPath = Path(directory, "custom-context")
-            val store = openBackendSettings(directory, backendDefaults())
+            val unified = UnifiedSettingsStore.open(directory, backendDefaults())
             val expectedContext = AgentContextSourceSettings(
                 agentsHomeEnabled = false,
                 codexHomeEnabled = false,
                 customSources = listOf(AgentContextCustomSource(contextPath.toString())),
             )
-            val updated = store.update { it.copy(contextSources = expectedContext) }
+            val updated = unified.backendStore.update { it.copy(contextSources = expectedContext) }
             val text = SystemCoroutineFileSystem.readString(path)
             assertFalse("schema_version:" in text)
             assertFalse("obsolete:" in text)
             assertTrue(text.lineSequence().none { it.trimStart().startsWith("mode:") })
             assertTrue("model: configured-model" in text)
-            assertEquals(updated, openBackendSettings(directory, backendDefaults()).settings.value)
+            assertEquals(updated, UnifiedSettingsStore.open(directory, backendDefaults()).backendSettings.value)
             assertEquals(expectedContext, updated.contextSources)
             assertFalse(SystemCoroutineFileSystem.exists(contextPath))
-            assertEquals(frontendText, SystemCoroutineFileSystem.readString(frontendPath))
+            assertEquals(NewLineKey.Enter, unified.frontendSettings.value.newLineKey)
         }
     }
 
@@ -120,20 +124,22 @@ val settingsCompatibilityEvidenceTest by testSuite(compartment = { TestCompartme
             ),
             sessionTitle = SessionTitleSettings(false, null, ReasoningEffort.Medium),
         )
-        assertEquals(expected, decodeBackendSettingsFile(backendGolden, defaults))
+        assertEquals(expected, decodeBackendSettingsFile(yamlMap(backendGolden), defaults))
         val encoded = encodeBackendSettingsFile(expected)
         assertTrue("auth_source: kodex" in encoded)
         assertTrue("request_user_input_mode: no_question" in encoded)
         assertTrue("model: null" in encoded)
-        assertEquals(expected, decodeBackendSettingsFile(encoded, defaults))
+        assertEquals(expected, decodeBackendSettingsFile(yamlMap(encoded), defaults))
         val frontendGolden = "new_line_key: enter\nsidebars: {left: none, right: history_index}\nhooks: []"
-        val frontend = decodeCliFrontendSettingsFile(frontendGolden, CliFrontendSettings())
+        val frontend = decodeCliFrontendSettingsFile(yamlMap(frontendGolden), CliFrontendSettings())
         assertEquals(NewLineKey.Enter, frontend.newLineKey)
         assertEquals(SidebarContent.None, frontend.sidebars.left)
         assertEquals(SidebarContent.HistoryIndex, frontend.sidebars.right)
         assertEquals(emptyList(), frontend.hooks)
         assertEquals(frontend, decodeCliFrontendSettingsFile(
-            encodeCliFrontendSettingsFile(frontend), CliFrontendSettings(),
+            yamlMap(encodeCliFrontendSettingsFile(frontend)), CliFrontendSettings(),
         ))
     }
 }
+
+private fun yamlMap(text: String): YamlMap = Yaml.default.parseToYamlNode(text) as YamlMap

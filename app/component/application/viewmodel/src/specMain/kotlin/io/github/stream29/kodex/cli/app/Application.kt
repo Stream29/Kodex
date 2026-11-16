@@ -14,7 +14,6 @@ public expect class KodexApplication(
     newLineKey: StateFlow<NewLineKey>,
     sidebarSettings: SidebarSettingsViewModel,
     reportUnhandledError: (Throwable) -> Unit,
-    reportWarning: (String) -> Unit,
     connectionState: StateFlow<BackendConnectionState>,
     connectionFailureReason: StateFlow<String?>,
 ) {
@@ -31,14 +30,6 @@ public expect class KodexApplication(
      * Application cancels unsent local observations, not work already admitted by the backend.
      */
     public val reportUnhandledError: (Throwable) -> Unit
-    /**
-     * Reports an actual frontend warning through the same backend admission path.
-     * The backend uses the existing Error Hook selection and
-     * `{"type":"unhandled_error","message":...}` input as [reportUnhandledError].
-     * Logs at warning severity, without creating an inline notice or a backend Stop.
-     * Shares the same live, best-effort buffer and single consumer.
-     */
-    public val reportWarning: (String) -> Unit
     public val connectionState: StateFlow<BackendConnectionState>
     public val connectionFailureReason: StateFlow<String?>
 }

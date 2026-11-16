@@ -62,7 +62,6 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         serviceTiers = fastTwoXServiceTier + ultrafastServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 872_000L,
-        compHash = "3000",
     ),
     ModelInfo(
         slug = OpenAiModelId("gpt-6.1-sol"),
@@ -72,7 +71,6 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         serviceTiers = fastTwoXServiceTier + ultrafastServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 872_000L,
-        compHash = "3000",
     ),
     ModelInfo(
         slug = OpenAiModelId("gpt-6-sol"),
@@ -82,7 +80,6 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         serviceTiers = fastServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 872_000L,
-        compHash = "3000",
     ),
     ModelInfo(
         slug = OpenAiModelId("gpt-6-luna"),
@@ -92,7 +89,6 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         serviceTiers = fastServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 872_000L,
-        compHash = "3000",
     ),
     ModelInfo(
         slug = OpenAiModelId("gpt-5.6-sol"),
@@ -102,7 +98,6 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         serviceTiers = fastIncreasedUsageServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 872_000L,
-        compHash = "3000",
     ),
     ModelInfo(
         slug = OpenAiModelId("gpt-5.6-terra"),
@@ -112,7 +107,6 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         serviceTiers = fastIncreasedUsageServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 872_000L,
-        compHash = "3000",
     ),
     ModelInfo(
         slug = OpenAiModelId("gpt-5.6-luna"),
@@ -122,7 +116,6 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         serviceTiers = fastIncreasedUsageServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 872_000L,
-        compHash = "3000",
     ),
     ModelInfo(
         slug = OpenAiModelId("gpt-5.5"),
@@ -132,7 +125,6 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         serviceTiers = fastIncreasedUsageServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 272_000L,
-        compHash = "2911",
     ),
     ModelInfo(
         slug = OpenAiModelId("codex-auto-review"),
@@ -142,6 +134,5 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         serviceTiers = fastIncreasedUsageServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 872_000L,
-        compHash = "3000",
     ),
 )

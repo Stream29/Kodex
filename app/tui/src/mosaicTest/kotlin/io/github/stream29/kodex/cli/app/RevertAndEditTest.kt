@@ -11,6 +11,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessag
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
+import io.github.stream29.kodex.app.test.seedTestHistory
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
@@ -68,14 +69,24 @@ val revertAndEditTest by testSuite {
     }
 
     test("first user message reverts to empty history and replaces only its owner's draft") {
-        val fixture = SessionViewModelTestFixture.create(this)
         val text = "  修改这条消息\n保留换行  "
+        var seededSessionIndex = -1
+        val fixture = SessionViewModelTestFixture.create(
+            this,
+            seed = { home ->
+                seededSessionIndex = seedTestHistory(
+                    home,
+                    "owner",
+                    mapOf(1 to StableUserMessage(listOf(ContentItem.InputText(text)))),
+                )
+            },
+        )
         try {
-            val session = fixture.persistedSession("owner")
+            val session = fixture.rpc.sessions.open(seededSessionIndex)
             val other = fixture.persistedSession("other")
             val binding = fixture.rpc.views.open(session.sessionIndex).current()
-            binding.appendUserMessage(listOf(ContentItem.InputText(text)))
-            val userIndex = fixture.rpc.services.storage.getLatestIndex(session.sessionIndex)
+            val userIndex = fixture.rpc.services.runtime.getLatestIndex(session.sessionIndex)
+            assertEquals(1, userIndex)
             binding.latestIndex.first { it >= userIndex }
             val agent = requireNotNull(session.rootAgent.value)
             val otherAgent = requireNotNull(other.rootAgent.value)

@@ -16,8 +16,6 @@ import io.github.stream29.kodex.backend.host.ensureBackend
 import io.github.stream29.kodex.backend.host.runBackendHost
 import io.github.stream29.kodex.backend.installBackendSignals
 import io.github.stream29.kodex.backend.randomBackendPassword
-import io.github.stream29.kodex.cli.rpc.RpcServices
-import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.control.backendControlRequest
 import io.github.stream29.kodex.rpc.local.withLocalRpcClient
 import io.github.stream29.kodex.utils.kodexhome.KodexHome
@@ -25,7 +23,11 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.writeBytes
 import io.github.stream29.kodex.utils.osenvironment.processId
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -34,20 +36,37 @@ import kotlinx.io.files.Path
 public actual fun main(args: Array<String>) {
     KotlinLoggingConfiguration.logStartupMessage = false
     KotlinLoggingConfiguration.direct.logLevel = Level.OFF
-    val result = dispatchCli(
-        arguments = args.asList(),
-        output = ::printCliMessage,
-        resolveMcpDomains = { target ->
-            runBlocking(CliCoroutineExceptionLogger) {
-                discoverDynamicMcpDomains(target, KodexHome)
-            }
-        },
-        execute = ::runLeafCommand,
+    val home = KodexHome
+    val sessionJob = SupervisorJob()
+    val session = ReusableToolRpcSession(
+        CoroutineScope(Dispatchers.Default + sessionJob + CliCoroutineExceptionLogger),
+        home,
     )
+    val result = try {
+        dispatchCli(
+            arguments = args.asList(),
+            output = ::printCliMessage,
+            resolveMcpDomains = { target ->
+                runBlocking(CliCoroutineExceptionLogger) {
+                    session.discoverMcpDomains(target)
+                }
+            },
+            execute = { command -> runLeafCommand(command, home, session) },
+        )
+    } finally {
+        runBlocking(NonCancellable) {
+            session.close()
+            sessionJob.cancelAndJoin()
+        }
+    }
     if (result != 0) exitKodexProcess(result)
 }
 
-private fun runLeafCommand(command: KodexLeafCommand): Int {
+private fun runLeafCommand(
+    command: KodexLeafCommand,
+    home: Path,
+    toolSession: ReusableToolRpcSession,
+): Int {
     var result = 0
     val outputHandler: (String) -> Unit = if (command.isToolCommand) {
         { message -> printCliMessage(message, true) }
@@ -57,11 +76,10 @@ private fun runLeafCommand(command: KodexLeafCommand): Int {
     return runCliSafely(
         backendStart = command is BackendStartCommand,
         processId = ::processId,
-        reportFailure = { logCliFailure(it, KodexHome) },
+        reportFailure = { logCliFailure(it, home) },
         output = outputHandler,
     ) {
         runBlocking(CliCoroutineExceptionLogger) {
-            val home = KodexHome
             when (command) {
                 is WebCommand -> {
                     val cwd = SystemCoroutineFileSystem.resolve(Path("."))
@@ -130,17 +148,14 @@ private fun runLeafCommand(command: KodexLeafCommand): Int {
                     val (backendHome, endpoint) = resolveFrontendBackend(home, command.backend.resolve())
                     initializeTuiLogging(home, ::backendProcessAlive)
                     withLocalRpcClient(backendHome, endpoint) { connection ->
-                        withFrontendApplication(connection, cwd, NativeFrontendHost) { application ->
+                        withFrontendApplication(connection, cwd) { application ->
                             runTuiApplication(application)
                         }
                     }
                 }
-                else -> {
-                    val (backendHome, endpoint) = resolveToolBackend(command.toolBackendTarget(), home)
-                    withLocalRpcClient(backendHome, endpoint) { connection ->
-                        val services = RpcServices(RestoringRpcClient(connection))
-                        result = executeCliToolCommand(command, services)
-                    }
+                is KodexToolLeafCommand -> {
+                    val services = toolSession.requireServices(command.backend.resolve())
+                    result = executeCliToolCommand(command, services)
                 }
             }
         }
@@ -156,12 +171,7 @@ internal suspend fun resolveFrontendBackend(
 ): Pair<Path, BackendEndpoint> {
     if (target == null || target.port == null) return home to ensure(home)
     val rawHome = target.backendHome
-    val backendHome = if (rawHome == null) {
-        home
-    } else {
-        val candidate = Path(rawHome)
-        if (SystemCoroutineFileSystem.exists(candidate)) SystemCoroutineFileSystem.resolve(candidate) else candidate
-    }
+    val backendHome = if (rawHome == null) home else resolveExistingOrCandidatePath(Path(rawHome))
     return backendHome to connect(backendHome, target.port)
 }
 

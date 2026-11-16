@@ -5,10 +5,8 @@ import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeRequest
 import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeResponse
 import io.github.stream29.kodex.openai.CodexRateLimitResetCreditsResponse
 import io.github.stream29.kodex.openai.CodexTokenUsageProfile
-import io.github.stream29.kodex.openai.CodexResponsesMetadata
-import io.github.stream29.kodex.openai.CodexResponsesRequestKind
+import io.github.stream29.kodex.openai.codexTurnClientMetadataOrNull
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
-import io.github.stream29.kodex.openai.CodexResponsesClientMetadata
 import io.github.stream29.kodex.openai.ImageEditRequest
 import io.github.stream29.kodex.openai.ImageGenerationRequest
 import io.github.stream29.kodex.openai.ImageResponse
@@ -35,10 +33,6 @@ public actual fun mockOpenAiClient(
     block: MockOpenAiClientBuilder.() -> Unit,
 ): OpenAiClient =
     MockOpenAiClientBuilderImpl().apply(block).build()
-
-/** Creates a test-only OpenAI client handler builder. */
-public actual fun MockOpenAiClientBuilder(): MockOpenAiClientBuilder =
-    MockOpenAiClientBuilderImpl()
 
 internal class MockOpenAiClientBuilderImpl : MockOpenAiClientBuilder {
     private var listModelsHandler: suspend () -> OpenAiResponseResult<ModelsResponse> = { missingHandler("listModels") }
@@ -249,7 +243,8 @@ private class MockOpenAiClient(
                 serviceTier = serviceTier,
                 promptCacheKey = promptCacheKey ?: threadId,
                 text = text,
-                clientMetadata = mockCodexClientMetadata(
+                clientMetadata = codexTurnClientMetadataOrNull(
+                    json = OpenAiJsonCodec,
                     installationId = installationId,
                     sessionId = sessionId,
                     threadId = threadId,
@@ -280,49 +275,3 @@ private class MockOpenAiClient(
 
 private fun <T> missingHandler(name: String): T =
     throw IllegalStateException("MockOpenAiClient handler is not configured for `$name`.")
-
-private fun mockCodexClientMetadata(
-    installationId: String?,
-    sessionId: String?,
-    threadId: String?,
-    turnId: String?,
-    windowId: String?,
-    threadSource: String?,
-    turnTrigger: String?,
-    turnState: String?,
-): CodexResponsesClientMetadata? {
-    if (
-        installationId == null &&
-        sessionId == null &&
-        threadId == null &&
-        turnId == null &&
-        windowId == null &&
-        turnState == null &&
-        threadSource == null &&
-        turnTrigger == null
-    ) {
-        return null
-    }
-    require(threadId != null) { "threadId is required when Codex request metadata is supplied." }
-    require(windowId != null) { "windowId is required when Codex request metadata is supplied." }
-    return CodexResponsesClientMetadata(
-        installationId = installationId,
-        sessionId = sessionId,
-        threadId = threadId,
-        turnId = turnId,
-        windowId = windowId,
-        turnMetadata = OpenAiJsonCodec.encodeToString(
-            CodexResponsesMetadata.serializer(),
-            CodexResponsesMetadata(
-                installationId = installationId,
-                sessionId = sessionId,
-                threadId = threadId,
-                turnId = turnId,
-                windowId = windowId,
-                requestKind = CodexResponsesRequestKind.Turn,
-                threadSource = threadSource,
-                turnTrigger = turnTrigger,
-            ),
-        ),
-    )
-}

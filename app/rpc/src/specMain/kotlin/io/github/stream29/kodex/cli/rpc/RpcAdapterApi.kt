@@ -4,58 +4,46 @@ package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.app.accountusage.AccountUsageViewModel
-import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
-import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
-import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.applicationpreferences.ApplicationPreferencesViewModel
 import io.github.stream29.kodex.app.authenticationsettings.AuthenticationSettingsViewModel
 import io.github.stream29.kodex.app.contextsourcesettings.ContextSourceSettingsViewModel
 import io.github.stream29.kodex.app.hooksettings.HookSettingsViewModel
-import io.github.stream29.kodex.app.mcpsettings.McpImportHandle
 import io.github.stream29.kodex.app.mcpsettings.McpSettingsViewModel
-import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogDependencies
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.app.sessiontitlesettings.SessionTitleSettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsEffect
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsViewModel
-import io.github.stream29.kodex.app.settings.contract.McpServerSettingsState
 import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsViewModel
-import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsState
-import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
-import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
-import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsConfiguration
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsDataSource
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsDataState
-import io.github.stream29.kodex.app.sessiontitlesettings.SessionTitleSettingsViewModel
+import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
+import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.usagereset.contract.UsageResetViewModel
-import io.github.stream29.kodex.cli.auth.KodexAuthLoginAttempt
+import io.github.stream29.kodex.cli.newsession.NewSessionDraftPort
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
-import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
-import io.github.stream29.kodex.mcp.contract.McpServerDraft
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
-import io.github.stream29.kodex.rpc.client.FrontendSettingsAccess
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
-import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.contract.SuspendMutableStateFlow
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.BackendSettings
-import io.github.stream29.kodex.rpc.models.NotificationHook
-import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.rpc.models.ShellSessionState
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import kotlinx.coroutines.CoroutineScope
@@ -65,59 +53,10 @@ import kotlinx.io.files.Path
 import kotlinx.rpc.RpcClient
 import kotlin.time.Instant
 
-/**
- * Creates the sole Agent ViewModel owned by this binding's frontend scope.
- */
-public expect fun createRpcAgentViewModel(
-    binding: RpcSessionBinding,
-    scope: CoroutineScope,
-    services: RpcServices,
-    models: StateFlow<List<ModelInfo>>,
-    reportUnhandledError: (Throwable) -> Unit,
-): AgentViewModel
-
-/**
- * Creates the Composer child bound to one exact RPC Session binding.
- * Command callbacks must belong to that binding's presentation owner: cancel admits
- * work through its caught command boundary, and failures use the Application's error outlet.
- * No callback may resolve the currently selected Session or silently discard a failure.
- */
-public expect fun createRpcComposerViewModel(
-    binding: RpcSessionBinding,
-    ownerScope: CoroutineScope,
-    cancellationPort: ComposerCancellationPort,
-    failureReporter: ComposerFailureReporter,
-): ComposerViewModel
-
-/** Bind once to an exact Agent or draft. No active-session lookup or settings mirror is introduced. */
-public expect fun createBoundRuntimeConfigurationViewModel(
-    target: AgentSettingsViewModel,
-    ownerScope: CoroutineScope,
-): RuntimeConfigurationViewModel
-
-/**
- * One editing intent keeps its target's initial value. Only false is retried; a lost response,
- * cancellation, or expired owner is never interpreted as permission to replay a write.
- */
-public expect suspend fun <T, F> SuspendMutableStateFlow<T>.editField(
-    initial: F,
-    select: (T) -> F,
-    replace: (T) -> T,
-    checkOwner: () -> Unit = {},
-): Boolean
-
-/** The backend owns the callback; its transient authorization URL belongs to this attempt. */
-public expect suspend fun startRpcOAuth(
-    rpc: GlobalRpc,
-    target: OAuthTarget,
-    scope: CoroutineScope,
-): KodexAuthLoginAttempt
-
 /** Borrowed proxies from an already restoring client. This object owns no connection. */
 public expect class RpcServices(client: RpcClient) {
     public val global: GlobalRpc
     public val runtime: AgentRuntimeRpc
-    public val storage: AgentStorageRpc
 }
 
 /** Independent backend observations, not a locally writable combined settings snapshot. */
@@ -127,23 +66,13 @@ public expect class RpcGlobalSettings : AutoCloseable {
     public val authentication: StateFlow<SettingsAuthenticationState>
     public val usage: StateFlow<SettingsAccountUsageState>
     public val mcp: StateFlow<List<McpManagedServerState>>
-    public val frontend: FrontendSettingsAccess
     public val sidebarWidths: StateFlow<Pair<Int, Int>>
     public fun ensureActive(): Unit
-
-    public suspend fun <F> edit(
-        initial: F,
-        select: (BackendSettings) -> F,
-        replace: (BackendSettings) -> BackendSettings,
-    ): Boolean
 
     /** Width changes are intentionally never persisted in either settings file. */
     public fun resizeSidebars(left: Int, right: Int)
 
-    public suspend fun updateHooks(hooks: List<NotificationHook>)
-
     override fun close(): Unit
-    public suspend fun join(): Unit
 
     public companion object {
         public suspend fun open(
@@ -159,13 +88,8 @@ public expect class RpcGlobalEditor(
     global: RpcGlobalSettings,
     rpc: GlobalRpc,
     applicationScope: CoroutineScope,
-    environment: RpcFrontendEnvironment,
+    launchBaseDirectory: String = ".",
 ) : GlobalSettingsViewModel {
-    public val global: RpcGlobalSettings
-    public val rpc: GlobalRpc
-    public val scope: CoroutineScope
-    public val mcp: RpcMcpSettings
-
     override val contextSourceSettings: ContextSourceSettingsViewModel
     override val sessionTitleSettings: SessionTitleSettingsViewModel
     override val applicationPreferences: ApplicationPreferencesViewModel
@@ -178,34 +102,6 @@ public expect class RpcGlobalEditor(
     override val effects: Flow<GlobalSettingsEffect>
     override val operationFailure: StateFlow<Boolean>
     override fun dismissOperationFailure(): Unit
-
-    public fun createLogin(ownerScope: CoroutineScope = scope): OpenAiLoginViewModel
-
-    override fun close(): Unit
-}
-
-/** A local editor keeps full configuration only in memory; list/detail rendering is sanitized. */
-public expect class RpcMcpSettings(
-    global: RpcGlobalSettings,
-    rpc: GlobalRpc,
-    scope: CoroutineScope,
-) : AutoCloseable {
-    public val servers: StateFlow<List<McpServerSettingsState>>
-
-    /** Capture before opening a delayed dialog, not when its submit coroutine finally runs. */
-    public fun capture(): Map<String, McpServerConfiguration>
-
-    public suspend fun save(
-        captured: Map<String, McpServerConfiguration>,
-        originalName: String?,
-        draft: McpServerDraft,
-    ): Boolean
-
-    public suspend fun delete(name: String, captured: McpServerConfiguration): Boolean
-    public suspend fun setEnabled(name: String, captured: McpServerConfiguration, enabled: Boolean): Boolean
-    public suspend fun readImport(accept: (suspend () -> Unit) -> Boolean): McpImportHandle
-    public suspend fun reconnect(name: String): Unit
-    public suspend fun logout(name: String): Unit
     override fun close(): Unit
 }
 
@@ -214,23 +110,15 @@ public expect class RpcMcpSettings(
  * All projection, revisions and command admission belong to the component; this adapter owns only
  * field-specific backend writes and queue disposal. Closing the child cannot cancel accepted writes.
  */
-public expect class RpcNewSessionSettings : NewSessionSettingsViewModel {
-    public constructor(global: RpcGlobalSettings, applicationScope: CoroutineScope)
-    override val state: StateFlow<NewSessionSettingsState>
-    override val operationFailure: StateFlow<Boolean>
-    override fun updateModel(expectedRevision: Long, model: OpenAiModelId): Unit
-    override fun updateReasoningEffort(expectedRevision: Long, reasoningEffort: ReasoningEffort): Unit
-    override fun updateServiceTier(expectedRevision: Long, serviceTier: ServiceTier): Unit
-    override fun updateRequestUserInputMode(expectedRevision: Long, mode: RequestUserInputMode): Unit
-    override fun dismissOperationFailure(): Unit
-    override fun close(): Unit
-}
+public expect fun RpcNewSessionSettings(
+    global: RpcGlobalSettings,
+    applicationScope: CoroutineScope,
+): NewSessionSettingsViewModel
 
 /** Adapts Global RPC to the component's backend port without opening Session runtimes. */
 public expect class RpcSessionCatalogDependencies(
     global: GlobalRpc,
     deleteSession: suspend (Int) -> Boolean = global::deleteSession,
-    forkSession: suspend (Int) -> Int = global::forkSession,
 ) : SessionCatalogDependencies {
     override suspend fun load(showArchived: Boolean): List<SessionCatalogEntry>
     override suspend fun archive(sessionIndex: Int): Unit
@@ -253,12 +141,10 @@ public expect class RpcSessionBinding {
     public val tokenCount: StateFlow<LlmRequestMeta?>
     public fun ensureActive(): Unit
     public suspend fun submit(content: List<ContentItem>): Unit
-    public suspend fun appendUserMessage(content: List<ContentItem>): Int
     public suspend fun resume(): Unit
     public suspend fun stop(): Unit
     public suspend fun forcedCompact(): Int
     public suspend fun clearPending(): Int
-    public suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int
     public suspend fun submitAskUserAnswer(askId: Int, response: RequestUserInputResponse): Unit
     public suspend fun closeShellSession(id: Int): Unit
     public suspend fun revertHistory(untilExclusive: Int, selectedCacheNonce: Long): Unit
@@ -287,13 +173,18 @@ public expect class RpcSessionViews(
     models: StateFlow<List<ModelInfo>>,
     reportUnhandledError: (Throwable) -> Unit,
     connectionAvailable: () -> Boolean = { true },
-) : AutoCloseable {
+) : PersistedSessionViewModelRegistry, AutoCloseable {
     public val services: RpcServices
-    public suspend fun open(index: Int): RpcSessionView
+    override suspend fun open(sessionIndex: Int): RpcSessionView
     public suspend fun release(view: RpcSessionView): Unit
 
     /** Also cancels a tab that is still initializing and has not returned a view to its caller. */
-    public suspend fun release(index: Int): Unit
+    override suspend fun release(sessionIndex: Int): Unit
+    override suspend fun archive(sessionIndex: Int): Unit
+    override suspend fun unarchive(sessionIndex: Int): Unit
+    override suspend fun fork(sessionIndex: Int): Int
+    override suspend fun delete(sessionIndex: Int): Boolean
+    override suspend fun shutdown(): Unit
 
     /** Reconnect activates still-open frontend tabs before publishing the new connection. */
     public suspend fun reactivate(replacement: RpcServices, isConnected: () -> Boolean): Unit
@@ -307,20 +198,43 @@ public expect class RpcSessionViews(
  * Recovery only repeats activation/reads; no failed or unacknowledged command is replayed.
  */
 public expect class RpcSessionView internal constructor(
-    index: Int,
+    sessionIndex: Int,
     services: RpcServices,
     scope: CoroutineScope,
     models: StateFlow<List<ModelInfo>>,
     reportUnhandledError: (Throwable) -> Unit,
     connectionAvailable: () -> Boolean,
-) : AutoCloseable {
-    public val index: Int
+) : PersistedSessionViewModel {
+    override val sessionIndex: Int
     public val binding: StateFlow<RpcSessionBinding?>
     public val status: StateFlow<SessionViewStatus>
     /** Sole binding-owned Agent; recovery replaces it rather than wrapping the previous owner. */
-    public val agent: StateFlow<AgentViewModel?>
+    override val rootAgent: StateFlow<AgentViewModel?>
+    override val settings: StateFlow<KodexAgentSettings>
+    override val models: StateFlow<List<ModelInfo>>
+    override val name: StateFlow<String>
+    override val lifecycle: StateFlow<PersistedSessionLifecycleState>
 
     public fun current(): RpcSessionBinding
+    override suspend fun readCreatedAt(): Instant?
+    override suspend fun readUpdatedAt(): Instant?
+    override suspend fun fork(
+        source: AgentViewModel,
+        untilExclusive: Int,
+        expectedGeneration: Long,
+    ): Int
+    override suspend fun rename(name: String): Unit
+    override suspend fun updateModel(model: OpenAiModelId): Unit
+    override suspend fun updateWorkingDirectory(workingDirectory: Path): Unit
+    override suspend fun updateReasoningEffort(reasoningEffort: ReasoningEffort): Unit
+    override suspend fun updateServiceTier(serviceTier: ServiceTier): Unit
+    override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode): Unit
+    override suspend fun updateModelConfiguration(
+        model: OpenAiModelId,
+        reasoningEffort: ReasoningEffort,
+        serviceTier: ServiceTier,
+    ): Unit
+    override suspend fun shutdown(): Unit
     override fun close(): Unit
     public suspend fun join(): Unit
 }
@@ -338,7 +252,7 @@ public expect class RpcSessionDraft(
     views: RpcSessionViews,
     global: RpcGlobalSettings,
     ownerScope: CoroutineScope,
-) : io.github.stream29.kodex.cli.newsession.NewSessionDraftPort {
+) : NewSessionDraftPort {
     override val settings: StateFlow<KodexAgentSettings>
     override val composer: ComposerViewModel
 
@@ -351,8 +265,8 @@ public expect class RpcSessionDraft(
     override fun updateWorkingDirectory(path: Path): Unit
 
     /**
-     * [open] opens the host's stable persisted handle before any append; RPC-only consumers may
-     * supply [RpcSessionViews.open]. Creation and append remain distinct commits. The caller
+     * [open] opens the host's stable persisted handle before any submit; RPC-only consumers may
+     * supply [RpcSessionViews.open]. Creation and submit remain distinct commits. The caller
      * owns accepted work and errors, so this suspends directly rather than launching hidden work.
      */
     override suspend fun <T> submit(expectedRevision: Long, open: suspend (Int) -> T): T?

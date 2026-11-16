@@ -1,8 +1,7 @@
 package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.backend.*
-import io.github.stream29.kodex.rpc.control.backendRegisterBrowser
-import io.github.stream29.kodex.rpc.control.backendRevokeBrowser
+import io.github.stream29.kodex.rpc.control.BackendControlClient
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.cio.CIO
@@ -236,6 +235,7 @@ internal suspend fun <R> withFrontendHostListener(
             }
         }
     }
+    val controlClient = BackendControlClient()
     var probe: LocalBrowserGrant? = null
     var reaper: Job? = null
     var primary: Throwable? = null
@@ -246,18 +246,18 @@ internal suspend fun <R> withFrontendHostListener(
         check(port != endpoint.port)
         val request = LocalBrowserGrant(LocalBrowserGrantProtocol, manualOrigin ?: origin, probeCredential, directory)
         probe = request
-        canonical.value = backendRegisterBrowser(endpoint, request)
+        canonical.value = controlClient.registerBrowser(endpoint, request)
         owners.value = FrontendCompanionOwners(
             hostScope, endpoint, id, origin, directory, id, newSecret, ::now,
-            backendOnline = { frontendBackendReady(endpoint) },
-            register = { backendRegisterBrowser(endpoint, it) },
+            backendOnline = { frontendBackendReady(endpoint, controlClient) },
+            register = { controlClient.registerBrowser(endpoint, it) },
             revoke = { grant ->
-                try { backendRevokeBrowser(endpoint, grant) }
+                try { controlClient.revokeBrowser(endpoint, grant) }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (failure: Exception) {
                     // Local resources have already joined. An ended exact backend has no live
                     // admission to revoke; unknown replies stay bounded by its finite grant.
-                    if (frontendBackendReady(endpoint)) throw failure
+                    if (frontendBackendReady(endpoint, controlClient)) throw failure
                 }
             },
             acquire = acquireResources,
@@ -291,9 +291,10 @@ internal suspend fun <R> withFrontendHostListener(
             canonical.value = null
             cleanup { engine.stopSuspend() }
             probe?.let {
-                try { withTimeout(3_000) { backendRevokeBrowser(endpoint, it) } }
+                try { withTimeout(3_000) { controlClient.revokeBrowser(endpoint, it) } }
                 catch (_: Exception) { /* Same-instance only; the finite grant also expires. */ }
             }
+            cleanup { controlClient.close() }
         }
         if (primary != null && currentCoroutineContext().isActive) throw requireNotNull(primary)
     }

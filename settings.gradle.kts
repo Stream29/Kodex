@@ -223,7 +223,6 @@ moduleTree("app") {
         }
         moduleTree("session") {
             module("contract")
-            module("viewmodel")
         }
         moduleTree("session-catalog") {
             module("view")
@@ -266,11 +265,7 @@ moduleTree("app") {
         }
     }
     moduleTree("rpc") {
-        module("application")
-        module("new-session")
         module("protocol")
-        module("session")
-        module("system")
         module("test-support")
     }
     moduleTree("tui") {

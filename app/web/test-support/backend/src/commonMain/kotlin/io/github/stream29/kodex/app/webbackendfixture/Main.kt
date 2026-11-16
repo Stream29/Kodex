@@ -6,6 +6,7 @@ import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import io.github.stream29.kodex.rpc.client.RpcWireSerializers
 import io.github.stream29.kodex.rpc.server.defaultBackendSettings
 import io.github.stream29.kodex.rpc.server.withBackendServices
 import io.github.stream29.kodex.rpc.websocket.WebSocketRpcTransport
@@ -107,7 +108,8 @@ public actual fun main(): Unit = runBlocking {
                             coroutineScope {
                                 val transport = WebSocketRpcTransport(this@webSocket, coroutineContext)
                                 val server = object : KrpcServer(
-                                    rpcServerConfig { serialization { json() } }, transport,
+                                    rpcServerConfig { serialization { json { serializersModule = RpcWireSerializers } } },
+                                    transport,
                                 ) {}
                                 backend.register(server)
                                 try { this@webSocket.closeReason.await() }

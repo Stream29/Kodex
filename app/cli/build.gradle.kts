@@ -101,8 +101,6 @@ kotlin {
             implementation(project(":app-backend-daemon"))
             implementation(project(":app-tui-host"))
             implementation(project(":app-web-host"))
-            implementation(project(":app-rpc-application"))
-            implementation(project(":app-rpc-system"))
             implementation(project(":utils-kodex-home"))
             implementation(project(":utils-logging-backend-file"))
             implementation(project(":utils-kotlinx-io-coroutines"))

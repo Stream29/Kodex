@@ -30,7 +30,6 @@ val modelCatalogModelsSerializationTest by testSuite {
         )
 
         val model = response.models.single()
-        assertEquals("test-hash", model.compHash)
         assertEquals(ReasoningEffort.Max, model.defaultReasoningLevel)
         assertEquals(
             listOf(

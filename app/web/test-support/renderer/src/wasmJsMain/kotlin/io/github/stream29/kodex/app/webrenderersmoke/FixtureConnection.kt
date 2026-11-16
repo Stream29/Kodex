@@ -17,7 +17,7 @@ internal class FixturePeer(
     val close: suspend () -> Unit,
 )
 
-internal data class FixtureWriteAttempts(val appends: Int = 0, val resumes: Int = 0)
+internal data class FixtureWriteAttempts(val submits: Int = 0, val resumes: Int = 0)
 
 /** Test-host routing with the same no-write-retry boundary as the Native connection. */
 internal class FixtureConnection : FrontendRpcConnection {
@@ -34,7 +34,7 @@ internal class FixtureConnection : FrontendRpcConnection {
     val discardedReplies = discarded.asStateFlow()
     private val attempts = MutableStateFlow(FixtureWriteAttempts())
     val writeAttempts = attempts.asStateFlow()
-    var discardNextAppendReply = false
+    var discardNextSubmitReply = false
 
     override fun onReconnection(handler: suspend (RpcClient, () -> Boolean) -> Unit) { recovery = handler }
 
@@ -84,18 +84,18 @@ internal class FixtureConnection : FrontendRpcConnection {
     private suspend fun <T> observeCall(peer: FixturePeer, call: RpcCall, invoke: suspend () -> T): T {
         val runtime = call.descriptor.fqName == "io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc"
         if (runtime) when (call.callableName) {
-            "appendUserMessage" -> attempts.value = attempts.value.copy(appends = attempts.value.appends + 1)
+            "submit" -> attempts.value = attempts.value.copy(submits = attempts.value.submits + 1)
             "resume" -> attempts.value = attempts.value.copy(resumes = attempts.value.resumes + 1)
         }
-        val loseReply = discardNextAppendReply && runtime && call.callableName == "appendUserMessage"
-        if (loseReply) discardNextAppendReply = false
+        val loseReply = discardNextSubmitReply && runtime && call.callableName == "submit"
+        if (loseReply) discardNextSubmitReply = false
         val result = invoke()
         if (loseReply) {
             // The backend accepted the real write; discard only its delivery to the caller.
             discarded.value++
             detach(peer)
             peer.close()
-            error("Fixture discarded an accepted append reply; no automatic replay.")
+            error("Fixture discarded an accepted submit reply; no automatic replay.")
         }
         return result
     }

@@ -33,9 +33,6 @@ private class TestModelCatalogStore(
     override val models: StateFlow<List<ModelInfo>> =
         MutableStateFlow(listOf(model))
 
-    override suspend fun refresh(): List<ModelInfo> =
-        models.value
-
     override fun resolve(model: OpenAiModelId): ModelInfo =
         models.value.first().copy(slug = model)
 

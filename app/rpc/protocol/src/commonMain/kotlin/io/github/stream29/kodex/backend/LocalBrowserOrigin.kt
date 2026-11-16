@@ -8,3 +8,8 @@ public actual fun canonicalLocalBrowserOrigin(value: String): String {
     require(port in 1..65535) { "Invalid browser origin port." }
     return "http://${match.groupValues[1]}" + if (port == 80) "" else ":$port"
 }
+
+public actual fun backendHeartbeatIntervalMillis(idleTtlSeconds: Long): Long {
+    require(idleTtlSeconds == -1L || idleTtlSeconds > 0L) { "Invalid backend idle timeout." }
+    return if (idleTtlSeconds == -1L || idleTtlSeconds >= 60L) 20_000L else maxOf(100L, idleTtlSeconds * 1000L / 3)
+}

@@ -39,15 +39,15 @@ val fixtureConnectionTest by testSuite {
             assertEquals(FixtureWriteAttempts(), connection.writeAttempts.value)
         }
     }
-    test("accepted append with discarded reply is never replayed or resumed on replacement") {
+    test("accepted submit with discarded reply is never replayed or resumed on replacement") {
         val connection = FixtureConnection()
         val first = TestPeer(connection)
         connection.install(first.peer)
-        connection.discardNextAppendReply = true
+        connection.discardNextSubmitReply = true
         assertFailsWith<BackendConnectionLost> {
-            RpcServices(connection).runtime.appendUserMessage(41, emptyList())
+            RpcServices(connection).runtime.submit(41, emptyList())
         }
-        assertEquals(listOf("appendUserMessage"), first.calls)
+        assertEquals(listOf("submit"), first.calls)
         assertFalse(first.alive)
         assertFalse(connection.available)
         val second = TestPeer(connection)
@@ -55,7 +55,7 @@ val fixtureConnectionTest by testSuite {
         assertEquals(1, connection.discardedReplies.value)
         assertEquals(2, connection.generation.value)
         assertEquals(emptyList(), second.calls)
-        assertEquals(listOf("appendUserMessage"), first.calls)
+        assertEquals(listOf("submit"), first.calls)
     }
     test("state subscription resumes only after exact replacement preparation") {
         runTest {
@@ -94,10 +94,10 @@ val fixtureConnectionTest by testSuite {
         connection.onReconnection { client, _ -> bound = client }
         val second = TestPeer(connection)
         connection.install(second.peer)
-        connection.discardNextAppendReply = true
-        assertFailsWith<IllegalStateException> { RpcServices(bound).runtime.appendUserMessage(41, emptyList()) }
-        assertEquals(listOf("appendUserMessage"), second.calls)
-        assertEquals(FixtureWriteAttempts(appends = 1), connection.writeAttempts.value)
+        connection.discardNextSubmitReply = true
+        assertFailsWith<IllegalStateException> { RpcServices(bound).runtime.submit(41, emptyList()) }
+        assertEquals(listOf("submit"), second.calls)
+        assertEquals(FixtureWriteAttempts(submits = 1), connection.writeAttempts.value)
         assertEquals(1, connection.discardedReplies.value)
         assertFalse(connection.available)
         assertTrue(first.calls.isEmpty())

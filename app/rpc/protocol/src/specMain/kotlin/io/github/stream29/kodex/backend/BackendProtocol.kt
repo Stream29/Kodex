@@ -41,3 +41,6 @@ public class LocalBrowserWelcome(
 
 /** Canonical loopback HTTP origin only; rejects paths, credentials, null and remote origins. */
 public expect fun canonicalLocalBrowserOrigin(value: String): String
+
+/** Renewal cadence derived from backend `idle_ttl_seconds` (`-1` for infinite, or positive seconds). */
+public expect fun backendHeartbeatIntervalMillis(idleTtlSeconds: Long): Long

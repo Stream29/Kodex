@@ -38,7 +38,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         nativeTest.dependencies {
-            implementation(project(":app-rpc-system"))
             implementation(project(":app-backend-settings"))
             implementation(project(":app-component-session-settings-viewmodel"))
             implementation(project(":app-rpc-test-support"))

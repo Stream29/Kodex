@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.settings.SettingsUpdateQueue
@@ -10,13 +8,15 @@ import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 
-public actual class RpcNewSessionSettings private constructor(
+public actual fun RpcNewSessionSettings(
+    global: RpcGlobalSettings,
+    applicationScope: CoroutineScope,
+): NewSessionSettingsViewModel = RpcNewSessionSettingsImpl(DefaultsResources(global, applicationScope))
+
+private class RpcNewSessionSettingsImpl(
     private val resources: DefaultsResources,
 ) : NewSessionSettingsViewModel by resources.child {
-    public actual constructor(global: RpcGlobalSettings, applicationScope: CoroutineScope) :
-        this(DefaultsResources(global, applicationScope))
-
-    actual override fun close() {
+    override fun close() {
         resources.child.close()
         resources.dependencies.close()
     }

@@ -22,7 +22,6 @@ kotlin {
             implementation(project(":app-component-application-preferences-viewmodel"))
             implementation(project(":app-component-new-session-viewmodel"))
             implementation(project(":app-component-history-viewmodel"))
-            implementation(project(":app-component-session-viewmodel"))
             implementation(libs.kotlinx.coroutines.test)
         }
         mosaicMain.dependencies {

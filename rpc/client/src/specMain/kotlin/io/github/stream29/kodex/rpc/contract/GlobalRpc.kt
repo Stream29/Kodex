@@ -21,7 +21,6 @@ import io.github.stream29.kodex.rpc.models.DirectoryQuery
 import io.github.stream29.kodex.rpc.models.DirectoryListResult
 import io.github.stream29.kodex.rpc.models.DirectoryValidationResult
 import io.github.stream29.kodex.rpc.models.FrontendErrorAdmission
-import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.utils.kotlinxioserialization.PathAsStringSerializer
@@ -102,24 +101,6 @@ public interface GlobalRpc {
 
     /** Includes the current catalog in provider order, followed by updates; it is not editable. */
     public fun getModelsFlow(): Flow<List<ModelInfo>>
-
-    /**
-     * Observes backend-produced notifications for all persisted root Agents.
-     *
-     * This is a broadcast event flow with replay=0 semantics, not a state subscription:
-     * no initial snapshot, prior events, offline backlog or acknowledgement is provided.
-     * A Session's inactivity does not terminate this global subscription. Cancelling collection
-     * releases only this observer, not backend Agent execution.
-     *
-     * Emits `Notification.AskUserCreated` immediately when `AgentRuntimeRpc.createAskUser` creates
-     * a new `AskUserSnapshot` entry, and `Notification.Stop` when an accepted Agent turn stops at
-     * an assistant message or unhandled failure. Notifications are not proof that an entry remains unanswered.
-     *
-     * Frontend Hooks consume observations only; their result or failure cannot control the Agent.
-     * RPC failures and backend logs remain independent. This declaration implements neither
-     * event publication nor a buffering policy and does not promise durable delivery.
-     */
-    public fun getNotificationFlow(): Flow<Notification>
 
     /** Reads the initial authentication summary for the currently selected settings.authSource. */
     public suspend fun getAuthentication(): SettingsAuthenticationState

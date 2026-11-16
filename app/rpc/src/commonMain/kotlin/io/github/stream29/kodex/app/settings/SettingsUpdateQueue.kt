@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.app.settings
 
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -8,9 +6,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 
-public actual class SettingsUpdateQueue actual constructor(
+internal class SettingsUpdateQueue(
     commandScope: CoroutineScope,
-    private val defaultReportError: ((Throwable) -> Unit)?,
+    private val defaultReportError: ((Throwable) -> Unit)? = null,
 ) {
     private class SettingsCommand(
         val block: suspend () -> Unit,
@@ -20,7 +18,7 @@ public actual class SettingsUpdateQueue actual constructor(
     private val commands = Channel<SettingsCommand>(Channel.UNLIMITED)
     private var closed: Boolean = false
     private var terminalFailure: Throwable? = null
-    public actual var drained: Boolean = false
+    var drained: Boolean = false
         private set
 
     private val worker = commandScope.launch {
@@ -48,8 +46,8 @@ public actual class SettingsUpdateQueue actual constructor(
         }
     }
 
-    public actual fun submit(
-        reportError: ((Throwable) -> Unit)?,
+    fun submit(
+        reportError: ((Throwable) -> Unit)? = null,
         block: suspend () -> Unit,
     ): Boolean {
         if (closed) return false
@@ -71,7 +69,7 @@ public actual class SettingsUpdateQueue actual constructor(
         }
     }
 
-    public actual fun close(onClosed: ((drained: Boolean) -> Unit)?) {
+    fun close(onClosed: ((drained: Boolean) -> Unit)? = null) {
         if (!closed) {
             closed = true
             commands.close()

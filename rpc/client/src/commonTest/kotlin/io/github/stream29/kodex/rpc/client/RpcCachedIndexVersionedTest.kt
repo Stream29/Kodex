@@ -15,7 +15,7 @@ import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrAfter
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
-import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
+import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import kotlinx.coroutines.CancellationException
@@ -255,7 +255,7 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("immediate second Flow creation failure releases the first subscription") {
         runTest {
             val backend = TimelineProbeImpl()
-            val rpc = object : AgentStorageRpc by backend {
+            val rpc = object : AgentRuntimeRpc by backend {
                 override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int> =
                     throw IllegalArgumentException("cannot create Flow")
             }
@@ -331,7 +331,7 @@ val rpcCachedIndexVersionedTest by testSuite(testConfig = TestConfig.testScope(i
     test("completed metadata does not leave a usable view with a permanently frozen nonce") {
         runTest {
             val backend = TimelineProbeImpl()
-            val rpc = object : AgentStorageRpc by backend {
+            val rpc = object : AgentRuntimeRpc by backend {
                 override fun getCacheNonceFlow(sessionIndex: Int): Flow<Long> = flowOf(17L)
             }
             val view = backgroundScope.rpcCachedAgentStorage(7, rpc)

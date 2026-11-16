@@ -41,13 +41,6 @@ public actual class UnifiedSettingsStore private constructor(
 
     public actual val backendStore: BackendSettingsStore = object : BackendSettingsStore {
         override val settings: StateFlow<BackendSettings> get() = backendSettings
-        override val settingsPath: Path get() = path
-        override suspend fun reload(): BackendSettings {
-            val expected = current
-            val candidate = readCandidate()
-            check(acceptReload(expected, candidate) { _, _ -> }) { "Settings changed during reload." }
-            return candidate.backend
-        }
         override suspend fun update(transform: (BackendSettings) -> BackendSettings): BackendSettings = mutex.withLock {
             val proposed = snapshot.copy(backend = transform(snapshot.backend))
             persist(proposed)

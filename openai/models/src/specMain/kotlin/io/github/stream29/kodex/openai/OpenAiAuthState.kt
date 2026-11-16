@@ -35,3 +35,19 @@ public sealed interface OpenAiAuthState {
         UnexpectedFailure,
     }
 }
+
+/** Human-readable explanation for why request credentials are unavailable. */
+public fun OpenAiAuthState.Unavailable.unavailableMessage(): String =
+    "OpenAI authentication is unavailable: " +
+        when (this) {
+            OpenAiAuthState.Unavailable.NotLoaded -> "credentials have not been loaded."
+            OpenAiAuthState.Unavailable.CredentialsNotFound -> "credentials were not found."
+            OpenAiAuthState.Unavailable.UnsupportedAuthMode ->
+                "the selected credentials use an unsupported authentication mode."
+            OpenAiAuthState.Unavailable.InvalidCredentials ->
+                "the selected credentials are malformed or incomplete."
+            OpenAiAuthState.Unavailable.CredentialSourceUnavailable ->
+                "the credential source could not be read."
+            OpenAiAuthState.Unavailable.UnexpectedFailure ->
+                "credential loading failed unexpectedly."
+        }

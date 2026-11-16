@@ -1,10 +1,10 @@
 package io.github.stream29.kodex.backend.host
 
-import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.app.migration.CurrentKodexApplicationVersion
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.backend.*
 import io.github.stream29.kodex.cli.notification.collectNotificationHooks
+import io.github.stream29.kodex.rpc.control.BackendControlClient
 import io.github.stream29.kodex.rpc.localserver.BackendControl
 import io.github.stream29.kodex.rpc.localserver.LocalBrowserAccess
 import io.github.stream29.kodex.rpc.control.backendControlRequest
@@ -127,7 +127,7 @@ public actual suspend fun runBackendHost(
                         renewBackend = { lifecycle.renew() },
                         backendRenewalInterval = {
                             val value = services?.settings?.unified?.current?.backend?.daemonTtlSeconds ?: 300L
-                            if (value == -1L || value >= 60) 20.seconds else (value * 1000 / 3).coerceAtLeast(100).milliseconds
+                            backendHeartbeatIntervalMillis(value).milliseconds
                         },
                         checkAdmission = {
                             check(lifecycle.state.value == BackendPhase.Ready) { "Backend business admission is closed." }
@@ -198,7 +198,6 @@ public actual suspend fun runBackendHost(
                         lifecycle.requestStop()
                     }
                     work.cancelAndJoin()
-                    services?.shutdownSessions()
                     lifecycle.finishStop()
                 }
             }
@@ -264,33 +263,35 @@ public actual suspend fun ensureBackend(home: Path): BackendEndpoint {
     val outputOffset = startupOutput().length
     val previous = try { BackendInstance.readRecord(home)?.instanceId } catch (_: Exception) { null }
     val launchedPid = launchIndependentBackend(home)
-    return withTimeout(60.seconds) {
-        while (true) {
-            val endpoint = try { BackendInstance.discover(home) } catch (_: Exception) { null }
-            if (endpoint == null) {
-                val ended = try { BackendInstance.readRecord(home) } catch (_: Exception) { null }
-                if (ended?.pid == launchedPid && ended.instanceId != previous) {
-                    ended.failureReason?.let { error(it) }
+    return BackendControlClient().use { controlClient ->
+        withTimeout(60.seconds) {
+            while (true) {
+                val endpoint = try { BackendInstance.discover(home) } catch (_: Exception) { null }
+                if (endpoint == null) {
+                    val ended = try { BackendInstance.readRecord(home) } catch (_: Exception) { null }
+                    if (ended?.pid == launchedPid && ended.instanceId != previous) {
+                        ended.failureReason?.let { error(it) }
+                    }
+                    val output = startupOutput()
+                    val currentOutput = if (output.length >= outputOffset) output.substring(outputOffset) else output
+                    val reason = currentOutput.substringAfterLast("Unable to run Kodex [pid=$launchedPid]: ", "").trim()
+                    if (reason.isNotEmpty()) error(reason)
+                    if (!backendProcessAlive(launchedPid)) error("Backend failed to start; inspect log/backend-startup.log.")
                 }
-                val output = startupOutput()
-                val currentOutput = if (output.length >= outputOffset) output.substring(outputOffset) else output
-                val reason = currentOutput.substringAfterLast("Unable to run Kodex [pid=$launchedPid]: ", "").trim()
-                if (reason.isNotEmpty()) error(reason)
-                if (!backendProcessAlive(launchedPid)) error("Backend failed to start; inspect log/backend-startup.log.")
-            }
-            if (endpoint != null) {
-                check(endpoint.businessProtocol == BackendBusinessProtocol) { "Backend protocol differs." }
-                if (endpoint.pid == launchedPid) endpoint.failureReason?.let { error(it) }
-                val status = try { backendControlRequest(endpoint, "status") } catch (_: Exception) { null }
-                if (status?.get("phase")?.jsonPrimitive?.content == "ready") return@withTimeout endpoint
-                if (endpoint.pid != launchedPid) {
-                    check(status?.get("phase")?.jsonPrimitive?.content != "stopping") { "Backend startup is stopping." }
+                if (endpoint != null) {
+                    check(endpoint.businessProtocol == BackendBusinessProtocol) { "Backend protocol differs." }
+                    if (endpoint.pid == launchedPid) endpoint.failureReason?.let { error(it) }
+                    val status = try { controlClient.request(endpoint, "status") } catch (_: Exception) { null }
+                    if (status?.get("phase")?.jsonPrimitive?.content == "ready") return@withTimeout endpoint
+                    if (endpoint.pid != launchedPid) {
+                        check(status?.get("phase")?.jsonPrimitive?.content != "stopping") { "Backend startup is stopping." }
+                    }
                 }
+                delay(100)
             }
-            delay(100)
+            @Suppress("UNREACHABLE_CODE")
+            error("Backend startup failed.")
         }
-        @Suppress("UNREACHABLE_CODE")
-        error("Backend startup failed.")
     }
 }
 

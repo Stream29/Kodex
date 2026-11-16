@@ -399,7 +399,6 @@ internal open class SidebarTestAgent(
     override val shellSessions = object : AgentShellSessionRegistry { override val activeSessions = sessions }
     var closeCount = 0
     override fun close() { closeCount++ }
-    override val storageUri: String get() = unused()
     override val composer: ComposerViewModel get() = unused()
     override val history: AgentHistoryViewModel get() = unused()
     override val runtimeConfiguration: RuntimeConfigurationViewModel get() = unused()

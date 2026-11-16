@@ -49,11 +49,9 @@ kotlin {
         named("mosaicTest").dependencies {
             implementation(project(":app-component-account-usage-viewmodel"))
             implementation(project(":app-rpc"))
-            implementation(project(":app-component-session-viewmodel"))
             implementation(project(":app-component-session-contract"))
             implementation(project(":rpc-server"))
             implementation(project(":rpc-in-memory"))
-            implementation(project(":app-rpc-system"))
             implementation(project(":app-rpc-test-support"))
             implementation(project(":app-backend-settings"))
             implementation(project(":app-tui-path-picker"))

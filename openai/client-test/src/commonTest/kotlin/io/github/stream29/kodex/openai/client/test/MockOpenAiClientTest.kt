@@ -59,7 +59,7 @@ val mockOpenAiClientTest by testSuite {
     }
 
     test("built simple response handlers are independent of later builder mutation") {
-        val builder = MockOpenAiClientBuilder()
+        val builder = MockOpenAiClientBuilderImpl()
         val firstEvent = ResponsesStreamEvent.Completed(Response(id = "first"))
         val secondEvent = ResponsesStreamEvent.Completed(Response(id = "second"))
         builder.createResponse { _: ResponsesApiRequest -> flowOf(firstEvent) }
@@ -78,7 +78,7 @@ val mockOpenAiClientTest by testSuite {
     }
 
     test("built full response handlers are independent and retain explicit override") {
-        val builder = MockOpenAiClientBuilder()
+        val builder = MockOpenAiClientBuilderImpl()
         val firstEvent = ResponsesStreamEvent.Completed(Response(id = "full-first"))
         val secondEvent = ResponsesStreamEvent.Completed(Response(id = "full-second"))
         builder.createResponse { _, _ -> flowOf(firstEvent) }

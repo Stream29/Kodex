@@ -3,18 +3,24 @@ package io.github.stream29.kodex.openai.modelcatalog
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.client.OpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
-import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
+import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.osenvironment.userHomeDirectory
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 private fun testCodexDirectory(): Path =
@@ -26,11 +32,18 @@ private fun testCodexDirectory(): Path =
 
 private suspend fun liveCatalog(): LiveCatalogFixture {
     val storage = CodexCliStorage(testCodexDirectory())
+    val credentials = storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()
+    val authState = MutableStateFlow<OpenAiAuthState>(OpenAiAuthState.Unavailable.NotLoaded)
+    val authStore = object : OpenAiAuthStore {
+        override val state = authState
+    }
     val client = OpenAiClient(
-        authStore = InMemoryOpenAiAuthStore(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
+        authStore = authStore,
         config = OpenAiClientConfig(),
     )
-    return LiveCatalogFixture(client, OpenAiModelCatalog(client))
+    val catalog = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        .ownedOpenAiModelCatalog(client, authStore)
+    return LiveCatalogFixture(client, catalog, authState, credentials)
 }
 
 private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionAuthState {
@@ -44,6 +57,8 @@ private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionA
 private class LiveCatalogFixture(
     private val client: OpenAiClient,
     val catalog: OpenAiModelCatalogStore,
+    val authState: MutableStateFlow<OpenAiAuthState>,
+    val credentials: OpenAiSubscriptionAuthState,
 ) : AutoCloseable {
     override fun close() {
         catalog.close()
@@ -57,10 +72,13 @@ val openAiModelCatalogIntegrationTest by testSuite(testConfig = TestConfig.testS
             "refreshes model metadata from the real Codex endpoint",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 120.seconds),
         ) { fixture ->
+            val bundled = fixture.catalog.models.value
             val models = withContext(Dispatchers.Default) {
-                fixture.catalog.refresh()
+                fixture.authState.value = OpenAiAuthState.Authenticated(fixture.credentials)
+                fixture.catalog.models.first { it !== bundled }
             }
 
+            assertTrue(models.isNotEmpty())
             assertEquals(models, fixture.catalog.models.value)
         }
     }

@@ -6,8 +6,11 @@ import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
+import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
+import io.github.stream29.kodex.mcp.contract.McpCatalogTool
+import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -15,6 +18,7 @@ import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.SearchResponse
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
+import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.server.defaultBackendSettings
 import io.github.stream29.kodex.rpc.server.withBackendServices
@@ -22,16 +26,29 @@ import io.github.stream29.kodex.tool.unifiedexec.KodexAgentIdEnvironmentVariable
 import io.github.stream29.kodex.tool.unifiedexec.KodexHomeEnvironmentVariable
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlin.random.Random
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Instant
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
+import kotlinx.rpc.registerService
+import kotlinx.schema.json.ObjectPropertyDefinition
+import kotlinx.schema.json.StringPropertyDefinition
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("resolveToolBackend fails fast without auto-starting a backend when none is running") {
@@ -45,6 +62,150 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
             )
         }
         assertContains(error.message.orEmpty(), "No running Kodex backend found")
+    }
+
+    test("dynamic MCP tool invocation reuses a single RPC connection across discovery and execution") {
+        val endpoint = BackendEndpoint("instance-mcp", 42, 18080, "a".repeat(64), "0.6.0")
+        val root = Path(SystemTemporaryDirectory, "kodex-cli-single-conn-${Random.nextLong()}")
+        val client = mockOpenAiClient {
+            listModels { OpenAiResult.Success(ModelsResponse(emptyList())) }
+        }
+        try {
+            withBackendServices(
+                home = root,
+                codexHome = Path(root, "codex"),
+                agentsHome = Path(root, "agents"),
+                defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
+                createClient = { client },
+            ) { backend ->
+                var opened = 0
+                var closed = 0
+                val published = McpCatalogTool(
+                    serverName = "github",
+                    serverInstructions = "GitHub MCP server.",
+                    toolName = "echo_title",
+                    description = "Echoes title.",
+                    inputSchema = ObjectPropertyDefinition(
+                        properties = mapOf("title" to StringPropertyDefinition(description = "Title")),
+                        required = listOf("title"),
+                    ),
+                )
+                withInMemoryRpc(backend::register) { baseRaw ->
+                    val baseServices = RpcServices(RestoringRpcClient(baseRaw))
+                    val customGlobal = object : GlobalRpc by baseServices.global {
+                        override suspend fun listMcpTools(): List<McpCatalogTool> = listOf(published)
+                        override suspend fun callMcpTool(
+                            serverName: String,
+                            toolName: String,
+                            arguments: JsonObject,
+                        ): CallToolResult {
+                            assertEquals("github", serverName)
+                            assertEquals("echo_title", toolName)
+                            return CallToolResult(
+                                content = listOf(
+                                    kotlinx.serialization.json.buildJsonObject {
+                                        put("type", kotlinx.serialization.json.JsonPrimitive("text"))
+                                        put("text", arguments.getValue("title"))
+                                    },
+                                ),
+                            )
+                        }
+                    }
+                    withInMemoryRpc(registerServices = {
+                        registerService<GlobalRpc> { customGlobal }
+                        registerService<io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc> { baseServices.runtime }
+                    }) { mcpRaw ->
+                        val mcpServices = RpcServices(RestoringRpcClient(mcpRaw))
+                        val sessionJob = SupervisorJob()
+                        val session = ReusableToolRpcSession(
+                            scope = CoroutineScope(Dispatchers.Default + sessionJob),
+                            defaultHome = root,
+                            discover = { endpoint },
+                            openServices = { _, _, use ->
+                                opened++
+                                try {
+                                    use(mcpServices)
+                                } finally {
+                                    closed++
+                                }
+                            },
+                        )
+                        val stdout = mutableListOf<String>()
+                        try {
+                            val code = dispatchCli(
+                                arguments = listOf("github", "echo_title", "--json", """{"title":"one-connection"}"""),
+                                output = { msg, _ -> error("Unexpected parser output: $msg") },
+                                resolveMcpDomains = { target -> runBlocking { session.discoverMcpDomains(target) } },
+                                execute = { leaf ->
+                                    runBlocking {
+                                        val toolLeaf = assertIs<KodexToolLeafCommand>(leaf)
+                                        executeCliToolCommand(
+                                            toolLeaf,
+                                            session.requireServices(toolLeaf.backend.resolve()),
+                                            writeStdout = stdout::add,
+                                        )
+                                    }
+                                },
+                            )
+                            assertEquals(0, code)
+                            assertEquals(1, opened)
+                            assertEquals(0, closed)
+                        } finally {
+                            runBlocking(NonCancellable) {
+                                session.close()
+                                sessionJob.cancelAndJoin()
+                            }
+                        }
+                        assertEquals(1, opened)
+                        assertEquals(1, closed)
+                        val result = CliToolJson.decodeFromString(CallToolResult.serializer(), stdout.single())
+                        assertEquals("one-connection", result.content.single().jsonObject.getValue("text").jsonPrimitive.content)
+
+                        // Help also closes its single discovery connection deterministically.
+                        var helpOpened = 0
+                        var helpClosed = 0
+                        val helpJob = SupervisorJob()
+                        val helpSession = ReusableToolRpcSession(
+                            scope = CoroutineScope(Dispatchers.Default + helpJob),
+                            defaultHome = root,
+                            discover = { endpoint },
+                            openServices = { _, _, use ->
+                                helpOpened++
+                                try { use(mcpServices) } finally { helpClosed++ }
+                            },
+                        )
+                        val helpMessages = mutableListOf<String>()
+                        try {
+                            val helpCode = dispatchCli(
+                                arguments = listOf("github", "--help"),
+                                output = { msg, err ->
+                                    assertFalse(err)
+                                    helpMessages += msg
+                                },
+                                resolveMcpDomains = { target -> runBlocking { helpSession.discoverMcpDomains(target) } },
+                                execute = { error("Help must not execute") },
+                            )
+                            assertEquals(0, helpCode)
+                        } finally {
+                            runBlocking(NonCancellable) {
+                                helpSession.close()
+                                helpJob.cancelAndJoin()
+                            }
+                        }
+                        assertEquals(1, helpOpened)
+                        assertEquals(1, helpClosed)
+                        assertContains(helpMessages.single(), "echo_title")
+                    }
+                }
+            }
+        } finally {
+            suspend fun removeTree(path: Path) {
+                val meta = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
+                if (meta.isDirectory) SystemCoroutineFileSystem.list(path).forEach { removeTree(it) }
+                SystemCoroutineFileSystem.delete(path, mustExist = false)
+            }
+            removeTree(root)
+        }
     }
 
     test("flat CLI tool commands execute end-to-end against RPC services using KODEX_AGENT_ID and --agent") {
@@ -104,7 +265,7 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                         ) { leaf ->
                             runBlocking {
                                 executeCliToolCommand(
-                                    command = leaf,
+                                    command = assertIs<KodexToolLeafCommand>(leaf),
                                     services = services,
                                     env = envMap::get,
                                     readStdin = { stdinText },

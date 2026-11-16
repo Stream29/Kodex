@@ -77,6 +77,14 @@ val localBrowserProtocolTest by testSuite {
         assertEquals(BackendBusinessProtocol, endpoint.businessProtocol)
         assertFalse(endpoint.toString().contains(endpoint.password))
     }
+    test("heartbeat renewal cadence caps long or infinite TTLs and scales short TTLs") {
+        assertEquals(20_000L, backendHeartbeatIntervalMillis(-1))
+        assertEquals(20_000L, backendHeartbeatIntervalMillis(60))
+        assertEquals(20_000L, backendHeartbeatIntervalMillis(300))
+        assertEquals(333L, backendHeartbeatIntervalMillis(1))
+        assertFailsWith<IllegalArgumentException> { backendHeartbeatIntervalMillis(0) }
+        assertFailsWith<IllegalArgumentException> { backendHeartbeatIntervalMillis(-2) }
+    }
 }
 
 private fun testHostDescriptor(credential: String): LocalFrontendHostDescriptor = LocalFrontendHostDescriptor(
@@ -91,7 +99,6 @@ private fun testHostDescriptor(credential: String): LocalFrontendHostDescriptor 
     launchDirectory = "/canonical/project",
     leaseMillis = LocalFrontendHostOwnerLeaseMillis,
     capabilities = FrontendHostCapabilities(
-        FrontendCapabilityStatus.Negotiating, FrontendCapabilityStatus.Negotiating,
         FrontendCapabilityStatus.Negotiating, FrontendCapabilityStatus.Negotiating,
     ),
 )

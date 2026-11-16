@@ -92,8 +92,8 @@ public interface AgentSettingsViewModel {
  *
  * Stable identity and mutable Agent-owned state are direct properties. Production
  * assembly uses the existing RPC factory
- * `createRpcAgentViewModel(binding, scope, services, models, reportUnhandledError)`: the exact
- * binding/services and model catalog are borrowed; scope owns the local Agent child;
+ * `createRpcAgentViewModel(binding, scope, models, reportUnhandledError)`: the exact
+ * binding and model catalog are borrowed; scope owns the local Agent child;
  * reportUnhandledError uses the Application's local error Hook outlet. Those inputs
  * are not renderer inputs or spec dependencies, and close does not close the shared
  * services/catalog/parent scope.
@@ -124,8 +124,6 @@ public interface AgentSettingsViewModel {
 public interface AgentViewModel :
     AgentSettingsViewModel,
     AutoCloseable {
-    /** Stable Storage URI of this root Session. */
-    public val storageUri: String
     public val composer: ComposerViewModel
     public val history: AgentHistoryViewModel
     public val historyIndex: HistoryIndexViewModel

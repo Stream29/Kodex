@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.rpc.localserver
 
 import io.github.stream29.kodex.backend.*
+import io.github.stream29.kodex.rpc.client.RpcWireSerializers
 import io.github.stream29.kodex.rpc.websocket.WebSocketRpcTransport
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.HttpHeaders
@@ -45,7 +46,6 @@ import kotlinx.rpc.RpcServer
 import kotlinx.rpc.krpc.rpcServerConfig
 import kotlinx.rpc.krpc.serialization.json.json
 import kotlinx.rpc.krpc.server.KrpcServer
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.Json
 
 public actual suspend fun <R> withLocalBackendServer(
@@ -79,7 +79,10 @@ public actual suspend fun <R> withLocalBackendServer(
                     if (stopping) false else { transports.add(transport); true }
                 }
                 if (!admitted) return
-                val server = object : KrpcServer(rpcServerConfig { serialization { json() } }, transport) {}
+                val server = object : KrpcServer(
+                    rpcServerConfig { serialization { json { serializersModule = RpcWireSerializers } } },
+                    transport,
+                ) {}
                 server.registerServices()
                 transport.awaitClosed()
             } finally {

@@ -141,10 +141,11 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
     test("history fork preserves source and inherited identity but appends a fresh current turn") {
         runtimeFixture { repository, index, runtime ->
             val management = testSessionManagement(repository, { error("Fork must not read global defaults") })
-            runtime.appendUserMessage(index, listOf(ContentItem.InputText("keep")))
-            val boundarySettings = repository.openSessions.value.getValue(index).storage.getSettingsAt(1)
-            runtime.appendUserMessage(index, listOf(ContentItem.InputText("remove")))
-            val source = repository.openSessions.value.getValue(index).storage as ObservableKodexAgentStorage
+            val session = repository.openSessions.value.getValue(index)
+            session.runtime.appendUserMessage(listOf(ContentItem.InputText("keep")))
+            val boundarySettings = session.storage.getSettingsAt(1)
+            session.runtime.appendUserMessage(listOf(ContentItem.InputText("remove")))
+            val source = session.storage as ObservableKodexAgentStorage
             val nonce = source.cacheNonce.value
             val fork = management.forkSessionHistory(index, 2, nonce)
             assertFalse(management.getSessionCatalog(false).single { it.sessionIndex == fork }.isActive)
@@ -167,9 +168,9 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
     }
 
     test("history admission rejects stale or invalid boundaries without creating targets") {
-        runtimeFixture { repository, index, _ ->
+        runtimeFixture { repository, index, runtime ->
             val management = testSessionManagement(repository)
-            val nonce = BackendAgentStorageRpc(repository).getCacheNonce(index)
+            val nonce = runtime.getCacheNonce(index)
             assertFailsWith<CacheNonceMismatch> { management.forkSessionHistory(index, 1, nonce xor 1) }
             assertFailsWith<IllegalArgumentException> { management.forkSessionHistory(index, 0, nonce) }
             assertFailsWith<IllegalArgumentException> { management.forkSessionHistory(index, 2, nonce) }
@@ -181,9 +182,9 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
     }
 
     test("complete fork temporarily opens an inactive source and leaves both entries closed") {
-        runtimeFixture { repository, index, runtime ->
+        runtimeFixture { repository, index, _ ->
             val management = testSessionManagement(repository, { error("Fork must not read global defaults") })
-            runtime.appendUserMessage(index, listOf(ContentItem.InputText("history")))
+            repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText("history")))
             management.archiveSession(index)
             repository.closeSession(index)
             val fork = management.forkSession(index)
@@ -210,7 +211,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             },
         ) { repository, index, runtime ->
             val management = testSessionManagement(repository)
-            runtime.appendUserMessage(index, listOf(ContentItem.InputText("run")))
+            repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText("run")))
             val waiter = async { runtime.resume(index) }
             entered.await()
             waiter.cancelAndJoin()
@@ -224,14 +225,14 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
     }
 
     test("created session remains when later submission fails") {
-        runtimeFixture { repository, _, runtime ->
+        runtimeFixture { repository, _, _ ->
             val management = testSessionManagement(repository)
             val created = management.createSession(Path("."))
             assertFailsWith<IllegalStateException> {
                 error("separate submission failed")
             }
             assertTrue(management.getSessionCatalog(false).any { it.sessionIndex == created })
-            assertEquals(1, runtime.appendUserMessage(created, listOf(ContentItem.InputText("retry draft"))))
+            assertEquals(1, repository.openSessions.value.getValue(created).runtime.appendUserMessage(listOf(ContentItem.InputText("retry draft"))))
         }
     }
 
@@ -304,14 +305,12 @@ private fun testSessionManagement(
     newSessionDefaults: () -> KodexNewSessionSettings = ::testNewSessionDefaults,
     titleSettings: () -> SessionTitleSettings = { SessionTitleSettings(enabled = false) },
     titleGenerator: SessionTitleGenerator = SessionTitleGenerator { _, _, _ -> error("unused") },
-    reportBackgroundFailure: (Throwable) -> Unit = { throw it },
 ): BackendSessionManagement =
     BackendSessionManagement(
         repository = repository,
         newSessionDefaults = newSessionDefaults,
         titleSettings = titleSettings,
         titleGenerator = titleGenerator,
-        reportBackgroundFailure = reportBackgroundFailure,
     )
 
 private fun testNewSessionDefaults(): KodexNewSessionSettings =

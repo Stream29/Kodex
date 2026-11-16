@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.cli.settings
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -12,24 +11,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-internal suspend fun <T> readSplitSettings(
-    fileSystem: CoroutineFileSystem,
-    path: Path,
-    defaults: T,
-    decode: (String, T) -> T,
-): T {
-    if (!fileSystem.exists(path)) return defaults
-    val text = fileSystem.readString(path)
-    return try {
-        decode(text, defaults)
-    } catch (failure: CancellationException) {
-        throw failure
-    } catch (failure: Exception) {
-        throw IllegalArgumentException("Invalid settings YAML at $path.", failure)
-    }
-}
-
-/** Shared file publication only; the two stores own their separate write mutexes and state. */
+/** Atomic file publication using a private same-directory temporary file. */
 @OptIn(ExperimentalUuidApi::class)
 internal suspend fun writeSplitSettings(
     fileSystem: CoroutineFileSystem,

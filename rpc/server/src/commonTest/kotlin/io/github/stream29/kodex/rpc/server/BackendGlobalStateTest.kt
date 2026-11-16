@@ -1,5 +1,3 @@
-@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-
 package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestConfig
@@ -9,7 +7,7 @@ import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
-import io.github.stream29.kodex.cli.settings.openBackendSettings
+import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
 import io.github.stream29.kodex.mcp.contract.*
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelsResponse
@@ -33,8 +31,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.runCurrent
-import kotlinx.coroutines.test.runTest
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
@@ -46,7 +42,7 @@ val backendGlobalStateTest by testSuite(testConfig = TestConfig.testScope(isEnab
             val initial = global.settings.value
             assertTrue(global.compareAndSetSettings(initial, initial))
             assertEquals(0, fs.moves)
-            assertFalse(fs.exists(global.store.settingsPath))
+            assertFalse(fs.exists(global.unified.path))
             val config = assertIs<McpServerConfiguration.StreamableHttp>(initial.mcpServers["alpha"])
             assertEquals(McpSecret("header-secret"), config.headers["Authorization"])
             val oauth = assertIs<McpOAuthConfiguration.Initialized>(config.oauth)
@@ -72,8 +68,8 @@ val backendGlobalStateTest by testSuite(testConfig = TestConfig.testScope(isEnab
             assertEquals(KodexAuthSource.Codex, global.settings.value.authSource)
             val current = global.settings.value
             assertTrue(global.compareAndSetSettings(current, current.copy(authSource = KodexAuthSource.Kodex)))
-            val saved = io.github.stream29.kodex.cli.settings.UnifiedSettingsStore.open(
-                Path(global.store.settingsPath.parent!!.toString()), old,
+            val saved = UnifiedSettingsStore.open(
+                Path(global.unified.path.parent!!.toString()), old,
             ).current.backend
             assertEquals(global.settings.value, saved)
         }
@@ -234,10 +230,9 @@ val backendGlobalStateTest by testSuite(testConfig = TestConfig.testScope(isEnab
             ),
         ))
         try {
-            val unified = io.github.stream29.kodex.cli.settings.UnifiedSettingsStore.open(root, initial)
-            val store = unified.backendStore
+            val unified = UnifiedSettingsStore.open(root, initial)
             withBackendGlobalState(
-                store, unified, root, root, root, mockOpenAiClient { listModels { awaitCancellation() } },
+                unified, root, root, root, mockOpenAiClient { listModels { awaitCancellation() } },
                 InMemoryOpenAiAuthStore(OpenAiSubscriptionAuthState("test-token")),
                 tokenRefresher = { error("No initialized credentials in this test.") },
                 loginPreparer = { error("No login in this test.") },
@@ -273,10 +268,9 @@ private suspend fun withGlobalFixture(
     val fs = GlobalTestFileSystem()
     val service = GlobalTestMcpService()
     try {
-        val unified = io.github.stream29.kodex.cli.settings.UnifiedSettingsStore.open(root, globalDefaults(), fs)
-        val store = unified.backendStore
+        val unified = UnifiedSettingsStore.open(root, globalDefaults(), fs)
         withBackendGlobalState(
-            store, unified, Path(root, "agents"), root, Path(root, "codex"), client,
+            unified, Path(root, "agents"), root, Path(root, "codex"), client,
             InMemoryOpenAiAuthStore(OpenAiSubscriptionAuthState("test-token")),
             loginPreparer = { error("No browser login in this fixture.") },
             serviceFactory = { _, _ -> service },

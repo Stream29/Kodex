@@ -56,8 +56,8 @@ import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
-import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
+import io.github.stream29.kodex.openai.modelcatalog.ownedOpenAiModelCatalog
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.readmedia.ReadMediaTools
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -66,7 +66,9 @@ import io.github.stream29.kodex.utils.osenvironment.userHomeDirectory
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -298,7 +300,7 @@ private fun userMessage(text: String): ResponseItem.Message =
     )
 
 internal fun testModelCatalog(): OpenAiModelCatalogStore =
-    OpenAiModelCatalog(
+    CoroutineScope(SupervisorJob() + Dispatchers.Default).ownedOpenAiModelCatalog(
         client = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse()) }
         },
@@ -664,53 +666,6 @@ val openAiCompactionItemProbeTest by testSuite {
             assertTrue(
                 events.assistantText().contains(marker),
                 "Expected normal response output to contain $marker.",
-            )
-        }
-    }
-}
-
-val openAiHostedWebSearchProbeTest by testSuite {
-    testFixture { realOpenAiClient() } asParameterForEach {
-        test(
-            "real client executes hosted web search",
-            testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
-        ) { client ->
-            val events = client.createResponse(
-                model = testOpenAiModel(),
-                input = listOf(
-                    userMessage(
-                        "Search the web for the current official Kotlin release, then reply with its version.",
-                    ),
-                ),
-                tools = listOf(ToolSpec.WebSearch(externalWebAccess = true)),
-                toolChoice = ToolChoice.Required,
-                store = false,
-            ).toList()
-            val outputItems = events.outputItems()
-
-            println("hosted web search output item types: ${outputItems.typeNames()}")
-            println("hosted web search output text: ${events.assistantText()}")
-
-            events.completedResponseOrFail("hosted web search")
-            assertTrue(
-                outputItems.any { item -> item is ResponseItem.WebSearchCall },
-                "Expected hosted search to emit web_search_call. Output items: $outputItems",
-            )
-            assertTrue(
-                events.any { event -> event is ResponsesStreamEvent.WebSearchCallInProgress },
-                "Expected hosted search to emit its in-progress stream event.",
-            )
-            assertTrue(
-                events.any { event -> event is ResponsesStreamEvent.WebSearchCallSearching },
-                "Expected hosted search to emit its searching stream event.",
-            )
-            assertTrue(
-                events.any { event -> event is ResponsesStreamEvent.WebSearchCallCompleted },
-                "Expected hosted search to emit its completed stream event.",
-            )
-            assertTrue(
-                events.assistantText().isNotBlank(),
-                "Expected hosted search to produce an assistant response.",
             )
         }
     }

@@ -26,7 +26,7 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.ktor.http)
             implementation(project(":app-component-application-viewmodel"))
-            implementation(project(":app-rpc-application"))
+            implementation(project(":app-rpc"))
             implementation(project(":rpc-browser-client"))
             implementation(project(":app-web-renderer"))
             implementation(project(":app-component-widgets"))

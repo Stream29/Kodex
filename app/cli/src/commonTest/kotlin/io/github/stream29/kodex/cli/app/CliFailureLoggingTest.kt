@@ -2,6 +2,8 @@ package io.github.stream29.kodex.cli.app
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.oshai.kotlinlogging.KotlinLoggingConfiguration
+import io.github.oshai.kotlinlogging.Level
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.backend.BackendInstance
 import io.github.stream29.kodex.backend.LocalFrontendHostJson
@@ -71,6 +73,23 @@ val cliFailureLoggingTest by testSuite(compartment = { TestCompartment.RealTime 
         }
         assertEquals(1, fallbackCode)
         assertEquals(listOf("Unable to run Kodex: outer failure marker"), fallback)
+
+        val previousLevel = KotlinLoggingConfiguration.direct.logLevel
+        try {
+            KotlinLoggingConfiguration.direct.logLevel = Level.OFF
+            val nonTuiHome = Path(home, "non-tui-coroutine")
+            val stderrMessages = mutableListOf<String>()
+            val handler = createCliCoroutineExceptionHandler(
+                home = { nonTuiHome },
+                stderrOutput = stderrMessages::add,
+            )
+            handler.handleException(kotlin.coroutines.EmptyCoroutineContext, failure)
+            val coroutineLog = readFailureLog(nonTuiHome)
+            assertContains(coroutineLog, "outer failure marker")
+            assertEquals(listOf("Unhandled CLI coroutine failure: outer failure marker"), stderrMessages)
+        } finally {
+            KotlinLoggingConfiguration.direct.logLevel = previousLevel
+        }
     }
 
     test("resolveFrontendBackend routes default and explicit backend URLs with optional backend Home") {

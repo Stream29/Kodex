@@ -101,7 +101,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val replacement = original.copy(command = "echo replacement")
             val added = original.copy(name = "admitted", command = "echo admitted")
             try {
-                global.updateHooks(listOf(original))
+                store.update { it.copy(hooks = listOf(original)) }
                 queue.submit { entered.complete(Unit); proceed.await() }
                 entered.await()
                 val stale = requireNotNull(dependencies.captureEditor(original.name))
@@ -122,7 +122,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                     admittedAdd.save(added.copy(command = "echo too late")),
                 )
                 // Mutate the backend-managed frontend projection before queued closures execute.
-                global.updateHooks(listOf(replacement))
+                store.update { it.copy(hooks = listOf(replacement)) }
                 accepting = false
                 queue.close { drained.complete(Unit) }
                 store.settings.first { it.hooks == listOf(replacement) }
@@ -196,12 +196,19 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 assertEquals(30 to 30, global.sidebarWidths.value)
                 global.resizeSidebars(17, 29)
                 val hooks = listOf(NotificationHook("notify", setOf(NotificationHookType.StopUnhandledError), "echo local"))
-                global.updateHooks(hooks)
+                store.update { it.copy(hooks = hooks) }
                 assertNotNull(SystemCoroutineFileSystem.metadataOrNull(Path(home, "settings.yml")))
                 assertNull(SystemCoroutineFileSystem.metadataOrNull(Path(home, "settings.frontend.cli.yml")))
                 assertNull(SystemCoroutineFileSystem.metadataOrNull(Path(home, "settings.backend.yml")))
                 val initial = global.settings.value.sessionTitle
-                assertTrue(global.edit(initial, { it.sessionTitle }, { it.copy(sessionTitle = initial.copy(enabled = true)) }))
+                assertTrue(
+                    global.settings.editField(
+                        initial,
+                        { it.sessionTitle },
+                        { it.copy(sessionTitle = initial.copy(enabled = true)) },
+                        global::ensureActive,
+                    ),
+                )
                 global.settings.first { it.sessionTitle.enabled }
                 store.settings.first { it.hooks == hooks }
                 assertEquals(store.settings.value, services.global.getFrontendSettings())
@@ -209,7 +216,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 assertTrue(global.models.value.isNotEmpty())
             } finally { global.close(); global.join() }
             assertFailsWith<CancellationException> {
-                global.edit(global.settings.value.authSource, { it.authSource }, { it })
+                global.settings.editField(global.settings.value.authSource, { it.authSource }, { it }, global::ensureActive)
             }
         }
     }
@@ -577,7 +584,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 global.settings.first { it.newSession.model == OpenAiModelId("shared") }
                 assertTrue(services.global.getSessionCatalog(true).isEmpty())
                 val view = assertNotNull(draft.submit(draft.composer.update("first"), views::open))
-                assertEquals("Session ${view.index}", view.current().settings.value.threadName)
+                assertEquals("Session ${view.sessionIndex}", view.current().settings.value.threadName)
                 assertEquals(OpenAiModelId("shared"), view.current().settings.value.model)
                 val source = RpcSessionSettingsSource(view, this)
                 try {

@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.app
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
@@ -16,6 +17,7 @@ import io.github.stream29.kodex.app.test.withRpcFrontend
 import io.github.stream29.kodex.cli.newsession.DefaultNewSessionViewModelFactory
 import io.github.stream29.kodex.cli.rpc.RpcSessionCatalogDependencies
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
@@ -86,15 +88,7 @@ val exactTargetCommandTest by testSuite(compartment = { TestCompartment.RealTime
         test("Application submits nonzero $label text unchanged through real RPC") {
             withCommandApplication {
                 val persisted = assertNotNull(application.submitNewSession(input(text)))
-                val message = assertIs<StableUserMessage>(
-                    backend.services.storage.getFirstCommitsIn(
-                        persisted.sessionIndex,
-                        backend.services.storage.getCacheNonce(persisted.sessionIndex),
-                        0,
-                        1,
-                        io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.IndexTypes,
-                    ).last().commit,
-                )
+                val message = readFirstUserMessage(persisted.sessionIndex)
                 assertEquals(listOf(ContentItem.InputText(text)), message.content)
                 assertEquals("", first.composer.state.value.text)
                 assertSame(persisted, application.navigation.value.selectedSession)
@@ -120,15 +114,7 @@ val exactTargetCommandTest by testSuite(compartment = { TestCompartment.RealTime
             assertEquals("later text", first.composer.state.value.text)
             assertEquals(later, first.composer.state.value.revision)
             first.settings.first { it.cwd == SystemTemporaryDirectory }
-            val message = assertIs<StableUserMessage>(
-                backend.services.storage.getFirstCommitsIn(
-                    persisted.sessionIndex,
-                    backend.services.storage.getCacheNonce(persisted.sessionIndex),
-                    0,
-                    1,
-                    io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.IndexTypes,
-                ).last().commit,
-            )
+            val message = readFirstUserMessage(persisted.sessionIndex)
             assertEquals(listOf(ContentItem.InputText("captured text")), message.content)
             assertNull(application.submitNewSession(original))
             assertNotNull(application.submitNewSession(later))
@@ -456,6 +442,25 @@ private class CommandApplicationFixture(
     }
     suspend fun openPersisted(): PersistedSessionViewModel =
         application.openSession(backend.services.global.createSession(backend.root))
+
+    suspend fun readFirstUserMessage(sessionIndex: Int): StableUserMessage {
+        while (true) {
+            try {
+                val nonce = backend.services.runtime.getCacheNonce(sessionIndex)
+                val latest = backend.services.runtime.getLatestIndex(sessionIndex)
+                return assertIs<StableUserMessage>(
+                    backend.services.runtime.getFirstCommitsIn(
+                        sessionIndex,
+                        nonce,
+                        0,
+                        latest,
+                        setOf(AgentCommitType.UserMessage),
+                    ).single().commit,
+                )
+            } catch (_: CacheNonceMismatch) {
+            }
+        }
+    }
 
     suspend fun blockCommands(): CommandBlocker {
         val index = backend.services.global.createSession(backend.root)

@@ -88,20 +88,6 @@ public data class OpenAiErrorResponse(
      */
     public val messageText: String?
         get() = error?.message ?: message ?: detail
-
-    /**
-     * Nullable because error payloads may omit every code-like field; `null`
-     * means no machine-readable code was provided.
-     */
-    public val codeText: String?
-        get() = error?.code ?: code
-
-    /**
-     * Nullable because error payloads may omit every type-like field; `null`
-     * means no machine-readable type was provided.
-     */
-    public val typeText: String?
-        get() = error?.type ?: type
 }
 
 /**
@@ -127,15 +113,6 @@ public class OpenAiResponseResultException(
     public val error: OpenAiErrorResponse,
 ) : IllegalStateException(
     error.messageText ?: "OpenAI returned an error response without a message.",
-)
-
-/**
- * Raised when a Responses stream emits `response.failed`.
- */
-public class OpenAiResponseStreamFailureException(
-    public val error: ResponseError?,
-) : IllegalStateException(
-    "OpenAI response stream failed.",
 )
 
 /**

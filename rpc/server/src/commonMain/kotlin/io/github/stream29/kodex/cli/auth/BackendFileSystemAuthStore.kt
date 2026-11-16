@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.cli.auth
 
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -16,6 +14,7 @@ import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.coroutines.closeOnFailure
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -38,7 +37,7 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-public actual class BackendFileSystemAuthStore internal constructor(
+internal class BackendFileSystemAuthStore internal constructor(
     private val owner: CoroutineScope,
     private val dataDirectory: Path,
     private val codexHome: Path,
@@ -51,7 +50,7 @@ public actual class BackendFileSystemAuthStore internal constructor(
     private val writes = Mutex()
     private val generations = KodexAuthSource.entries.associateWith { 0L }.toMutableMap()
     private val loaded = mutableMapOf<KodexAuthSource, AuthLoadResult>()
-    actual override val state: StateFlow<OpenAiAuthState>
+    override val state: StateFlow<OpenAiAuthState>
         field = MutableStateFlow<OpenAiAuthState>(OpenAiAuthState.Unavailable.NotLoaded)
 
     internal suspend fun start() {
@@ -81,12 +80,12 @@ public actual class BackendFileSystemAuthStore internal constructor(
         }
     }
 
-    public actual suspend fun beginLogin(source: KodexAuthSource): Long = writes.withLock {
+    suspend fun beginLogin(source: KodexAuthSource): Long = writes.withLock {
         owner.ensureActive()
         nextGeneration(source)
     }
 
-    public actual suspend fun commitLogin(
+    suspend fun commitLogin(
         source: KodexAuthSource,
         generation: Long,
         tokens: OpenAiSubscriptionTokens,
@@ -102,7 +101,7 @@ public actual class BackendFileSystemAuthStore internal constructor(
         }
     }
 
-    public actual suspend fun remove(source: KodexAuthSource) {
+    suspend fun remove(source: KodexAuthSource) {
         writes.withLock {
             owner.ensureActive()
             nextGeneration(source)
@@ -112,7 +111,7 @@ public actual class BackendFileSystemAuthStore internal constructor(
         }
     }
 
-    public actual suspend fun reload(source: KodexAuthSource) {
+    suspend fun reload(source: KodexAuthSource) {
         writes.withLock {
             owner.ensureActive()
             loaded[source] = read(source)
@@ -159,7 +158,7 @@ public actual class BackendFileSystemAuthStore internal constructor(
         }
     }
 
-    actual override fun close() { owner.cancel() }
+    override fun close() { owner.cancel() }
 
     private fun nextGeneration(source: KodexAuthSource): Long {
         val previous = generations.getValue(source)
@@ -243,13 +242,13 @@ public actual class BackendFileSystemAuthStore internal constructor(
 
 private val BackendAuthLogger by lazy { KotlinLogging.logger {} }
 
-public actual suspend fun CoroutineScope.BackendFileSystemAuthStore(
+internal suspend fun CoroutineScope.BackendFileSystemAuthStore(
     dataDirectory: Path,
     codexHome: Path,
     selectedSource: StateFlow<KodexAuthSource>,
     loginClient: OpenAiLoginClient,
-    fileSystem: CoroutineFileSystem,
-    clock: Clock,
+    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    clock: Clock = Clock.System,
 ): BackendFileSystemAuthStore =
     supervisorChildScope().closeOnFailure({ it.cancel() }) { owner ->
         BackendFileSystemAuthStore(owner, dataDirectory, codexHome, selectedSource, fileSystem, loginClient, clock)

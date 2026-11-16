@@ -11,9 +11,9 @@ import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.getOrThrow
+import io.github.stream29.kodex.openai.unavailableMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
@@ -32,8 +32,7 @@ import kotlin.uuid.Uuid
 internal class CodexAccountUsageStoreImpl(
     private val client: OpenAiClient,
     private val authStore: OpenAiAuthStore,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-    private val retainDefinitiveOutcome: Boolean = false,
+    private val scope: CoroutineScope,
 ) : CodexAccountUsageStore {
     private val operationMutex = Mutex()
     private val attemptAccountKeys = linkedMapOf<String, AccountKey>()
@@ -151,10 +150,7 @@ internal class CodexAccountUsageStoreImpl(
             val outcome = response.code.toOutcome()
             if (currentAccountKey() != accountKey) {
                 transitionToCurrentAuth()
-                if (retainDefinitiveOutcome) return@withLock outcome
-                throw IllegalStateException(
-                    "The authenticated Codex account changed while the reset was being used.",
-                )
+                return@withLock outcome
             }
 
             try {
@@ -252,7 +248,7 @@ internal class CodexAccountUsageStoreImpl(
         when (val authState = authStore.state.value) {
             is OpenAiAuthState.Authenticated -> authState.credentials
             is OpenAiAuthState.Unavailable ->
-                throw IllegalStateException(authState.usageFailureMessage())
+                throw IllegalStateException(authState.unavailableMessage())
         }
 
     private fun currentAccountKey(): AccountKey? =
@@ -277,24 +273,14 @@ internal class CodexAccountUsageStoreImpl(
     }
 }
 
-/** Creates a live, account-isolated Codex usage store. */
-public actual fun CodexAccountUsageStore(
-    client: OpenAiClient,
-    authStore: OpenAiAuthStore,
-): CodexAccountUsageStore =
-    CodexAccountUsageStoreImpl(
-        client = client,
-        authStore = authStore,
-    )
-
-/** Backend ownership and result semantics, without changing the legacy CLI factory. */
+/** Creates a live, account-isolated Codex usage store owned by this scope. */
 public actual fun CoroutineScope.ownedCodexAccountUsageStore(
     client: OpenAiClient,
     authStore: OpenAiAuthStore,
 ): CodexAccountUsageStore = CodexAccountUsageStoreImpl(
-    client, authStore,
-    CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[kotlinx.coroutines.Job])),
-    retainDefinitiveOutcome = true,
+    client = client,
+    authStore = authStore,
+    scope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[kotlinx.coroutines.Job])),
 )
 
 internal fun buildAccountUsageSnapshot(
@@ -410,21 +396,6 @@ private fun Throwable.usageFailureMessage(fallback: String): String =
         ?.takeIf(String::isNotBlank)
         ?.let { detail -> "$fallback $detail" }
         ?: fallback
-
-private fun OpenAiAuthState.Unavailable.usageFailureMessage(): String =
-    "OpenAI authentication is unavailable: " +
-        when (this) {
-            OpenAiAuthState.Unavailable.NotLoaded -> "credentials have not been loaded."
-            OpenAiAuthState.Unavailable.CredentialsNotFound -> "credentials were not found."
-            OpenAiAuthState.Unavailable.UnsupportedAuthMode ->
-                "the selected credentials use an unsupported authentication mode."
-            OpenAiAuthState.Unavailable.InvalidCredentials ->
-                "the selected credentials are malformed or incomplete."
-            OpenAiAuthState.Unavailable.CredentialSourceUnavailable ->
-                "the credential source could not be read."
-            OpenAiAuthState.Unavailable.UnexpectedFailure ->
-                "credential loading failed unexpectedly."
-        }
 
 private fun String.toInstantOrNull(): Instant? =
     runCatching { Instant.parse(this) }.getOrNull()

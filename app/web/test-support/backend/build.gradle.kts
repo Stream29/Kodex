@@ -27,6 +27,7 @@ kotlin {
         implementation(project(":app-web-host"))
         implementation(project(":rpc-backend-control-client"))
         implementation(project(":app-rpc-test-support"))
+        implementation(project(":rpc-client"))
         implementation(project(":rpc-server"))
         implementation(project(":rpc-websocket"))
         implementation(project(":openai-client-test"))

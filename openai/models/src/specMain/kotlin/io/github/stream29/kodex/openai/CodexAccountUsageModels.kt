@@ -7,8 +7,6 @@ import kotlinx.serialization.Serializable
 /** Account rate-limit payload returned by the ChatGPT Codex usage endpoint. */
 @Serializable
 public data class CodexAccountUsageResponse(
-    @SerialName("plan_type")
-    public val planType: String? = null,
     @SerialName("rate_limit")
     public val rateLimit: CodexAccountRateLimitStatus? = null,
     @SerialName("additional_rate_limits")
@@ -113,8 +111,6 @@ public enum class CodexRateLimitResetConsumeCode {
 @Serializable
 public data class CodexRateLimitResetConsumeResponse(
     public val code: CodexRateLimitResetConsumeCode,
-    @SerialName("windows_reset")
-    public val windowsReset: Long = 0L,
 )
 
 /** Account-wide token activity returned by the Codex profile endpoint. */

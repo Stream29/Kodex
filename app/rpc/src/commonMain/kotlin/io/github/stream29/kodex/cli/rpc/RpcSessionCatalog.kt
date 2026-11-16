@@ -9,7 +9,6 @@ import io.github.stream29.kodex.rpc.contract.GlobalRpc
 public actual class RpcSessionCatalogDependencies actual constructor(
     private val global: GlobalRpc,
     private val deleteSession: suspend (Int) -> Boolean,
-    private val forkSession: suspend (Int) -> Int,
 ) : SessionCatalogDependencies {
     actual override suspend fun load(showArchived: Boolean): List<SessionCatalogEntry> =
         global.getSessionCatalog(showArchived)
@@ -21,7 +20,7 @@ public actual class RpcSessionCatalogDependencies actual constructor(
         global.unarchiveSession(sessionIndex)
 
     actual override suspend fun fork(sessionIndex: Int): Int =
-        forkSession(sessionIndex)
+        global.forkSession(sessionIndex)
 
     actual override suspend fun delete(sessionIndex: Int): Boolean =
         deleteSession(sessionIndex)

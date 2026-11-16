@@ -6,8 +6,8 @@ import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.cli.settings.BackendSettingsStore
 import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
-import io.github.stream29.kodex.mcp.contract.McpManagedServerState
 import io.github.stream29.kodex.mcp.contract.McpConfigurationStore
+import io.github.stream29.kodex.mcp.contract.McpManagedServerState
 import io.github.stream29.kodex.mcp.contract.McpOAuthTokenRefresher
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpService
@@ -16,9 +16,9 @@ import io.github.stream29.kodex.mcp.impl.McpManagerImpl
 import io.github.stream29.kodex.mcp.impl.McpOAuthLoginPreparer
 import io.github.stream29.kodex.mcp.impl.McpServiceImpl
 import io.github.stream29.kodex.mcp.impl.validateMcpConfigurationUpdate
-import io.github.stream29.kodex.openai.client.contract.OpenAiClient
-import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.ModelInfo
+import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
+import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import io.github.stream29.kodex.openai.modelcatalog.ownedOpenAiModelCatalog
 import io.github.stream29.kodex.rpc.models.BackendSettings
@@ -37,8 +37,7 @@ import kotlinx.io.files.Path
  * The OpenAI client is borrowed from the backend authentication owner.
  * No frontend owns or closes these resources, and no partial GlobalRpc is registered.
  */
-public actual suspend fun <R> withBackendGlobalState(
-    store: BackendSettingsStore,
+internal suspend fun <R> withBackendGlobalState(
     unified: UnifiedSettingsStore,
     agentsHome: Path,
     kodexHome: Path,
@@ -49,7 +48,13 @@ public actual suspend fun <R> withBackendGlobalState(
     loginPreparer: McpOAuthLoginPreparer,
     block: suspend CoroutineScope.(BackendGlobalState) -> R,
 ): R = withBackendGlobalState(
-    store, unified, agentsHome, kodexHome, codexHome, client, authStore, loginPreparer,
+    unified = unified,
+    agentsHome = agentsHome,
+    kodexHome = kodexHome,
+    codexHome = codexHome,
+    client = client,
+    authStore = authStore,
+    loginPreparer = loginPreparer,
     serviceFactory = { settings, configurations ->
         McpServiceImpl(settings, configurations, tokenRefresher)
     },
@@ -57,7 +62,6 @@ public actual suspend fun <R> withBackendGlobalState(
 )
 
 internal suspend fun <R> withBackendGlobalState(
-    store: BackendSettingsStore,
     unified: UnifiedSettingsStore,
     agentsHome: Path,
     kodexHome: Path,
@@ -68,6 +72,7 @@ internal suspend fun <R> withBackendGlobalState(
     serviceFactory: CoroutineScope.(StateFlow<McpSettings>, McpConfigurationStore) -> McpService,
     block: suspend CoroutineScope.(BackendGlobalState) -> R,
 ): R = coroutineScope {
+    val store = unified.backendStore
     val owner = supervisorChildScope()
     var service: McpService? = null
     var manager: McpManagerImpl? = null
@@ -87,7 +92,7 @@ internal suspend fun <R> withBackendGlobalState(
         )
         models = owner.ownedOpenAiModelCatalog(client, authStore)
         coroutineScope {
-            block(BackendGlobalState(store, configurations, context, service, manager, models, codexHome, unified))
+            block(BackendGlobalState(unified, configurations, context, service, manager, models, codexHome))
         }
     } catch (error: Throwable) {
         failure = error
@@ -104,27 +109,27 @@ internal suspend fun <R> withBackendGlobalState(
 }
 
 public actual class BackendGlobalState internal constructor(
-    public actual val store: BackendSettingsStore,
-    public actual val mcpConfigurations: McpConfigurationStore,
-    public actual val contextSettings: StateFlow<AgentContextSettings>,
-    public actual val mcpService: McpService,
-    public actual val mcpManager: McpManagerImpl,
-    public actual val modelCatalog: OpenAiModelCatalogStore,
-    private val codexHome: Path,
     public actual val unified: UnifiedSettingsStore,
+    internal val mcpConfigurations: McpConfigurationStore,
+    internal val contextSettings: StateFlow<AgentContextSettings>,
+    internal val mcpService: McpService,
+    internal val mcpManager: McpManagerImpl,
+    internal val modelCatalog: OpenAiModelCatalogStore,
+    private val codexHome: Path,
 ) {
-    public actual val settings: StateFlow<BackendSettings> get() = store.settings
-    public actual val models: StateFlow<List<ModelInfo>> get() = modelCatalog.models
-    public actual val mcpServers: StateFlow<List<McpManagedServerState>> get() = mcpManager.servers
+    internal val store: BackendSettingsStore get() = unified.backendStore
+    internal val settings: StateFlow<BackendSettings> get() = store.settings
+    internal val models: StateFlow<List<ModelInfo>> get() = modelCatalog.models
+    internal val mcpServers: StateFlow<List<McpManagedServerState>> get() = mcpManager.servers
 
-    public actual suspend fun compareAndSetSettings(expect: BackendSettings, update: BackendSettings): Boolean =
+    internal suspend fun compareAndSetSettings(expect: BackendSettings, update: BackendSettings): Boolean =
         mcpManager.commitConfigurationChange(expect.mcpServers, update.mcpServers) {
             store.compareAndSet(expect, update) { current, proposed ->
                 validateMcpConfigurationUpdate(current.mcpServers, proposed.mcpServers)
             }
         }
 
-    public actual suspend fun reconnectMcpServer(name: String): Unit = mcpManager.reconnect(name)
+    internal suspend fun reconnectMcpServer(name: String): Unit = mcpManager.reconnect(name)
 
     public actual suspend fun reloadSettings() {
         val expected = unified.current
@@ -137,7 +142,7 @@ public actual class BackendGlobalState internal constructor(
         check(accepted) { "Settings changed during reload; retry the explicit reload." }
     }
 
-    public actual suspend fun getCodexMcpSettings(): List<McpCodexImportCandidate> =
+    internal suspend fun getCodexMcpSettings(): List<McpCodexImportCandidate> =
         readBackendCodexMcpSettings(codexHome)
 }
 

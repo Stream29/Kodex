@@ -24,7 +24,7 @@ import io.github.stream29.kodex.openai.contextWindowTokenStatus
 import io.github.stream29.kodex.openai.effectiveContextWindow
 import io.github.stream29.kodex.openai.resolvedAutoCompactionTokenLimit
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
-import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
+import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.local.withLocalRpcClient
 import io.github.stream29.kodex.rpc.models.GeneratedImageArtifact
 import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
@@ -39,7 +39,16 @@ import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -94,6 +103,23 @@ internal data class CliMcpServerDetail(
     val tools: List<McpCatalogTool> = emptyList(),
 )
 
+internal suspend fun resolveExistingOrCandidatePath(path: Path): Path =
+    if (SystemCoroutineFileSystem.exists(path)) SystemCoroutineFileSystem.resolve(path) else path
+
+internal suspend fun resolveToolBackendOrNull(
+    target: CliBackendTarget?,
+    defaultHome: Path,
+    env: (String) -> String? = ::environmentVariable,
+    discover: suspend (Path) -> BackendEndpoint? = BackendInstance::discover,
+    connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
+): Pair<Path, BackendEndpoint?> {
+    val rawHome = target?.backendHome ?: env(KodexHomeEnvironmentVariable)?.takeIf { it.isNotBlank() }
+    val resolvedHome = resolveExistingOrCandidatePath(if (rawHome == null) defaultHome else Path(rawHome))
+    val port = target?.port
+    val endpoint = if (port != null) connect(resolvedHome, port) else discover(resolvedHome)
+    return resolvedHome to endpoint
+}
+
 internal suspend fun resolveToolBackend(
     target: CliBackendTarget?,
     defaultHome: Path,
@@ -101,21 +127,103 @@ internal suspend fun resolveToolBackend(
     discover: suspend (Path) -> BackendEndpoint? = BackendInstance::discover,
     connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
 ): Pair<Path, BackendEndpoint> {
-    val rawHome = target?.backendHome ?: env(KodexHomeEnvironmentVariable)?.takeIf { it.isNotBlank() }
-    val candidate = if (rawHome == null) defaultHome else Path(rawHome)
-    val resolvedHome = if (SystemCoroutineFileSystem.exists(candidate)) {
-        SystemCoroutineFileSystem.resolve(candidate)
-    } else {
-        candidate
+    val (resolvedHome, endpoint) = resolveToolBackendOrNull(target, defaultHome, env, discover, connect)
+    return resolvedHome to (
+        endpoint ?: error(
+            "No running Kodex backend found in $resolvedHome. Start 'kodex backend start' or open a Kodex frontend first.",
+        )
+    )
+}
+
+/**
+ * Holds at most one open RPC connection across dynamic MCP domain discovery and subsequent leaf
+ * command execution within a single CLI invocation, closing it deterministically on exit.
+ */
+internal class ReusableToolRpcSession(
+    private val scope: CoroutineScope,
+    private val defaultHome: Path,
+    private val env: (String) -> String? = ::environmentVariable,
+    private val discover: suspend (Path) -> BackendEndpoint? = BackendInstance::discover,
+    private val connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
+    private val openServices: suspend (Path, BackendEndpoint, suspend (RpcServices) -> Unit) -> Unit =
+        { home, endpoint, use ->
+            withLocalRpcClient(home, endpoint) { connection ->
+                use(RpcServices(RestoringRpcClient(connection)))
+            }
+        },
+) {
+    private class ActiveConnection(
+        val target: CliBackendTarget?,
+        val services: Deferred<RpcServices>,
+        val release: CompletableDeferred<Unit>,
+        val job: Job,
+    )
+
+    private var active: ActiveConnection? = null
+
+    suspend fun discoverMcpDomains(target: CliBackendTarget?): List<McpServerDomainCommand> = try {
+        val services = servicesOrNull(target) ?: return emptyList()
+        loadDynamicMcpDomains(services)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        emptyList()
     }
-    val port = target?.port
-    val endpoint = if (port != null) {
-        connect(resolvedHome, port)
-    } else {
-        discover(resolvedHome)
-            ?: error("No running Kodex backend found in $resolvedHome. Start 'kodex backend start' or open a Kodex frontend first.")
+
+    suspend fun servicesOrNull(target: CliBackendTarget?): RpcServices? {
+        existingServices(target)?.let { return it }
+        val (resolvedHome, endpoint) = resolveToolBackendOrNull(target, defaultHome, env, discover, connect)
+        return if (endpoint == null) null else attach(target, resolvedHome, endpoint)
     }
-    return resolvedHome to endpoint
+
+    suspend fun requireServices(target: CliBackendTarget?): RpcServices {
+        existingServices(target)?.let { return it }
+        val (resolvedHome, endpoint) = resolveToolBackend(target, defaultHome, env, discover, connect)
+        return attach(target, resolvedHome, endpoint)
+    }
+
+    private suspend fun existingServices(target: CliBackendTarget?): RpcServices? {
+        val current = active ?: return null
+        if (current.target == target && current.job.isActive) return current.services.await()
+        close()
+        return null
+    }
+
+    private suspend fun attach(
+        target: CliBackendTarget?,
+        resolvedHome: Path,
+        endpoint: BackendEndpoint,
+    ): RpcServices {
+        val ready = CompletableDeferred<RpcServices>()
+        val release = CompletableDeferred<Unit>()
+        val job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                openServices(resolvedHome, endpoint) { services ->
+                    ready.complete(services)
+                    release.await()
+                }
+            } catch (failure: Throwable) {
+                val delivered = !ready.completeExceptionally(failure)
+                if (delivered && failure !is CancellationException) throw failure
+            }
+        }
+        active = ActiveConnection(target, ready, release, job)
+        return try {
+            ready.await()
+        } catch (failure: Throwable) {
+            active = null
+            release.complete(Unit)
+            withContext(NonCancellable) { job.cancelAndJoin() }
+            throw failure
+        }
+    }
+
+    suspend fun close() {
+        val current = active ?: return
+        active = null
+        current.release.complete(Unit)
+        withContext(NonCancellable) { current.job.join() }
+    }
 }
 
 internal fun resolveTargetAgentId(
@@ -131,37 +239,8 @@ internal fun resolveTargetAgentId(
     return parsed
 }
 
-internal suspend fun discoverDynamicMcpDomains(
-    target: CliBackendTarget?,
-    defaultHome: Path,
-    env: (String) -> String? = ::environmentVariable,
-): List<McpServerDomainCommand> = try {
-    val rawHome = target?.backendHome ?: env(KodexHomeEnvironmentVariable)?.takeIf { it.isNotBlank() }
-    val candidate = if (rawHome == null) defaultHome else Path(rawHome)
-    val resolvedHome = if (SystemCoroutineFileSystem.exists(candidate)) {
-        SystemCoroutineFileSystem.resolve(candidate)
-    } else {
-        candidate
-    }
-    val port = target?.port
-    val endpoint = if (port != null) {
-        connectBackend(resolvedHome, port)
-    } else {
-        BackendInstance.discover(resolvedHome) ?: return emptyList()
-    }
-    withLocalRpcClient(resolvedHome, endpoint) { connection ->
-        loadDynamicMcpDomains(RpcServices(RestoringRpcClient(connection)))
-    }
-} catch (cancelled: CancellationException) {
-    throw cancelled
-} catch (_: Exception) {
-    emptyList()
-}
-
 internal suspend fun loadDynamicMcpDomains(services: RpcServices): List<McpServerDomainCommand> {
-    val toolsByServer = services.global.listMcpTools()
-        .filter { it.serverName !in ReservedMcpServerNames }
-        .groupBy { it.serverName }
+    val toolsByServer = services.global.listMcpTools().groupBy { it.serverName }
     return toolsByServer.entries
         .sortedBy { it.key }
         .map { (serverName, tools) ->
@@ -173,32 +252,8 @@ internal suspend fun loadDynamicMcpDomains(services: RpcServices): List<McpServe
         }
 }
 
-internal fun KodexLeafCommand.toolBackendTarget(): CliBackendTarget? = when (this) {
-    is TerminalListCommand -> backend.resolve()
-    is TerminalReadCommand -> backend.resolve()
-    is TerminalWriteCommand -> backend.resolve()
-    is TerminalKillCommand -> backend.resolve()
-    is AskCreateCommand -> backend.resolve()
-    is AskListCommand -> backend.resolve()
-    is AskGetCommand -> backend.resolve()
-    is ScheduleCreateCommand -> backend.resolve()
-    is ScheduleListCommand -> backend.resolve()
-    is ScheduleDeleteCommand -> backend.resolve()
-    is SessionStatusCommand -> backend.resolve()
-    is SearchCommand -> backend.resolve()
-    is ImageCommand -> backend.resolve()
-    is McpListCommand -> backend.resolve()
-    is McpStatusCommand -> backend.resolve()
-    is McpReconnectCommand -> backend.resolve()
-    is McpEnableCommand -> backend.resolve()
-    is McpDisableCommand -> backend.resolve()
-    is McpServerToolCommand -> backend.resolve()
-    is ToolListCommand -> backend.resolve()
-    else -> null
-}
-
 internal suspend fun executeCliToolCommand(
-    command: KodexLeafCommand,
+    command: KodexToolLeafCommand,
     services: RpcServices,
     env: (String) -> String? = ::environmentVariable,
     readStdin: () -> String = ::readCliStdinText,
@@ -279,13 +334,13 @@ internal suspend fun executeCliToolCommand(
         is AskListCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
             services.global.keepSessionAlive(agentId)
-            val entries = readAskUsers(services.storage, agentId)
+            val entries = readAskUsers(services.runtime, agentId)
             writeStdout(CliToolJson.encodeToString(ListSerializer(AskUserEntry.serializer()), entries))
         }
         is AskGetCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
             services.global.keepSessionAlive(agentId)
-            val entry = readAskUsers(services.storage, agentId).firstOrNull { it.askId == command.askId }
+            val entry = readAskUsers(services.runtime, agentId).firstOrNull { it.askId == command.askId }
                 ?: error("Ask entry ${command.askId} not found in Agent $agentId.")
             writeStdout(CliToolJson.encodeToString(AskUserEntry.serializer(), entry))
         }
@@ -323,7 +378,7 @@ internal suspend fun executeCliToolCommand(
         is SessionStatusCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
             services.global.keepSessionAlive(agentId)
-            val (latestIndex, settings, tokenMeta) = readSessionStatusSnapshot(services.storage, agentId)
+            val (latestIndex, settings, tokenMeta) = readSessionStatusSnapshot(services.runtime, agentId)
             val running = services.runtime.getRunningTurn(agentId)
             val modelInfo = services.global.getModels().firstOrNull { it.slug == settings.model }
             val contextWindow = modelInfo?.effectiveContextWindow()?.let { effectiveWindow ->
@@ -420,12 +475,8 @@ internal suspend fun executeCliToolCommand(
                 ?: error("MCP server '${command.serverName}' is not configured.")
             writeStdout(CliToolJson.encodeToString(McpManagedServerState.serializer(), state))
         }
-        is McpEnableCommand -> {
-            val state = setMcpServerEnabled(services, command.serverName, enabled = true)
-            writeStdout(CliToolJson.encodeToString(McpManagedServerState.serializer(), state))
-        }
-        is McpDisableCommand -> {
-            val state = setMcpServerEnabled(services, command.serverName, enabled = false)
+        is McpSetEnabledCommand -> {
+            val state = setMcpServerEnabled(services, command.serverName, enabled = command.enabled)
             writeStdout(CliToolJson.encodeToString(McpManagedServerState.serializer(), state))
         }
         is McpServerToolCommand -> {
@@ -437,7 +488,6 @@ internal suspend fun executeCliToolCommand(
             val mcpDomains = loadDynamicMcpDomains(services)
             collectToolListLines(KodexCommand(mcpDomains)).forEach(writeStdout)
         }
-        else -> error("Unsupported tool command: ${command.commandName}")
     }
     return 0
 }
@@ -447,7 +497,7 @@ private fun <T> CliPayloadInput<T>.resolve(
     readStdin: () -> String,
 ): T = when (this) {
     is CliPayloadInput.Inline -> value
-    CliPayloadInput.Stdin -> CliToolJson.decodeFromString(serializer, readStdin())
+    is CliPayloadInput.Stdin -> CliToolJson.decodeFromString(serializer, readStdin())
 }
 
 private suspend fun setMcpServerEnabled(
@@ -475,67 +525,69 @@ private suspend fun setMcpServerEnabled(
     }
 }
 
+private suspend fun <T> withConsistentStorageSnapshot(
+    runtime: AgentRuntimeRpc,
+    sessionIndex: Int,
+    block: suspend (cacheNonce: Long, latestIndex: Int) -> T,
+): T {
+    while (true) {
+        val nonce = runtime.getCacheNonce(sessionIndex)
+        val latestIndex = runtime.getLatestIndex(sessionIndex)
+        try {
+            return block(nonce, latestIndex)
+        } catch (_: CacheNonceMismatch) {
+            delay(10)
+        }
+    }
+}
+
 private suspend fun readAskUsers(
-    storage: AgentStorageRpc,
+    runtime: AgentRuntimeRpc,
     sessionIndex: Int,
 ): List<AskUserEntry> {
-    val commit = readLatestCommitOrNull(storage, sessionIndex, AgentCommitType.AskUserTypes)?.commit as? AskUserSnapshot
+    val commit = readLatestCommitOrNull(runtime, sessionIndex, AgentCommitType.AskUserTypes)?.commit as? AskUserSnapshot
     return commit?.entries ?: emptyList()
 }
 
 private suspend fun readSessionStatusSnapshot(
-    storage: AgentStorageRpc,
+    runtime: AgentRuntimeRpc,
     sessionIndex: Int,
-): Triple<Int, KodexAgentSettings, LlmRequestMeta?> {
-    while (true) {
-        val nonce = storage.getCacheNonce(sessionIndex)
-        val latestIndex = storage.getLatestIndex(sessionIndex)
+): Triple<Int, KodexAgentSettings, LlmRequestMeta?> =
+    withConsistentStorageSnapshot(runtime, sessionIndex) { nonce, latestIndex ->
         if (latestIndex < 0) error("Agent $sessionIndex storage is not initialized.")
-        try {
-            val settingsCommit = storage.getLastCommitsIn(
-                sessionIndex = sessionIndex,
-                cacheNonce = nonce,
-                fromInclusive = 0,
-                toInclusive = latestIndex,
-                types = AgentCommitType.SettingsTypes,
-                limit = 1,
-            ).lastOrNull()?.commit as? KodexAgentSettings
-                ?: error("Agent $sessionIndex has no committed settings.")
-            val tokenMeta = storage.getLastCommitsIn(
-                sessionIndex = sessionIndex,
-                cacheNonce = nonce,
-                fromInclusive = 0,
-                toInclusive = latestIndex,
-                types = AgentCommitType.LlmRequestMetaTypes,
-                limit = 1,
-            ).lastOrNull()?.commit as? LlmRequestMeta
-            return Triple(latestIndex, settingsCommit, tokenMeta)
-        } catch (_: CacheNonceMismatch) {
-            delay(10)
-        }
+        val settingsCommit = runtime.getLastCommitsIn(
+            sessionIndex = sessionIndex,
+            cacheNonce = nonce,
+            fromInclusive = 0,
+            toInclusive = latestIndex,
+            types = AgentCommitType.SettingsTypes,
+            limit = 1,
+        ).lastOrNull()?.commit as? KodexAgentSettings
+            ?: error("Agent $sessionIndex has no committed settings.")
+        val tokenMeta = runtime.getLastCommitsIn(
+            sessionIndex = sessionIndex,
+            cacheNonce = nonce,
+            fromInclusive = 0,
+            toInclusive = latestIndex,
+            types = AgentCommitType.LlmRequestMetaTypes,
+            limit = 1,
+        ).lastOrNull()?.commit as? LlmRequestMeta
+        Triple(latestIndex, settingsCommit, tokenMeta)
     }
-}
 
 private suspend fun readLatestCommitOrNull(
-    storage: AgentStorageRpc,
+    runtime: AgentRuntimeRpc,
     sessionIndex: Int,
     types: Set<AgentCommitType>,
-): IndexedAgentCommit? {
-    while (true) {
-        val nonce = storage.getCacheNonce(sessionIndex)
-        val latestIndex = storage.getLatestIndex(sessionIndex)
-        if (latestIndex < 0) return null
-        try {
-            return storage.getLastCommitsIn(
-                sessionIndex = sessionIndex,
-                cacheNonce = nonce,
-                fromInclusive = 0,
-                toInclusive = latestIndex,
-                types = types,
-                limit = 1,
-            ).lastOrNull()
-        } catch (_: CacheNonceMismatch) {
-            delay(10)
-        }
+): IndexedAgentCommit? =
+    withConsistentStorageSnapshot(runtime, sessionIndex) { nonce, latestIndex ->
+        if (latestIndex < 0) null
+        else runtime.getLastCommitsIn(
+            sessionIndex = sessionIndex,
+            cacheNonce = nonce,
+            fromInclusive = 0,
+            toInclusive = latestIndex,
+            types = types,
+            limit = 1,
+        ).lastOrNull()
     }
-}

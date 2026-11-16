@@ -3,37 +3,37 @@ package io.github.stream29.kodex.cli.rpc
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionResult
-import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
-import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
-import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
-import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
 import io.github.stream29.kodex.agentstorage.contract.getAskUsersAt
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
+import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
+import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionResult
+import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
+import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
+import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
 import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.*
-import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
-import io.ktor.http.URLBuilder
+import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
-import io.github.stream29.kodex.rpc.local.BackendConnectionLost
 import io.github.stream29.kodex.rpc.client.update
+import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
+import io.github.stream29.kodex.rpc.local.BackendConnectionLost
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.ShellSessionState
-import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
-import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.server.defaultBackendSettings
 import io.github.stream29.kodex.rpc.server.withBackendServices
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
-import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
-import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.NoMatchException
+import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
+import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
+import io.ktor.http.URLBuilder
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
@@ -50,13 +50,11 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val fail = CompletableDeferred<Unit>()
             val available = MutableStateFlow(true)
             var subscribed = false
-            var appends = 0
-            var resumes = 0
+            var submits = 0
             frontend(connectionAvailable = { available.value }, decorate = { delegate ->
                 object : RpcClient by delegate {
                     override suspend fun <T> call(call: RpcCall): T {
-                        if (call.callableName == "appendUserMessage") appends++
-                        if (call.callableName == "resume") resumes++
+                        if (call.callableName == "submit") submits++
                         return delegate.call(call)
                     }
                     override fun <T> callServerStreaming(call: RpcCall): Flow<T> {
@@ -77,31 +75,30 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             }) {
                 val view = views.open(services.global.createSession(home))
                 val old = view.current()
-                val oldAgent = requireNotNull(view.agent.value)
-                old.appendUserMessage(listOf(ContentItem.InputText("accepted once")))
+                val oldAgent = requireNotNull(view.rootAgent.value)
+                old.submit(listOf(ContentItem.InputText("accepted once")))
+                old.running.first { !it }
                 available.value = false
                 fail.complete(Unit)
-                view.agent.first { it == null }
+                view.rootAgent.first { it == null }
                 view.status.first { it == SessionViewStatus.Loading }
-                assertEquals(1, appends)
-                assertEquals(0, resumes)
+                assertEquals(1, submits)
                 if (closeWhileDisconnected) {
                     views.release(view)
                     available.value = true
                     view.join()
                     assertEquals(SessionViewStatus.Closed, view.status.value)
-                    assertNull(view.agent.value)
+                    assertNull(view.rootAgent.value)
                 } else {
                     available.value = true
                     val rebound = view.binding.filterNotNull().first { it !== old }
                     view.status.first { it == SessionViewStatus.Ready }
-                    assertNotSame(oldAgent, view.agent.value)
+                    assertNotSame(oldAgent, view.rootAgent.value)
                     assertEquals(ComposerLifecycle.Closed, oldAgent.composer.state.value.lifecycle)
-                    assertSame(view, views.open(view.index))
-                    assertEquals(AgentStateValue.UserMessage, rebound.state.value)
+                    assertSame(view, views.open(view.sessionIndex))
+                    assertEquals(AgentStateValue.AssistantMessage, rebound.state.value)
                 }
-                assertEquals(1, appends)
-                assertEquals(0, resumes)
+                assertEquals(1, submits)
             }
         }
     }
@@ -110,7 +107,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend(decorate = { delegate -> client = delegate; delegate }) {
             val bad = views.open(services.global.createSession(home))
             val healthy = views.open(services.global.createSession(home))
-            val retainedAgent = healthy.agent.value
+            val retainedAgent = healthy.rootAgent.value
             var activations = 0
             val replacement = RpcServices(object : RpcClient by client {
                 override suspend fun <T> call(call: RpcCall): T {
@@ -125,20 +122,20 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertEquals("damaged Session fixture", failed.cause.message)
             assertEquals(2, activations)
             assertEquals(SessionViewStatus.Ready, healthy.status.value)
-            assertSame(retainedAgent, healthy.agent.value)
+            assertSame(retainedAgent, healthy.rootAgent.value)
         }
     }
     test("a lost replacement transport is not recorded as a Session business failure") {
         lateinit var client: RpcClient
         frontend(decorate = { delegate -> client = delegate; delegate }) {
             val view = views.open(services.global.createSession(home))
-            val retained = view.agent.value
+            val retained = view.rootAgent.value
             val replacement = RpcServices(object : RpcClient by client {
                 override suspend fun <T> call(call: RpcCall): T = error("fixture socket ended")
             })
             assertFailsWith<IllegalStateException> { views.reactivate(replacement) { false } }
             assertEquals(SessionViewStatus.Ready, view.status.value)
-            assertSame(retained, view.agent.value)
+            assertSame(retained, view.rootAgent.value)
         }
     }
     test("blank drafts and catalog construction allocate nothing") {
@@ -307,31 +304,41 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             binding.settings.first { it.instructions == "edited" }
             assertFalse(binding.settings.compareAndSet(initial, initial.copy(threadName = "stale")))
             assertEquals(
-                "Session ${view.index}",
+                "Session ${view.sessionIndex}",
                 checkNotNull(binding.storage.getSettingsAt(binding.latestIndex.value)).threadName,
             )
         }
     }
 
-    test("append and rollback refresh the original history using the backend nonce") {
+    test("submit and rollback refresh the original history using the backend nonce") {
         frontend {
             val view = views.open(services.global.createSession(home))
             val binding = view.current()
-            val agent = requireNotNull(view.agent.value)
-            val committed = binding.appendUserMessage(listOf(ContentItem.InputText("history")))
-            val old = agent.historyIndex.window.first { committed in it.indexes }
-            assertEquals(binding.storage.cacheNonce.value, old.generation)
+            val agent = requireNotNull(view.rootAgent.value)
+            binding.submit(listOf(ContentItem.InputText("history")))
+            binding.state.first { it == AgentStateValue.AssistantMessage }
+            binding.running.first { !it }
+            val nonce = binding.storage.cacheNonce.value
+            val committed = services.runtime.getFirstCommitsIn(
+                view.sessionIndex,
+                nonce,
+                0,
+                binding.latestIndex.value,
+                setOf(io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.UserMessage),
+            ).single().index
+            val old = agent.historyIndex.window.first { it.generation == nonce && committed in it.indexes }
             assertTrue(assertNotNull(old.entryAtOrNull(committed)).summary.contains("history"))
             agent.history.historyItems.first { it.size > 0 }
+            val latestBeforeCheckout = binding.latestIndex.value
             assertTrue(agent.historyIndex.checkOut(old.generation, committed))
-            assertEquals(committed, binding.latestIndex.value) // Check out did not revert history.
+            assertEquals(latestBeforeCheckout, binding.latestIndex.value) // Check out did not revert history.
             binding.revertHistory(committed, old.generation)
             val changed = agent.historyIndex.window.first { it.generation != old.generation }
             assertEquals(binding.storage.cacheNonce.value, changed.generation)
             assertFalse(agent.historyIndex.contains(old.generation, committed))
             assertFalse(agent.historyIndex.checkOut(old.generation, committed))
-            assertFailsWith<CacheNonceMismatch> { binding.forkHistory(1, old.generation) }
-            binding.settings.first { it.threadName == "Session ${view.index}" }
+            assertFailsWith<CacheNonceMismatch> { binding.forkHistory(committed, old.generation) }
+            binding.settings.first { it.threadName == "Session ${view.sessionIndex}" }
         }
     }
 
@@ -366,7 +373,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val other = views.open(services.global.createSession(home))
             other.current().settings.update { it.copy(threadName = "other") }
             other.current().settings.first { it.threadName == "other" }
-            val agent = requireNotNull(view.agent.value)
+            val agent = requireNotNull(view.rootAgent.value)
             try {
                 val child = agent.runtimeConfiguration
                 val before = agent.settings.value
@@ -400,7 +407,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             }
         }) {
             val view = views.open(services.global.createSession(home))
-            val composer = requireNotNull(view.agent.value).composer
+            val composer = requireNotNull(view.rootAgent.value).composer
             val original = composer.update("original")
             val current = composer.update("current")
             assertEquals(ComposerSubmissionResult.Stale, composer.submit(original))
@@ -436,7 +443,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         }) {
             val view = views.open(services.global.createSession(home))
             val binding = view.current()
-            val agent = requireNotNull(view.agent.value)
+            val agent = requireNotNull(view.rootAgent.value)
             val revision = agent.composer.update("  retained cancellation draft  ", 4)
             val waiting = async { agent.composer.submit(revision) }
             entered.await()
@@ -470,7 +477,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             }
         }) {
             val view = views.open(services.global.createSession(home))
-            val agent = requireNotNull(view.agent.value)
+            val agent = requireNotNull(view.rootAgent.value)
             try {
                 val revision = agent.composer.update("  persisted but retained  ", 6)
                 assertEquals(
@@ -482,8 +489,8 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertEquals("  persisted but retained  ", agent.composer.state.value.text)
                 assertEquals(6, agent.composer.state.value.cursorOffset)
                 assertEquals(revision + 1, agent.composer.state.value.revision)
-                services.runtime.getRunningTurnFlow(view.index).first { !it }
-                assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(view.index))
+                services.runtime.getRunningTurnFlow(view.sessionIndex).first { !it }
+                assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(view.sessionIndex))
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertEquals(1, submits)
             } finally { agent.close() }
@@ -503,7 +510,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         }) {
             val view = views.open(services.global.createSession(home))
             val binding = view.current()
-            val agent = requireNotNull(view.agent.value)
+            val agent = requireNotNull(view.rootAgent.value)
             try {
                 agent.cancel() // Actual root Stop command, not the Composer cancel port.
                 assertEquals("ordinary stop failure", failures.first { it.size == 1 }.single().message)
@@ -543,22 +550,20 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         }) {
             val view = views.open(services.global.createSession(home))
             val binding = view.current()
-            binding.appendUserMessage(listOf(ContentItem.InputText("start")))
-            val waiting = async { binding.resume() }
+            binding.submit(listOf(ContentItem.InputText("start")))
             entered.await()
             binding.running.first { it }
-            val agent = requireNotNull(view.agent.value)
+            val agent = requireNotNull(view.rootAgent.value)
             agent.composer.state.first { it.running }
             val revision = agent.composer.update("steer")
             assertEquals(ComposerSubmissionResult.QueuedAsSteer, agent.composer.submit(revision))
             preempted.await()
             binding.pendingSteer.first { it.isNotEmpty() }
-            waiting.cancelAndJoin()
             views.release(view)
-            assertTrue(services.runtime.getRunningTurn(view.index))
+            assertTrue(services.runtime.getRunningTurn(view.sessionIndex))
             finish.complete(Unit)
-            services.runtime.getRunningTurnFlow(view.index).first { !it }
-            assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(view.index))
+            services.runtime.getRunningTurnFlow(view.sessionIndex).first { !it }
+            assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(view.sessionIndex))
             assertEquals(2, requests)
         }
     }
@@ -576,7 +581,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertNull(draft.submit(revision, views::open))
                 assertEquals("second", draft.composer.state.value.text)
                 val second = assertNotNull(draft.submit(next, views::open))
-                assertNotEquals(view.index, second.index)
+                assertNotEquals(view.sessionIndex, second.sessionIndex)
                 assertEquals(2, services.global.getSessionCatalog(true).size)
             } finally { draft.close() }
         }
@@ -596,8 +601,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         }) {
             val view = views.open(services.global.createSession(home))
             val binding = view.current()
-            binding.appendUserMessage(listOf(ContentItem.InputText("stream please")))
-            val waiting = async { binding.resume() }
+            binding.submit(listOf(ContentItem.InputText("stream please")))
             emitted.await()
             val output = binding.displayState.filterIsInstance<KodexAgentStateValue.RequestResponse.Message>().first()
             val first = async { output.events.first { it is ResponsesStreamEvent.OutputTextDelta } }
@@ -605,21 +609,21 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertEquals(first.await(), second.await())
             views.release(view)
             finish.complete(Unit)
-            waiting.await()
+            services.runtime.getRunningTurnFlow(view.sessionIndex).first { !it }
             assertEquals(SessionViewStatus.Closed, view.status.value)
         }
     }
 
-    test("an inactive upstream rebuilds all bindings without replaying an accepted append") {
+    test("an inactive upstream rebuilds all bindings without replaying an accepted submit") {
         val fail = CompletableDeferred<Unit>()
         var subscribed = false
         var keepalives = 0
-        var appends = 0
+        var submits = 0
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
                     if (call.callableName == "keepSessionAlive") keepalives++
-                    if (call.callableName == "appendUserMessage") appends++
+                    if (call.callableName == "submit") submits++
                     return delegate.call(call)
                 }
                 override fun <T> callServerStreaming(call: RpcCall): Flow<T> {
@@ -637,13 +641,15 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         }) {
             val view = views.open(services.global.createSession(home))
             val old = view.current()
-            val oldAgent = requireNotNull(view.agent.value)
+            val oldAgent = requireNotNull(view.rootAgent.value)
             val oldComposer = oldAgent.composer
-            old.appendUserMessage(listOf(ContentItem.InputText("once")))
+            old.submit(listOf(ContentItem.InputText("once")))
+            old.state.first { it == AgentStateValue.AssistantMessage }
+            old.running.first { !it }
             fail.complete(Unit)
             val recovered = view.binding.filterNotNull().first { it !== old }
             view.status.first { it == SessionViewStatus.Ready }
-            val recoveredAgent = requireNotNull(view.agent.value)
+            val recoveredAgent = requireNotNull(view.rootAgent.value)
             assertNotSame(oldAgent, recoveredAgent)
             assertNotSame(oldComposer, recoveredAgent.composer)
             assertSame(recovered.settings, recoveredAgent.settings)
@@ -651,12 +657,12 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertEquals(ComposerLifecycle.Closed, oldComposer.state.value.lifecycle)
             assertEquals(ComposerSubmissionResult.Unavailable, oldComposer.submit(oldComposer.state.value.revision))
             assertFailsWith<CancellationException> { oldAgent.renameThread("expired binding") }
-            assertSame(recoveredAgent, view.agent.value)
+            assertSame(recoveredAgent, view.rootAgent.value)
             assertEquals(2, keepalives)
-            assertEquals(1, appends)
-            assertEquals(AgentStateValue.UserMessage, recovered.state.value)
+            assertEquals(1, submits)
+            assertEquals(AgentStateValue.AssistantMessage, recovered.state.value)
             assertFailsWith<CancellationException> { old.storage.getSettingsAt(0) }
-            assertSame(view, views.open(view.index))
+            assertSame(view, views.open(view.sessionIndex))
         }
     }
 
@@ -693,7 +699,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             views.release(view)
             assertEquals(SessionViewStatus.Closed, view.status.value)
             assertNull(view.binding.value)
-            assertNull(view.agent.value)
+            assertNull(view.rootAgent.value)
             assertEquals(2, keepalives)
             assertTrue(services.global.getSessionCatalog(true).single().isActive)
         }
@@ -730,14 +736,14 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         }
     }
 
-    test("a lost append reply keeps the created entity and draft without automatic retries") {
-        var appends = 0
+    test("a lost submit reply keeps the created entity and draft without automatic retries") {
+        var submits = 0
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
                     val result = delegate.call<T>(call)
-                    if (call.callableName == "appendUserMessage") {
-                        appends++
+                    if (call.callableName == "submit") {
+                        submits++
                         error("lost reply")
                     }
                     return result
@@ -750,8 +756,9 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertFailsWith<IllegalStateException> { draft.submit(revision, views::open) }
                 val index = services.global.getSessionCatalog(true).single().sessionIndex
                 assertEquals("keep me", draft.composer.state.value.text)
-                assertEquals(AgentStateValue.UserMessage, services.runtime.getState(index))
-                assertEquals(1, appends)
+                services.runtime.getRunningTurnFlow(index).first { !it }
+                assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(index))
+                assertEquals(1, submits)
             } finally { draft.close() }
         }
     }
@@ -845,10 +852,11 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend {
             val view = views.open(services.global.createSession(home))
             val binding = view.current()
-            val agent = requireNotNull(view.agent.value)
-            val index = binding.appendUserMessage(listOf(ContentItem.InputText("one")))
-            binding.latestIndex.first { it >= index }
-            binding.state.first { it == AgentStateValue.UserMessage }
+            val agent = requireNotNull(view.rootAgent.value)
+            binding.submit(listOf(ContentItem.InputText("one")))
+            binding.state.first { it == AgentStateValue.AssistantMessage }
+            binding.running.first { !it }
+            val index = 1
             val nonce = binding.storage.cacheNonce.value
             val request = agent.requestHistoryRevert(index, nonce)
             binding.revertHistory(index, nonce)
@@ -868,7 +876,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
 
     test("shell completion is a projection and completed entries remain until the registry removes them") {
         val arguments = ExecCommandArguments("not executed", yieldTimeMillis = 10_000)
-        val snapshot = MutableStateFlow(mapOf(9 to ShellSessionState("/tmp", arguments, null)))
+        val snapshot = MutableStateFlow(mapOf(9 to ShellSessionState(arguments, null)))
         val closed = CompletableDeferred<Unit>()
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
@@ -885,12 +893,12 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             }
         }) {
             val view = views.open(services.global.createSession(home))
-            val registry = requireNotNull(view.agent.value).shellSessions
+            val registry = requireNotNull(view.rootAgent.value).shellSessions
             val shell = registry.activeSessions.value.getValue(9)
             shell.close()
             closed.await()
             assertFalse(shell.completed.value)
-            snapshot.value = mapOf(9 to ShellSessionState("/tmp", arguments, 0))
+            snapshot.value = mapOf(9 to ShellSessionState(arguments, 0))
             shell.completed.first { it }
             assertSame(shell, registry.activeSessions.value[9])
             snapshot.value = emptyMap()
@@ -933,7 +941,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                     listOf(RequestUserInputQuestion("secret", "Secret", "Value?", isSecret = true)),
                 ),
             )
-            val questions = requireNotNull(view.agent.value).requestUserInput
+            val questions = requireNotNull(view.rootAgent.value).requestUserInput
             val observed = questions.state.filterIsInstance<RequestUserInputState.Pending>().first()
             assertEquals(created.askId, observed.askId)
             assertTrue(observed.arguments.questions.single().isSecret)
@@ -958,7 +966,15 @@ internal class FrontendFixture(
     val global: RpcGlobalSettings,
     val home: Path,
     val failures: StateFlow<List<Throwable>>,
-) : CoroutineScope
+) : CoroutineScope {
+    suspend fun create(name: String = "Test Session"): RpcSessionView {
+        val session = views.open(services.global.createSession(home))
+        session.rename(name)
+        session.name.first { it == name }
+        session.settings.first { it.threadName == name }
+        return session
+    }
+}
 
 internal suspend fun frontend(
     response: suspend FlowCollector<ResponsesStreamEvent>.() -> Unit = { answer() },
@@ -1005,14 +1021,15 @@ internal suspend fun frontend(
             }
         }
     } finally {
-        suspend fun remove(path: Path) {
-            val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
-            if (metadata.isDirectory) SystemCoroutineFileSystem.list(path).forEach { remove(it) }
-            SystemCoroutineFileSystem.delete(path)
-        }
-        remove(root)
+        removeTestDirectory(root)
     }
 } }
+
+internal suspend fun removeTestDirectory(path: Path) {
+    val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
+    if (metadata.isDirectory) SystemCoroutineFileSystem.list(path).forEach { removeTestDirectory(it) }
+    SystemCoroutineFileSystem.delete(path)
+}
 
 private class FixtureLoginClient : OpenAiLoginClient {
     override fun authorizationUrl(request: OpenAiLoginAuthorization): String =
@@ -1031,7 +1048,7 @@ private class FixtureLoginClient : OpenAiLoginClient {
         error("Fresh test credentials should not refresh.")
 }
 
-private suspend fun FlowCollector<ResponsesStreamEvent>.answer() {
+internal suspend fun FlowCollector<ResponsesStreamEvent>.answer() {
     emit(ResponsesStreamEvent.OutputItemDone(0, ResponseItem.Message(
         id = ResponseItemId("answer"), role = MessageRole.Assistant,
         content = listOf(ContentItem.OutputText("answer")),

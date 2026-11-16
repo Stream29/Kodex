@@ -16,6 +16,7 @@ sourceSets {
     }
     commonMain.dependencies {
         implementation(project(":app-backend-daemon"))
+        implementation(project(":rpc-client"))
         implementation(project(":rpc-websocket"))
         implementation(libs.kotlinx.rpc.krpc.server)
         implementation(libs.kotlinx.rpc.krpc.serialization.json)

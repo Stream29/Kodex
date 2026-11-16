@@ -7,10 +7,7 @@ import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
-import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
-import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
@@ -19,7 +16,6 @@ import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
-import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.contract.*
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
@@ -28,7 +24,6 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import io.github.stream29.kodex.utils.rpcexception.*
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
 import io.ktor.http.URLBuilder
-import io.ktor.http.Url
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
@@ -94,12 +89,12 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
             withInMemoryRpc(services::register) { raw ->
                 val client = RestoringRpcClient(raw)
                 val global = client.withService<GlobalRpc>()
-                val storage = client.withService<AgentStorageRpc>()
+                val runtime = client.withService<AgentRuntimeRpc>()
                 val staleFrontend = global.getSettings()
                 val firstCwd = Path("/fixture/旧目录 with spaces")
                 val first = global.createSession(firstCwd)
-                val firstNonce = storage.getCacheNonce(first)
-                val original = storage.getLastCommitsIn(first, firstNonce, 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings
+                val firstNonce = runtime.getCacheNonce(first)
+                val original = runtime.getLastCommitsIn(first, firstNonce, 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings
                 val defaults = KodexNewSessionSettings(
                     model = OpenAiModelId("backend-only-model"),
                     reasoningEffort = ReasoningEffort.High,
@@ -114,7 +109,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertNotEquals(defaults, staleFrontend.newSession)
                 val cwd = Path("/fixture/新目录 with spaces")
                 val second = global.createSession(cwd)
-                val current = storage.getLastCommitsIn(second, storage.getCacheNonce(second), 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings
+                val current = runtime.getLastCommitsIn(second, runtime.getCacheNonce(second), 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings
                 assertEquals(defaults.model, current.model)
                 assertEquals(defaults.reasoningEffort, current.reasoning.effort)
                 assertEquals(defaults.serviceTier, current.serviceTier)
@@ -127,7 +122,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertFalse(services.runtime.getRunningTurn(second))
                 assertEquals(firstCwd, original.cwd)
                 assertEquals(staleFrontend.newSession.model, original.model)
-                assertEquals(original, storage.getLastCommitsIn(first, firstNonce, 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings)
+                assertEquals(original, runtime.getLastCommitsIn(first, firstNonce, 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings)
             }
         }
     }
@@ -160,7 +155,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
             }
         }
     }
-    test("the complete backend registers all eight real services and retains independent views") {
+    test("the complete backend registers both real services and retains independent views") {
         withServices { services, _ ->
             withInMemoryRpc(services::register) { raw ->
                 val client = RestoringRpcClient(raw)
@@ -175,9 +170,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 global.keepSessionAlive(index)
                 assertEquals(0, runtime.getLatestIndex(index))
                 assertTrue(global.getSessionCatalog(false).single().isActive)
-                val storage = client.withService<AgentStorageRpc>()
-                val nonce = storage.getCacheNonce(index)
-                assertEquals(nonce, storage.getCacheNonceFlow(index).first())
+                val nonce = runtime.getCacheNonce(index)
+                assertEquals(nonce, runtime.getCacheNonceFlow(index).first())
                 for (types in listOf(
                     AgentCommitType.IndexTypes,
                     AgentCommitType.WorkTypes,
@@ -185,7 +179,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                     AgentCommitType.LlmRequestMetaTypes,
                     AgentCommitType.UnstableTypes,
                 )) {
-                    storage.getFirstCommitsIn(index, nonce, 0, 1, types)
+                    runtime.getFirstCommitsIn(index, nonce, 0, 1, types)
                 }
                 global.archiveSession(index)
                 assertTrue(global.getSessionCatalog(false).isEmpty())
@@ -220,9 +214,14 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val index = global.createSession(Path("."))
                 openSqliteConnection(Path(home, "kodex.db"), readOnly = true).use { db ->
                     assertEquals(listOf(listOf(index.toLong())), db.query("SELECT session_id FROM sessions"))
-                    val state = runtime.appendUserMessage(index, listOf(ContentItem.InputText("SQLite mutation")))
-                    val payload = db.query("""SELECT payload_json FROM agent_commits WHERE agent_id = ? AND type = 'user_message' AND "index" = ?""",
-                        listOf(index.toLong(), state.toLong())).single().single() as String
+                    runtime.submit(index, listOf(ContentItem.InputText("SQLite mutation")))
+                    runtime.getRunningTurnFlow(index).first { !it }
+                    val committedRow = db.query(
+                        """SELECT "index", payload_json FROM agent_commits WHERE agent_id = ? AND type = 'user_message'""",
+                        listOf(index.toLong()),
+                    ).single()
+                    val state = committedRow[0] as Long
+                    val payload = committedRow[1] as String
                     assertTrue(payload.contains("SQLite mutation"))
                     val message = Path(home, "sessions", index.toString(), "index", "$state.json")
                     mirrored { fs.metadataOrNull(message) != null && fs.readString(message).contains("SQLite mutation") }
@@ -277,13 +276,13 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
                 val index = global.createSession(Path("."))
-                val event = async(start = CoroutineStart.UNDISPATCHED) { global.getNotificationFlow().first() }
+                val event = async(start = CoroutineStart.UNDISPATCHED) { services.notifications.first() }
                 services.notificationSubscriptionCount.first { it > 0 }
-                runtime.appendUserMessage(index, listOf(ContentItem.InputText("question")))
-                runtime.resume(index)
+                runtime.submit(index, listOf(ContentItem.InputText("question")))
                 val stop = assertIs<Notification.Stop.AssistantMessage>(event.await())
                 assertEquals(index, stop.sessionIndex)
                 assertEquals("answer", stop.message.content.filterIsInstance<ContentItem.OutputText>().single().text)
+                runtime.getRunningTurnFlow(index).first { !it }
             }
         }
     }
@@ -294,9 +293,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val client = RestoringRpcClient(raw)
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
-                val storage = client.withService<AgentStorageRpc>()
                 val index = global.createSession(Path("."))
-                val event = async(start = CoroutineStart.UNDISPATCHED) { global.getNotificationFlow().first() }
+                val event = async(start = CoroutineStart.UNDISPATCHED) { services.notifications.first() }
                 services.notificationSubscriptionCount.first { it > 0 }
 
                 val now = kotlin.time.Clock.System.now()
@@ -313,12 +311,12 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 withTimeout(5.seconds) {
                     while (services.schedules.list(index).isNotEmpty()) delay(10)
                 }
-                val nonce = storage.getCacheNonce(index)
-                val scheduleCommits = storage.getFirstCommitsIn(
+                val nonce = runtime.getCacheNonce(index)
+                val scheduleCommits = runtime.getFirstCommitsIn(
                     index,
                     nonce,
                     0,
-                    storage.getLatestIndex(index),
+                    runtime.getLatestIndex(index),
                     setOf(AgentCommitType.EventSchedule),
                     10,
                 )
@@ -353,9 +351,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val client = RestoringRpcClient(raw)
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
-                val storage = client.withService<AgentStorageRpc>()
                 val index = global.createSession(Path("."))
-                val event = async(start = CoroutineStart.UNDISPATCHED) { global.getNotificationFlow().first() }
+                val event = async(start = CoroutineStart.UNDISPATCHED) { services.notifications.first() }
                 services.notificationSubscriptionCount.first { it > 0 }
 
                 val now = kotlin.time.Clock.System.now()
@@ -401,12 +398,12 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
                 withTimeout(5.seconds) {
                     while (true) {
-                        val currentNonce = storage.getCacheNonce(index)
-                        val count = storage.getFirstCommitsIn(
+                        val currentNonce = runtime.getCacheNonce(index)
+                        val count = runtime.getFirstCommitsIn(
                             index,
                             currentNonce,
                             0,
-                            storage.getLatestIndex(index),
+                            runtime.getLatestIndex(index),
                             setOf(AgentCommitType.EventSchedule),
                             10,
                         ).size
@@ -415,12 +412,12 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                     }
                 }
                 delay(50)
-                val nonce = storage.getCacheNonce(index)
-                val scheduleCommits = storage.getFirstCommitsIn(
+                val nonce = runtime.getCacheNonce(index)
+                val scheduleCommits = runtime.getFirstCommitsIn(
                     index,
                     nonce,
                     0,
-                    storage.getLatestIndex(index),
+                    runtime.getLatestIndex(index),
                     setOf(AgentCommitType.EventSchedule),
                     10,
                 )
@@ -474,7 +471,7 @@ internal suspend fun withServices(
         override fun close() { clientClosed = true; mock.close() }
     }
     try {
-        withBackendServices(
+        withBackendServicesWithTitleGenerator(
             home = root, codexHome = Path(root, "codex"), agentsHome = Path(root, "agents"),
             defaults = defaultBackendSettings().copy(
                 newSession = KodexNewSessionSettings(model = OpenAiModelId("test-model")),

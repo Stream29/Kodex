@@ -4,6 +4,7 @@ package io.github.stream29.kodex.cli.rpc
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.settings.contract.*
@@ -11,11 +12,12 @@ import io.github.stream29.kodex.app.settings.createSessionSettingsViewModel
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.models.BackendSettings
+import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.SystemTemporaryDirectory
-import kotlinx.rpc.RpcClient
 import kotlinx.rpc.RpcCall
+import kotlinx.rpc.RpcClient
 import kotlin.test.*
 import kotlin.time.Duration.Companion.seconds
 
@@ -50,8 +52,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
             try {
                 val index = services.global.createSession(home)
                 val persisted = views.open(index)
-                persisted.current().appendUserMessage(listOf(ContentItem.InputText("backend turn")))
-                val turn = async { persisted.current().resume() }
+                persisted.current().submit(listOf(ContentItem.InputText("backend turn")))
                 try {
                     running.await()
                     first.close()
@@ -63,10 +64,9 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                     assertTrue(services.runtime.getRunningTurn(index))
                     global.ensureActive()
                     finish.complete(Unit)
-                    turn.await()
                     services.runtime.getRunningTurnFlow(index).first { !it }
                     assertEquals(1, services.global.getSessionCatalog(true).size)
-                } finally { finish.complete(Unit); turn.cancelAndJoin() }
+                } finally { finish.complete(Unit) }
             } finally { finish.complete(Unit); first.close(); sibling.close(); parent.cancelAndJoin() }
         }
     }
@@ -219,28 +219,20 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
         }
     }
     for ((label, text) in listOf("spaces" to "   ", "newlines" to "\n\n", "padded" to " \n first message \t\n")) {
-        test("nonzero $label text is appended byte-for-byte") {
+        test("nonzero $label text is submitted byte-for-byte") {
             frontend {
                 val draft = RpcSessionDraft(home, views, global, this)
                 try {
                     val revision = draft.composer.update(text)
                     val view = assertNotNull(draft.submit(revision, views::open))
-                    val message = assertIs<StableUserMessage>(
-                        services.storage.getFirstCommitsIn(
-                            view.index,
-                            services.storage.getCacheNonce(view.index),
-                            0,
-                            1,
-                            io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.IndexTypes,
-                        ).last().commit,
-                    )
+                    val message = readFirstUserMessage(services, view.sessionIndex)
                     assertEquals(listOf(ContentItem.InputText(text)), message.content)
                     assertEquals("", draft.composer.state.value.text)
                 } finally { draft.close() }
             }
         }
     }
-    for (boundary in listOf("createSession", "appendUserMessage")) {
+    for (boundary in listOf("createSession", "submit")) {
         test("in-flight $boundary duplicates do not queue and late completion preserves newer text and ABA directory edit") {
             val entered = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
@@ -250,7 +242,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                 object : RpcClient by original {
                     override suspend fun <T> call(call: RpcCall): T {
                         if (call.callableName == "createSession") creations++
-                        if (call.callableName == "appendUserMessage") assertTrue(opened)
+                        if (call.callableName == "submit") assertTrue(opened)
                         if (call.callableName == boundary && creations == 1) {
                             entered.complete(Unit)
                             release.await()
@@ -285,7 +277,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                     assertEquals(capturedCwd, draft.settings.value.cwd)
                     assertNull(draft.submit(revision, views::open))
                     val next = assertNotNull(draft.submit(later, views::open))
-                    assertNotEquals(first.index, next.index)
+                    assertNotEquals(first.sessionIndex, next.sessionIndex)
                     assertEquals(2, creations)
                     assertEquals("", draft.composer.state.value.text)
                     draft.settings.first { it.cwd == home }
@@ -293,7 +285,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
             }
         }
     }
-    test("normal success resets only after resume admission and does not wait for model completion") {
+    test("normal success resets only after submit admission and does not wait for model completion") {
         val running = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()
         frontend(response = {
@@ -307,7 +299,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                 val revision = draft.composer.update("accepted")
                 val view = assertNotNull(withTimeout(5.seconds) { draft.submit(revision, views::open) })
                 running.await()
-                assertTrue(services.runtime.getRunningTurn(view.index))
+                assertTrue(services.runtime.getRunningTurn(view.sessionIndex))
                 assertFalse(finish.isCompleted)
                 assertEquals("", draft.composer.state.value.text)
                 draft.settings.first { it.cwd == home }
@@ -320,7 +312,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
         frontend(decorate = { original ->
             object : RpcClient by original {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "appendUserMessage") {
+                    if (call.callableName == "submit") {
                         entered.complete(Unit)
                         release.await()
                     }
@@ -352,56 +344,16 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
             }
         }
     }
-    test("admitted asynchronous resume failure uses the existing error outlet and cannot restore consumed input") {
-        val entered = CompletableDeferred<Unit>()
-        val failResume = CompletableDeferred<Unit>()
-        var creates = 0
-        var appends = 0
-        frontend(decorate = { original ->
-            object : RpcClient by original {
-                override suspend fun <T> call(call: RpcCall): T {
-                    when (call.callableName) {
-                        "createSession" -> creates++
-                        "appendUserMessage" -> appends++
-                        "resume" -> {
-                            entered.complete(Unit)
-                            failResume.await()
-                            error("controlled asynchronous resume failure")
-                        }
-                    }
-                    return original.call(call)
-                }
-            }
-        }) {
-            val draft = RpcSessionDraft(home, views, global, this)
-            try {
-                val revision = draft.composer.update("consumed")
-                assertNotNull(draft.submit(revision, views::open))
-                entered.await()
-                assertEquals("", draft.composer.state.value.text)
-                val later = draft.composer.update("later edit")
-                failResume.complete(Unit)
-                assertEquals("controlled asynchronous resume failure", failures.first { it.size == 1 }.single().message)
-                assertEquals("later edit", draft.composer.state.value.text)
-                assertEquals(later, draft.composer.state.value.revision)
-                assertEquals(1, creates)
-                assertEquals(1, appends)
-                assertEquals(1, services.global.getSessionCatalog(true).size)
-            } finally { failResume.complete(Unit); draft.close() }
-        }
-    }
-    for (phase in listOf("createSession", "open", "appendUserMessage")) {
-        test("$phase failure propagates without reset replay deletion or automatic resume") {
+    for (phase in listOf("createSession", "open", "submit")) {
+        test("$phase failure propagates without reset replay deletion or extra submit") {
             var creates = 0
-            var appends = 0
-            var resumes = 0
+            var submits = 0
             frontend(decorate = { original ->
                 object : RpcClient by original {
                     override suspend fun <T> call(call: RpcCall): T {
                         when (call.callableName) {
                             "createSession" -> creates++
-                            "appendUserMessage" -> appends++
-                            "resume" -> resumes++
+                            "submit" -> submits++
                         }
                         val result = original.call<T>(call)
                         if (call.callableName == phase) error("lost $phase reply")
@@ -424,8 +376,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                     assertEquals(revision, draft.composer.state.value.revision)
                     draft.settings.first { it.cwd == cwd }
                     assertEquals(1, creates)
-                    assertEquals(if (phase == "appendUserMessage") 1 else 0, appends)
-                    assertEquals(0, resumes)
+                    assertEquals(if (phase == "submit") 1 else 0, submits)
                     assertEquals(1, services.global.getSessionCatalog(true).size)
                     draft.composer.update("still editable")
                     draft.updateWorkingDirectory(home)
@@ -433,14 +384,12 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
             }
         }
     }
-    test("command owner cancellation during append propagates without forced resume or reset") {
+    test("command owner cancellation during submit propagates without reset") {
         val entered = CompletableDeferred<Unit>()
-        var resumes = 0
         frontend(decorate = { original ->
             object : RpcClient by original {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "resume") resumes++
-                    if (call.callableName == "appendUserMessage") {
+                    if (call.callableName == "submit") {
                         entered.complete(Unit)
                         awaitCancellation()
                     }
@@ -456,9 +405,37 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                 command.cancelAndJoin()
                 assertFailsWith<CancellationException> { command.await() }
                 assertEquals("retained", draft.composer.state.value.text)
-                assertEquals(0, resumes)
                 assertEquals(1, services.global.getSessionCatalog(true).size)
             } finally { command.cancelAndJoin(); draft.close() }
         }
     }
 }
+
+private suspend fun readFirstUserMessage(services: RpcServices, sessionIndex: Int): StableUserMessage =
+    withTimeout(5.seconds) {
+        while (true) {
+            try {
+                val nonce = services.runtime.getCacheNonce(sessionIndex)
+                val latest = services.runtime.getLatestIndex(sessionIndex)
+                val found = if (latest >= 0) {
+                    services.runtime.getFirstCommitsIn(
+                        sessionIndex,
+                        nonce,
+                        0,
+                        latest,
+                        setOf(AgentCommitType.UserMessage),
+                        limit = 1,
+                    ).firstOrNull()
+                } else {
+                    null
+                }
+                if (found != null) {
+                    return@withTimeout assertIs<StableUserMessage>(found.commit)
+                }
+                delay(10)
+            } catch (_: CacheNonceMismatch) {
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        error("Unreachable")
+    }

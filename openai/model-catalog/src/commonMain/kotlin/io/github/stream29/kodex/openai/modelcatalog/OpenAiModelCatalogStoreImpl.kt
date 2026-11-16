@@ -9,11 +9,8 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.getOrThrow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.buffer
@@ -29,14 +26,14 @@ import kotlinx.coroutines.launch
  * background scope refreshes on authentication changes when an auth store is
  * supplied, or once at startup for a fixed client.
  *
- * @property authStore Nullable for the fixed-client factory; `null` means there
- * is no authentication subscription and only the startup refresh runs automatically.
+ * @property authStore Nullable for a fixed client; `null` means there is no
+ * authentication subscription and only the startup refresh runs automatically.
  */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal class OpenAiModelCatalogStoreImpl(
     private val client: OpenAiClient,
     private val authStore: OpenAiAuthStore? = null,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    private val scope: CoroutineScope,
 ) : OpenAiModelCatalogStore {
 
     /**
@@ -79,18 +76,6 @@ internal class OpenAiModelCatalogStoreImpl(
         }
     }
 
-    /** Fetches `/models` and returns the atomically published catalog snapshot. */
-    override suspend fun refresh(): List<ModelInfo> {
-        val auth = authStore?.state?.value
-        val refreshed = fetchModels()
-        currentCoroutineContext().ensureActive()
-        if (authStore != null && authStore.state.value != auth) {
-            throw CancellationException("Authentication changed during model catalog refresh.")
-        }
-        models.value = refreshed
-        return refreshed
-    }
-
     /** Cancels catalog-owned background work without closing the injected client. */
     override fun close(): Unit = scope.cancel()
 
@@ -114,23 +99,18 @@ internal class OpenAiModelCatalogStoreImpl(
 }
 
 /**
- * Creates a live catalog. Supply the client's [authStore] to refresh on authentication
- * changes and discard remote metadata belonging to a previous account.
- * Omitting it retains the fixed-client, one-time startup refresh behavior.
+ * Creates a live catalog whose background refresh work is owned by this scope.
+ *
+ * Supply the client's [authStore] to refresh on authentication changes and
+ * discard remote metadata belonging to a previous account. Omitting it retains
+ * the fixed-client, one-time startup refresh behavior.
  *
  * @param authStore Nullable for a fixed client; `null` disables authentication
  * observation, not authentication within the client itself.
  */
-public actual fun OpenAiModelCatalog(
-    client: OpenAiClient,
-    authStore: OpenAiAuthStore?,
-): OpenAiModelCatalogStore =
-    OpenAiModelCatalogStoreImpl(client = client, authStore = authStore)
-
-/** Backend-owned variant: background refresh is joined by the supplied owner. */
 public actual fun CoroutineScope.ownedOpenAiModelCatalog(
     client: OpenAiClient,
-    authStore: OpenAiAuthStore,
+    authStore: OpenAiAuthStore?,
 ): OpenAiModelCatalogStore =
     OpenAiModelCatalogStoreImpl(
         client = client,

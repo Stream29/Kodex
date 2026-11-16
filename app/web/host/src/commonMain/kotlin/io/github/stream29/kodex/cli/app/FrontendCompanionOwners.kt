@@ -8,7 +8,6 @@ import kotlinx.coroutines.sync.withLock
 /** One page's local resources. The caller's business RPC never passes through this object. */
 internal interface FrontendCompanionResources {
     val capabilities: FrontendHostCapabilities
-    suspend fun call(request: LocalFrontendHostRequest): LocalFrontendHostReply
     suspend fun closeAndJoin()
 }
 
@@ -211,23 +210,6 @@ internal class FrontendCompanionOwners(
                         LocalFrontendHostOwnerLeaseMillis, requireNotNull(entry.resources).capabilities,
                     ) else LocalFrontendHostReply.Failure(LocalFrontendHostFailure.OwnerClosed)
                 }
-            }
-            else -> try {
-                val active = mutex.withLock { !closed && entry.phase == Phase.Active }
-                if (!active) LocalFrontendHostReply.Failure(LocalFrontendHostFailure.OwnerClosed)
-                else {
-                    currentCoroutineContext().ensureActive()
-                    val operation = CoroutineScope(currentCoroutineContext() + entry.job).async {
-                        requireNotNull(entry.resources).call(call.request)
-                    }
-                    try { operation.await() }
-                    finally { withContext(NonCancellable) { operation.cancelAndJoin() } }
-                }
-            } catch (cancelled: CancellationException) {
-                currentCoroutineContext().ensureActive()
-                LocalFrontendHostReply.Failure(LocalFrontendHostFailure.OwnerClosed)
-            } catch (_: Exception) {
-                LocalFrontendHostReply.Failure(LocalFrontendHostFailure.ServiceFailed)
             }
         }
         return LocalFrontendHostResult(LocalFrontendHostProtocol, hostInstanceId, entry.owner, reply)

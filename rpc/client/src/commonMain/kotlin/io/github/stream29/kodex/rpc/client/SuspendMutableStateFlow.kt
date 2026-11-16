@@ -31,23 +31,3 @@ public actual suspend inline fun <T> SuspendMutableStateFlow<T>.update(function:
         delay(CAS_RETRY_DELAY_MILLIS)
     }
 }
-
-public actual suspend inline fun <T> SuspendMutableStateFlow<T>.getAndUpdate(function: (T) -> T): T {
-    while (true) {
-        currentCoroutineContext().ensureActive()
-        val expect = value
-        val update = function(expect)
-        if (compareAndSet(expect, update)) return expect
-        delay(CAS_RETRY_DELAY_MILLIS)
-    }
-}
-
-public actual suspend inline fun <T> SuspendMutableStateFlow<T>.updateAndGet(function: (T) -> T): T {
-    while (true) {
-        currentCoroutineContext().ensureActive()
-        val expect = value
-        val update = function(expect)
-        if (compareAndSet(expect, update)) return update
-        delay(CAS_RETRY_DELAY_MILLIS)
-    }
-}

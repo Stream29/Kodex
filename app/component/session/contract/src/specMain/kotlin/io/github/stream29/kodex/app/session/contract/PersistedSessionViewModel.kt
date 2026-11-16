@@ -54,13 +54,6 @@ public interface PersistedSessionViewModel : AgentSettingsViewModel, AutoCloseab
     public val lifecycle: StateFlow<PersistedSessionLifecycleState>
 
     /**
-     * Validates the current read binding; subscriptions own the name/settings projection.
-     * @throws IllegalStateException if the view is not ready.
-     * @throws kotlinx.coroutines.CancellationException if its owner is closed.
-     */
-    public suspend fun refresh(): Unit
-
-    /**
      * Reads the first stored timestamp in index order on each menu opening.
      * @return null when the timestamp timeline is empty.
      * @throws IllegalStateException if the current read binding is not ready.
@@ -99,13 +92,6 @@ public interface PersistedSessionViewModel : AgentSettingsViewModel, AutoCloseab
         untilExclusive: Int,
         expectedGeneration: Long,
     ): Int
-
-    /**
-     * Forks the complete persisted root storage without changing navigation.
-     * @throws Exception if source admission, storage, or transport fails.
-     * @throws kotlinx.coroutines.CancellationException if caller waiting is cancelled.
-     */
-    public suspend fun fork(): Int
 
     /**
      * Closes the owning RPC view first, then the local projection owner, and

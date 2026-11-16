@@ -69,12 +69,6 @@ private class OpenAiLoginClientImpl(
             parameters.append("codex_cli_simplified_flow", "true")
             parameters.append("state", request.state)
             parameters.append("originator", DefaultOpenAiLoginOriginator)
-            if (request.allowedWorkspaceIds.isNotEmpty()) {
-                parameters.append(
-                    "allowed_workspace_id",
-                    request.allowedWorkspaceIds.joinToString(separator = ","),
-                )
-            }
         }.buildString()
 
     override suspend fun exchangeAuthorizationCode(
@@ -120,7 +114,6 @@ private suspend inline fun <reified T> HttpResponse.decodeLoginResponse(): OpenA
         return OpenAiResult.Failure(
             OpenAiLoginError(
                 statusCode = status.value,
-                statusDescription = status.description,
                 message = "OpenAI login request failed with HTTP ${status.value} (${status.description}).",
             ),
         )

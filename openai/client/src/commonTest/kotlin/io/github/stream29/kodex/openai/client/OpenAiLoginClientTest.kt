@@ -29,7 +29,6 @@ val openAiLoginClientTest by testSuite {
                         redirectUri = "http://127.0.0.1:1455/auth/callback",
                         codeChallenge = "challenge",
                         state = "state",
-                        allowedWorkspaceIds = listOf("workspace-a", "workspace-b"),
                     ),
                 ),
             )
@@ -44,7 +43,7 @@ val openAiLoginClientTest by testSuite {
             assertEquals("true", url.parameters["codex_cli_simplified_flow"])
             assertEquals("state", url.parameters["state"])
             assertEquals("codex_cli_rs", url.parameters["originator"])
-            assertEquals("workspace-a,workspace-b", url.parameters["allowed_workspace_id"])
+            assertEquals(null, url.parameters["allowed_workspace_id"])
         } finally {
             client.close()
         }
@@ -143,7 +142,6 @@ val openAiLoginClientTest by testSuite {
                 OpenAiResult.Failure(
                     io.github.stream29.kodex.openai.OpenAiLoginError(
                         statusCode = HttpStatusCode.BadGateway.value,
-                        statusDescription = HttpStatusCode.BadGateway.description,
                         message = "OpenAI login request failed with HTTP 502 (Bad Gateway).",
                     ),
                 ),

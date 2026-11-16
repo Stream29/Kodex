@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
@@ -35,14 +33,14 @@ import kotlin.time.Duration.Companion.minutes
  * Backend-private attempt registry. Handles are unique across target kinds;
  * completion/cancellation never resolve a target from current frontend state.
  */
-public actual class BackendOAuth internal constructor(
+internal class BackendOAuth internal constructor(
     scope: CoroutineScope,
     private val credentials: BackendFileSystemAuthStore,
     private val openAi: OpenAiLoginClient,
     private val mcp: McpManagerImpl,
     private val waitForCallbackDeadline: suspend (Duration) -> Unit,
 ) : AutoCloseable {
-    public actual constructor(
+    constructor(
         scope: CoroutineScope,
         credentials: BackendFileSystemAuthStore,
         openAi: OpenAiLoginClient,
@@ -53,13 +51,9 @@ public actual class BackendOAuth internal constructor(
     private val attempts = mutableMapOf<Long, Attempt>()
     private var nextId = 1L
 
-    internal suspend fun closeAndJoin() {
+    suspend fun closeAndJoin() {
         close()
         owner.cancelAndJoin()
-    }
-
-    public actual suspend fun start(target: OAuthTarget, redirectUri: String): OAuthAuthorization = accepted {
-        begin(target, redirectUri) {}.authorization.await()
     }
 
     /**
@@ -139,7 +133,7 @@ public actual class BackendOAuth internal constructor(
         true
     }
 
-    public actual suspend fun complete(id: Long, callbackUrl: String): Unit = accepted {
+    suspend fun complete(id: Long, callbackUrl: String): Unit = accepted {
         val work = mutex.withLock {
             val attempt = attempts[id] ?: error("Unknown or completed OAuth attempt.")
             check(attempt.phase == AttemptPhase.Waiting) { "This OAuth attempt is not waiting for a callback." }
@@ -156,7 +150,7 @@ public actual class BackendOAuth internal constructor(
         work.await()
     }
 
-    public actual suspend fun cancel(id: Long): Unit = accepted {
+    suspend fun cancel(id: Long): Unit = accepted {
         mutex.withLock {
             attempts[id]?.also {
                 it.phase = AttemptPhase.Released
@@ -166,7 +160,7 @@ public actual class BackendOAuth internal constructor(
         }
     }
 
-    public actual suspend fun abandonPending(id: Long): Unit = accepted {
+    suspend fun abandonPending(id: Long): Unit = accepted {
         mutex.withLock {
             attempts[id]?.takeIf {
                 it.phase == AttemptPhase.Preparing || it.phase == AttemptPhase.Waiting
@@ -179,7 +173,7 @@ public actual class BackendOAuth internal constructor(
         }
     }
 
-    public actual suspend fun removeAuthentication(source: KodexAuthSource): Unit = accepted {
+    suspend fun removeAuthentication(source: KodexAuthSource): Unit = accepted {
         mutex.withLock {
             attempts.values.filter { it.target == OAuthTarget.OpenAi(source) }.forEach {
                 it.phase = AttemptPhase.Released
@@ -190,7 +184,7 @@ public actual class BackendOAuth internal constructor(
         credentials.remove(source)
     }
 
-    public actual suspend fun logoutMcpServer(name: String): Unit = accepted { mcp.logout(name) }
+    suspend fun logoutMcpServer(name: String): Unit = accepted { mcp.logout(name) }
 
     private suspend fun ready(
         attempt: Attempt,
@@ -222,7 +216,7 @@ public actual class BackendOAuth internal constructor(
         return owner.async { block() }.await()
     }
 
-    public actual override fun close() { owner.cancel() }
+    override fun close() { owner.cancel() }
 }
 
 internal class BackendOAuthPreparation(

@@ -22,9 +22,3 @@ public expect fun <T> StateFlow<T>.asSuspendMutableStateFlow(
  * Field-level settings conflict detection belongs to the editing layer, not this generic loop.
  */
 public expect suspend inline fun <T> SuspendMutableStateFlow<T>.update(function: (T) -> T): Unit
-
-/** Like [update], but returns the expected value from the successful CAS, not the local value. */
-public expect suspend inline fun <T> SuspendMutableStateFlow<T>.getAndUpdate(function: (T) -> T): T
-
-/** Like [update], but returns the proposed value from the successful CAS, not the local value. */
-public expect suspend inline fun <T> SuspendMutableStateFlow<T>.updateAndGet(function: (T) -> T): T

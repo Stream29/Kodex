@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
@@ -22,7 +20,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-public actual class BackendAccountState actual constructor(
+internal class BackendAccountState(
     scope: CoroutineScope,
     authStore: OpenAiAuthStore,
     client: OpenAiClient,
@@ -30,23 +28,23 @@ public actual class BackendAccountState actual constructor(
     private val owner = scope.supervisorChildScope()
     private val usage: CodexAccountUsageStore = owner.ownedCodexAccountUsageStore(client, authStore)
     private val reset = Mutex()
-    public actual val authentication: StateFlow<SettingsAuthenticationState> =
+    val authentication: StateFlow<SettingsAuthenticationState> =
         authStore.state.map { it.toSummary() }.stateIn(
             owner, SharingStarted.Eagerly, authStore.state.value.toSummary(),
         )
-    public actual val accountUsage: StateFlow<SettingsAccountUsageState> =
+    val accountUsage: StateFlow<SettingsAccountUsageState> =
         usage.state.map { it.toSummary() }.stateIn(owner, SharingStarted.Eagerly, usage.state.value.toSummary())
 
-    public actual suspend fun refreshAccountUsage(): Unit = usage.refresh()
+    suspend fun refreshAccountUsage(): Unit = usage.refresh()
 
-    public actual suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome {
+    suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome {
         require(creditId.isNotBlank()) { "A specific reset credit is required." }
         return reset.withLock {
             usage.consumeResetAttempt(usage.createResetAttempt(creditId))
         }
     }
 
-    actual override fun close() {
+    override fun close() {
         try { usage.close() } finally { owner.cancel() }
     }
 

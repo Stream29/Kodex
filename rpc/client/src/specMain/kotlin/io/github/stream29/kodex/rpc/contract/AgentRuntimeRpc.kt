@@ -1,7 +1,9 @@
 package io.github.stream29.kodex.rpc.contract
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.SearchCommands
@@ -17,7 +19,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.rpc.annotations.Rpc
 
 /**
- * Runtime capabilities of the root Agent addressed by an existing Session index.
+ * Runtime and storage capabilities of the root Agent addressed by an existing Session index.
  *
  * Pending steer is persisted in the root Agent's storage via `SteerSnapshot` and observed by
  * the frontend directly through `AgentStorage` (`getSteerAt(latestIndex)`), while user input
@@ -26,27 +28,20 @@ import kotlinx.rpc.annotations.Rpc
  * implicit activation. Await keepSessionAlive before access. Deactivation ends existing
  * Session-bound upstreams with SessionNotActive, requiring activation and a new subscription.
  * Inactivity is distinct from currentFlow's output-binding NoMatchException.
- * This review contract has no client/server implementation.
  */
 @Rpc
 public interface AgentRuntimeRpc {
-    /**
-     * Reads the root Agent's original storage URI from its active backend owner.
-     *
-     * This stable locator has no companion flow. It is not a frontend-local path, permission
-     * to bypass RPC for file access, or an owner/cache identity. Do not reconstruct it
-     * from a frontend Home directory or assume a particular storage scheme.
-     * Inactive Sessions fail with SessionNotActive; this read does not activate or renew TTL.
-     */
-    public suspend fun getStorageUri(sessionIndex: Int): String
+    /** Reads the initial random cache-validity nonce for this storage owner. */
+    public suspend fun getCacheNonce(sessionIndex: Int): Long
 
-    /** Reads the initial globally visible storage index published by the backend AgentState. */
+    /** Includes the current cache nonce when collection begins, followed by replacements. */
+    public fun getCacheNonceFlow(sessionIndex: Int): Flow<Long>
+
+    /** Reads the initial greatest stored index, or -1 for an empty storage. */
     public suspend fun getLatestIndex(sessionIndex: Int): Int
 
     /**
-     * Includes the current globally visible storage index, then the backend's published updates.
-     * Retains AgentState's publication after storage transactions, rather than combining the
-     * independently observed tails of its six sparse timelines on the frontend.
+     * Includes the current greatest stored index when collection begins, followed by changes.
      *
      * Revert may decrease the index; intermediate values may be conflated. This value is not
      * a cache nonce or an immutable snapshot lease for subsequent RPC reads. Timeline queries
@@ -55,6 +50,45 @@ public interface AgentRuntimeRpc {
      * Cancelling collection does not close the Session; neither reads nor collection renew TTL.
      */
     public fun getLatestIndexFlow(sessionIndex: Int): Flow<Int>
+
+    /** Counts all commits in [fromInclusive..toInclusive] whose type is in [types]. */
+    public suspend fun countCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType> = AgentCommitType.All,
+    ): Int
+
+    /** Reads up to [limit] earliest commits in [fromInclusive..toInclusive] whose type is in [types]. */
+    public suspend fun getFirstCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType> = AgentCommitType.All,
+        limit: Int = Int.MAX_VALUE,
+    ): List<IndexedAgentCommit>
+
+    /** Reads up to [limit] latest commits in [fromInclusive..toInclusive] whose type is in [types] in ascending order. */
+    public suspend fun getLastCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType> = AgentCommitType.All,
+        limit: Int = Int.MAX_VALUE,
+    ): List<IndexedAgentCommit>
+
+    /**
+     * Compares the current complete settings with [expect] using value equality and, if equal,
+     * commits [update] through the backend's existing settings-write boundary.
+     */
+    public suspend fun compareAndSetSettings(
+        sessionIndex: Int,
+        expect: KodexAgentSettings,
+        update: KodexAgentSettings,
+    ): Boolean
 
     /** Reads initial atomic state; subsequent state and active output changes use the flow. */
     public suspend fun getState(sessionIndex: Int): AgentStateValue
@@ -119,7 +153,7 @@ public interface AgentRuntimeRpc {
      *
      * Requires an active Session (`SessionNotActive` otherwise) and
      * `settings.requestUserInputMode == RequestUserInputMode.AskUser` (fails explicitly when `NoQuestion`).
-     * Immediately emits `Notification.AskUserCreated(sessionIndex, entry)` onto `GlobalRpc.getNotificationFlow()`.
+     * Immediately emits `Notification.AskUserCreated(sessionIndex, entry)` onto `BackendServices.notifications`.
      */
     public suspend fun createAskUser(
         sessionIndex: Int,
@@ -148,21 +182,6 @@ public interface AgentRuntimeRpc {
         sessionIndex: Int,
         arguments: ImageGenToolArguments,
     ): GeneratedImageArtifact
-
-    /**
-     * Appends one user message and returns its committed storage index.
-     *
-     * Retains the existing atomic state admission, timestamp and persisted turn-id calculation.
-     * Does not introduce a separate markNewTurn operation. Requests targeting an invalid state
-     * fail rather than bypassing admission; input during execution uses pendingSteer instead.
-     *
-     * Does not resume the Agent, clear the frontend composer or renew TTL; automatic session-title
-     * generation observes committed storage independently when attached at Session creation.
-     * Accepted writes belong to the backend owner; cancelling the caller's wait does not undo
-     * them. A lost reply or a later resume failure must not trigger a blind repeat append.
-     * The returned index does not imply that frontend subscriptions have caught up.
-     */
-    public suspend fun appendUserMessage(sessionIndex: Int, content: List<ContentItem>): Int
 
     /**
      * Runs one complete runtime operation, preserving AgentRuntime.resume's waiting semantics.
@@ -213,23 +232,6 @@ public interface AgentRuntimeRpc {
      * backend-owned; cancelling the caller's wait does not cancel accepted cleanup.
      */
     public suspend fun clearPending(sessionIndex: Int): Int
-
-    /**
-     * Commits one completed tool event and returns its storage index.
-     *
-     * Retains the original ToolPending admission and projected-output callId validation.
-     * Writes the original index/work event and removes the matching unstable pending call in
-     * the same state transition; other pending calls remain pending. A stale or already
-     * completed call fails instead of appending another result.
-     *
-     * Does not create suggested Sessions, edit frontend drafts, resume the Agent or renew TTL.
-     * Accepted completion belongs to the backend owner. Returning does not synchronize frontend
-     * state/history projections, and a failed reply does not prove that nothing was committed.
-     */
-    public suspend fun completeToolCall(
-        sessionIndex: Int,
-        completed: StableCleanEvent.CompletedTool,
-    ): Int
 
     /**
      * Removes history at and after [untilExclusive], preserving initialization.

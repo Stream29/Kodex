@@ -13,7 +13,6 @@ public actual class KodexApplication actual constructor(
     public actual val newLineKey: StateFlow<NewLineKey>,
     public actual val sidebarSettings: SidebarSettingsViewModel,
     public actual val reportUnhandledError: (Throwable) -> Unit,
-    public actual val reportWarning: (String) -> Unit,
     public actual val connectionState: StateFlow<BackendConnectionState>,
     public actual val connectionFailureReason: StateFlow<String?>,
 )

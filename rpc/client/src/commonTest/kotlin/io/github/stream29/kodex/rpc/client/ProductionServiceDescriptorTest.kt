@@ -11,7 +11,6 @@ val productionServiceDescriptorTest by testSuite {
     val factories: List<Pair<String, (RpcClient) -> Any>> = listOf(
         "GlobalRpc" to { it.withService<GlobalRpc>() },
         "AgentRuntimeRpc" to { it.withService<AgentRuntimeRpc>() },
-        "AgentStorageRpc" to { it.withService<AgentStorageRpc>() },
     )
     for ((name, create) in factories) {
         test("$name production interface has a generated client descriptor") {

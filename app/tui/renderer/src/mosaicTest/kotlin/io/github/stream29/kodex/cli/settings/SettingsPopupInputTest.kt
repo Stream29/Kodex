@@ -96,7 +96,7 @@ val settingsPopupInputTest by testSuite {
                     assertTrue(editor.authenticationSettings.state.value.closed)
                     assertFalse(defaults.state.value.active)
                     assertNotNull(fixture.services.global.getSettings())
-                } finally { vm.close(); global.close(); global.join() }
+                } finally { vm.close(); global.close() }
             } finally { fixture.closeAndJoin() }
         }
     }

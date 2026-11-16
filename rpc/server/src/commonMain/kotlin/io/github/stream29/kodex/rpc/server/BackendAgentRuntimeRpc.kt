@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
@@ -10,8 +8,10 @@ import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
@@ -41,6 +41,7 @@ import io.github.stream29.kodex.utils.rpcexception.NoMatchException
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -58,13 +59,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlin.random.Random
 
-public actual class BackendAgentRuntimeRpc actual constructor(
+internal class BackendAgentRuntimeRpc(
     private val repository: KodexSessionRepository,
-    private val eventBus: AgentEventBus,
-    private val client: OpenAiClient?,
-    private val home: Path?,
-    private val onAskUserCreated: (Notification.AskUserCreated) -> Unit,
-    private val checkAdmission: () -> Unit,
+    private val eventBus: AgentEventBus = AgentEventBus(repository),
+    private val client: OpenAiClient? = null,
+    private val home: Path? = null,
+    private val onAskUserCreated: (Notification.AskUserCreated) -> Unit = {},
+    private val checkAdmission: () -> Unit = {},
 ) : AgentRuntimeRpc {
     private val viewsMutex = Mutex()
     private val views = mutableMapOf<KodexAgentSession, RuntimeView>()
@@ -114,19 +115,82 @@ public actual class BackendAgentRuntimeRpc actual constructor(
         }.await()
     }
 
-    actual override suspend fun getStorageUri(sessionIndex: Int): String =
-        openSession(sessionIndex).storage.uri
+    private suspend fun <R> checkedStorage(
+        sessionIndex: Int,
+        nonce: Long,
+        block: suspend ObservableKodexAgentStorage.() -> R,
+    ): R {
+        val session = openSession(sessionIndex)
+        val storage = session.storage
+        if (storage.cacheNonce.value != nonce) throw CacheNonceMismatch()
+        return try {
+            storage.block()
+        } catch (failure: IllegalStateException) {
+            if (!session.coroutineContext.job.isActive) {
+                throw SessionNotActive()
+            }
+            throw failure
+        }
+    }
 
-    actual override suspend fun getLatestIndex(sessionIndex: Int): Int =
-        openSession(sessionIndex).runtime.latestIndex.value
+    override suspend fun getCacheNonce(sessionIndex: Int): Long =
+        openSession(sessionIndex).storage.cacheNonce.value
 
-    actual override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int> =
-        observe(sessionIndex) { latestIndex }
+    override fun getCacheNonceFlow(sessionIndex: Int): Flow<Long> = flow {
+        val session = openSession(sessionIndex)
+        emitAll(session.observeActive(checkAdmission, session.storage.cacheNonce))
+    }
 
-    actual override suspend fun getState(sessionIndex: Int): AgentStateValue =
+    override suspend fun getLatestIndex(sessionIndex: Int): Int =
+        openSession(sessionIndex).storage.latestIndexFlow.value
+
+    override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int> = flow {
+        val session = openSession(sessionIndex)
+        emitAll(session.observeActive(checkAdmission, session.storage.latestIndexFlow))
+    }
+
+    override suspend fun countCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType>,
+    ): Int =
+        checkedStorage(sessionIndex, cacheNonce) { countCommitsIn(fromInclusive..toInclusive, types) }
+
+    override suspend fun getFirstCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> =
+        checkedStorage(sessionIndex, cacheNonce) { getFirstCommitsIn(fromInclusive..toInclusive, types, limit) }
+
+    override suspend fun getLastCommitsIn(
+        sessionIndex: Int,
+        cacheNonce: Long,
+        fromInclusive: Int,
+        toInclusive: Int,
+        types: Set<AgentCommitType>,
+        limit: Int,
+    ): List<IndexedAgentCommit> =
+        checkedStorage(sessionIndex, cacheNonce) { getLastCommitsIn(fromInclusive..toInclusive, types, limit) }
+
+    override suspend fun compareAndSetSettings(
+        sessionIndex: Int,
+        expect: KodexAgentSettings,
+        update: KodexAgentSettings,
+    ): Boolean =
+        command(sessionIndex) {
+            runtime.compareAndSetSettings(expect, update)
+        }
+
+    override suspend fun getState(sessionIndex: Int): AgentStateValue =
         view(sessionIndex).snapshot().value
 
-    actual override fun getStateFlow(sessionIndex: Int): Flow<AgentStateValue> = flow {
+    override fun getStateFlow(sessionIndex: Int): Flow<AgentStateValue> = flow {
         val view = view(sessionIndex)
         emitAll(
             view.session.observeActive(
@@ -136,7 +200,7 @@ public actual class BackendAgentRuntimeRpc actual constructor(
         )
     }
 
-    actual override fun currentFlow(sessionIndex: Int, nonce: Long): Flow<ResponsesStreamEvent> = flow {
+    override fun currentFlow(sessionIndex: Int, nonce: Long): Flow<ResponsesStreamEvent> = flow {
         val view = view(sessionIndex)
         val snapshot = view.snapshot()
         val source = snapshot.events
@@ -144,13 +208,13 @@ public actual class BackendAgentRuntimeRpc actual constructor(
         emitAll(view.session.observeActive(checkAdmission, source))
     }
 
-    actual override suspend fun submit(sessionIndex: Int, content: List<ContentItem>): Unit =
+    override suspend fun submit(sessionIndex: Int, content: List<ContentItem>): Unit =
         command(sessionIndex) {
             if (content.isEmpty()) return@command
             eventBus.submitUserMessage(sessionIndex, content)
         }
 
-    actual override suspend fun submitAskUserAnswer(
+    override suspend fun submitAskUserAnswer(
         sessionIndex: Int,
         askId: Int,
         response: RequestUserInputResponse,
@@ -159,7 +223,7 @@ public actual class BackendAgentRuntimeRpc actual constructor(
             eventBus.submitAskUserAnswer(sessionIndex, askId, response)
         }
 
-    actual override suspend fun createAskUser(
+    override suspend fun createAskUser(
         sessionIndex: Int,
         arguments: RequestUserInputArgs,
     ): AskUserEntry =
@@ -173,7 +237,7 @@ public actual class BackendAgentRuntimeRpc actual constructor(
             entry
         }
 
-    actual override suspend fun runWebSearch(
+    override suspend fun runWebSearch(
         sessionIndex: Int,
         commands: SearchCommands,
     ): SearchResponse =
@@ -186,7 +250,7 @@ public actual class BackendAgentRuntimeRpc actual constructor(
             ).run(commands).getOrThrow().copy(encryptedOutput = null)
         }
 
-    actual override suspend fun generateImage(
+    override suspend fun generateImage(
         sessionIndex: Int,
         arguments: ImageGenToolArguments,
     ): GeneratedImageArtifact =
@@ -202,12 +266,7 @@ public actual class BackendAgentRuntimeRpc actual constructor(
             )
         }
 
-    actual override suspend fun appendUserMessage(sessionIndex: Int, content: List<ContentItem>): Int =
-        command(sessionIndex) {
-            runtime.appendUserMessage(content)
-        }
-
-    actual override suspend fun resume(sessionIndex: Int): Unit = command(sessionIndex) {
+    override suspend fun resume(sessionIndex: Int): Unit = command(sessionIndex) {
         exclusive {
             val before = runtime.latestIndex.value
             val acceptedState = runtime.isAcceptedResumeStart(before)
@@ -226,19 +285,14 @@ public actual class BackendAgentRuntimeRpc actual constructor(
         }
     }
 
-    actual override suspend fun forcedCompact(sessionIndex: Int): Int = command(sessionIndex) {
+    override suspend fun forcedCompact(sessionIndex: Int): Int = command(sessionIndex) {
         exclusive { runtime.forcedCompact() }
     }
 
-    actual override suspend fun clearPending(sessionIndex: Int): Int =
+    override suspend fun clearPending(sessionIndex: Int): Int =
         command(sessionIndex) { runtime.clearPending() }
 
-    actual override suspend fun completeToolCall(
-        sessionIndex: Int,
-        completed: StableCleanEvent.CompletedTool,
-    ): Int = command(sessionIndex) { runtime.completeToolCall(completed) }
-
-    actual override suspend fun revertHistory(
+    override suspend fun revertHistory(
         sessionIndex: Int,
         untilExclusive: Int,
         expectedCacheNonce: Long,
@@ -257,13 +311,13 @@ public actual class BackendAgentRuntimeRpc actual constructor(
         }
     }
 
-    actual override suspend fun getShellSessions(sessionIndex: Int): Map<Int, ShellSessionState> =
+    override suspend fun getShellSessions(sessionIndex: Int): Map<Int, ShellSessionState> =
         openSession(sessionIndex).runtime.unifiedExecToolClient.activeSessions.value.mapValues { (_, shellSession) ->
             shellSession.toShellSessionState()
         }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    actual override fun getShellSessionsFlow(sessionIndex: Int): Flow<Map<Int, ShellSessionState>> =
+    override fun getShellSessionsFlow(sessionIndex: Int): Flow<Map<Int, ShellSessionState>> =
         observe(sessionIndex) {
             unifiedExecToolClient.activeSessions.flatMapLatest { sessions ->
                 if (sessions.isEmpty()) {
@@ -273,7 +327,6 @@ public actual class BackendAgentRuntimeRpc actual constructor(
                         sessions.map { (id, shellSession) ->
                             shellSession.exitCode.map { exitCode ->
                                 id to ShellSessionState(
-                                    cwd = shellSession.cwd.toString(),
                                     arguments = shellSession.arguments,
                                     exitCode = exitCode,
                                 )
@@ -284,7 +337,7 @@ public actual class BackendAgentRuntimeRpc actual constructor(
             }
         }
 
-    actual override suspend fun readShellSessionOutput(
+    override suspend fun readShellSessionOutput(
         sessionIndex: Int,
         shellSessionId: Int,
         offset: ULong,
@@ -297,7 +350,7 @@ public actual class BackendAgentRuntimeRpc actual constructor(
             shellSession.readOutput(offset = offset, limit = limit)
         }
 
-    actual override suspend fun writeShellSessionStdin(
+    override suspend fun writeShellSessionStdin(
         sessionIndex: Int,
         shellSessionId: Int,
         chars: String,
@@ -310,20 +363,20 @@ public actual class BackendAgentRuntimeRpc actual constructor(
             shellSession.writeStdin(chars = chars, closeInput = closeInput)
         }
 
-    actual override suspend fun closeShellSession(sessionIndex: Int, shellSessionId: Int): Unit =
+    override suspend fun closeShellSession(sessionIndex: Int, shellSessionId: Int): Unit =
         command(sessionIndex) {
             requireNotNull(runtime.unifiedExecToolClient.activeSessions.value[shellSessionId]) {
                 "Shell session is no longer registered."
             }.close()
         }
 
-    actual override suspend fun getRunningTurn(sessionIndex: Int): Boolean =
+    override suspend fun getRunningTurn(sessionIndex: Int): Boolean =
         openSession(sessionIndex).runtime.runningTurn.value != null
 
-    actual override fun getRunningTurnFlow(sessionIndex: Int): Flow<Boolean> =
+    override fun getRunningTurnFlow(sessionIndex: Int): Flow<Boolean> =
         observe(sessionIndex) { runningTurn.map { it != null }.distinctUntilChanged() }
 
-    actual override suspend fun cancelRunningTurn(sessionIndex: Int): Unit = command(sessionIndex) {
+    override suspend fun cancelRunningTurn(sessionIndex: Int): Unit = command(sessionIndex) {
         runtime.runningTurn.value?.cancel()
     }
 
@@ -333,9 +386,32 @@ public actual class BackendAgentRuntimeRpc actual constructor(
     }
 }
 
+internal fun <T> KodexAgentSession.observeActive(
+    checkAdmission: () -> Unit,
+    source: Flow<T>,
+): Flow<T> = channelFlow {
+    checkAdmission()
+    val sessionJob = this@observeActive.coroutineContext.job
+    if (!sessionJob.isActive) throw SessionNotActive()
+    val deactivated = CompletableDeferred<Unit>()
+    val completionHandle = sessionJob.invokeOnCompletion {
+        deactivated.complete(Unit)
+    }
+    val watcher = launch {
+        deactivated.await()
+        throw SessionNotActive()
+    }
+    try {
+        if (!sessionJob.isActive) throw SessionNotActive()
+        source.collect { send(it) }
+    } finally {
+        completionHandle.dispose()
+        watcher.cancel()
+    }
+}
+
 private fun UnifiedExecProcessSession.toShellSessionState(): ShellSessionState =
     ShellSessionState(
-        cwd = cwd.toString(),
         arguments = arguments,
         exitCode = exitCode.value,
     )

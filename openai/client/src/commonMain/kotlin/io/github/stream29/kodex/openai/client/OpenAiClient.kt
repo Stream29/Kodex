@@ -7,9 +7,6 @@ import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeRequest
 import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeResponse
 import io.github.stream29.kodex.openai.CodexRateLimitResetCreditsResponse
 import io.github.stream29.kodex.openai.CodexTokenUsageProfile
-import io.github.stream29.kodex.openai.CodexResponsesClientMetadata
-import io.github.stream29.kodex.openai.CodexResponsesMetadata
-import io.github.stream29.kodex.openai.CodexResponsesRequestKind
 import io.github.stream29.kodex.openai.ImageEditRequest
 import io.github.stream29.kodex.openai.ImageGenerationRequest
 import io.github.stream29.kodex.openai.ImageResponse
@@ -17,6 +14,7 @@ import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiErrorResponse
 import io.github.stream29.kodex.openai.OpenAiFailureDiagnostic
+import io.github.stream29.kodex.openai.codexTurnClientMetadataOrNull
 import io.github.stream29.kodex.openai.escapeOpenAiDiagnosticText
 import io.github.stream29.kodex.openai.OpenAiFailureTermination
 import io.github.stream29.kodex.openai.OpenAiFailureReason
@@ -38,6 +36,7 @@ import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.openai.TextControls
 import io.github.stream29.kodex.openai.ToolChoice
 import io.github.stream29.kodex.openai.ToolSpec
+import io.github.stream29.kodex.openai.unavailableMessage
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient as OpenAiClientContract
 import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
@@ -46,7 +45,6 @@ import io.github.stream29.kodex.utils.ktorclientext.ChatGptAccountId
 import io.github.stream29.kodex.utils.ktorclientext.CodexOriginator
 import io.github.stream29.kodex.utils.ktorclientext.OpenAiSearchVersion
 import io.github.stream29.kodex.utils.ktorclientext.SseCompatibility
-import io.github.stream29.kodex.utils.ktorclientext.addAll
 import io.github.stream29.kodex.utils.ktorclientext.postSseEventsWithHeaders
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
@@ -132,17 +130,19 @@ private val OpenAiPolicyGuard = createClientPlugin("OpenAiPolicyGuard") {
             val response = cause.openAiHttpResponse()
             if (
                 request.attributes.contains(OpenAiStreamingRequestKey) &&
-                response != null && response.status.value !in 200..299 &&
-                response.hasHttpPolicyBlock()
+                response != null && response.status.value !in 200..299
             ) {
-                val failure = OpenAiModerationBlockedException(OpenAiFailureReason.ContentPolicyViolation)
-                failure.failureDiagnostic = (cause.httpFailureDiagnostic() ?: failure.failureDiagnostic)?.copy(
-                    termination = OpenAiFailureTermination.ModerationBlocked,
-                    reason = OpenAiFailureReason.ContentPolicyViolation,
-                    httpStatus = response.status.value,
-                    requestId = response.providerRequestId(),
-                )
-                throw failure
+                val diagnostic = response.httpFailureDiagnostic()
+                if (diagnostic?.reason == OpenAiFailureReason.ContentPolicyViolation) {
+                    val failure = OpenAiModerationBlockedException(OpenAiFailureReason.ContentPolicyViolation)
+                    failure.failureDiagnostic = diagnostic.copy(
+                        termination = OpenAiFailureTermination.ModerationBlocked,
+                        reason = OpenAiFailureReason.ContentPolicyViolation,
+                        httpStatus = response.status.value,
+                        requestId = response.providerRequestId(),
+                    )
+                    throw failure
+                }
             }
             throw cause
         }
@@ -160,9 +160,10 @@ private val OpenAiPolicyGuard = createClientPlugin("OpenAiPolicyGuard") {
             if (!errorBody.hasSafeJsonDepth()) {
                 throw OpenAiHttpStreamException(response.status.value, response.providerRequestId())
             }
-            if (errorBody.hasHttpPolicyBlock()) {
+            val diagnostic = errorBody.httpFailureDiagnostic()
+            if (diagnostic?.reason == OpenAiFailureReason.ContentPolicyViolation) {
                 val failure = OpenAiModerationBlockedException(OpenAiFailureReason.ContentPolicyViolation)
-                failure.failureDiagnostic = (errorBody.httpFailureDiagnostic() ?: failure.failureDiagnostic)?.copy(
+                failure.failureDiagnostic = diagnostic.copy(
                     termination = OpenAiFailureTermination.ModerationBlocked,
                     reason = OpenAiFailureReason.ContentPolicyViolation,
                     httpStatus = response.status.value,
@@ -236,7 +237,6 @@ internal fun HttpClientConfig<*>.configureOpenAiClient(config: OpenAiClientConfi
         url(config.baseUrl.trimEnd('/') + "/")
         headers[HttpHeaders.CodexOriginator] = config.originator
         headers[HttpHeaders.UserAgent] = config.userAgent
-        headers.addAll(config.defaultHeaders)
     }
 }
 
@@ -334,7 +334,8 @@ public actual class OpenAiClient actual constructor(
             serviceTier = serviceTier,
             promptCacheKey = promptCacheKey ?: threadId,
             text = text,
-            clientMetadata = codexClientMetadataOrNull(
+            clientMetadata = codexTurnClientMetadataOrNull(
+                json = OpenAiJsonCodec,
                 installationId = installationId,
                 sessionId = sessionId,
                 threadId = threadId,
@@ -450,7 +451,7 @@ public actual class OpenAiClient actual constructor(
         val account = when (val state = authStore.state.value) {
             is OpenAiAuthState.Authenticated -> state.credentials
             is OpenAiAuthState.Unavailable -> {
-                throw IllegalStateException(state.requestFailureMessage())
+                throw IllegalStateException(state.unavailableMessage())
             }
         }
         check(expectedAccount == null || account == expectedAccount) {
@@ -462,21 +463,6 @@ public actual class OpenAiClient actual constructor(
             ?.let { accountId -> headers[HttpHeaders.ChatGptAccountId] = accountId }
     }
 }
-
-private fun OpenAiAuthState.Unavailable.requestFailureMessage(): String =
-    "OpenAI authentication is unavailable: " +
-        when (this) {
-            OpenAiAuthState.Unavailable.NotLoaded -> "credentials have not been loaded."
-            OpenAiAuthState.Unavailable.CredentialsNotFound -> "credentials were not found."
-            OpenAiAuthState.Unavailable.UnsupportedAuthMode ->
-                "the selected credentials use an unsupported authentication mode."
-            OpenAiAuthState.Unavailable.InvalidCredentials ->
-                "the selected credentials are malformed or incomplete."
-            OpenAiAuthState.Unavailable.CredentialSourceUnavailable ->
-                "the credential source could not be read."
-            OpenAiAuthState.Unavailable.UnexpectedFailure ->
-                "credential loading failed unexpectedly."
-        }
 
 private const val RemoteCompactionV2Feature: String = "remote_compaction_v2"
 /** Request-local routing from the exact body snapshot, never from live settings. */
@@ -529,17 +515,11 @@ internal fun HttpClient.streamResponseEvents(
                     if (!responseId.isNullOrEmpty() && responseId != observedResponseId) {
                         observedResponseId = responseId
                     }
-                    if (event.isExplicitModerationBlock()) {
-                        val failure = event.moderationFailure()
-                        failure.failureDiagnostic = (event.toFailureDiagnostic() ?: failure.failureDiagnostic)?.copy(
-                            termination = OpenAiFailureTermination.ModerationBlocked,
-                            reason = event.explicitModerationReason(),
-                            httpStatus = acceptedStatus,
-                            requestId = providerRequestId,
-                            responseId = observedResponseId?.takeIf { it.isNotEmpty() },
-                        )
-                        throw failure
-                    }
+                    event.moderationFailureOrNull(
+                        httpStatus = acceptedStatus,
+                        requestId = providerRequestId,
+                        responseId = observedResponseId?.takeIf { it.isNotEmpty() },
+                    )?.let { throw it }
                 }
                 .catch { cause ->
                     currentCoroutineContext().ensureActive()
@@ -910,17 +890,17 @@ internal suspend fun Flow<RemoteCompactionStreamEvent>.collectRemoteCompactionV2
                 }
 
                 is ResponsesStreamEvent.Failed -> {
-                    if (event.isExplicitModerationBlock()) throw event.moderationFailure()
+                    event.moderationFailureOrNull()?.let { throw it }
                     throw OpenAiRemoteCompactionV2StreamFailureException()
                 }
 
                 is ResponsesStreamEvent.Incomplete -> {
-                    if (event.isExplicitModerationBlock()) throw event.moderationFailure()
+                    event.moderationFailureOrNull()?.let { throw it }
                     throw OpenAiRemoteCompactionV2StreamFailureException()
                 }
 
                 else -> {
-                    if (event.isExplicitModerationBlock()) throw event.moderationFailure()
+                    event.moderationFailureOrNull()?.let { throw it }
                 }
             }
         }
@@ -1087,13 +1067,21 @@ private fun Throwable.remoteCompactionTermination(): String = when (this) {
     else -> if (openAiHttpStatus()?.let { it !in 200..299 } == true) "http_status" else "transport_error"
 }
 
-private fun ResponsesStreamEvent.moderationFailure(): OpenAiModerationBlockedException =
-    OpenAiModerationBlockedException(checkNotNull(explicitModerationReason())).also { failure ->
-        failure.failureDiagnostic = (toFailureDiagnostic() ?: failure.failureDiagnostic)?.copy(
-            termination = OpenAiFailureTermination.ModerationBlocked,
-            reason = explicitModerationReason(),
-        )
-    }
+private fun ResponsesStreamEvent.moderationFailureOrNull(
+    httpStatus: Int? = null,
+    requestId: String? = null,
+    responseId: String? = null,
+): OpenAiModerationBlockedException? {
+    val reason = explicitModerationReason() ?: return null
+    val diagnostic = toFailureDiagnostic()
+    return OpenAiModerationBlockedException(
+        reason = reason,
+        httpStatus = httpStatus ?: diagnostic?.httpStatus,
+        requestId = requestId ?: diagnostic?.requestId,
+        responseId = responseId ?: diagnostic?.responseId,
+        diagnostic = diagnostic,
+    )
+}
 
 private fun ResponsesStreamEvent.responseIdentifier(): String? = when (this) {
     is ResponsesStreamEvent.Metadata -> responseId
@@ -1103,53 +1091,6 @@ private fun ResponsesStreamEvent.responseIdentifier(): String? = when (this) {
     is ResponsesStreamEvent.Failed -> response.id
     is ResponsesStreamEvent.Incomplete -> response.id
     else -> null
-}
-
-private fun codexClientMetadataOrNull(
-    installationId: String?,
-    sessionId: String?,
-    threadId: String?,
-    turnId: String?,
-    windowId: String?,
-    threadSource: String?,
-    turnTrigger: String?,
-    turnState: String?,
-): CodexResponsesClientMetadata? {
-    if (
-        installationId == null &&
-        sessionId == null &&
-        threadId == null &&
-        turnId == null &&
-        windowId == null &&
-        turnState == null &&
-        threadSource == null &&
-        turnTrigger == null
-    ) {
-        return null
-    }
-    require(threadId != null) { "threadId is required when Codex request metadata is supplied." }
-    require(windowId != null) { "windowId is required when Codex request metadata is supplied." }
-    val metadata = CodexResponsesMetadata(
-        installationId = installationId,
-        sessionId = sessionId,
-        threadId = threadId,
-        turnId = turnId,
-        windowId = windowId,
-        requestKind = CodexResponsesRequestKind.Turn,
-        threadSource = threadSource,
-        turnTrigger = turnTrigger,
-    )
-    return CodexResponsesClientMetadata(
-        installationId = installationId,
-        sessionId = sessionId,
-        threadId = threadId,
-        turnId = turnId,
-        windowId = windowId,
-        turnMetadata = OpenAiJsonCodec.encodeToString(
-            CodexResponsesMetadata.serializer(),
-            metadata,
-        ),
-    )
 }
 
 internal fun Throwable.isRetryableOpenAiException(
@@ -1184,21 +1125,20 @@ private fun Throwable.openAiHttpResponse(): HttpResponse? {
     return successfulResponse
 }
 
-internal suspend fun Throwable.hasHttpPolicyBlock(): Boolean {
-    val response = openAiHttpResponse() ?: return false
-    return response.hasHttpPolicyBlock()
-}
+internal suspend fun Throwable.hasHttpPolicyBlock(): Boolean =
+    httpFailureDiagnostic()?.reason == OpenAiFailureReason.ContentPolicyViolation
 
-private suspend fun Throwable.httpFailureDiagnostic(): OpenAiFailureDiagnostic? {
-    val response = openAiHttpResponse() ?: return null
-    return try {
-        response.bodyAsText().httpFailureDiagnostic()?.copy(httpStatus = response.status.value)
+private suspend fun Throwable.httpFailureDiagnostic(): OpenAiFailureDiagnostic? =
+    openAiHttpResponse()?.httpFailureDiagnostic()
+
+private suspend fun HttpResponse.httpFailureDiagnostic(): OpenAiFailureDiagnostic? =
+    try {
+        bodyAsText().httpFailureDiagnostic()?.copy(httpStatus = status.value)
     } catch (cancellation: CancellationException) {
         throw cancellation
     } catch (_: Exception) {
         null
     }
-}
 
 internal fun String.safeHttpFailureReason(): OpenAiFailureReason? {
     return httpFailureDiagnostic()?.reason
@@ -1226,30 +1166,6 @@ private fun String.httpFailureDiagnostic(): OpenAiFailureDiagnostic? {
         )
     } catch (_: Exception) {
         null
-    }
-}
-
-private suspend fun HttpResponse.hasHttpPolicyBlock(): Boolean {
-    return try {
-        bodyAsText().hasHttpPolicyBlock()
-    } catch (cancellation: CancellationException) {
-        throw cancellation
-    } catch (_: Exception) {
-        false
-    }
-}
-
-private fun String.hasHttpPolicyBlock(): Boolean {
-    if (!hasSafeJsonDepth()) return false
-    return try {
-        val payload = Json.parseToJsonElement(this) as? JsonObject
-        val error = (payload?.get("error") as? JsonObject) ?: payload
-        val code = error?.get("code") as? JsonPrimitive
-        val type = error?.get("type") as? JsonPrimitive
-        (code?.isString == true && code.contentOrNull == "content_policy_violation") ||
-            (type?.isString == true && type.contentOrNull == "content_policy_violation")
-    } catch (_: Exception) {
-        false
     }
 }
 

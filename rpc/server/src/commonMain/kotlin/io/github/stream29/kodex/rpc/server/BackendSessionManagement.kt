@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
@@ -30,13 +28,12 @@ import kotlinx.io.files.Path
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-public actual class BackendSessionManagement actual constructor(
+internal class BackendSessionManagement(
     private val repository: KodexSessionRepository,
     private val newSessionDefaults: () -> KodexNewSessionSettings,
     private val titleSettings: () -> SessionTitleSettings,
     private val titleGenerator: SessionTitleGenerator,
-    private val reportBackgroundFailure: (Throwable) -> Unit,
-    private val checkAdmission: () -> Unit,
+    private val checkAdmission: () -> Unit = {},
 ) {
     private val operations: CoroutineScope = repository.supervisorChildScope()
     private val commands = Mutex()
@@ -52,7 +49,7 @@ public actual class BackendSessionManagement actual constructor(
         }.await()
     }
 
-    public actual suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> = inBackend {
+    suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> = inBackend {
         commands.withLock {
             repository.listEntries(includeArchived).map { entry ->
                 SessionCatalogEntry(
@@ -68,7 +65,7 @@ public actual class BackendSessionManagement actual constructor(
         }
     }
 
-    public actual suspend fun createSession(cwd: Path): Int = inBackend {
+    suspend fun createSession(cwd: Path): Int = inBackend {
         commands.withLock {
             val defaults = newSessionDefaults()
             val initialSettings = KodexAgentSettings(
@@ -82,28 +79,28 @@ public actual class BackendSessionManagement actual constructor(
         }
     }
 
-    public actual suspend fun keepSessionAlive(sessionIndex: Int): Unit = inBackend {
+    suspend fun keepSessionAlive(sessionIndex: Int): Unit = inBackend {
         commands.withLock {
             requireEntry(sessionIndex)
             repository.open(sessionIndex).let {}
         }
     }
 
-    public actual suspend fun archiveSession(sessionIndex: Int): Unit = inBackend {
+    suspend fun archiveSession(sessionIndex: Int): Unit = inBackend {
         commands.withLock {
             requireEntry(sessionIndex)
             repository.getEntry(sessionIndex).archive()
         }
     }
 
-    public actual suspend fun unarchiveSession(sessionIndex: Int): Unit = inBackend {
+    suspend fun unarchiveSession(sessionIndex: Int): Unit = inBackend {
         commands.withLock {
             requireEntry(sessionIndex)
             repository.getEntry(sessionIndex).unarchive()
         }
     }
 
-    public actual suspend fun deleteSession(sessionIndex: Int): Boolean = inBackend {
+    suspend fun deleteSession(sessionIndex: Int): Boolean = inBackend {
         commands.withLock {
             if (sessionIndex !in repository.list()) return@withLock false
             repository.delete(sessionIndex)
@@ -111,9 +108,9 @@ public actual class BackendSessionManagement actual constructor(
         }
     }
 
-    public actual suspend fun forkSession(sessionIndex: Int): Int = fork(sessionIndex, null, null)
+    suspend fun forkSession(sessionIndex: Int): Int = fork(sessionIndex, null, null)
 
-    public actual suspend fun forkSessionHistory(
+    suspend fun forkSessionHistory(
         sessionIndex: Int,
         untilExclusive: Int,
         expectedCacheNonce: Long,

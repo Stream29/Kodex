@@ -17,7 +17,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.seconds
 
-public actual suspend fun startRpcOAuth(
+internal suspend fun startRpcOAuth(
     rpc: GlobalRpc,
     target: OAuthTarget,
     scope: CoroutineScope,

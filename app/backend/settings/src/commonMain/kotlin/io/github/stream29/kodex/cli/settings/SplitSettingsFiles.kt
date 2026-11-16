@@ -27,9 +27,6 @@ import kotlinx.serialization.Serializable
  * absence. Only nullable domain fields (such as session_title.model) accept null.
  * File codecs retain snake_case names; RPC serializers are not changed.
  */
-internal fun decodeBackendSettingsFile(text: String, defaults: BackendSettings): BackendSettings =
-    decodeBackendSettingsFile(settingsMap(text), defaults)
-
 internal fun decodeBackendSettingsFile(root: YamlMap, defaults: BackendSettings): BackendSettings {
     return BackendSettings(
         authSource = root.value("auth_source", defaults.authSource),
@@ -67,9 +64,6 @@ internal fun decodeBackendSettingsFile(root: YamlMap, defaults: BackendSettings)
         daemonTtlSeconds = root.value("daemon_ttl_seconds", defaults.daemonTtlSeconds),
     )
 }
-
-internal fun decodeCliFrontendSettingsFile(text: String, defaults: CliFrontendSettings): CliFrontendSettings =
-    decodeCliFrontendSettingsFile(settingsMap(text), defaults)
 
 internal fun decodeCliFrontendSettingsFile(root: YamlMap, defaults: CliFrontendSettings): CliFrontendSettings {
     return CliFrontendSettings(
@@ -120,12 +114,6 @@ internal fun encodeCliFrontendSettingsFile(value: CliFrontendSettings): String =
         FrontendFile.serializer(),
         FrontendFile(value.newLineKey, value.sidebars, value.hooks),
     )
-
-private fun settingsMap(text: String): YamlMap {
-    val root = SplitSettingsYaml.parseToYamlNode(text)
-    require(root is YamlMap) { "Settings must be a YAML mapping." }
-    return root
-}
 
 private inline fun <reified T> YamlMap.value(name: String, default: T): T {
     val node = get<YamlNode>(name) ?: return default

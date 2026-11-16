@@ -11,7 +11,6 @@ import io.ktor.client.network.sockets.ConnectTimeoutException
 import io.ktor.client.network.sockets.SocketTimeoutException
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.plugins.timeout
 import io.ktor.client.request.*
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
@@ -21,6 +20,38 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.readByteArray
+import kotlinx.serialization.json.Json
+
+internal fun validateLocalWebLocation(origin: String, path: String, ticket: String?) {
+    require(origin == canonicalLocalBrowserOrigin(origin) && origin.startsWith("http://127.0.0.1:")) {
+        "Invalid local Web origin."
+    }
+    require(path.matches(Regex("/web/[0-9a-f]{64}/"))) { "Invalid local Web context." }
+    require(ticket == null || ticket.matches(Regex("[0-9a-f]{64}"))) { "Invalid frontend capability." }
+}
+
+internal suspend fun bootstrapLocalFrontend(origin: String, path: String, ticket: String?): LocalFrontendBootstrap {
+    require(ticket != null) { "Frontend capability unavailable. Run kodex web or kodex app again." }
+    val http = frontendHttp()
+    return try {
+        val info = http.preparePost(origin + path + "bootstrap") {
+            contentType(ContentType.Application.Json)
+            setBody(Json.encodeToString(LocalWebTicket.serializer(), LocalWebTicket(ticket)))
+        }.execute { reply ->
+            check(reply.status.value in 200..299) { "Frontend bootstrap rejected." }
+            // Read inside the streaming statement so Ktor never pre-buffers an unbounded reply.
+            decodeBootstrap(readFrontendFrame(reply))
+        }
+        info.also {
+            validateFrontendBootstrap(it, origin, origin)
+            validateBrowserEndpoint(it.endpoint)
+        }
+    } catch (failure: Throwable) {
+        currentCoroutineContext().ensureActive()
+        if (!isBrowserNetworkFailure(failure)) throw failure
+        throw IllegalStateException("Frontend bootstrap unavailable. Run kodex web or kodex app again.")
+    } finally { http.close() }
+}
 
 public actual suspend fun <R> withLocalFrontendClient(
     origin: String,
@@ -138,9 +169,6 @@ internal fun frontendHostConnection(
                 http.preparePost(descriptor.baseUrl + LocalFrontendHostPath) {
                     contentType(ContentType.Application.Json)
                     setBody(body)
-                    if (request is LocalFrontendHostRequest.AwaitCallback) {
-                        timeout { requestTimeoutMillis = LocalFrontendHostCallbackWaitMillis + 10_000 }
-                    }
                 }.execute { response ->
                     if (response.status.value !in 200..299) {
                         response.bodyAsChannel().cancel(null)

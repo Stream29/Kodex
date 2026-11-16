@@ -5,7 +5,6 @@ package io.github.stream29.kodex.cli.rpc
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
-import io.github.stream29.kodex.rpc.client.FrontendSettingsAccess
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.rpc.client.asSuspendMutableStateFlow
@@ -13,7 +12,6 @@ import io.github.stream29.kodex.rpc.client.rpcStateIn
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.contract.SuspendMutableStateFlow
 import io.github.stream29.kodex.rpc.models.BackendSettings
-import io.github.stream29.kodex.rpc.models.NotificationHook
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -30,11 +28,11 @@ import kotlinx.coroutines.flow.onCompletion
  * One editing intent keeps its target's initial value. Only false is retried; a lost response,
  * cancellation, or expired owner is never interpreted as permission to replay a write.
  */
-public actual suspend fun <T, F> SuspendMutableStateFlow<T>.editField(
+internal suspend fun <T, F> SuspendMutableStateFlow<T>.editField(
     initial: F,
     select: (T) -> F,
     replace: (T) -> T,
-    checkOwner: () -> Unit,
+    checkOwner: () -> Unit = {},
 ): Boolean {
     while (true) {
         currentCoroutineContext().ensureActive()
@@ -52,7 +50,7 @@ public actual class RpcGlobalSettings private constructor(
     public actual val authentication: StateFlow<SettingsAuthenticationState>,
     public actual val usage: StateFlow<SettingsAccountUsageState>,
     public actual val mcp: StateFlow<List<McpManagedServerState>>,
-    public actual val frontend: FrontendSettingsAccess,
+    internal val frontend: RpcFrontendSettings,
     public actual val sidebarWidths: StateFlow<Pair<Int, Int>>,
     private val widths: MutableStateFlow<Pair<Int, Int>>,
     private val owner: Job,
@@ -66,25 +64,14 @@ public actual class RpcGlobalSettings private constructor(
     }
     internal fun dismissOperationFailure() { mutableOperationFailure.value = false }
 
-    public actual suspend fun <F> edit(
-        initial: F,
-        select: (BackendSettings) -> F,
-        replace: (BackendSettings) -> BackendSettings,
-    ): Boolean = settings.editField(initial, select, replace, ::ensureActive)
-
     public actual fun resizeSidebars(left: Int, right: Int) {
         ensureActive()
         require(left >= 0 && right >= 0)
         widths.value = left to right
     }
 
-    public actual suspend fun updateHooks(hooks: List<NotificationHook>) {
-        ensureActive()
-        frontend.update { it.copy(hooks = hooks) }
-    }
-
     public actual override fun close() { owner.cancel() }
-    public actual suspend fun join(): Unit = owner.join()
+    internal suspend fun join(): Unit = owner.join()
 
     public actual companion object {
         public actual suspend fun open(

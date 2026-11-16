@@ -13,7 +13,17 @@ kotlin {
         named("specMain").dependencies {
             api(project(":app-rpc-protocol"))
             api(project(":rpc-models"))
+            api(project(":agent-schedule-contract"))
+            api(project(":mcp-contract"))
+            api(project(":agent-storage-clean-models"))
+            api(project(":agent-storage-core"))
+            api(project(":openai-models"))
+            api(project(":tool-request-user-input"))
+            api(project(":utils-kotlinx-io-serialization"))
             api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.rpc.core)
+            api(libs.kotlinx.serialization.core)
+            api(libs.kotlinx.serialization.json)
         }
         commonMain.dependencies {
             api(project(":utils-rpc-exception"))
@@ -21,31 +31,8 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(project(":rpc-in-memory"))
-            implementation(libs.kotlinx.coroutines.test)
-        }
-    }
-}
-
-kotlin {
-    sourceSets {
-        named("specMain") {
-            dependencies {
-                api(project(":rpc-models"))
-                api(project(":agent-schedule-contract"))
-                api(project(":mcp-contract"))
-                api(project(":agent-storage-clean-models"))
-                api(project(":agent-storage-core"))
-                api(project(":openai-models"))
-                api(project(":tool-request-user-input"))
-                api(project(":utils-kotlinx-io-serialization"))
-                api(libs.kotlinx.coroutines.core)
-                api(libs.kotlinx.rpc.core)
-                api(libs.kotlinx.serialization.core)
-                api(libs.kotlinx.serialization.json)
-            }
-        }
-        commonTest.dependencies {
             implementation(project(":utils-rpc-exception"))
+            implementation(libs.kotlinx.coroutines.test)
             implementation(libs.kotlinx.rpc.krpc.client)
             implementation(libs.kotlinx.rpc.krpc.server)
             implementation(libs.kotlinx.rpc.krpc.serialization.json)

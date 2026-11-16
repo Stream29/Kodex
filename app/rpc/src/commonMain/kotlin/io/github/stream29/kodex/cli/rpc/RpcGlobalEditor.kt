@@ -11,28 +11,26 @@ import io.github.stream29.kodex.app.mcpsettings.*
 import io.github.stream29.kodex.app.sessiontitlesettings.*
 import io.github.stream29.kodex.app.settings.SettingsUpdateQueue
 import io.github.stream29.kodex.app.settings.contract.*
-import io.github.stream29.kodex.app.settings.createOpenAiLoginViewModel
-import io.github.stream29.kodex.app.usagereset.createUsageResetViewModel
 import io.github.stream29.kodex.app.usagereset.contract.*
+import io.github.stream29.kodex.app.usagereset.createUsageResetViewModel
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
-import io.github.stream29.kodex.rpc.models.OAuthTarget
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 
 public actual class RpcGlobalEditor actual constructor(
-    public actual val global: RpcGlobalSettings,
-    public actual val rpc: GlobalRpc,
+    private val global: RpcGlobalSettings,
+    private val rpc: GlobalRpc,
     applicationScope: CoroutineScope,
-    private val environment: RpcFrontendEnvironment,
+    launchBaseDirectory: String,
 ) : GlobalSettingsViewModel {
     private val owner = Job(applicationScope.coroutineContext[Job])
-    public actual val scope: CoroutineScope = CoroutineScope(applicationScope.coroutineContext + owner)
+    private val scope: CoroutineScope = CoroutineScope(applicationScope.coroutineContext + owner)
     private val updates = SettingsUpdateQueue(applicationScope, defaultReportError = global::reportOperationFailure)
     private val writes = RpcConfigurationWrites(global, ::acceptWrite)
-    public actual val mcp: RpcMcpSettings = RpcMcpSettings(global, rpc, applicationScope)
+    private val mcp: RpcMcpSettings = RpcMcpSettings(global, rpc, applicationScope)
     private val effectsChannel = Channel<GlobalSettingsEffect>(Channel.BUFFERED)
     private var closed = false
     actual override val effects: Flow<GlobalSettingsEffect> = effectsChannel.receiveAsFlow()
@@ -40,7 +38,12 @@ public actual class RpcGlobalEditor actual constructor(
     actual override fun dismissOperationFailure() { global.dismissOperationFailure() }
 
     actual override val contextSourceSettings: ContextSourceSettingsViewModel = createContextSourceSettingsViewModel(
-        RpcContextSourceSettingsDependencies(global, global.settings.projectState { it.contextSources }, writes, environment.contextPaths),
+        RpcContextSourceSettingsDependencies(
+            global,
+            global.settings.projectState { it.contextSources },
+            writes,
+            RpcContextSourcePathPolicy(rpc, launchBaseDirectory),
+        ),
         scope,
     )
     actual override val sessionTitleSettings: SessionTitleSettingsViewModel = createSessionTitleSettingsViewModel(
@@ -103,15 +106,6 @@ public actual class RpcGlobalEditor actual constructor(
     private fun acceptWrite(action: suspend () -> Unit): Boolean {
         if (!owner.isActive) return false
         return updates.submit { action(); global.dismissOperationFailure() }
-    }
-
-    public actual fun createLogin(ownerScope: CoroutineScope): OpenAiLoginViewModel {
-        owner.ensureActive()
-        val target = OAuthTarget.OpenAi(global.settings.value.authSource)
-        return createOpenAiLoginViewModel(
-            dependencies = OpenAiLoginDependencies { startRpcOAuth(rpc, target, ownerScope) },
-            ownerScope = ownerScope,
-        )
     }
 
     actual override fun close() {

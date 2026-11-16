@@ -4,21 +4,19 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KeepGeneratedSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 /**
  * Codex metadata attached to a Responses API request.
  *
  * @property installationId Nullable because Codex identity metadata is
- * optional; `null` means `installation_id` is omitted for identified requests.
+ * optional; `null` means `installation_id` is omitted.
  * @property sessionId Nullable because Codex identity metadata is optional;
- * `null` means `session_id` is omitted for identified requests.
- * @property threadId Provider-facing thread identity. Detached memory metadata
- * omits it from the wire.
+ * `null` means `session_id` is omitted.
+ * @property threadId Provider-facing thread identity.
  * @property turnId Nullable because metadata may exist outside a logical user
- * turn; `null` means `turn_id` is omitted. Detached memory metadata always
- * omits it from the wire.
- * @property windowId Identity of the active context window. Detached memory
- * metadata omits it from the wire.
+ * turn; `null` means `turn_id` is omitted.
+ * @property windowId Identity of the active context window.
  * @property requestKind Request purpose and its request-specific metadata.
  * @property threadSource Optional request attribution source; omitted when null.
  * @property turnTrigger Optional turn-start attribution; omitted when null.
@@ -76,6 +74,57 @@ public data class CodexResponsesClientMetadata(
 )
 
 /**
+ * Builds the `client_metadata` projection for a Codex turn request, or returns
+ * `null` when no Codex identity or turn-state fields are supplied.
+ */
+public fun codexTurnClientMetadataOrNull(
+    json: Json,
+    installationId: String? = null,
+    sessionId: String? = null,
+    threadId: String? = null,
+    turnId: String? = null,
+    windowId: String? = null,
+    threadSource: String? = null,
+    turnTrigger: String? = null,
+    turnState: String? = null,
+): CodexResponsesClientMetadata? {
+    if (
+        installationId == null &&
+        sessionId == null &&
+        threadId == null &&
+        turnId == null &&
+        windowId == null &&
+        turnState == null &&
+        threadSource == null &&
+        turnTrigger == null
+    ) {
+        return null
+    }
+    require(threadId != null) { "threadId is required when Codex request metadata is supplied." }
+    require(windowId != null) { "windowId is required when Codex request metadata is supplied." }
+    return CodexResponsesClientMetadata(
+        installationId = installationId,
+        sessionId = sessionId,
+        threadId = threadId,
+        turnId = turnId,
+        windowId = windowId,
+        turnMetadata = json.encodeToString(
+            CodexResponsesMetadata.serializer(),
+            CodexResponsesMetadata(
+                installationId = installationId,
+                sessionId = sessionId,
+                threadId = threadId,
+                turnId = turnId,
+                windowId = windowId,
+                requestKind = CodexResponsesRequestKind.Turn,
+                threadSource = threadSource,
+                turnTrigger = turnTrigger,
+            ),
+        ),
+    )
+}
+
+/**
  * Purpose of a Codex Responses request.
  *
  * [Compaction] is the only branch carrying compaction metadata, so invalid
@@ -88,18 +137,10 @@ public sealed interface CodexResponsesRequestKind {
     public data object Turn : CodexResponsesRequestKind
 
     @Serializable
-    @SerialName("prewarm")
-    public data object Prewarm : CodexResponsesRequestKind
-
-    @Serializable
     @SerialName("compaction")
     public data class Compaction(
         public val metadata: CompactionTurnMetadata,
     ) : CodexResponsesRequestKind
-
-    @Serializable
-    @SerialName("memory")
-    public data object Memory : CodexResponsesRequestKind
 }
 
 /**
@@ -116,21 +157,12 @@ public data class CompactionTurnMetadata(
 
 @Serializable
 public enum class CompactionImplementation {
-    @SerialName("responses")
-    Responses,
-
     @SerialName("responses_compaction_v2")
     ResponsesCompactionV2,
-
-    @SerialName("responses_compact")
-    ResponsesCompact,
 }
 
 @Serializable
 public enum class CompactionStrategy {
     @SerialName("memento")
     Memento,
-
-    @SerialName("prefix_compaction")
-    PrefixCompaction,
 }

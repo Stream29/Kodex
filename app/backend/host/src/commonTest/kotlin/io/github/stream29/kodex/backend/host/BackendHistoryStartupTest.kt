@@ -16,7 +16,6 @@ import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
-import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.local.withLocalRpcClient
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -60,7 +59,7 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                     // Native Debug executes this full 192-item window more slowly than Release.
                     withTimeout(10.seconds) {
                         val view = views.open(0)
-                        val agent = requireNotNull(view.agent.value)
+                        val agent = requireNotNull(view.rootAgent.value)
                         val state = agent.history.loadState.first { it != AgentHistoryLoadState.Initializing }
                         assertEquals(AgentHistoryLoadState.Ready, state)
                         assertEquals(192, agent.history.historyItems.value.size)
@@ -108,23 +107,30 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                 val client = RestoringRpcClient(connection)
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
-                val storage = client.withService<AgentStorageRpc>()
                 assertEquals("Migrated session", global.getSessionCatalog(false).single().threadName)
                 global.keepSessionAlive(0)
-                val nonce = storage.getCacheNonce(0)
+                val nonce = runtime.getCacheNonce(0)
                 assertEquals(
                     "Migrated session",
-                    (storage.getLastCommitsIn(0, nonce, 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings).threadName,
+                    (runtime.getLastCommitsIn(0, nonce, 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings).threadName,
                 )
                 assertEquals(
                     listOf(ContentItem.InputText("Migrated history")),
-                    assertIs<StableUserMessage>(storage.getLastCommitsIn(0, nonce, 0, 0, AgentCommitType.IndexTypes, 1).single().commit).content,
+                    assertIs<StableUserMessage>(runtime.getLastCommitsIn(0, nonce, 0, 0, AgentCommitType.IndexTypes, 1).single().commit).content,
                 )
-                val next = runtime.appendUserMessage(0, listOf(ContentItem.InputText("After migration")))
-                runtime.resume(0)
+                runtime.submit(0, listOf(ContentItem.InputText("After migration")))
                 val sent = withTimeout(10.seconds) { request.await() }
+                withTimeout(10.seconds) { runtime.getRunningTurnFlow(0).first { !it } }
                 assertNotNull(sent.clientMetadata?.threadId)
                 assertEquals(sent.clientMetadata?.threadId, sent.promptCacheKey)
+                val next = runtime.getLastCommitsIn(
+                    0,
+                    runtime.getCacheNonce(0),
+                    1,
+                    runtime.getLatestIndex(0),
+                    setOf(AgentCommitType.UserMessage),
+                    1,
+                ).single().index
                 openSqliteConnection(Path(home, "kodex.db"), readOnly = true).use { db ->
                     assertTrue((db.query("""SELECT payload_json FROM agent_commits WHERE agent_id = 0 AND type = 'user_message' AND "index" = ?""",
                         listOf(next.toLong())).single().single() as String).contains("After migration"))
@@ -158,13 +164,13 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
             withLocalRpcClient(home, endpoint) { connection ->
                 val client = RestoringRpcClient(connection)
                 val global = client.withService<GlobalRpc>()
-                val storage = client.withService<AgentStorageRpc>()
+                val runtime = client.withService<AgentRuntimeRpc>()
                 assertEquals("Auto-migrated session", global.getSessionCatalog(false).single().threadName)
                 global.keepSessionAlive(0)
-                val nonce = storage.getCacheNonce(0)
+                val nonce = runtime.getCacheNonce(0)
                 assertEquals(
                     listOf(ContentItem.InputText("From 0.5.2 file")),
-                    assertIs<StableUserMessage>(storage.getLastCommitsIn(0, nonce, 0, 0, AgentCommitType.IndexTypes, 1).single().commit).content,
+                    assertIs<StableUserMessage>(runtime.getLastCommitsIn(0, nonce, 0, 0, AgentCommitType.IndexTypes, 1).single().commit).content,
                 )
             }
         }

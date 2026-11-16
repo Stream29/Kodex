@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.cli.sessiontitle
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
@@ -25,7 +23,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.yield
 
-public actual fun attachSessionTitleGeneration(
+internal fun attachSessionTitleGeneration(
     scope: CoroutineScope,
     agentState: KodexAgentState,
     settings: () -> SessionTitleSettings,

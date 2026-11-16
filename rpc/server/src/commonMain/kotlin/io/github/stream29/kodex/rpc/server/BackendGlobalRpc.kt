@@ -1,5 +1,4 @@
 @file:OptIn(kotlin.time.ExperimentalTime::class, kotlin.uuid.ExperimentalUuidApi::class)
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
 
 package io.github.stream29.kodex.rpc.server
 
@@ -38,16 +37,15 @@ import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 /** Complete frozen GlobalRpc, delegating to the same owned backend graph. */
-public actual class BackendGlobalRpc actual constructor(
+internal class BackendGlobalRpc(
     private val scope: CoroutineScope,
     private val settings: BackendGlobalState,
     private val account: BackendAccountState,
     private val effects: BackendFrontendEffects,
     private val sessions: BackendSessionManagement,
-    private val notifications: Flow<Notification>,
-    private val schedules: ScheduleRepository?,
-    private val home: Path?,
-    private val checkAdmission: () -> Unit,
+    private val schedules: ScheduleRepository? = null,
+    private val home: Path? = null,
+    private val checkAdmission: () -> Unit = {},
 ) : GlobalRpc {
     private val operations: CoroutineScope = scope.supervisorChildScope()
     private val paths by lazy {
@@ -80,81 +78,80 @@ public actual class BackendGlobalRpc actual constructor(
         }.await()
     }
 
-    actual override suspend fun validateDirectory(query: DirectoryQuery): DirectoryValidationResult {
+    override suspend fun validateDirectory(query: DirectoryQuery): DirectoryValidationResult {
         ensureAdmission()
         return paths.validateDirectory(query)
     }
 
-    actual override suspend fun listDirectories(query: DirectoryQuery): DirectoryListResult {
+    override suspend fun listDirectories(query: DirectoryQuery): DirectoryListResult {
         ensureAdmission()
         return paths.listDirectories(query)
     }
 
-    actual override suspend fun evaluateContextPaths(query: ContextPathQuery): ContextPathEvaluation {
+    override suspend fun evaluateContextPaths(query: ContextPathQuery): ContextPathEvaluation {
         ensureAdmission()
         return paths.evaluateContextPaths(query)
     }
 
-    actual override suspend fun getSettings(): BackendSettings = observation { settings.settings.value }
-    actual override suspend fun getFrontendSettings(): CliFrontendSettings = observation { settings.unified.current.frontend }
-    actual override fun getFrontendSettingsFlow(): Flow<CliFrontendSettings> = observation { settings.unified.frontendSettings }
-    actual override suspend fun compareAndSetFrontendSettings(
+    override suspend fun getSettings(): BackendSettings = observation { settings.settings.value }
+    override suspend fun getFrontendSettings(): CliFrontendSettings = observation { settings.unified.current.frontend }
+    override fun getFrontendSettingsFlow(): Flow<CliFrontendSettings> = observation { settings.unified.frontendSettings }
+    override suspend fun compareAndSetFrontendSettings(
         expect: CliFrontendSettings,
         update: CliFrontendSettings,
     ): Boolean = inBackend { settings.unified.compareAndSetFrontend(expect, update) }
 
-    actual override fun getSettingsFlow(): Flow<BackendSettings> = observation { settings.settings }
-    actual override suspend fun compareAndSetSettings(expect: BackendSettings, update: BackendSettings): Boolean =
+    override fun getSettingsFlow(): Flow<BackendSettings> = observation { settings.settings }
+    override suspend fun compareAndSetSettings(expect: BackendSettings, update: BackendSettings): Boolean =
         inBackend { settings.compareAndSetSettings(expect, update) }
 
-    actual override suspend fun getModels(): List<ModelInfo> = observation { settings.models.value }
-    actual override fun getModelsFlow(): Flow<List<ModelInfo>> = observation { settings.models }
-    actual override fun getNotificationFlow(): Flow<Notification> = observation { notifications }
-    actual override suspend fun getAuthentication(): SettingsAuthenticationState = observation { account.authentication.value }
-    actual override fun getAuthenticationFlow(): Flow<SettingsAuthenticationState> = observation { account.authentication }
-    actual override suspend fun getAccountUsage(): SettingsAccountUsageState = observation { account.accountUsage.value }
-    actual override fun getAccountUsageFlow(): Flow<SettingsAccountUsageState> = observation { account.accountUsage }
-    actual override suspend fun refreshAccountUsage(): Unit = inBackend { account.refreshAccountUsage() }
-    actual override suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome =
+    override suspend fun getModels(): List<ModelInfo> = observation { settings.models.value }
+    override fun getModelsFlow(): Flow<List<ModelInfo>> = observation { settings.models }
+    override suspend fun getAuthentication(): SettingsAuthenticationState = observation { account.authentication.value }
+    override fun getAuthenticationFlow(): Flow<SettingsAuthenticationState> = observation { account.authentication }
+    override suspend fun getAccountUsage(): SettingsAccountUsageState = observation { account.accountUsage.value }
+    override fun getAccountUsageFlow(): Flow<SettingsAccountUsageState> = observation { account.accountUsage }
+    override suspend fun refreshAccountUsage(): Unit = inBackend { account.refreshAccountUsage() }
+    override suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome =
         inBackend { account.consumeUsageReset(creditId) }
 
-    actual override suspend fun startOAuthLogin(target: OAuthTarget): OAuthAuthorization =
+    override suspend fun startOAuthLogin(target: OAuthTarget): OAuthAuthorization =
         inBackend { effects.startOAuth(target) }
 
-    actual override suspend fun awaitOAuthLogin(attemptId: Long) {
+    override suspend fun awaitOAuthLogin(attemptId: Long) {
         ensureAdmission()
         effects.awaitOAuth(attemptId)
     }
 
-    actual override suspend fun reportFrontendError(message: String?): FrontendErrorAdmission =
+    override suspend fun reportFrontendError(message: String?): FrontendErrorAdmission =
         inBackend { effects.reportFrontendError(message) }
 
-    actual override suspend fun cancelOAuthLogin(attemptId: Long): Unit =
+    override suspend fun cancelOAuthLogin(attemptId: Long): Unit =
         inBackend { effects.cancelOAuth(attemptId) }
 
-    actual override suspend fun abandonPendingOAuthLogin(attemptId: Long): Unit =
+    override suspend fun abandonPendingOAuthLogin(attemptId: Long): Unit =
         inBackend { effects.abandonPendingOAuth(attemptId) }
 
-    actual override suspend fun removeAuthentication(source: KodexAuthSource): Unit =
+    override suspend fun removeAuthentication(source: KodexAuthSource): Unit =
         inBackend { effects.removeAuthentication(source) }
 
-    actual override suspend fun getMcpServers(): List<McpManagedServerState> = observation { settings.mcpServers.value }
-    actual override fun getMcpServersFlow(): Flow<List<McpManagedServerState>> = observation { settings.mcpServers }
-    actual override suspend fun reconnectMcpServer(serverName: String): Unit =
+    override suspend fun getMcpServers(): List<McpManagedServerState> = observation { settings.mcpServers.value }
+    override fun getMcpServersFlow(): Flow<List<McpManagedServerState>> = observation { settings.mcpServers }
+    override suspend fun reconnectMcpServer(serverName: String): Unit =
         inBackend { settings.reconnectMcpServer(serverName) }
 
-    actual override suspend fun logoutMcpServer(serverName: String): Unit =
+    override suspend fun logoutMcpServer(serverName: String): Unit =
         inBackend { effects.logoutMcp(serverName) }
 
-    actual override suspend fun getCodexMcpSettings(): List<McpCodexImportCandidate> =
+    override suspend fun getCodexMcpSettings(): List<McpCodexImportCandidate> =
         inBackend { settings.getCodexMcpSettings() }
 
-    actual override suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> =
+    override suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> =
         sessions.getSessionCatalog(includeArchived)
 
-    actual override suspend fun createSession(cwd: Path): Int = sessions.createSession(cwd)
+    override suspend fun createSession(cwd: Path): Int = sessions.createSession(cwd)
 
-    actual override suspend fun createSchedule(
+    override suspend fun createSchedule(
         agentId: Int,
         triggerAt: Instant,
         cron: String?,
@@ -171,17 +168,17 @@ public actual class BackendGlobalRpc actual constructor(
         )
     }
 
-    actual override suspend fun listSchedules(agentId: Int): List<ScheduleRecord> = inBackend {
+    override suspend fun listSchedules(agentId: Int): List<ScheduleRecord> = inBackend {
         val repository = checkNotNull(schedules) { "ScheduleRepository is not configured on BackendGlobalRpc." }
         repository.list(agentId)
     }
 
-    actual override suspend fun deleteSchedule(scheduleId: Long): Boolean = inBackend {
+    override suspend fun deleteSchedule(scheduleId: Long): Boolean = inBackend {
         val repository = checkNotNull(schedules) { "ScheduleRepository is not configured on BackendGlobalRpc." }
         repository.delete(scheduleId)
     }
 
-    actual override suspend fun listMcpTools(): List<McpCatalogTool> = observation {
+    override suspend fun listMcpTools(): List<McpCatalogTool> = observation {
         settings.mcpService.clients.value
             .entries
             .sortedBy { it.key }
@@ -199,7 +196,7 @@ public actual class BackendGlobalRpc actual constructor(
             }
     }
 
-    actual override suspend fun callMcpTool(
+    override suspend fun callMcpTool(
         serverName: String,
         toolName: String,
         arguments: JsonObject,
@@ -213,17 +210,17 @@ public actual class BackendGlobalRpc actual constructor(
         raw.materializeImageBlocks(mediaRoot = mediaRoot, serverName = serverName)
     }
 
-    actual override suspend fun keepSessionAlive(sessionIndex: Int): Unit = sessions.keepSessionAlive(sessionIndex)
-    actual override suspend fun archiveSession(sessionIndex: Int): Unit = sessions.archiveSession(sessionIndex)
-    actual override suspend fun unarchiveSession(sessionIndex: Int): Unit = sessions.unarchiveSession(sessionIndex)
-    actual override suspend fun forkSession(sessionIndex: Int): Int = sessions.forkSession(sessionIndex)
-    actual override suspend fun forkSessionHistory(
+    override suspend fun keepSessionAlive(sessionIndex: Int): Unit = sessions.keepSessionAlive(sessionIndex)
+    override suspend fun archiveSession(sessionIndex: Int): Unit = sessions.archiveSession(sessionIndex)
+    override suspend fun unarchiveSession(sessionIndex: Int): Unit = sessions.unarchiveSession(sessionIndex)
+    override suspend fun forkSession(sessionIndex: Int): Int = sessions.forkSession(sessionIndex)
+    override suspend fun forkSessionHistory(
         sessionIndex: Int,
         untilExclusive: Int,
         expectedCacheNonce: Long,
     ): Int = sessions.forkSessionHistory(sessionIndex, untilExclusive, expectedCacheNonce)
 
-    actual override suspend fun deleteSession(sessionIndex: Int): Boolean = sessions.deleteSession(sessionIndex)
+    override suspend fun deleteSession(sessionIndex: Int): Boolean = sessions.deleteSession(sessionIndex)
 }
 
 private suspend fun CallToolResult.materializeImageBlocks(

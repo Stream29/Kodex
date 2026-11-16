@@ -45,12 +45,13 @@ import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.TokenUsage
 import io.github.stream29.kodex.openai.client.OpenAiModerationBlockedException
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
-import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
+import io.github.stream29.kodex.openai.modelcatalog.ownedOpenAiModelCatalog
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -682,8 +683,8 @@ private data class RecordedRemoteCompactionV2Request(
 private val RecordedRemoteCompactionV2Request.turnMetadata: String
     get() = requireNotNull(request.clientMetadata).turnMetadata
 
-private fun testModelCatalog(): OpenAiModelCatalogStore =
-    OpenAiModelCatalog(
+private fun CoroutineScope.testModelCatalog(): OpenAiModelCatalogStore =
+    ownedOpenAiModelCatalog(
         client = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse()) }
         },

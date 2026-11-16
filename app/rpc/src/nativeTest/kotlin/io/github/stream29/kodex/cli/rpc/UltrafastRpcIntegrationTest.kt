@@ -6,8 +6,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.first
 import kotlinx.rpc.RpcCall
 import kotlinx.rpc.RpcClient
 import kotlin.test.*
@@ -33,17 +33,17 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 // Updating defaults changes the reusable draft, not this persisted Session.
                 assertTrue(services.global.compareAndSetSettings(defaults, old))
                 assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
-                val agent = requireNotNull(view.agent.value)
+                val agent = requireNotNull(view.rootAgent.value)
                 agent.updateModel(OpenAiModelId("changed-model"))
                 binding.settings.first { it.model == OpenAiModelId("changed-model") }
                 assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
                 val current = binding.settings.value
                 assertFalse(binding.settings.compareAndSet(current.copy(serviceTier = ServiceTier.Default), current))
-                val forked = services.global.forkSession(view.index)
+                val forked = services.global.forkSession(view.sessionIndex)
                 val fork = views.open(forked)
                 assertEquals(ServiceTier.Ultrafast, fork.current().settings.value.serviceTier)
                 views.release(view)
-                val reopened = views.open(view.index)
+                val reopened = views.open(view.sessionIndex)
                 assertEquals(ServiceTier.Ultrafast, reopened.current().settings.value.serviceTier)
             } finally {
                 draft.close()
@@ -64,7 +64,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
             )))
             val view = views.open(services.global.createSession(home))
             val binding = view.current()
-            val agent = requireNotNull(view.agent.value)
+            val agent = requireNotNull(view.rootAgent.value)
             try {
                 agent.submit(listOf(ContentItem.InputText("test response")))
                 started.await()
@@ -82,9 +82,9 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 assertNull(agent.notification.value)
                 assertTrue(failures.value.isEmpty())
                 views.release(view)
-                val reopened = views.open(view.index)
+                val reopened = views.open(view.sessionIndex)
                 yield(); yield()
-                assertNull(requireNotNull(reopened.agent.value).notification.value)
+                assertNull(requireNotNull(reopened.rootAgent.value).notification.value)
                 assertTrue(failures.value.isEmpty())
             } finally {
                 finish.complete(Unit)
@@ -111,7 +111,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
             )))
             val view = views.open(services.global.createSession(home))
             val binding = view.current()
-            val agent = requireNotNull(view.agent.value)
+            val agent = requireNotNull(view.rootAgent.value)
             try {
                 agent.submit(listOf(ContentItem.InputText("test")))
                 started.await()
@@ -141,7 +141,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 )))
                 val view = views.open(services.global.createSession(home))
                 val binding = view.current()
-                val agent = requireNotNull(view.agent.value)
+                val agent = requireNotNull(view.rootAgent.value)
                 agent.submit(listOf(ContentItem.InputText("test response")))
                 binding.state.first { it == AgentStateValue.AssistantMessage }
                 binding.running.first { !it }

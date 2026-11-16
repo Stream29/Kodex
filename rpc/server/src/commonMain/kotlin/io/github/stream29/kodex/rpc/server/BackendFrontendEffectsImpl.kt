@@ -5,6 +5,17 @@ import io.github.stream29.kodex.rpc.models.FrontendErrorAdmission
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 
+/** Backend-owned effects used by the global service. */
+internal interface BackendFrontendEffects {
+    suspend fun startOAuth(target: OAuthTarget): OAuthAuthorization
+    suspend fun awaitOAuth(attemptId: Long)
+    suspend fun cancelOAuth(attemptId: Long)
+    suspend fun abandonPendingOAuth(attemptId: Long)
+    suspend fun removeAuthentication(source: KodexAuthSource)
+    suspend fun logoutMcp(serverName: String)
+    fun reportFrontendError(message: String?): FrontendErrorAdmission
+}
+
 internal class BackendFrontendEffectsImpl(
     private val owned: BackendOwnedOAuth,
     private val oauth: BackendOAuth,

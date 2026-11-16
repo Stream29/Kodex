@@ -25,6 +25,11 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+internal fun validateBackendHomeValue(value: String): String {
+    require(value.isNotBlank() && '\u0000' !in value) { "Backend Home path must not be blank." }
+    return value
+}
+
 /** Explicit local-loopback backend target (`--backend-url` / `--backend-home`). */
 public data class CliBackendTarget(
     public val port: Int? = null,
@@ -35,11 +40,7 @@ public data class CliBackendTarget(
             "CliBackendTarget requires at least a loopback port or a backendHome path."
         }
         if (port != null) require(port in 1..65535) { "Invalid backend URL port: $port" }
-        if (backendHome != null) {
-            require(backendHome.isNotBlank() && '\u0000' !in backendHome) {
-                "Backend Home path must not be blank."
-            }
-        }
+        if (backendHome != null) validateBackendHomeValue(backendHome)
     }
 }
 
@@ -145,6 +146,22 @@ public sealed class KodexLeafCommand(
     public open fun validate(): Unit = Unit
 }
 
+/** Executable thin-client tool leaf command sharing [ToolBackendOptions]. */
+public sealed class KodexToolLeafCommand(
+    name: String,
+    summary: String,
+) : KodexLeafCommand(name, summary, isToolCommand = true) {
+    public val backend: ToolBackendOptions by ToolBackendOptions()
+}
+
+/** Executable Agent-targeted thin-client tool command sharing [AgentTargetOptions] and [ToolBackendOptions]. */
+public sealed class KodexAgentToolCommand(
+    name: String,
+    summary: String,
+) : KodexToolLeafCommand(name, summary) {
+    public val agent: AgentTargetOptions by AgentTargetOptions()
+}
+
 /** Interactive frontend backend options (`--backend-home` requires `--backend-url`). */
 public class FrontendBackendOptions : OptionGroup() {
     public val backendPort: Int? by option(
@@ -157,10 +174,7 @@ public class FrontendBackendOptions : OptionGroup() {
         "--backend-home",
         metavar = "DIR",
         help = "Read the target backend's lock and connection record from this Kodex Home (requires --backend-url).",
-    ).convert {
-        require(it.isNotBlank() && '\u0000' !in it) { "Backend Home path must not be blank." }
-        it
-    }
+    ).convert { validateBackendHomeValue(it) }
 
     public fun resolve(): CliBackendTarget? {
         val port = backendPort
@@ -185,10 +199,7 @@ public class ToolBackendOptions : OptionGroup() {
         "--backend-home",
         metavar = "DIR",
         help = "Read the running backend connection record from this Kodex Home (defaults to KODEX_HOME or ~/.kodex).",
-    ).convert {
-        require(it.isNotBlank() && '\u0000' !in it) { "Backend Home path must not be blank." }
-        it
-    }
+    ).convert { validateBackendHomeValue(it) }
 
     public fun resolve(): CliBackendTarget? {
         val port = backendPort

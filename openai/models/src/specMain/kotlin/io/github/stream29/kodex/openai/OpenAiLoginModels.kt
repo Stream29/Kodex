@@ -16,8 +16,6 @@ public typealias OpenAiLoginResult<Success> = OpenAiResult<Success, OpenAiLoginE
 public data class OpenAiLoginError(
     /** HTTP status code returned by the token endpoint. */
     public val statusCode: Int,
-    /** HTTP reason phrase associated with [statusCode]. */
-    public val statusDescription: String,
     /** Stable human-readable description for logs and presentation. */
     public val message: String,
 )
@@ -27,15 +25,11 @@ public data class OpenAiLoginAuthorization(
     public val redirectUri: String,
     public val codeChallenge: String,
     public val state: String,
-    public val allowedWorkspaceIds: List<String> = emptyList(),
 ) {
     init {
         require(redirectUri.isNotBlank()) { "redirectUri must not be blank." }
         require(codeChallenge.isNotBlank()) { "codeChallenge must not be blank." }
         require(state.isNotBlank()) { "state must not be blank." }
-        require(allowedWorkspaceIds.all(String::isNotBlank)) {
-            "allowedWorkspaceIds must not contain blank values."
-        }
     }
 }
 

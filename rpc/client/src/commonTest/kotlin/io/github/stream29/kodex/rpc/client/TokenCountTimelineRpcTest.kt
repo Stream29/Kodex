@@ -16,7 +16,7 @@ import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.openai.TokenUsage
-import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
+import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -37,9 +37,9 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
                 },
             )
             withInMemoryRpc(
-                registerServices = { registerService(AgentStorageRpc::class) { backend } },
+                registerServices = { registerService(AgentRuntimeRpc::class) { backend } },
             ) { client ->
-                val rpc = RestoringRpcClient(client).withService<AgentStorageRpc>()
+                val rpc = RestoringRpcClient(client).withService<AgentRuntimeRpc>()
                 val ownerJob = Job(coroutineContext[Job])
                 try {
                     val view = CoroutineScope(coroutineContext + ownerJob).rpcCachedAgentStorage(7, rpc)
@@ -59,9 +59,9 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
         withTimeout(15.seconds) {
             val backend = TokenCountTestService()
             withInMemoryRpc(
-                registerServices = { registerService(AgentStorageRpc::class) { backend } },
+                registerServices = { registerService(AgentRuntimeRpc::class) { backend } },
             ) { client ->
-                val rpc = RestoringRpcClient(client).withService<AgentStorageRpc>()
+                val rpc = RestoringRpcClient(client).withService<AgentRuntimeRpc>()
                 val nonce = rpc.getCacheNonce(7)
                 assertEquals(5, rpc.getLatestIndex(7))
                 assertEquals(emptyList(), rpc.getFirstCommitsIn(7, nonce, 4, 4, AgentCommitType.LlmRequestMetaTypes))
@@ -108,7 +108,7 @@ private class TokenCountTestService(
             diagnostics = TokenCountDiagnostics(requestId = "request", turnStateReceived = true),
         ),
     ),
-) : AgentStorageRpc {
+) : StubAgentRuntimeRpc() {
     var exactReads = 0
     var lastQueries = 0
     var countQueries = 0

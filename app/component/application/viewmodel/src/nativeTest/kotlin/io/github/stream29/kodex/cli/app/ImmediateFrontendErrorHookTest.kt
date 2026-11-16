@@ -14,6 +14,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.io.IOException
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.json.Json
@@ -46,7 +47,7 @@ val immediateFrontendErrorHookTest by testSuite(compartment = { TestCompartment.
                         home, launch, Path(root, "codex"), Path(root, "agents"),
                         createClient = { applicationClient() }, createLoginClient = { ApplicationLoginClient },
                     ) { app ->
-                        app.reportWarning("first-warning")
+                        app.reportUnhandledError(IOException("first-warning"))
                         val output = Path(root, "immediate-hook.json")
                         withTimeout(10.seconds) {
                             while (!Fs.exists(output) || Fs.readString(output).isEmpty()) delay(10)

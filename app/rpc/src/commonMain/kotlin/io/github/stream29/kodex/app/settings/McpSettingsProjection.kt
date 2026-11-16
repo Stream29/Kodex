@@ -3,7 +3,7 @@ package io.github.stream29.kodex.app.settings
 import io.github.stream29.kodex.app.settings.contract.*
 import io.github.stream29.kodex.mcp.contract.*
 
-public actual fun McpManagedServerState.toSettingsState(): McpServerSettingsState = McpServerSettingsState(
+internal fun McpManagedServerState.toSettingsState(): McpServerSettingsState = McpServerSettingsState(
     serverName, transport, enabled, authentication,
     when {
         !enabled -> McpServerSettingsStatus.Disabled

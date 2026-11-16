@@ -15,23 +15,80 @@ import kotlin.test.*
 
 private val transportCapabilities = FrontendHostCapabilities(
     FrontendCapabilityStatus.Ready, FrontendCapabilityStatus.Ready,
-    FrontendCapabilityStatus.Ready, FrontendCapabilityStatus.Ready,
 )
-private fun transportDescriptor() = LocalFrontendHostDescriptor(
+private fun transportDescriptor(credential: String = "c".repeat(64)) = LocalFrontendHostDescriptor(
     1, "i".repeat(64), "business-instance", "http://localhost:18795", "http://127.0.0.1:1234",
-    "c".repeat(64), LocalFrontendOwner("o".repeat(64)), "device", "/launch", 60_000, transportCapabilities,
+    credential, LocalFrontendOwner("o".repeat(64)), "device", "/launch", 60_000, transportCapabilities,
 )
 
 internal val frontendHostTransportTest by testSuite {
+    test("launch location accepts only canonical loopback context paths and bounded tickets") {
+        val path = "/web/${"a".repeat(64)}/"
+        validateLocalWebLocation("http://127.0.0.1:1234", path, "b".repeat(64))
+        for (origin in listOf("http://localhost:1234", "https://127.0.0.1:1234", "http://remote:1234")) {
+            assertFailsWith<IllegalArgumentException> { validateLocalWebLocation(origin, path, null) }
+        }
+        for (bad in listOf("/web/a/", "$path../", "$path?x=1", "/web/${"A".repeat(64)}/")) {
+            assertFailsWith<IllegalArgumentException> { validateLocalWebLocation("http://127.0.0.1:1234", bad, null) }
+        }
+        assertFailsWith<IllegalArgumentException> { validateLocalWebLocation("http://127.0.0.1:1234", path, "short") }
+    }
+    test("cross-origin launch is rejected before contacting any listener") {
+        assertFailsWith<IllegalArgumentException> {
+            withLocalFrontendClient<Unit>("http://127.0.0.1:1", "/web/${"a".repeat(64)}/", null) { _, _, _ ->
+                fail("No business connection should be opened")
+            }
+        }
+    }
+    test("bootstrap returns only a scoped direct endpoint and does not retry a lost response") {
+        withContext(Dispatchers.Default) { fetchOwner.withLock {
+            for (lostResponse in listOf(false, true)) {
+                val state = interceptEntryFetch(lostResponse)
+                try {
+                    if (lostResponse) {
+                        assertFailsWith<IllegalStateException> {
+                            bootstrapLocalFrontend("http://127.0.0.1:1", "/web/${"a".repeat(64)}/", "b".repeat(64))
+                        }
+                    } else {
+                        val info = bootstrapLocalFrontend("http://127.0.0.1:1", "/web/${"a".repeat(64)}/", "b".repeat(64))
+                        assertEquals("direct-test", info.endpoint.instanceId)
+                        assertEquals(1234, info.endpoint.port)
+                        assertEquals("/project", info.workingDirectory)
+                    }
+                    assertEquals("bootstrap", entryFetchCalls(state))
+                    assertTrue(entryFetchClean(state), "No management credential or bearer header; capability only in bootstrap JSON.")
+                } finally { restoreEntryFetch(state) }
+            }
+        } }
+    }
+    test("bootstrap rejects an oversized streaming reply without prebuffering its remaining body") {
+        withContext(Dispatchers.Default) { fetchOwner.withLock {
+            val state = interceptStreamingBootstrap()
+            try {
+                assertFailsWith<IllegalStateException> {
+                    bootstrapLocalFrontend(
+                        "http://127.0.0.1:1", "/web/${"a".repeat(64)}/", "b".repeat(64),
+                    )
+                }
+                withTimeout(5_000) {
+                    while (!streamingBootstrapStopped(state)) delay(1)
+                }
+                assertTrue(streamingBootstrapStopped(state), "The bounded reader must cancel the unread response.")
+            } finally {
+                restoreStreamingBootstrap(state)
+            }
+        } }
+    }
     test("actual fetch sends only the closed typed call and correlates the exact reply") {
         withContext(Dispatchers.Default) { fetchOwner.withLock {
             val state = interceptCompanionFetch("valid")
             val http = HttpClient(Js) { followRedirects = false }
             try {
                 val host = frontendHostConnection(transportDescriptor(), http, MutableStateFlow(transportCapabilities))
-                assertEquals(LocalErrorObservationAdmission.Admitted, assertIs<LocalFrontendHostReply.ErrorObserved>(
-                    host.call(LocalFrontendHostRequest.ObserveError(null)),
-                ).admission)
+                assertSame(
+                    LocalFrontendHostReply.OwnerClosed,
+                    host.call(LocalFrontendHostRequest.CloseOwner),
+                )
                 assertEquals(1, companionFetchCount(state))
                 assertTrue(companionFetchClean(state))
             } finally { http.close(); restoreCompanionFetch(state) }
@@ -48,7 +105,7 @@ internal val frontendHostTransportTest by testSuite {
                 try {
                     val host = frontendHostConnection(transportDescriptor(), http, MutableStateFlow(transportCapabilities))
                     val failure = assertFails {
-                        host.call(LocalFrontendHostRequest.ObserveError("live-fixture-error"))
+                        host.call(LocalFrontendHostRequest.CloseOwner)
                     }
                     assertFalse(failure.message.orEmpty().contains("private-callback-marker"))
                     assertEquals(1, companionFetchCount(state), "$mode must not retry an unknown outcome.")
@@ -60,7 +117,7 @@ internal val frontendHostTransportTest by testSuite {
         withContext(Dispatchers.Default) { fetchOwner.withLock {
             for (mode in listOf(
                 "lost", "stream-lost", "server", "denied", "forbidden", "instance", "owner",
-                "protocol", "unknown", "utf8", "json", "large", "wrong-reply", "js-invalid",
+                "protocol", "unknown", "utf8", "json", "large", "wrong-reply-renew", "js-invalid",
             )) {
                 val state = interceptCompanionFetch(mode)
                 val http = HttpClient(Js) { followRedirects = false }
@@ -79,29 +136,17 @@ internal val frontendHostTransportTest by testSuite {
             }
         } }
     }
-    test("all one-shot operations including cleanup never replay an unknown result or rejection") {
+    test("close cleanup never replays an unknown result or rejection") {
         withContext(Dispatchers.Default) { fetchOwner.withLock {
-            val reservation = LocalOAuthReservation("r".repeat(64))
-            val requests = listOf(
-                LocalFrontendHostRequest.ReserveCallback(LocalOAuthProvider.OpenAi, null),
-                LocalFrontendHostRequest.BindCallback(reservation, LocalOAuthBinding(1, "state", "https://provider/auth")),
-                LocalFrontendHostRequest.AwaitCallback(reservation),
-                LocalFrontendHostRequest.OpenRegisteredAuthorization(reservation, 1),
-                LocalFrontendHostRequest.CloseCallback(reservation),
-                LocalFrontendHostRequest.ObserveError("live-only"),
-                LocalFrontendHostRequest.CloseOwner,
-            )
             for (mode in listOf("lost", "server", "denied", "forbidden")) {
-                for (request in requests) {
-                    val state = interceptCompanionFetch(mode)
-                    val http = HttpClient(Js) { followRedirects = false }
-                    try {
-                        val host = frontendHostConnection(transportDescriptor(), http, MutableStateFlow(transportCapabilities))
-                        assertFails { host.call(request) }
-                        assertEquals(1, companionFetchCount(state))
-                        assertTrue(companionFetchClean(state))
-                    } finally { http.close(); restoreCompanionFetch(state) }
-                }
+                val state = interceptCompanionFetch(mode)
+                val http = HttpClient(Js) { followRedirects = false }
+                try {
+                    val host = frontendHostConnection(transportDescriptor(), http, MutableStateFlow(transportCapabilities))
+                    assertFails { host.call(LocalFrontendHostRequest.CloseOwner) }
+                    assertEquals(1, companionFetchCount(state))
+                    assertTrue(companionFetchClean(state))
+                } finally { http.close(); restoreCompanionFetch(state) }
             }
         } }
     }
@@ -187,20 +232,100 @@ internal val frontendHostTransportTest by testSuite {
             }
         } }
     }
-    test("oversize UTF8 call is rejected before fetch instead of truncating an observation") {
+    test("oversize UTF8 call is rejected before fetch instead of truncating") {
         withContext(Dispatchers.Default) { fetchOwner.withLock {
             val state = interceptCompanionFetch("valid")
             val http = HttpClient(Js)
             try {
-                val host = frontendHostConnection(transportDescriptor(), http, MutableStateFlow(transportCapabilities))
+                val host = frontendHostConnection(
+                    transportDescriptor(credential = "界".repeat(LocalFrontendHostMaxFrameBytes)),
+                    http, MutableStateFlow(transportCapabilities),
+                )
                 assertFailsWith<IllegalArgumentException> {
-                    host.call(LocalFrontendHostRequest.ObserveError("界".repeat(LocalFrontendHostMaxFrameBytes)))
+                    host.call(LocalFrontendHostRequest.RenewOwner)
                 }
                 assertEquals(0, companionFetchCount(state))
             } finally { http.close(); restoreCompanionFetch(state) }
         } }
     }
 }
+
+@JsFun("""() => {
+    const original = globalThis.fetch;
+    const state = {pulls: 0, cancelled: false};
+    const replacement = async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url !== 'http://127.0.0.1:1/web/' + 'a'.repeat(64) + '/bootstrap') {
+            return original.call(globalThis, input, init);
+        }
+        return new Response(new ReadableStream({
+            pull(controller) {
+                if (++state.pulls > 1024) controller.close();
+                else controller.enqueue(new Uint8Array(8192).fill(32));
+            },
+            cancel() { state.cancelled = true; }
+        }), {status: 200});
+    };
+    state.restore = () => {
+        if (globalThis.fetch !== replacement) throw new Error('Fetch ownership changed');
+        globalThis.fetch = original;
+    };
+    globalThis.fetch = replacement;
+    return state;
+}""")
+private external fun interceptStreamingBootstrap(): JsAny
+
+@JsFun("(state) => state.cancelled && state.pulls < 1024")
+private external fun streamingBootstrapStopped(state: JsAny): Boolean
+
+@JsFun("(state) => state.restore()")
+private external fun restoreStreamingBootstrap(state: JsAny)
+
+@JsFun("""(lost) => {
+    const original = globalThis.fetch;
+    const prefix = 'http://127.0.0.1:1/web/' + 'a'.repeat(64) + '/';
+    const state = {calls: [], clean: true};
+    const replacement = async function(input, init) {
+        const url = typeof input === 'string' ? input : input.url;
+        if (!url.startsWith(prefix)) return original.call(globalThis, input, init);
+        const route = url.slice(prefix.length);
+        state.calls.push(route);
+        state.clean &&= !new Headers(init.headers).has('Authorization');
+        if (route === 'bootstrap') {
+            const body = await new Response(init.body).text();
+            state.clean &&= init.method === 'POST' && JSON.parse(body).ticket === 'b'.repeat(64);
+            if (lost) return Promise.reject(new TypeError('Failed to fetch'));
+            return Promise.resolve(new Response(JSON.stringify({
+                protocol: 2, workingDirectory: '/project',
+                endpoint: {instanceId: 'direct-test', port: 1234, password: 'c'.repeat(64), businessProtocol: '0.5.4'},
+                host: {
+                    protocol: 1, hostInstanceId: 'h'.repeat(64), backendInstanceId: 'direct-test',
+                    origin: 'http://127.0.0.1:1', baseUrl: 'http://127.0.0.1:1',
+                    credential: 'd'.repeat(64), owner: {value: 'o'.repeat(64)},
+                    executionEnvironmentId: 'test-device', launchDirectory: '/launch', leaseMillis: 60000,
+                    capabilities: {directoryBrowsing: 'Ready', contextPathEvaluation: 'Ready'}
+                }
+            }), {status: 200}));
+        }
+        return Promise.resolve(new Response('{}', {status: 401}));
+    };
+    state.restore = () => {
+        if (globalThis.fetch !== replacement) throw new Error('Fetch ownership changed');
+        globalThis.fetch = original;
+    };
+    globalThis.fetch = replacement;
+    return state;
+}""")
+private external fun interceptEntryFetch(lost: Boolean): JsAny
+
+@JsFun("(state) => state.calls.join(',')")
+private external fun entryFetchCalls(state: JsAny): String
+
+@JsFun("(state) => state.clean")
+private external fun entryFetchClean(state: JsAny): Boolean
+
+@JsFun("(state) => state.restore()")
+private external fun restoreEntryFetch(state: JsAny)
 
 @JsFun("""(mode) => {
     const original = globalThis.fetch;
@@ -214,8 +339,7 @@ internal val frontendHostTransportTest by testSuite {
         state.clean &&= init.method === 'POST' && !new Headers(init.headers).has('Authorization')
             && call.protocol === 1 && call.hostInstanceId === 'i'.repeat(64)
             && call.owner.value === 'o'.repeat(64) && call.credential === 'c'.repeat(64)
-            && ['reserve_callback', 'bind_callback', 'await_callback', 'open_registered_authorization',
-                'close_callback', 'observe_error', 'renew_owner', 'close_owner'].includes(call.request.type)
+            && ['renew_owner', 'close_owner'].includes(call.request.type)
             && !body.includes('management-private-marker') && !url.includes(call.credential);
         if (mode === 'lost') return Promise.reject(new TypeError('Failed to fetch'));
         if (mode === 'js-invalid') return Promise.reject(new SyntaxError('private-js-marker'));
@@ -238,12 +362,14 @@ internal val frontendHostTransportTest by testSuite {
             protocol: mode === 'protocol' ? 0 : 1,
             hostInstanceId: mode === 'instance' ? 'other' : 'i'.repeat(64),
             owner: {value: mode === 'owner' ? 'other' : 'o'.repeat(64)},
-            reply: {type: 'error_observed', admission: 'Admitted'}
+            reply: {type: 'owner_closed'}
         };
-        if (mode === 'wrong-reply') reply.reply = {type: 'callback_closed', reservation: {value: 'r'.repeat(64)}};
+        if (mode === 'wrong-reply') reply.reply = {type: 'owner_renewed', leaseMillis: 60000, capabilities: {
+            directoryBrowsing: 'Ready', contextPathEvaluation: 'Ready'
+        }};
+        if (mode === 'wrong-reply-renew') reply.reply = {type: 'owner_closed'};
         if (mode === 'renew-valid') reply.reply = {type: 'owner_renewed', leaseMillis: 60000, capabilities: {
-            directoryBrowsing: 'Ready', contextPathEvaluation: 'Ready',
-            oauthCallbacks: 'Ready', frontendErrorObservation: 'Ready'
+            directoryBrowsing: 'Ready', contextPathEvaluation: 'Ready'
         }};
         if (mode === 'closed' || mode === 'offline') reply.reply = {
             type: 'failure', reason: mode === 'closed' ? 'OwnerClosed' : 'BackendOffline'

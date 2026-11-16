@@ -56,8 +56,8 @@ private fun BrowserApplication() {
             val connectedBlock: suspend CoroutineScope.(String, FrontendRpcConnection, FrontendHostConnection) -> Unit = { directory, connected, frontendServer ->
                 connection = connected
                 val path = Path(directory)
-                val host = BrowserHost(path, frontendServer)
-                withFrontendApplication(connected, path, host) { app ->
+                val host = BrowserHost(frontendServer)
+                withFrontendApplication(connected, path) { app ->
                     try { activeHost = host; application = app; awaitCancellation() }
                     finally { application = null; activeHost = null }
                 }
@@ -71,7 +71,7 @@ private fun BrowserApplication() {
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Throwable) {
             message = if (automatic) "Could not connect to this local session. Run kodex web or kodex app again."
-                else "Could not pair. Run kodex host for this exact Origin and select its new scoped pairing record within 60 seconds."
+                else "Could not pair. Run kodex web --origin for this exact Origin and select its new scoped pairing record within 60 seconds."
             pairing = null
             automatic = false
         } finally { connection = null; application = null; activeHost = null; ownerActive = false }
@@ -140,7 +140,7 @@ private fun BrowserApplication() {
                 if (origin == null) {
                     UiText("Serve this package from an HTTP loopback origin (127.0.0.1 or localhost).", UiTextRole.Error)
                 } else {
-                    UiText("Start the frontend server with: kodex host --origin $origin")
+                    UiText("Start the frontend server with: kodex web --origin $origin")
                     UiText("Select the scoped pairing record printed by the frontend server within 60 seconds. Keep the frontend server running.")
                     UiText("Trust this Web package and the local OS/listener. This mode is not for remote or untrusted shared hosts.", UiTextRole.Supporting)
                     UiAction("Choose scoped pairing record", enabled = !choosing, onClick = {

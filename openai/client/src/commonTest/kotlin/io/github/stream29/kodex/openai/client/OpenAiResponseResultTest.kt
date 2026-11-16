@@ -50,6 +50,5 @@ val openAiResponseResultTest by testSuite {
 
         val success = assertIs<OpenAiResult.Success<CodexRateLimitResetConsumeResponse>>(result)
         assertEquals(CodexRateLimitResetConsumeCode.Reset, success.value.code)
-        assertEquals(2L, success.value.windowsReset)
     }
 }

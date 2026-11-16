@@ -11,33 +11,37 @@ import kotlin.test.*
 private const val registryOrigin = "http://127.0.0.1:1234"
 private val registryCapabilities = FrontendHostCapabilities(
     FrontendCapabilityStatus.Ready, FrontendCapabilityStatus.Ready,
-    FrontendCapabilityStatus.Ready, FrontendCapabilityStatus.Ready,
 )
 
 internal val frontendCompanionOwnersTest by testSuite {
-    test("HTTP caller cancellation stops only its dispatched operation and keeps the owner renewable") {
+    test("HTTP caller cancellation stops only its pending renewal check and keeps the owner renewable") {
         runTest {
             val fixture = OwnersFixture(this)
+            val onlineGate = CompletableDeferred<Unit>()
+            var cancelledChecks = 0
             try {
                 val host = fixture.owners.open(registryOrigin, "/launch").host
-                fixture.resources.single().wait = true
+                fixture.beforeOnline = {
+                    try { onlineGate.await() }
+                    finally { if (!currentCoroutineContext().isActive) cancelledChecks++ }
+                }
                 val waiting = async {
-                    fixture.owners.call(registryOrigin, fixture.call(
-                        host, LocalFrontendHostRequest.AwaitCallback(LocalOAuthReservation("reserved")),
-                    ))
+                    fixture.owners.call(registryOrigin, fixture.call(host, LocalFrontendHostRequest.RenewOwner))
                 }
                 runCurrent()
                 assertFalse(waiting.isCompleted)
                 waiting.cancel()
                 runCurrent()
-                assertTrue(waiting.isCompleted, "Replacing the HTTP Job must not detach a pending request.")
-                assertEquals(1, fixture.resources.single().cancelledCalls)
+                assertTrue(waiting.isCompleted)
+                assertEquals(1, cancelledChecks)
                 assertTrue(fixture.resourceJobs.single().isActive)
+                fixture.beforeOnline = {}
                 assertIs<LocalFrontendHostReply.OwnerRenewed>(
                     fixture.owners.call(registryOrigin, fixture.call(host, LocalFrontendHostRequest.RenewOwner))?.reply,
                 )
                 assertEquals(0, fixture.resources.single().closes)
             } finally {
+                onlineGate.complete(Unit)
                 fixture.owners.closeAndJoin()
             }
         }
@@ -218,9 +222,10 @@ internal val frontendCompanionOwnersTest by testSuite {
                 val first = opening.await().host
                 assertEquals(LocalFrontendHostOwnerLeaseMillis, first.leaseMillis)
                 fixture.now += LocalFrontendHostOwnerLeaseMillis - 1
-                assertNotNull(fixture.owners.call(registryOrigin,
-                    fixture.call(first, LocalFrontendHostRequest.ObserveError(null))))
-                fixture.now++
+                assertIs<LocalFrontendHostReply.OwnerRenewed>(
+                    fixture.owners.call(registryOrigin, fixture.call(first, LocalFrontendHostRequest.RenewOwner))?.reply,
+                )
+                fixture.now += LocalFrontendHostOwnerLeaseMillis
                 fixture.owners.expire()
                 assertEquals(1, fixture.resources.single().closes)
                 val identities = mutableSetOf(first.owner.value)
@@ -409,7 +414,7 @@ internal val frontendCompanionOwnersTest by testSuite {
             val fixture = OwnersFixture(this)
             try {
                 val host = fixture.owners.open(registryOrigin, "/launch").host
-                val request = LocalFrontendHostRequest.ObserveError("private-fixture-error")
+                val request = LocalFrontendHostRequest.CloseOwner
                 val valid = fixture.call(host, request)
                 for (call in listOf(
                     LocalFrontendHostCall(0, host.hostInstanceId, host.credential, host.owner, request),
@@ -420,11 +425,11 @@ internal val frontendCompanionOwnersTest by testSuite {
                     assertNull(fixture.owners.call(registryOrigin, call))
                 }
                 assertNull(fixture.owners.call("http://localhost:1234", valid))
-                assertEquals(0, fixture.resources.single().calls)
+                assertEquals(0, fixture.resources.single().closes)
             } finally { fixture.owners.closeAndJoin() }
         }
     }
-    test("only renewal extends a live owner and backend offline closes without replacement") {
+    test("renewal extends a live owner past original deadline and backend offline closes without replacement") {
         runTest {
             val fixture = OwnersFixture(this)
             try {
@@ -433,9 +438,9 @@ internal val frontendCompanionOwnersTest by testSuite {
                 val renewed = fixture.owners.call(registryOrigin, fixture.call(host, LocalFrontendHostRequest.RenewOwner))
                 assertIs<LocalFrontendHostReply.OwnerRenewed>(renewed?.reply)
                 fixture.now = 70_000
-                assertNotNull(fixture.owners.call(
-                    registryOrigin, fixture.call(host, LocalFrontendHostRequest.ObserveError(null)),
-                ))
+                assertIs<LocalFrontendHostReply.OwnerRenewed>(
+                    fixture.owners.call(registryOrigin, fixture.call(host, LocalFrontendHostRequest.RenewOwner))?.reply,
+                )
                 fixture.online = false
                 val offline = fixture.owners.call(registryOrigin, fixture.call(host, LocalFrontendHostRequest.RenewOwner))
                 assertEquals(LocalFrontendHostFailure.BackendOffline,
@@ -460,24 +465,23 @@ internal val frontendCompanionOwnersTest by testSuite {
             } finally { fixture.owners.closeAndJoin() }
         }
     }
-    test("owner close cancels local waiting work and does not close another owner") {
+    test("owner close cancels local owner scope work and does not close another owner") {
         runTest {
             val fixture = OwnersFixture(this)
+            val childJobs = mutableListOf<Job>()
+            fixture.beforeAcquire = { ownerScope, _ ->
+                childJobs += ownerScope.launch { awaitCancellation() }
+            }
             try {
                 val first = fixture.owners.open(registryOrigin, "/launch").host
                 val second = fixture.owners.open(registryOrigin, "/launch").host
-                fixture.resources[0].wait = true
-                val waiting = async {
-                    fixture.owners.call(registryOrigin, fixture.call(
-                        first, LocalFrontendHostRequest.AwaitCallback(LocalOAuthReservation("reserved")),
-                    ))
-                }
                 runCurrent()
-                assertFalse(waiting.isCompleted)
+                assertTrue(childJobs[0].isActive)
+                assertTrue(childJobs[1].isActive)
                 val closed = fixture.owners.call(registryOrigin, fixture.call(first, LocalFrontendHostRequest.CloseOwner))
                 assertIs<LocalFrontendHostReply.OwnerClosed>(closed?.reply)
-                assertEquals(LocalFrontendHostFailure.OwnerClosed,
-                    assertIs<LocalFrontendHostReply.Failure>(waiting.await()?.reply).reason)
+                assertTrue(childJobs[0].isCancelled)
+                assertTrue(childJobs[1].isActive)
                 assertEquals(1, fixture.resources[0].closes)
                 assertEquals(0, fixture.resources[1].closes)
                 assertIs<LocalFrontendHostReply.OwnerRenewed>(
@@ -534,6 +538,7 @@ private class OwnersFixture(
 ) {
     var now = 0L
     var online = true
+    var beforeOnline: suspend () -> Unit = {}
     var canonicalDirectory = canonical
     var beforeRegister: suspend (LocalBrowserGrant) -> Unit = {}
     var beforeRevoke: suspend (LocalBrowserGrant) -> Unit = {}
@@ -547,7 +552,8 @@ private class OwnersFixture(
     val owners = FrontendCompanionOwners(
         scope, BackendEndpoint("backend", 1, 1235, "m".repeat(64), "fixture"),
         "h".repeat(64), registryOrigin, "/native-launch", "device",
-        { (++serial).toString(16).padStart(32, '0') + "e".repeat(32) }, { now }, { online },
+        { (++serial).toString(16).padStart(32, '0') + "e".repeat(32) }, { now },
+        backendOnline = { beforeOnline(); online },
         register = {
             registered += it
             beforeRegister(it)
@@ -568,18 +574,7 @@ private class OwnersFixture(
 
 private class FakeCompanionResources : FrontendCompanionResources {
     override val capabilities = registryCapabilities
-    var calls = 0
     var closes = 0
-    var wait = false
-    var cancelledCalls = 0
     var onClose: suspend () -> Unit = {}
-    override suspend fun call(request: LocalFrontendHostRequest): LocalFrontendHostReply {
-        calls++
-        if (wait) {
-            try { awaitCancellation() }
-            finally { cancelledCalls++ }
-        }
-        return LocalFrontendHostReply.ErrorObserved(LocalErrorObservationAdmission.Admitted)
-    }
     override suspend fun closeAndJoin() { closes++; onClose() }
 }

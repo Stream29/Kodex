@@ -56,23 +56,22 @@ val backendOpenAiLoopbackTest by testSuite(compartment = { TestCompartment.RealT
                 withLoopback(if (automatic) Scenario.AutoCompact else Scenario.Policy, status) { client, ordinary, compact, _ ->
                     runtimeFixture(client) { repository, index, rpc ->
                         if (automatic) {
-                            val storage = BackendAgentStorageRpc(repository)
-                            val before = storage.getLastCommitsIn(
+                            val before = rpc.getLastCommitsIn(
                                 index,
-                                storage.getCacheNonce(index),
+                                rpc.getCacheNonce(index),
                                 0,
-                                storage.getLatestIndex(index),
+                                rpc.getLatestIndex(index),
                                 io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType.SettingsTypes,
                                 1,
                             ).single().commit as io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-                            assertTrue(storage.compareAndSetSettings(index, before, before.copy(autoCompactionTokenLimit = 20)))
+                            assertTrue(rpc.compareAndSetSettings(index, before, before.copy(autoCompactionTokenLimit = 20)))
                         }
                         val events = mutableListOf<Notification>()
                         val collector = launch(start = CoroutineStart.UNDISPATCHED) {
                             repository.stopEvents.toNotifications().collect { events += it }
                         }
                         try {
-                            rpc.appendUserMessage(index, listOf(ContentItem.InputText(prompt)))
+                            repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText(prompt)))
                             val failure = assertFailsWithReported { rpc.resume(index) }
                             withTimeout(5.seconds) { while (events.isEmpty()) delay(10) }
                             assertEquals(1, ordinary.value)
@@ -107,7 +106,7 @@ val backendOpenAiLoopbackTest by testSuite(compartment = { TestCompartment.RealT
                         repository.stopEvents.toNotifications().collect { events += it }
                     }
                     try {
-                        rpc.appendUserMessage(index, listOf(ContentItem.InputText(prompt)))
+                        repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText(prompt)))
                         val failure = assertFailsWithReported { rpc.resume(index) }
                         withTimeout(5.seconds) { while (events.isEmpty()) delay(10) }
                         // 20 Agent retries plus the initial attempt, each with two HTTP retries.
@@ -134,7 +133,7 @@ val backendOpenAiLoopbackTest by testSuite(compartment = { TestCompartment.RealT
                     repository.stopEvents.toNotifications().collect { events += it }
                 }
                 try {
-                    rpc.appendUserMessage(index, listOf(ContentItem.InputText(prompt)))
+                    repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText(prompt)))
                     val run = async { rpc.resume(index) }
                     withTimeout(5_000) { entered.await() }
                     rpc.cancelRunningTurn(index)

@@ -21,6 +21,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessag
 import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.test.deleteTestDirectory
+import io.github.stream29.kodex.app.test.seedTestHistory
 import io.github.stream29.kodex.app.test.testAnswer
 import io.github.stream29.kodex.cli.agent.canEditHistory
 import io.github.stream29.kodex.cli.components.TuiPopupHost
@@ -28,14 +29,12 @@ import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.cli.rpc.*
 import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDropdowns
-import io.github.stream29.kodex.cli.session.DefaultPersistedSessionViewModelRegistry
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
-import io.github.stream29.kodex.rpc.client.update
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.server.defaultBackendSettings
@@ -132,18 +131,16 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
                 assertSame(agent, session.rootAgent.value)
-                assertEquals(AgentStateValue.Empty, services.runtime.getState(view.index))
+                assertEquals(AgentStateValue.Empty, services.runtime.getState(view.sessionIndex))
             }
         }
     }
 
     test("real host resume reports failure without an inline error and keeps Session Ready") {
-        var appends = 0
         var resumes = 0
-        composerHost(decorate = { delegate ->
+        composerHost(seedUserMessage = "persist once", decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "appendUserMessage") appends++
                     if (call.callableName == "resume") { resumes++; error("injected resume failure") }
                     return delegate.call(call)
                 }
@@ -151,7 +148,6 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
         }) {
             val agent = requireNotNull(session.rootAgent.value)
             val binding = view.current()
-            binding.appendUserMessage(listOf(ContentItem.InputText("persist once")))
             runComposerHostMosaicTest {
                 val focus = FocusRequester()
                 setContentAndSnapshot {
@@ -165,19 +161,19 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertFalse("injected resume failure" in snapshot, snapshot)
                 assertFalse("Session operation failed." in snapshot, snapshot)
                 assertFalse("Unable to submit:" in snapshot, snapshot)
-                assertEquals(AgentStateValue.UserMessage, services.runtime.getState(view.index))
-                assertEquals(1, appends)
+                assertEquals(AgentStateValue.UserMessage, services.runtime.getState(view.sessionIndex))
                 assertEquals(1, resumes)
                 assertNull(agent.notification.value)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
-                assertSame(agent, view.agent.value)
+                assertSame(agent, view.rootAgent.value)
                 assertSame(agent, session.rootAgent.value)
                 assertIs<AgentLifecycleState.Open>(agent.lifecycle.value)
+                assertEquals(1, services.runtime.getLatestIndex(view.sessionIndex)) // No retry or compensating append.
                 // The binding is still usable, not merely a transient Ready snapshot.
                 agent.renameThread("usable after failure")
                 agent.settings.first { it.threadName == "usable after failure" }
-                assertEquals(1, appends) // No retry or compensating append.
+                assertEquals(2, services.runtime.getLatestIndex(view.sessionIndex))
             }
         }
     }
@@ -208,8 +204,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
             val agent = requireNotNull(session.rootAgent.value)
             val binding = view.current()
             try {
-                binding.appendUserMessage(listOf(ContentItem.InputText("start")))
-                agent.resume()
+                binding.submit(listOf(ContentItem.InputText("start")))
                 entered.await()
                 agent.composer.state.first { it.running }
                 binding.submit(listOf(ContentItem.InputText("earlier")))
@@ -240,9 +235,9 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
             }
             withTimeout(5.seconds) { agent.running.first { !it } }
             val index = session.sessionIndex
-            val nonce = services.storage.getCacheNonce(index)
+            val nonce = services.runtime.getCacheNonce(index)
             val latest = services.runtime.getLatestIndex(index)
-            val messages = services.storage.getFirstCommitsIn(
+            val messages = services.runtime.getFirstCommitsIn(
                 index,
                 nonce,
                 1,
@@ -261,7 +256,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
 
     test("real host Enter inactive submit replaces binding without replaying accepted submit") {
         var submits = 0
-        composerHost(decorate = { delegate ->
+        composerHost(seedUserMessage = "accepted once", decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
                     if (call.callableName == "submit" && ++submits == 1) throw SessionNotActive()
@@ -271,7 +266,6 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
         }) {
             val agent = requireNotNull(session.rootAgent.value)
             val oldBinding = view.current()
-            oldBinding.appendUserMessage(listOf(ContentItem.InputText("accepted once")))
             agent.composer.update("not replayed")
             runComposerHostMosaicTest {
                 val focus = FocusRequester()
@@ -326,11 +320,11 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertFalse("Session operation failed." in snapshot, snapshot)
                 assertNull(agent.notification.value)
                 assertTrue(failures.value.isEmpty(), "Cancellation must not enter the error outlet.")
-                assertSame(agent, view.agent.value)
+                assertSame(agent, view.rootAgent.value)
                 assertEquals("retained on cancellation", agent.composer.state.value.text)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
-                assertEquals(AgentStateValue.Empty, services.runtime.getState(view.index))
+                assertEquals(AgentStateValue.Empty, services.runtime.getState(view.sessionIndex))
             }
         }
     }
@@ -383,10 +377,10 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
     }
 
     test("Agent screen forwards the displayed history generation index and actual child") {
-        composerHost {
+        val text = "exact displayed history target"
+        composerHost(seedUserMessage = text) {
             val agent = requireNotNull(session.rootAgent.value)
-            val text = "exact displayed history target"
-            val index = view.current().appendUserMessage(listOf(ContentItem.InputText(text)))
+            val index = 1
             agent.history.historyItems.first { it.size > 0 && agent.history.contains(it.generation, index) }
             agent.state.first { it.canEditHistory(agent.running.value) }
             val callbacks = mutableListOf<Triple<Long, Int, HistoryItemViewModel>>()
@@ -479,6 +473,7 @@ private class ComposerHostFixture(
  * or replacement frontend state model stands in for the production assembly.
  */
 private suspend fun composerHost(
+    seedUserMessage: String? = null,
     decorate: (RpcClient) -> RpcClient = { it },
     response: suspend FlowCollector<ResponsesStreamEvent>.() -> Unit = { testAnswer() },
     block: suspend ComposerHostFixture.() -> Unit,
@@ -491,6 +486,9 @@ private suspend fun composerHost(
         createResponse { flow { response() } }
     }
     try {
+        val seededIndex = seedUserMessage?.let { message ->
+            seedTestHistory(root, "Test Session", mapOf(1 to StableUserMessage(listOf(ContentItem.InputText(message)))))
+        }
         withBackendServices(
             root, Path(root, "codex"), Path(root, "agents"),
             defaults = defaultBackendSettings().let {
@@ -508,12 +506,11 @@ private suspend fun composerHost(
                 val failures = MutableStateFlow<List<Throwable>>(emptyList())
                 val views = RpcSessionViews(this, services, models,
                     reportUnhandledError = { error -> failures.update { it + error } })
-                val sessions = DefaultPersistedSessionViewModelRegistry(views, models, this)
                 try {
-                    val index = services.global.createSession(root)
-                    val session = sessions.open(index)
-                    ComposerHostFixture(services, session, views.open(index), failures).block()
-                } finally { withContext(NonCancellable) { sessions.shutdown() } }
+                    val index = seededIndex ?: services.global.createSession(root)
+                    val view = views.open(index)
+                    ComposerHostFixture(services, view, view, failures).block()
+                } finally { withContext(NonCancellable) { views.shutdown() } }
             }
         }
     } finally { withContext(NonCancellable) { deleteTestDirectory(root) } }

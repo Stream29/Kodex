@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.cli.sessiontitle
 
 import io.github.stream29.kodex.openai.ContentItem
@@ -20,11 +18,11 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 
-public actual class OpenAiSessionTitleGenerator actual constructor(
+internal class OpenAiSessionTitleGenerator(
     private val client: OpenAiClient,
 ) : SessionTitleGenerator {
     @OptIn(ExperimentalUuidApi::class)
-    actual override suspend fun generateTitle(
+    override suspend fun generateTitle(
         userText: String,
         model: OpenAiModelId,
         reasoningEffort: ReasoningEffort,

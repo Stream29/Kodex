@@ -43,10 +43,6 @@ internal class FrontendOwnerLease(
                     ?: throw FrontendHostTransientFailure()
             } catch (_: FrontendHostTransientFailure) {
                 remaining()
-                capabilities.value = capabilities.value.copy(
-                    oauthCallbacks = FrontendCapabilityStatus.Negotiating,
-                    frontendErrorObservation = FrontendCapabilityStatus.Negotiating,
-                )
                 nextAttempt = nowMillis() + 1_000
                 continue
             }
@@ -65,9 +61,10 @@ internal class FrontendOwnerLease(
 }
 
 private fun FrontendHostCapabilities.hasEndedOwner(): Boolean =
-    listOf(directoryBrowsing, contextPathEvaluation, oauthCallbacks, frontendErrorObservation).any {
-        it == FrontendCapabilityStatus.OwnerClosed || it == FrontendCapabilityStatus.BackendOffline
-    }
+    directoryBrowsing == FrontendCapabilityStatus.OwnerClosed ||
+        directoryBrowsing == FrontendCapabilityStatus.BackendOffline ||
+        contextPathEvaluation == FrontendCapabilityStatus.OwnerClosed ||
+        contextPathEvaluation == FrontendCapabilityStatus.BackendOffline
 
 internal fun validateHostReply(
     request: LocalFrontendHostRequest,
@@ -75,24 +72,6 @@ internal fun validateHostReply(
 ): LocalFrontendHostReply {
     if (reply is LocalFrontendHostReply.Failure) return reply
     val matches = when (request) {
-        is LocalFrontendHostRequest.ReserveCallback ->
-            reply is LocalFrontendHostReply.CallbackReserved &&
-                reply.reservation.value.length in 32..256 && reply.redirectUri.isNotBlank()
-        is LocalFrontendHostRequest.BindCallback ->
-            reply is LocalFrontendHostReply.CallbackBound &&
-                reply.reservation.value == request.reservation.value &&
-                reply.binding.attemptId == request.binding.attemptId &&
-                reply.binding.state == request.binding.state &&
-                reply.binding.authorizationUrl == request.binding.authorizationUrl
-        is LocalFrontendHostRequest.AwaitCallback ->
-            reply is LocalFrontendHostReply.CallbackReceived &&
-                reply.reservation.value == request.reservation.value && reply.attemptId > 0
-        is LocalFrontendHostRequest.OpenRegisteredAuthorization ->
-            reply is LocalFrontendHostReply.AuthorizationOpened &&
-                reply.reservation.value == request.reservation.value && reply.attemptId == request.attemptId
-        is LocalFrontendHostRequest.CloseCallback ->
-            reply is LocalFrontendHostReply.CallbackClosed && reply.reservation.value == request.reservation.value
-        is LocalFrontendHostRequest.ObserveError -> reply is LocalFrontendHostReply.ErrorObserved
         LocalFrontendHostRequest.RenewOwner -> reply is LocalFrontendHostReply.OwnerRenewed
         LocalFrontendHostRequest.CloseOwner -> reply is LocalFrontendHostReply.OwnerClosed
     }

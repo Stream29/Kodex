@@ -121,7 +121,7 @@ val backendFileSystemAuthStoreTest by testSuite(compartment = { TestCompartment.
             f.login(KodexAuthSource.Codex, "codex")
             f.login(KodexAuthSource.Kodex, "kodex")
             f.clock.instant += 9.days
-            f.client.failure = OpenAiLoginError(400, "Bad Request", "Synthetic refresh failure")
+            f.client.failure = OpenAiLoginError(400, "Synthetic refresh failure")
             for (source in KodexAuthSource.entries) {
                 val destination = if (source == KodexAuthSource.Codex) Path(f.codex, "auth.json") else Path(f.data, "auth.yml")
                 val before = f.fs.readString(destination)

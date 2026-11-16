@@ -2,15 +2,24 @@
 
 package io.github.stream29.kodex.cli.rpc
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
+import io.github.stream29.kodex.openai.ModelInfo
+import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
+import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.rpc.local.BackendConnectionLost
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
-import io.github.stream29.kodex.rpc.local.BackendConnectionLost
-import io.github.stream29.kodex.openai.ModelInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +36,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.io.files.Path
+import kotlin.time.Instant
 
 public actual class RpcSessionViews actual constructor(
     scope: CoroutineScope,
@@ -34,16 +45,25 @@ public actual class RpcSessionViews actual constructor(
     private val models: StateFlow<List<ModelInfo>>,
     private val reportUnhandledError: (Throwable) -> Unit,
     private val connectionAvailable: () -> Boolean,
-) : AutoCloseable {
+) : PersistedSessionViewModelRegistry, AutoCloseable {
     private val owner = SupervisorJob(scope.coroutineContext[Job])
     private val localScope = CoroutineScope(scope.coroutineContext + owner)
     private val mutex = Mutex()
     private val views = mutableMapOf<Int, RpcSessionView>()
+    private var closed = false
 
-    public actual suspend fun open(index: Int): RpcSessionView {
-        val view = mutex.withLock {
+    actual override suspend fun open(sessionIndex: Int): RpcSessionView {
+        val (view, alreadyReady) = mutex.withLock {
+            check(!closed)
             owner.ensureActive()
-            views.getOrPut(index) { RpcSessionView(index, services, localScope, models, reportUnhandledError, connectionAvailable) }
+            val current = views.getOrPut(sessionIndex) {
+                RpcSessionView(sessionIndex, services, localScope, models, reportUnhandledError, connectionAvailable)
+            }
+            current to current.isInitiallyReady
+        }
+        if (alreadyReady) {
+            services.global.unarchiveSession(sessionIndex)
+            return view
         }
         try {
             view.awaitReady()
@@ -54,12 +74,12 @@ public actual class RpcSessionViews actual constructor(
             if (view.status.value is SessionViewStatus.Missing || view.status.value is SessionViewStatus.Failed) {
                 withContext(NonCancellable) {
                     mutex.withLock {
-                        if (views[index] === view &&
+                        if (views[sessionIndex] === view &&
                             (view.status.value is SessionViewStatus.Missing || view.status.value is SessionViewStatus.Failed)
                         ) {
                             view.close()
                             view.join()
-                            views.remove(index)
+                            views.remove(sessionIndex)
                         }
                     }
                 }
@@ -70,16 +90,38 @@ public actual class RpcSessionViews actual constructor(
 
     public actual suspend fun release(view: RpcSessionView): Unit {
         mutex.withLock {
-            if (views[view.index] === view) views.remove(view.index)
+            if (views[view.sessionIndex] === view) views.remove(view.sessionIndex)
             view.close()
         }
         view.join()
     }
 
     /** Also cancels a tab that is still initializing and has not returned a view to its caller. */
-    public actual suspend fun release(index: Int): Unit {
-        val view = mutex.withLock { views.remove(index)?.also { it.close() } }
+    actual override suspend fun release(sessionIndex: Int): Unit {
+        val view = mutex.withLock { views.remove(sessionIndex)?.also { it.close() } }
         view?.join()
+    }
+
+    actual override suspend fun archive(sessionIndex: Int): Unit = services.global.archiveSession(sessionIndex)
+    actual override suspend fun unarchive(sessionIndex: Int): Unit = services.global.unarchiveSession(sessionIndex)
+    actual override suspend fun fork(sessionIndex: Int): Int = services.global.forkSession(sessionIndex)
+    actual override suspend fun delete(sessionIndex: Int): Boolean =
+        services.global.deleteSession(sessionIndex).also { if (it) release(sessionIndex) }
+
+    actual override suspend fun shutdown(): Unit {
+        currentCoroutineContext().ensureActive()
+        val snapshot = mutex.withLock {
+            closed = true
+            views.values.toList().also {
+                views.clear()
+                it.forEach(RpcSessionView::close)
+            }
+        }
+        close()
+        withContext(NonCancellable) {
+            snapshot.forEach { it.join() }
+            join()
+        }
     }
 
     /** Reconnect activates still-open frontend tabs before publishing the new connection. */
@@ -87,7 +129,7 @@ public actual class RpcSessionViews actual constructor(
         val targets = mutex.withLock {
             owner.ensureActive()
             views.values.filter { it.status.value != SessionViewStatus.Closed }
-                .map { it.index to it.binding.value }
+                .map { it.sessionIndex to it.binding.value }
         }
         targets.forEach { (index, binding) ->
             try { replacement.global.keepSessionAlive(index) }
@@ -106,13 +148,13 @@ public actual class RpcSessionViews actual constructor(
 }
 
 public actual class RpcSessionView internal actual constructor(
-    public actual val index: Int,
+    actual override val sessionIndex: Int,
     private val services: RpcServices,
     scope: CoroutineScope,
-    private val models: StateFlow<List<ModelInfo>>,
+    actual override val models: StateFlow<List<ModelInfo>>,
     private val reportUnhandledError: (Throwable) -> Unit,
     private val connectionAvailable: () -> Boolean,
-) : AutoCloseable {
+) : PersistedSessionViewModel {
     private val owner = SupervisorJob(scope.coroutineContext[Job])
     private val localScope = CoroutineScope(scope.coroutineContext + owner)
     private val initial = CompletableDeferred<Unit>()
@@ -122,7 +164,13 @@ public actual class RpcSessionView internal actual constructor(
     public actual val status: StateFlow<SessionViewStatus> = mutableStatus.asStateFlow()
     private val mutableAgent = MutableStateFlow<AgentViewModel?>(null)
     /** Sole binding-owned Agent; recovery replaces it rather than wrapping the previous owner. */
-    public actual val agent: StateFlow<AgentViewModel?> = mutableAgent.asStateFlow()
+    actual override val rootAgent: StateFlow<AgentViewModel?> = mutableAgent.asStateFlow()
+    // Last-known read cache: recovery can withdraw the Agent/binding before publishing
+    // the replacement. It must not blank the tab name or become a writable second truth.
+    private val mutableSettings = MutableStateFlow(KodexAgentSettings(model = OpenAiModelId("placeholder")))
+    actual override val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()
+    actual override val name: StateFlow<String> = settings.projectState { it.threadName }
+    actual override val lifecycle: StateFlow<PersistedSessionLifecycleState> = status.projectState(::lifecycleStatus)
 
     init {
         owner.invokeOnCompletion {
@@ -145,6 +193,8 @@ public actual class RpcSessionView internal actual constructor(
         }
     }
 
+    internal val isInitiallyReady: Boolean get() = initial.isCompleted && owner.isActive
+
     internal suspend fun awaitReady() { initial.await(); owner.ensureActive() }
 
     private suspend fun coordinate() {
@@ -161,12 +211,13 @@ public actual class RpcSessionView internal actual constructor(
             var failure: Throwable? = null
             try {
                 val next = withContext(bindingScope.coroutineContext) {
-                    services.global.keepSessionAlive(index)
+                    services.global.keepSessionAlive(sessionIndex)
+                    if (!initial.isCompleted) services.global.unarchiveSession(sessionIndex)
                     bindingScope.launch {
                         while (true) {
                             delay(20_000)
                             if (connectionAvailable()) {
-                                try { services.global.keepSessionAlive(index) }
+                                try { services.global.keepSessionAlive(sessionIndex) }
                                 catch (failure: Throwable) {
                                     currentCoroutineContext().ensureActive()
                                     if (connectionAvailable()) throw failure
@@ -174,7 +225,7 @@ public actual class RpcSessionView internal actual constructor(
                             }
                         }
                     }
-                    val result = RpcSessionBinding.create(index, services, bindingScope) { error ->
+                    val result = RpcSessionBinding.create(sessionIndex, services, bindingScope) { error ->
                         failed.complete(error)
                     }
                     // Returning from withContext must not wait for the long-lived observers:
@@ -183,11 +234,14 @@ public actual class RpcSessionView internal actual constructor(
                 }
                 owner.ensureActive()
                 bindingJob.ensureActive()
+                mutableSettings.value = next.settings.value
+                bindingScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    next.settings.collect { mutableSettings.value = it }
+                }
                 mutableBinding.value = next
                 val nextAgent = createRpcAgentViewModel(
                     next,
                     bindingScope,
-                    services,
                     models,
                     reportUnhandledError,
                 )
@@ -230,6 +284,48 @@ public actual class RpcSessionView internal actual constructor(
         return requireNotNull(binding.value).also { it.ensureActive() }
     }
 
+    private fun currentAgent(): AgentViewModel {
+        owner.ensureActive()
+        val activeBinding = current()
+        return requireNotNull(rootAgent.value).also { check(it.settings === activeBinding.settings) }
+    }
+
+    actual override suspend fun readCreatedAt(): Instant? = current().readCreatedAt()
+    actual override suspend fun readUpdatedAt(): Instant? = current().readUpdatedAt()
+
+    actual override suspend fun fork(
+        source: AgentViewModel,
+        untilExclusive: Int,
+        expectedGeneration: Long,
+    ): Int {
+        owner.ensureActive()
+        val activeBinding = current()
+        val capturedAgent = requireNotNull(rootAgent.value).also { check(it.settings === activeBinding.settings) }
+        require(source === capturedAgent) { "The history target expired." }
+        return activeBinding.forkHistory(untilExclusive, expectedGeneration)
+    }
+
+    actual override suspend fun rename(name: String): Unit = currentAgent().renameThread(name.trim())
+    actual override suspend fun updateModel(model: OpenAiModelId): Unit = currentAgent().updateModel(model)
+    actual override suspend fun updateWorkingDirectory(workingDirectory: Path): Unit =
+        currentAgent().updateWorkingDirectory(workingDirectory)
+    actual override suspend fun updateReasoningEffort(reasoningEffort: ReasoningEffort): Unit =
+        currentAgent().updateReasoningEffort(reasoningEffort)
+    actual override suspend fun updateServiceTier(serviceTier: ServiceTier): Unit =
+        currentAgent().updateServiceTier(serviceTier)
+    actual override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode): Unit =
+        currentAgent().updateRequestUserInputMode(mode)
+    actual override suspend fun updateModelConfiguration(
+        model: OpenAiModelId,
+        reasoningEffort: ReasoningEffort,
+        serviceTier: ServiceTier,
+    ): Unit = currentAgent().updateModelConfiguration(model, reasoningEffort, serviceTier)
+
+    actual override suspend fun shutdown() {
+        close()
+        join()
+    }
+
     actual override fun close() {
         mutableStatus.value = SessionViewStatus.Closed
         mutableBinding.value = null
@@ -240,6 +336,15 @@ public actual class RpcSessionView internal actual constructor(
 
     public actual suspend fun join(): Unit = owner.join()
 }
+
+private fun lifecycleStatus(status: SessionViewStatus): PersistedSessionLifecycleState =
+    when (status) {
+        SessionViewStatus.Loading -> PersistedSessionLifecycleState.Loading
+        SessionViewStatus.Ready -> PersistedSessionLifecycleState.Open
+        SessionViewStatus.Missing -> PersistedSessionLifecycleState.Failed("Session no longer exists.")
+        is SessionViewStatus.Failed -> PersistedSessionLifecycleState.Failed(status.cause.message ?: "Session view failed.")
+        SessionViewStatus.Closed -> PersistedSessionLifecycleState.Closed
+    }
 
 private fun Throwable.remoteReason(): Throwable {
     var value = this

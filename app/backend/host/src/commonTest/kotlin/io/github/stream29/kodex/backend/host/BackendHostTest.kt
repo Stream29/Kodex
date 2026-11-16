@@ -145,10 +145,8 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 ))
                 index = rpc.global.createSession(home)
                 rpc.global.keepSessionAlive(index)
-                rpc.runtime.appendUserMessage(index, listOf(ContentItem.InputText("offline fixture")))
-                val waiter = launch { rpc.runtime.resume(index) }
+                rpc.runtime.submit(index, listOf(ContentItem.InputText("offline fixture")))
                 withTimeout(10.seconds) { started.await() }
-                waiter.cancelAndJoin()
             }
             delay(3_000) // Longer than the daemon TTL, without frontend renewal.
             assertTrue(!cancelled.isCompleted)
@@ -202,10 +200,8 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 ))
                 val index = rpc.global.createSession(home)
                 rpc.global.keepSessionAlive(index)
-                rpc.runtime.appendUserMessage(index, listOf(ContentItem.InputText("offline fixture")))
-                val waiter = launch { runCatching { rpc.runtime.resume(index) } }
+                rpc.runtime.submit(index, listOf(ContentItem.InputText("offline fixture")))
                 withTimeout(10.seconds) { entered.await() }
-                waiter.cancelAndJoin()
             }
             fail.complete(Unit)
             val marker = Path(home, "business-hook-marker")
@@ -235,8 +231,7 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 ))
                 val index = rpc.global.createSession(home)
                 rpc.global.keepSessionAlive(index)
-                rpc.runtime.appendUserMessage(index, listOf(ContentItem.InputText("shutdown fixture")))
-                val waiter = launch { runCatching { rpc.runtime.resume(index) } }
+                rpc.runtime.submit(index, listOf(ContentItem.InputText("shutdown fixture")))
                 withTimeout(10.seconds) { started.await() }
                 backendControlRequest(endpoint, "stop")
                 withTimeout(10.seconds) { stopped.join() }
@@ -245,7 +240,6 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 assertNull(BackendInstance.readRecord(home)?.failureReason)
                 val log = SystemCoroutineFileSystem.readString(Path(home, "log/Backend-${processId()}.log"))
                 assertTrue(!log.contains("AgentSession storage is closed."), log)
-                waiter.cancelAndJoin()
             }
         }
     }

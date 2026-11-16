@@ -32,20 +32,21 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
             }
         }
         runtimeFixture(client) { repository, index, rpc ->
+            val session = repository.openSessions.value.getValue(index)
             val notifications = repository.stopEvents.toNotifications()
-            rpc.appendUserMessage(index, listOf(ContentItem.InputText("unobserved")))
+            session.runtime.appendUserMessage(listOf(ContentItem.InputText("unobserved")))
             rpc.resume(index)
 
             val first = async(start = CoroutineStart.UNDISPATCHED) { notifications.first() }
-            rpc.appendUserMessage(index, listOf(ContentItem.InputText("observed-1")))
+            session.runtime.appendUserMessage(listOf(ContentItem.InputText("observed-1")))
             rpc.resume(index)
             assertEquals(index, (first.await() as Notification.Stop).sessionIndex)
 
-            rpc.appendUserMessage(index, listOf(ContentItem.InputText("between")))
+            session.runtime.appendUserMessage(listOf(ContentItem.InputText("between")))
             rpc.resume(index)
 
             val second = async(start = CoroutineStart.UNDISPATCHED) { notifications.first() }
-            rpc.appendUserMessage(index, listOf(ContentItem.InputText("observed-2")))
+            session.runtime.appendUserMessage(listOf(ContentItem.InputText("observed-2")))
             rpc.resume(index)
             assertEquals(index, (second.await() as Notification.Stop).sessionIndex)
         }
@@ -80,7 +81,7 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
                 client = client,
                 onAskUserCreated = { createdEvents += it },
             )
-            rpc.appendUserMessage(index, listOf(ContentItem.InputText("start turn")))
+            repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText("start turn")))
             val running = async { rpc.resume(index) }
             enteredTurn.await()
             assertTrue(rpc.getRunningTurn(index))
@@ -115,10 +116,11 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
             val event = async(start = CoroutineStart.UNDISPATCHED) {
                 repository.stopEvents.toNotifications().first()
             }
-            rpc.appendUserMessage(index, listOf(ContentItem.InputText("run")))
+            val session = repository.openSessions.value.getValue(index)
+            session.runtime.appendUserMessage(listOf(ContentItem.InputText("run")))
             val run = async { runCatching { rpc.resume(index) } }
             entered.await()
-            assertFailsWith<Throwable> { rpc.appendUserMessage(index, listOf(ContentItem.InputText("illegal"))) }
+            assertFailsWith<Throwable> { session.runtime.appendUserMessage(listOf(ContentItem.InputText("illegal"))) }
             assertFalse(event.isCompleted)
             fail.complete(Unit)
             val failure = assertIs<AgentRunFailureReported>(run.await().exceptionOrNull())
@@ -131,7 +133,7 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
             val unexpected = async(start = CoroutineStart.UNDISPATCHED) {
                 repository.stopEvents.toNotifications().first()
             }
-            rpc.appendUserMessage(index, listOf(ContentItem.InputText("cancel")))
+            repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText("cancel")))
             val run = async { rpc.resume(index) }
             rpc.getRunningTurnFlow(index).first { it }
             rpc.cancelRunningTurn(index)
@@ -164,7 +166,7 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
                 repository.stopEvents.toNotifications().collect { events += it }
             }
             try {
-                rpc.appendUserMessage(index, listOf(ContentItem.InputText("run")))
+                repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText("run")))
                 val failure = assertFailsWith<AgentRunFailureReported> {
                     rpc.resume(index)
                 }
@@ -195,7 +197,7 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
                 repository.stopEvents.toNotifications().collect { events += it }
             }
             try {
-                rpc.appendUserMessage(index, listOf(ContentItem.InputText("run")))
+                repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText("run")))
                 val failure = assertFailsWith<OpenAiModerationBlockedException> { rpc.forcedCompact(index) }
                 yield()
                 assertEquals(1, attempts)

@@ -106,6 +106,20 @@ internal fun collectToolListLines(
     }
 }
 
+private fun parseDynamicBackendUrlOption(raw: String): Int =
+    try {
+        parseLocalBackendUrlPort(raw)
+    } catch (e: IllegalArgumentException) {
+        throw UsageError(e.message ?: "Invalid --backend-url", paramName = "--backend-url")
+    }
+
+private fun parseDynamicBackendHomeOption(raw: String): String =
+    try {
+        validateBackendHomeValue(raw)
+    } catch (e: IllegalArgumentException) {
+        throw UsageError(e.message ?: "Backend Home path must not be blank.", paramName = "--backend-home")
+    }
+
 private fun extractDynamicBackendTarget(tokens: List<String>): CliBackendTarget? {
     var port: Int? = null
     var home: String? = null
@@ -117,34 +131,18 @@ private fun extractDynamicBackendTarget(tokens: List<String>): CliBackendTarget?
             token == "--backend-url" -> {
                 val raw = tokens.getOrNull(++index)
                     ?: throw UsageError("option --backend-url requires a value", paramName = "--backend-url")
-                port = try {
-                    parseLocalBackendUrlPort(raw)
-                } catch (e: IllegalArgumentException) {
-                    throw UsageError(e.message ?: "Invalid --backend-url", paramName = "--backend-url")
-                }
+                port = parseDynamicBackendUrlOption(raw)
             }
             token.startsWith("--backend-url=") -> {
-                val raw = token.substringAfter("--backend-url=")
-                port = try {
-                    parseLocalBackendUrlPort(raw)
-                } catch (e: IllegalArgumentException) {
-                    throw UsageError(e.message ?: "Invalid --backend-url", paramName = "--backend-url")
-                }
+                port = parseDynamicBackendUrlOption(token.substringAfter("--backend-url="))
             }
             token == "--backend-home" -> {
                 val raw = tokens.getOrNull(++index)
                     ?: throw UsageError("option --backend-home requires a value", paramName = "--backend-home")
-                if (raw.isBlank() || '\u0000' in raw) {
-                    throw UsageError("Backend Home path must not be blank.", paramName = "--backend-home")
-                }
-                home = raw
+                home = parseDynamicBackendHomeOption(raw)
             }
             token.startsWith("--backend-home=") -> {
-                val raw = token.substringAfter("--backend-home=")
-                if (raw.isBlank() || '\u0000' in raw) {
-                    throw UsageError("Backend Home path must not be blank.", paramName = "--backend-home")
-                }
-                home = raw
+                home = parseDynamicBackendHomeOption(token.substringAfter("--backend-home="))
             }
         }
         index++

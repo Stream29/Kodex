@@ -1,24 +1,24 @@
 package io.github.stream29.kodex.cli.rpc
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
-import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
 import io.github.stream29.kodex.app.agent.contract.AgentNotification
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
-import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
+import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
+import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
-import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
+import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDependencies
+import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.cli.agent.createHistoryIndexViewModel
 import io.github.stream29.kodex.cli.agent.createRequestUserInputViewModel
 import io.github.stream29.kodex.cli.history.AgentHistorySource
 import io.github.stream29.kodex.cli.history.createAgentHistoryViewModel
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -28,51 +28,42 @@ import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.ShellSessionState
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
-import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
-import io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
+import io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported
+import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.io.files.Path
 
-public actual fun createRpcAgentViewModel(
+internal fun createRpcAgentViewModel(
     binding: RpcSessionBinding,
     scope: CoroutineScope,
-    services: RpcServices,
     models: StateFlow<List<ModelInfo>>,
     reportUnhandledError: (Throwable) -> Unit,
-): AgentViewModel = RpcAgentViewModel(binding, scope, services, models, reportUnhandledError)
+): AgentViewModel = RpcAgentViewModel(binding, scope, models, reportUnhandledError)
 
 /** Original Agent behavior and children share one disposable, binding-scoped owner. */
 private class RpcAgentViewModel(
     private val binding: RpcSessionBinding,
     scope: CoroutineScope,
-    @Suppress("UNUSED_PARAMETER")
-    private val services: RpcServices,
     override val models: StateFlow<List<ModelInfo>>,
     private val reportUnhandledError: (Throwable) -> Unit,
 ) : AgentViewModel {
     private val owner = Job(scope.coroutineContext[Job])
     private val local = CoroutineScope(scope.coroutineContext + owner)
-    override val storageUri = binding.storage.uri
     override val settings = binding.settings
     override val state = binding.state
     override val running = binding.running
     override val latestIndex = binding.latestIndex
     override val pendingSteer = binding.pendingSteer
     override val runtimeConfiguration = createBoundRuntimeConfigurationViewModel(this, local)
-    override val tokenCount: StateFlow<Long?> = binding.tokenCount.map { it?.totalTokens }
-        .stateIn(local, SharingStarted.Eagerly, binding.tokenCount.value?.totalTokens)
+    override val tokenCount: StateFlow<Long?> = binding.tokenCount.projectState { it?.totalTokens }
     private val mutableLifecycle = MutableStateFlow<AgentLifecycleState>(AgentLifecycleState.Open)
     override val lifecycle = mutableLifecycle.asStateFlow()
     private val mutableNotification = MutableStateFlow<AgentNotification?>(null)

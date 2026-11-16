@@ -2,34 +2,34 @@
 
 package io.github.stream29.kodex.cli.rpc
 
-import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
-import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
-import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.app.agent.contract.ComposerDependencies
 import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
+import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
 import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPort
 import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPresentation
 import io.github.stream29.kodex.app.agent.contract.ComposerRuntimePort
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmitPort
-import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
+import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.cli.agent.createComposerViewModel
+import io.github.stream29.kodex.cli.newsession.NewSessionDraftPort
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.Reasoning
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.io.files.Path
 
@@ -38,7 +38,7 @@ public actual class RpcSessionDraft actual constructor(
     private val views: RpcSessionViews,
     private val global: RpcGlobalSettings,
     ownerScope: CoroutineScope,
-) : io.github.stream29.kodex.cli.newsession.NewSessionDraftPort {
+) : NewSessionDraftPort {
     private val submission = Mutex()
     private data class WorkingDirectory(val path: Path, val revision: Long)
     private val directory = MutableStateFlow(WorkingDirectory(initialWorkingDirectory, 0))
@@ -127,15 +127,8 @@ public actual class RpcSessionDraft actual constructor(
             checkOpen()
             val view = views.open(index)
             val binding = view.current()
-            val agent = requireNotNull(view.agent.value)
-            binding.appendUserMessage(listOf(ContentItem.InputText(captured.text)))
+            binding.submit(listOf(ContentItem.InputText(captured.text)))
             currentCoroutineContext().ensureActive()
-            checkOpen()
-            binding.ensureActive()
-            check(view.binding.value === binding && view.agent.value === agent &&
-                agent.lifecycle.value == AgentLifecycleState.Open
-            ) { "The created Session binding changed before resume admission." }
-            agent.resume()
             checkOpen()
             composer.clear(captured.revision)
             // Compare revisions as well as paths: A -> B -> A is still a later directory edit.

@@ -34,7 +34,6 @@ val codexAccountUsageModelsSerializationTest by testSuite {
             """.trimIndent(),
         )
 
-        assertEquals("pro", response.planType)
         assertEquals(42L, response.rateLimit?.primaryWindow?.usedPercent)
         assertEquals("codex_review", response.additionalRateLimits?.single()?.meteredFeature)
         assertEquals(2L, response.rateLimitResetCredits?.availableCount)
@@ -89,6 +88,5 @@ val codexAccountUsageModelsSerializationTest by testSuite {
         assertEquals("attempt-1", encoded.getValue("redeem_request_id").jsonPrimitive.content)
         assertFalse("credit_id" in encoded)
         assertEquals(CodexRateLimitResetConsumeCode.AlreadyRedeemed, response.code)
-        assertEquals(2L, response.windowsReset)
     }
 }

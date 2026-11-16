@@ -5,8 +5,8 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -17,6 +17,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.IOException
+import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -29,9 +30,9 @@ val backendSettingsCasTest by testSuite(
     compartment = { TestCompartment.RealTime },
 ) {
     test("mismatch on missing file neither creates a directory nor publishes the proposal") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
-            val store = openBackendSettings(directory, initial)
+            val store = UnifiedSettingsStore.open(directory, initial).backendStore
             val different = initial.copy(authSource = KodexAuthSource.Kodex)
             assertFalse(store.compareAndSet(different, different))
             assertEquals(initial, store.settings.value)
@@ -40,9 +41,9 @@ val backendSettingsCasTest by testSuite(
     }
 
     test("equal values succeed without writing even when they are different instances") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
-            val store = openBackendSettings(directory, initial)
+            val store = UnifiedSettingsStore.open(directory, initial).backendStore
             val expect = initial.copy()
             val update = initial.copy()
             assertNotSame(initial, expect)
@@ -54,38 +55,39 @@ val backendSettingsCasTest by testSuite(
     }
 
     test("same value on a sparse file does not canonicalize or drop unknown fields") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val fileSystem = FaultingSettingsFileSystem()
             var writes = 0
             fileSystem.afterWrite = { writes++ }
             val initial = backendDefaults()
-            val store = openBackendSettings(directory, initial, fileSystem)
-            val text = "auth_source: codex\nfuture_option: preserve\n"
-            writeFixture(store.settingsPath, text)
+            val path = Path(directory, "settings.yml")
+            val text = "backend:\n  auth_source: codex\n  future_option: preserve\n"
+            writeFixture(path, text)
+            val store = UnifiedSettingsStore.open(directory, initial, fileSystem).backendStore
             assertTrue(store.compareAndSet(initial.copy(), initial.copy()))
             assertEquals(0, writes)
-            assertEquals(text, SystemCoroutineFileSystem.readString(store.settingsPath))
+            assertEquals(text, SystemCoroutineFileSystem.readString(path))
         }
     }
 
-    test("a stale compare observes the actual file but never persists the rejected value") {
-        withSplitSettingsDirectory { directory ->
+    test("a stale compare never persists the rejected value") {
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
-            val first = openBackendSettings(directory, initial)
-            val second = openBackendSettings(directory, initial)
-            val actual = second.update { it.copy(authSource = KodexAuthSource.Kodex) }
-            val text = SystemCoroutineFileSystem.readString(first.settingsPath)
+            val unified = UnifiedSettingsStore.open(directory, initial)
+            val store = unified.backendStore
+            val actual = store.update { it.copy(authSource = KodexAuthSource.Kodex) }
+            val text = SystemCoroutineFileSystem.readString(unified.path)
             val rejected = initial.copy(sessionTitle = initial.sessionTitle.copy(enabled = false))
-            assertFalse(first.compareAndSet(initial, rejected))
-            assertEquals(actual, first.settings.value)
-            assertEquals(text, SystemCoroutineFileSystem.readString(first.settingsPath))
+            assertFalse(store.compareAndSet(initial, rejected))
+            assertEquals(actual, store.settings.value)
+            assertEquals(text, SystemCoroutineFileSystem.readString(unified.path))
         }
     }
 
     test("matching file CAS persists and publishes the whole proposed value") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
-            val store = openBackendSettings(directory, initial)
+            val store = UnifiedSettingsStore.open(directory, initial).backendStore
             val update = initial.copy(
                 authSource = KodexAuthSource.Kodex,
                 sessionTitle = initial.sessionTitle.copy(enabled = false),
@@ -93,17 +95,17 @@ val backendSettingsCasTest by testSuite(
             )
             assertTrue(store.compareAndSet(initial.copy(), update))
             assertEquals(update, store.settings.value)
-            assertEquals(update, openBackendSettings(directory, initial).settings.value)
+            assertEquals(update, UnifiedSettingsStore.open(directory, initial).backendSettings.value)
         }
     }
 
     test("stale and equal CAS skip validation while a real change validates the exact locked values once") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
             val fileSystem = FaultingSettingsFileSystem()
             var writes = 0
             fileSystem.afterWrite = { writes++ }
-            val store = openBackendSettings(directory, initial, fileSystem)
+            val store = UnifiedSettingsStore.open(directory, initial, fileSystem).backendStore
             val proposal = initial.copy(authSource = KodexAuthSource.Kodex)
             var validations = 0
             val validate: (BackendSettings, BackendSettings) -> Unit =
@@ -124,13 +126,14 @@ val backendSettingsCasTest by testSuite(
         }
     }
 
-    test("validation failure preserves the actual read snapshot and original throwable without rewriting") {
-        withSplitSettingsDirectory { directory ->
+    test("validation failure preserves the actual snapshot and original throwable without rewriting") {
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
-            val store = openBackendSettings(directory, initial)
+            val unified = UnifiedSettingsStore.open(directory, initial)
+            val store = unified.backendStore
             val actual = initial.copy(authSource = KodexAuthSource.Kodex)
-            openBackendSettings(directory, initial).update { actual }
-            val original = SystemCoroutineFileSystem.readString(store.settingsPath)
+            store.update { actual }
+            val original = SystemCoroutineFileSystem.readString(unified.path)
             val failure = IllegalStateException("validation rejected")
             assertSame(failure, assertFailsWith<IllegalStateException> {
                 store.compareAndSet(actual, initial) { current, update ->
@@ -141,15 +144,16 @@ val backendSettingsCasTest by testSuite(
                 }
             })
             assertEquals(actual, store.settings.value)
-            assertEquals(original, SystemCoroutineFileSystem.readString(store.settingsPath))
+            assertEquals(original, SystemCoroutineFileSystem.readString(unified.path))
         }
     }
 
     test("lost CAS completion after replacement leaves persisted proposal without claiming rollback") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
             val fileSystem = FaultingSettingsFileSystem()
-            val store = openBackendSettings(directory, initial, fileSystem)
+            val unified = UnifiedSettingsStore.open(directory, initial, fileSystem)
+            val store = unified.backendStore
             val proposal = initial.copy(authSource = KodexAuthSource.Kodex)
             val failure = CancellationException("CAS completion lost")
             fileSystem.afterMove = { throw failure }
@@ -157,18 +161,18 @@ val backendSettingsCasTest by testSuite(
                 store.compareAndSet(initial, proposal)
             })
             assertEquals(initial, store.settings.value)
-            assertEquals(proposal, openBackendSettings(directory, initial).settings.value)
-            assertEquals(listOf(store.settingsPath), SystemCoroutineFileSystem.list(directory).toList())
+            assertEquals(proposal, UnifiedSettingsStore.open(directory, initial).backendSettings.value)
+            assertEquals(listOf(unified.path), SystemCoroutineFileSystem.list(directory).toList())
         }
     }
 
     test("only one concurrent CAS with the same expectation succeeds") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
             val fileSystem = FaultingSettingsFileSystem()
             var writes = 0
             fileSystem.afterWrite = { writes++ }
-            val store = openBackendSettings(directory, initial, fileSystem)
+            val store = UnifiedSettingsStore.open(directory, initial, fileSystem).backendStore
             val proposals = (0 until 8).map { index ->
                 initial.copy(newSession = initial.newSession.copy(model = OpenAiModelId("model-$index")))
             }
@@ -181,15 +185,15 @@ val backendSettingsCasTest by testSuite(
             assertEquals(1, writes)
             val winner = proposals[results.indexOf(true)]
             assertEquals(winner, store.settings.value)
-            assertEquals(winner, openBackendSettings(directory, initial).settings.value)
+            assertEquals(winner, UnifiedSettingsStore.open(directory, initial).backendSettings.value)
         }
     }
 
     test("update waits for CAS and preserves its committed fields") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
             val fileSystem = FaultingSettingsFileSystem()
-            val store = openBackendSettings(directory, initial, fileSystem)
+            val store = UnifiedSettingsStore.open(directory, initial, fileSystem).backendStore
             val entered = CompletableDeferred<Unit>()
             val finish = CompletableDeferred<Unit>()
             fileSystem.beforeMove = {
@@ -218,15 +222,15 @@ val backendSettingsCasTest by testSuite(
                     finish.complete(Unit)
                 }
             }
-            assertEquals(store.settings.value, openBackendSettings(directory, initial).settings.value)
+            assertEquals(store.settings.value, UnifiedSettingsStore.open(directory, initial).backendSettings.value)
         }
     }
 
     test("CAS waits for update and rejects an expectation made stale by that update") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
             val fileSystem = FaultingSettingsFileSystem()
-            val store = openBackendSettings(directory, initial, fileSystem)
+            val store = UnifiedSettingsStore.open(directory, initial, fileSystem).backendStore
             val entered = CompletableDeferred<Unit>()
             val finish = CompletableDeferred<Unit>()
             fileSystem.beforeMove = {
@@ -254,11 +258,14 @@ val backendSettingsCasTest by testSuite(
         }
     }
 
-    test("reload waits for a pending CAS instead of overwriting it with the old file") {
-        withSplitSettingsDirectory { directory ->
+    test("acceptReload waits for a pending CAS instead of overwriting it with the old file") {
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
             val fileSystem = FaultingSettingsFileSystem()
-            val store = openBackendSettings(directory, initial, fileSystem)
+            val unified = UnifiedSettingsStore.open(directory, initial, fileSystem)
+            val store = unified.backendStore
+            val expected = unified.current
+            val candidate = unified.readCandidate()
             val entered = CompletableDeferred<Unit>()
             val finish = CompletableDeferred<Unit>()
             fileSystem.beforeMove = {
@@ -270,11 +277,14 @@ val backendSettingsCasTest by testSuite(
                 val comparison = async { store.compareAndSet(initial, updated) }
                 try {
                     withTimeout(10.seconds) { entered.await() }
-                    val reloaded = async(start = CoroutineStart.UNDISPATCHED) { store.reload() }
+                    val reloaded = async(start = CoroutineStart.UNDISPATCHED) {
+                        unified.acceptReload(expected, candidate) { _, _ -> }
+                    }
                     assertFalse(reloaded.isCompleted)
                     finish.complete(Unit)
                     assertTrue(comparison.await())
-                    assertEquals(updated, reloaded.await())
+                    assertFalse(reloaded.await())
+                    assertEquals(updated, store.settings.value)
                 } finally {
                     finish.complete(Unit)
                 }
@@ -282,40 +292,42 @@ val backendSettingsCasTest by testSuite(
         }
     }
 
-    test("invalid file is a failure not a comparison mismatch") {
-        withSplitSettingsDirectory { directory ->
+    test("invalid file fails readCandidate without mutating runtime state") {
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
-            val store = openBackendSettings(directory, initial)
-            writeFixture(store.settingsPath, "auth_source: invalid\n")
+            val unified = UnifiedSettingsStore.open(directory, initial)
+            writeFixture(unified.path, "backend:\n  auth_source: invalid\n")
             assertFailsWith<IllegalArgumentException> {
-                store.compareAndSet(initial, initial.copy(authSource = KodexAuthSource.Kodex))
+                unified.readCandidate()
             }
-            assertEquals(initial, store.settings.value)
-            assertEquals("auth_source: invalid\n", SystemCoroutineFileSystem.readString(store.settingsPath))
+            assertEquals(initial, unified.backendSettings.value)
+            assertEquals("backend:\n  auth_source: invalid\n", SystemCoroutineFileSystem.readString(unified.path))
         }
     }
 
     test("persistence failure propagates without publishing the failed proposal") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
             val fileSystem = FaultingSettingsFileSystem()
-            val store = openBackendSettings(directory, initial, fileSystem)
+            val unified = UnifiedSettingsStore.open(directory, initial, fileSystem)
+            val store = unified.backendStore
             val failure = IOException("replacement failed")
             fileSystem.beforeMove = { throw failure }
             assertSame(failure, assertFailsWith<IOException> {
                 store.compareAndSet(initial, initial.copy(authSource = KodexAuthSource.Kodex))
             })
             assertEquals(initial, store.settings.value)
-            assertFalse(SystemCoroutineFileSystem.exists(store.settingsPath))
+            assertFalse(SystemCoroutineFileSystem.exists(unified.path))
             assertEquals(emptyList(), SystemCoroutineFileSystem.list(directory).toList())
         }
     }
 
     test("cancelling CAS before replacement cleans up without writing or publishing") {
-        withSplitSettingsDirectory { directory ->
+        withSettingsDirectory { directory ->
             val initial = backendDefaults()
             val fileSystem = FaultingSettingsFileSystem()
-            val store = openBackendSettings(directory, initial, fileSystem)
+            val unified = UnifiedSettingsStore.open(directory, initial, fileSystem)
+            val store = unified.backendStore
             val entered = CompletableDeferred<Unit>()
             fileSystem.beforeMove = {
                 entered.complete(Unit)
@@ -333,7 +345,7 @@ val backendSettingsCasTest by testSuite(
                 assertTrue(comparison.isCancelled)
             }
             assertEquals(initial, store.settings.value)
-            assertFalse(SystemCoroutineFileSystem.exists(store.settingsPath))
+            assertFalse(SystemCoroutineFileSystem.exists(unified.path))
             assertEquals(emptyList(), SystemCoroutineFileSystem.list(directory).toList())
         }
     }

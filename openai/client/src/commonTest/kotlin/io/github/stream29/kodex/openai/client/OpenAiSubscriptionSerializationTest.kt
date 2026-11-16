@@ -141,8 +141,10 @@ val openAiSubscriptionSerializationTest by testSuite {
     test("function call output payload can be content items") {
         val item = ResponseItem.FunctionCallOutput(
             callId = "call_1",
-            output = FunctionCallOutputPayload.fromContentItems(
-                listOf(FunctionCallOutputContentItem.InputText("note")),
+            output = FunctionCallOutputPayload(
+                FunctionCallOutputBody.ContentItems(
+                    listOf(FunctionCallOutputContentItem.InputText("note")),
+                ),
             ),
         )
 
@@ -599,42 +601,6 @@ val openAiSubscriptionSerializationTest by testSuite {
         )
     }
 
-    test("tool search tool serializes expected wire shape") {
-        val tool = ToolSpec.ToolSearch(
-            execution = "sync",
-            description = "Search app tools",
-            parameters = ObjectPropertyDefinition(
-                properties = mapOf("query" to StringPropertyDefinition(description = "Tool search query")),
-                required = listOf("query"),
-                additionalProperties = AdditionalPropertiesConstraint.deny(),
-            ),
-        )
-
-        assertEquals(
-            json.parseToJsonElement(
-                """
-                    {
-                      "type": "tool_search",
-                      "execution": "sync",
-                      "description": "Search app tools",
-                      "parameters": {
-                        "type": "object",
-                        "properties": {
-                          "query": {
-                            "type": "string",
-                            "description": "Tool search query"
-                          }
-                        },
-                        "required": ["query"],
-                        "additionalProperties": false
-                      }
-                    }
-                """.trimIndent(),
-            ),
-            encodeTool(tool),
-        )
-    }
-
     test("tool search output serializes loadable tools expected wire shape") {
         val item = ResponseItem.ClientToolSearchOutput(
             callId = "call_1",
@@ -812,45 +778,6 @@ val openAiSubscriptionSerializationTest by testSuite {
         )
     }
 
-    test("web search tool serializes expected wire shape") {
-        val tool = ToolSpec.WebSearch(
-            externalWebAccess = true,
-            filters = ResponsesApiWebSearchFilters(allowedDomains = listOf("example.com")),
-            userLocation = ResponsesApiWebSearchUserLocation(
-                country = "US",
-                region = "California",
-                city = "San Francisco",
-                timezone = "America/Los_Angeles",
-            ),
-            searchContextSize = WebSearchContextSize.High,
-            searchContentTypes = listOf("text", "image"),
-        )
-
-        assertEquals(
-            json.parseToJsonElement(
-                """
-                    {
-                      "type": "web_search",
-                      "external_web_access": true,
-                      "filters": {
-                        "allowed_domains": ["example.com"]
-                      },
-                      "user_location": {
-                        "type": "approximate",
-                        "country": "US",
-                        "region": "California",
-                        "city": "San Francisco",
-                        "timezone": "America/Los_Angeles"
-                      },
-                      "search_context_size": "high",
-                      "search_content_types": ["text", "image"]
-                    }
-                """.trimIndent(),
-            ),
-            encodeTool(tool),
-        )
-    }
-
     test("custom tool serializes expected wire shape") {
         val tool = FreeformTool(
             name = "apply_patch",
@@ -877,15 +804,6 @@ val openAiSubscriptionSerializationTest by testSuite {
                     }
                 """.trimIndent(),
             ),
-            encodeTool(tool),
-        )
-    }
-
-    test("image generation tool serializes expected wire shape") {
-        val tool = ToolSpec.ImageGeneration(outputFormat = "png")
-
-        assertEquals(
-            json.parseToJsonElement("""{"type":"image_generation","output_format":"png"}"""),
             encodeTool(tool),
         )
     }

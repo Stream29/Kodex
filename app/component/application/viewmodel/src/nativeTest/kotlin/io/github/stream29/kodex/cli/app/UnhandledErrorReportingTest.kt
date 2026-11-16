@@ -79,26 +79,17 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
                 assertEquals("unhandled_error", payload.getValue("type").jsonPrimitive.content)
                 assertEquals("literal $(touch unwanted) \"failure\"", payload.getValue("message").jsonPrimitive.content)
             }
-            repeat(2) { app.reportWarning("literal $(touch unwanted) \"warning\"") }
-            val warnings = lines(5).drop(3)
-            assertEquals(2, warnings.size)
-            for (line in warnings) {
-                val payload = Json.parseToJsonElement(line).jsonObject
-                assertEquals(setOf("type", "message"), payload.keys)
-                assertEquals("unhandled_error", payload.getValue("type").jsonPrimitive.content)
-                assertEquals("literal $(touch unwanted) \"warning\"", payload.getValue("message").jsonPrimitive.content)
-            }
             assertFalse(Fs.exists(Path(home, "unwanted")))
             assertSame(session, app.viewModel.navigation.value.selectedSession)
             // Exercise the real Agent callback, not only the exposed Application reporter.
             agent.confirmHistoryRevert(Long.MAX_VALUE)
-            val agentError = Json.parseToJsonElement(lines(6).last()).jsonObject
+            val agentError = Json.parseToJsonElement(lines(4).last()).jsonObject
             assertEquals("unhandled_error", agentError.getValue("type").jsonPrimitive.content)
             assertEquals("No history confirmation is pending.", agentError.getValue("message").jsonPrimitive.content)
             assertNull(agent.notification.value)
             agent.submit(listOf(ContentItem.InputText("after local errors")))
-            val resumed = lines(7)
-            assertEquals(7, resumed.size, "Local errors, warnings and failed Hooks must not kill or recursively notify the host.")
+            val resumed = lines(5)
+            assertEquals(5, resumed.size, "Local errors and failed Hooks must not kill or recursively notify the host.")
             assertTrue(resumed.last().contains("stop_assistant_message"))
         }
     }

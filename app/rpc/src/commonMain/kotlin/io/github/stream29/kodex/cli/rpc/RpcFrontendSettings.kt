@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.cli.rpc
 
-import io.github.stream29.kodex.rpc.client.FrontendSettingsAccess
 import io.github.stream29.kodex.rpc.client.rpcStateIn
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.models.CliFrontendSettings
@@ -13,9 +12,9 @@ import kotlinx.coroutines.flow.StateFlow
 /** Read projection plus captured-field CAS editing; no filesystem API or offline write queue. */
 internal class RpcFrontendSettings private constructor(
     private val rpc: GlobalRpc,
-    override val settings: StateFlow<CliFrontendSettings>,
-) : FrontendSettingsAccess {
-    override suspend fun update(transform: (CliFrontendSettings) -> CliFrontendSettings): CliFrontendSettings {
+    val settings: StateFlow<CliFrontendSettings>,
+) {
+    suspend fun update(transform: (CliFrontendSettings) -> CliFrontendSettings): CliFrontendSettings {
         val baseline = settings.value
         val desired = transform(baseline)
         if (baseline == desired) return baseline

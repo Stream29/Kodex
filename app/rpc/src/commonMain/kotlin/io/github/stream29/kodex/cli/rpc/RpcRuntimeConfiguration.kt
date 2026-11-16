@@ -11,7 +11,7 @@ import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import kotlinx.coroutines.CoroutineScope
 
-public actual fun createBoundRuntimeConfigurationViewModel(
+internal fun createBoundRuntimeConfigurationViewModel(
     target: AgentSettingsViewModel,
     ownerScope: CoroutineScope,
 ): RuntimeConfigurationViewModel = createRuntimeConfigurationViewModel(

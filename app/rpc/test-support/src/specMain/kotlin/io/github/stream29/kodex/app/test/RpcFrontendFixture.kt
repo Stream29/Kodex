@@ -2,15 +2,15 @@
 
 package io.github.stream29.kodex.app.test
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
 import io.github.stream29.kodex.cli.newsession.DefaultNewSessionViewModelFactory
 import io.github.stream29.kodex.cli.rpc.RpcGlobalSettings
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.cli.rpc.RpcSessionViews
-import io.github.stream29.kodex.cli.session.DefaultPersistedSessionViewModelRegistry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.CoroutineDispatcher
@@ -27,7 +27,7 @@ public expect class RpcFrontendFixture : CoroutineScope {
     public val services: RpcServices
     public val views: RpcSessionViews
     public val global: RpcGlobalSettings
-    public val sessions: DefaultPersistedSessionViewModelRegistry
+    public val sessions: PersistedSessionViewModelRegistry
     public val drafts: DefaultNewSessionViewModelFactory
     public val models: StateFlow<List<ModelInfo>>
     public val failures: StateFlow<List<Throwable>>

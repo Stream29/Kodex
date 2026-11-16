@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
-import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory

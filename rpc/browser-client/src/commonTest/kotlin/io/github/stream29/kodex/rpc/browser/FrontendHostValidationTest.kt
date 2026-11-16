@@ -8,7 +8,6 @@ private const val testOrigin = "http://127.0.0.1:1234"
 private const val testHostOrigin = "http://127.0.0.1:4321"
 private val testCapabilities = FrontendHostCapabilities(
     FrontendCapabilityStatus.Ready, FrontendCapabilityStatus.Ready,
-    FrontendCapabilityStatus.Ready, FrontendCapabilityStatus.Ready,
 )
 
 private fun descriptor(

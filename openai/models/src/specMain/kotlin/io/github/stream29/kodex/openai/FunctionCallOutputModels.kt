@@ -19,11 +19,6 @@ public data class FunctionCallOutputPayload(
     public companion object {
         public fun fromText(text: String): FunctionCallOutputPayload =
             FunctionCallOutputPayload(FunctionCallOutputBody.Text(text))
-
-        public fun fromContentItems(
-            contentItems: List<FunctionCallOutputContentItem>,
-        ): FunctionCallOutputPayload =
-            FunctionCallOutputPayload(FunctionCallOutputBody.ContentItems(contentItems))
     }
 }
 

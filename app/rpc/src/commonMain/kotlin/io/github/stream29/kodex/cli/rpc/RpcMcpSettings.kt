@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.mcpsettings.McpImportHandle
@@ -19,32 +17,26 @@ import io.github.stream29.kodex.mcp.contract.validatedName
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 
-public actual class RpcMcpSettings actual constructor(
+internal class RpcMcpSettings(
     private val global: RpcGlobalSettings,
     private val rpc: GlobalRpc,
     scope: CoroutineScope,
 ) : AutoCloseable {
     private val owner = Job(scope.coroutineContext[Job])
-    private val local = CoroutineScope(scope.coroutineContext + owner)
-    public actual val servers: StateFlow<List<McpServerSettingsState>> = global.mcp
-        .map { values -> values.map { it.toSettingsState() } }
-        .stateIn(local, SharingStarted.Eagerly, global.mcp.value.map { it.toSettingsState() })
+    val servers: StateFlow<List<McpServerSettingsState>> =
+        global.mcp.projectState { values -> values.map { it.toSettingsState() } }
     private var nextPreview = 0L
 
-    public actual fun capture(): Map<String, McpServerConfiguration> {
+    fun capture(): Map<String, McpServerConfiguration> {
         owner.ensureActive()
         global.ensureActive()
         return global.settings.value.mcpServers
     }
 
-    public actual suspend fun save(
+    suspend fun save(
         captured: Map<String, McpServerConfiguration>,
         originalName: String?,
         draft: McpServerDraft,
@@ -67,12 +59,12 @@ public actual class RpcMcpSettings actual constructor(
         )
     }
 
-    public actual suspend fun delete(name: String, captured: McpServerConfiguration): Boolean =
+    suspend fun delete(name: String, captured: McpServerConfiguration): Boolean =
         global.settings.editField(captured, { it.mcpServers[name] }, { it.copy(mcpServers = it.mcpServers - name) }) {
             owner.ensureActive(); global.ensureActive()
         }
 
-    public actual suspend fun setEnabled(name: String, captured: McpServerConfiguration, enabled: Boolean): Boolean {
+    suspend fun setEnabled(name: String, captured: McpServerConfiguration, enabled: Boolean): Boolean {
         val changed = when (captured) {
             is McpServerConfiguration.StreamableHttp -> captured.copy(enabled = enabled)
             is McpServerConfiguration.Stdio -> captured.copy(enabled = enabled)
@@ -83,7 +75,7 @@ public actual class RpcMcpSettings actual constructor(
         )
     }
 
-    public actual suspend fun readImport(
+    suspend fun readImport(
         accept: (suspend () -> Unit) -> Boolean,
     ): McpImportHandle {
         owner.ensureActive()
@@ -127,9 +119,9 @@ public actual class RpcMcpSettings actual constructor(
         )
     }
 
-    public actual suspend fun reconnect(name: String) { owner.ensureActive(); rpc.reconnectMcpServer(name) }
-    public actual suspend fun logout(name: String) { owner.ensureActive(); rpc.logoutMcpServer(name) }
-    public actual override fun close() { owner.cancel() }
+    suspend fun reconnect(name: String) { owner.ensureActive(); rpc.reconnectMcpServer(name) }
+    suspend fun logout(name: String) { owner.ensureActive(); rpc.logoutMcpServer(name) }
+    override fun close() { owner.cancel() }
 }
 
 internal class CodexMcpImport(

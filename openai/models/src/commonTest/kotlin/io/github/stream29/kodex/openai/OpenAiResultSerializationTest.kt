@@ -87,8 +87,8 @@ val openAiResultSerializationTest by testSuite {
         val failure = assertIs<OpenAiResult.Failure<*>>(result)
         val error = assertIs<OpenAiErrorResponse>(failure.error)
         assertEquals("bad request", error.messageText)
-        assertEquals("invalid_request", error.codeText)
-        assertEquals("invalid_request_error", error.typeText)
+        assertEquals("invalid_request", error.error?.code)
+        assertEquals("invalid_request_error", error.error?.type)
     }
 
     test("decodes flat error response as failure") {
@@ -99,7 +99,7 @@ val openAiResultSerializationTest by testSuite {
         val failure = assertIs<OpenAiResult.Failure<*>>(result)
         val error = assertIs<OpenAiErrorResponse>(failure.error)
         assertEquals("rate limited", error.messageText)
-        assertEquals("rate_limit", error.codeText)
+        assertEquals("rate_limit", error.code)
     }
 
     test("encodes result as raw payload") {

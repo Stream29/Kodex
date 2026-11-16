@@ -34,29 +34,6 @@ val codexResponsesMetadataSerializationTest by testSuite {
         assertEquals(title, OpenAiJsonCodec.decodeFromJsonElement(CodexResponsesMetadata.serializer(), titleJson))
     }
 
-    test("memory retains attribution while removing only turn identity") {
-        val metadata = CodexResponsesMetadata(
-            installationId = "installation",
-            sessionId = "session",
-            threadId = "thread",
-            turnId = "turn",
-            windowId = "window",
-            requestKind = CodexResponsesRequestKind.Memory,
-            threadSource = "user",
-            turnTrigger = "user",
-        )
-        val encoded = OpenAiJsonCodec
-            .encodeToJsonElement(CodexResponsesMetadata.serializer(), metadata).jsonObject
-        assertEquals(JsonObject(mapOf(
-            "request_kind" to JsonPrimitive("memory"),
-            "thread_source" to JsonPrimitive("user"),
-            "turn_trigger" to JsonPrimitive("user"),
-        )), encoded)
-        val decoded = OpenAiJsonCodec.decodeFromJsonElement(CodexResponsesMetadata.serializer(), encoded)
-        assertEquals("user", decoded.threadSource)
-        assertEquals("user", decoded.turnTrigger)
-    }
-
     test("keeps turn state transport-only") {
         val request = ResponsesApiRequest(
             model = OpenAiModelId("model"),
@@ -162,32 +139,6 @@ val codexResponsesMetadataSerializationTest by testSuite {
         assertEquals(
             metadata,
             OpenAiJsonCodec.decodeFromJsonElement(CodexResponsesMetadata.serializer(), encoded),
-        )
-    }
-
-    test("omits turn identity from detached memory metadata") {
-        val metadata = CodexResponsesMetadata(
-            installationId = "unused-installation",
-            sessionId = "unused-session",
-            threadId = "unused-thread",
-            turnId = "unused-turn",
-            windowId = "unused-window",
-            requestKind = CodexResponsesRequestKind.Memory,
-        )
-
-        val encoded = OpenAiJsonCodec
-            .encodeToJsonElement(CodexResponsesMetadata.serializer(), metadata)
-            .jsonObject
-
-        assertEquals(
-            JsonObject(mapOf("request_kind" to JsonPrimitive("memory"))),
-            encoded,
-        )
-        assertEquals(
-            CodexResponsesRequestKind.Memory,
-            OpenAiJsonCodec
-                .decodeFromJsonElement(CodexResponsesMetadata.serializer(), encoded)
-                .requestKind,
         )
     }
 }

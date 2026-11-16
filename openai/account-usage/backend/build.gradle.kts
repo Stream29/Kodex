@@ -8,6 +8,7 @@ plugins {
 kotlin {
     sourceSets {
         named("specMain").dependencies {
+            api(libs.kotlinx.coroutines.core)
             api(project(":openai-account-usage"))
             api(project(":openai-client"))
         }

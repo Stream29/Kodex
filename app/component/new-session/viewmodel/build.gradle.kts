@@ -22,7 +22,6 @@ kotlin {
             implementation(project(":app-rpc-test-support"))
             implementation(project(":agent-session-test"))
             implementation(project(":app-component-history-viewmodel"))
-            implementation(project(":app-component-session-viewmodel"))
             implementation(project(":openai-client-test"))
             implementation(project(":utils-coroutines"))
             implementation(libs.kotlinx.coroutines.test)

@@ -83,7 +83,7 @@ val localFrontendHostTest by testSuite(compartment = { TestCompartment.RealTime 
                     LocalFrontendHostJson.encodeToString(
                         LocalFrontendHostCall.serializer(), LocalFrontendHostCall(
                             LocalFrontendHostProtocol, host.hostInstanceId, credential, owner,
-                            LocalFrontendHostRequest.ObserveError("isolated-live-error"),
+                            LocalFrontendHostRequest.RenewOwner,
                         ),
                     ).encodeToByteArray()
                 for (invalid in listOf(
@@ -104,8 +104,10 @@ val localFrontendHostTest by testSuite(compartment = { TestCompartment.RealTime 
                     LocalFrontendHostResult.serializer(), accepted.body.decodeToString(),
                 )
                 assertEquals(host.owner.value, reply.owner.value)
-                assertEquals(LocalFrontendHostFailure.CapabilityUnavailable,
-                    assertIs<LocalFrontendHostReply.Failure>(reply.reply).reason)
+                assertEquals(
+                    LocalFrontendHostOwnerLeaseMillis,
+                    assertIs<LocalFrontendHostReply.OwnerRenewed>(reply.reply).leaseMillis,
+                )
                 assertFalse(accepted.body.decodeToString().contains(host.credential))
                 val oversized = fixture.wire.request(
                     address, "POST", LocalFrontendHostPath, address.bootstrapHeaders,
@@ -651,10 +653,7 @@ private class Fixture(val home: Path, val wire: Wire, val registration: Registra
 private class FixtureCompanionResources : FrontendCompanionResources {
     override val capabilities = FrontendHostCapabilities(
         FrontendCapabilityStatus.Ready, FrontendCapabilityStatus.Ready,
-        FrontendCapabilityStatus.ServiceFailed, FrontendCapabilityStatus.ServiceFailed,
     )
-    override suspend fun call(request: LocalFrontendHostRequest): LocalFrontendHostReply =
-        LocalFrontendHostReply.Failure(LocalFrontendHostFailure.CapabilityUnavailable)
     override suspend fun closeAndJoin() {}
 }
 

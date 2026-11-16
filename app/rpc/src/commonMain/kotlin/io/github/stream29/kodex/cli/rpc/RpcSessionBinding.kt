@@ -3,18 +3,16 @@
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getAskUsersAt
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
-import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.rpc.client.asSuspendMutableStateFlow
 import io.github.stream29.kodex.rpc.client.rpcCachedAgentStorage
@@ -59,29 +57,15 @@ public actual class RpcSessionBinding private constructor(
     /** Reports against this exact binding generation, not whichever tab binding comes later. */
     internal fun failRecovery(failure: Throwable) { if (owner.isActive) invalidate(failure) }
 
-    private suspend fun <R> command(action: suspend () -> R): R {
-        ensureActive()
-        return try {
-            action()
-        } catch (error: SessionNotActive) {
-            invalidate(error)
-            throw error
-        } catch (error: SessionNotFound) {
-            invalidate(error)
-            throw error
-        }
-    }
+    private suspend fun <R> command(action: suspend () -> R): R =
+        runSessionCommand(owner, invalidate, action)
 
     public actual suspend fun submit(content: List<ContentItem>): Unit =
         command { services.runtime.submit(sessionIndex, content) }
-    public actual suspend fun appendUserMessage(content: List<ContentItem>): Int =
-        command { services.runtime.appendUserMessage(sessionIndex, content) }
     public actual suspend fun resume(): Unit = command { services.runtime.resume(sessionIndex) }
     public actual suspend fun stop(): Unit = command { services.runtime.cancelRunningTurn(sessionIndex) }
     public actual suspend fun forcedCompact(): Int = command { services.runtime.forcedCompact(sessionIndex) }
     public actual suspend fun clearPending(): Int = command { services.runtime.clearPending(sessionIndex) }
-    public actual suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int =
-        command { services.runtime.completeToolCall(sessionIndex, completed) }
     public actual suspend fun submitAskUserAnswer(askId: Int, response: RequestUserInputResponse): Unit =
         command { services.runtime.submitAskUserAnswer(sessionIndex, askId, response) }
     public actual suspend fun closeShellSession(id: Int): Unit =
@@ -93,7 +77,7 @@ public actual class RpcSessionBinding private constructor(
     public actual suspend fun readCreatedAt(): Instant? =
         storage.getCommitAtOrBefore(0)?.createdAt?.takeIf { it != Instant.DISTANT_PAST }
     public actual suspend fun readUpdatedAt(): Instant? =
-        storage.latestIndexFlow.value.takeIf { it >= 0 }?.let {
+        latestIndex.value.takeIf { it >= 0 }?.let {
             storage.getCommitAtOrBefore(it)?.createdAt?.takeIf { ts -> ts != Instant.DISTANT_PAST }
         }
 
@@ -108,12 +92,9 @@ public actual class RpcSessionBinding private constructor(
             val runtime = services.runtime
             val storage = scope.rpcCachedAgentStorage(
                 sessionIndex = index,
-                uri = runtime.getStorageUri(index),
-                rpc = services.storage,
+                rpc = runtime,
             )
-            val latest = scope.rpcStateIn(
-                { runtime.getLatestIndex(index) }, { runtime.getLatestIndexFlow(index).requiredState() },
-            )
+            val latest = storage.latestIndexFlow
             val state = scope.rpcStateIn(
                 { runtime.getState(index) }, { runtime.getStateFlow(index).requiredState() },
             )
@@ -123,10 +104,10 @@ public actual class RpcSessionBinding private constructor(
             val shell = scope.rpcStateIn(
                 { runtime.getShellSessions(index) }, { runtime.getShellSessionsFlow(index).requiredState() },
             )
-            val pending = scope.visibleValue(storage, latest) { position ->
+            val pending = scope.visibleValue(storage) { position ->
                 if (position >= 0) storage.getSteerAt(position) else emptyList()
             }
-            val pendingAskUser = scope.visibleValue(storage, latest) { position ->
+            val pendingAskUser = scope.visibleValue(storage) { position ->
                 if (position >= 0) {
                     storage.getAskUsersAt(position)
                         .filter { it.answer == null }
@@ -135,32 +116,37 @@ public actual class RpcSessionBinding private constructor(
                     null
                 }
             }
-            val settings = scope.visibleValue(storage, latest) { position -> storage.getSettingsAt(position) }
-            val tokenCount = scope.visibleValue(storage, latest) { position ->
+            val settings = scope.visibleValue(storage) { position -> storage.getSettingsAt(position) }
+            val tokenCount = scope.visibleValue(storage) { position ->
                 if (position >= 0) storage.getLlmRequestMetaAtOrNull(position) else null
-            }
-            suspend fun <R> compare(action: suspend () -> R): R {
-                owner.ensureActive()
-                return try {
-                    action()
-                } catch (error: SessionNotActive) {
-                    invalidate(error)
-                    throw error
-                } catch (error: SessionNotFound) {
-                    invalidate(error)
-                    throw error
-                }
             }
             return RpcSessionBinding(
                 index, storage, latest, state, scope.projectOutput(index, runtime, state), running, shell,
                 settings.asSuspendMutableStateFlow { expect, update ->
-                    compare { services.storage.compareAndSetSettings(index, expect, update) }
+                    runSessionCommand(owner, invalidate) { runtime.compareAndSetSettings(index, expect, update) }
                 },
                 pending,
                 pendingAskUser,
                 tokenCount, owner, services, invalidate,
             )
         }
+    }
+}
+
+private suspend fun <R> runSessionCommand(
+    owner: Job,
+    invalidate: (Throwable) -> Unit,
+    action: suspend () -> R,
+): R {
+    owner.ensureActive()
+    return try {
+        action()
+    } catch (error: SessionNotActive) {
+        invalidate(error)
+        throw error
+    } catch (error: SessionNotFound) {
+        invalidate(error)
+        throw error
     }
 }
 
@@ -174,14 +160,13 @@ private fun <T> Flow<T>.requiredState(): Flow<T> = onCompletion { cause ->
  */
 private suspend fun <T> CoroutineScope.visibleValue(
     storage: ObservableKodexAgentStorage,
-    latest: StateFlow<Int>,
     read: suspend (Int) -> T,
 ): StateFlow<T> {
     suspend fun load(): T {
         while (true) {
             val nonce = storage.cacheNonce.value
             try {
-                return read(latest.value)
+                return read(storage.latestIndexFlow.value)
             } catch (_: CacheNonceMismatch) {
                 storage.cacheNonce.first { it != nonce }
             }
@@ -189,8 +174,8 @@ private suspend fun <T> CoroutineScope.visibleValue(
     }
     val value = MutableStateFlow(load())
     launch {
-        combine(latest, storage.cacheNonce, storage.latestIndexFlow) { position, nonce, tail ->
-            Triple(position, nonce, tail)
+        combine(storage.cacheNonce, storage.latestIndexFlow) { nonce, tail ->
+            nonce to tail
         }.collect {
             value.value = load()
         }

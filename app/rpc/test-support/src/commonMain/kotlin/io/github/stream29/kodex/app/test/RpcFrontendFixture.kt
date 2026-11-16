@@ -2,18 +2,16 @@
 
 package io.github.stream29.kodex.app.test
 
-import io.github.stream29.kodex.app.migration.prepareKodexHome
-import io.github.stream29.kodex.app.session.contract.*
+import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
+import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
-import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
-import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
-import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
+import io.github.stream29.kodex.app.migration.prepareKodexHome
+import io.github.stream29.kodex.app.session.contract.*
 import io.github.stream29.kodex.cli.newsession.DefaultNewSessionViewModelFactory
 import io.github.stream29.kodex.cli.rpc.*
-import io.github.stream29.kodex.cli.session.DefaultPersistedSessionViewModelRegistry
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
@@ -21,6 +19,7 @@ import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.server.*
+import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -35,7 +34,7 @@ public actual class RpcFrontendFixture internal constructor(
     public actual val services: RpcServices,
     public actual val views: RpcSessionViews,
     public actual val global: RpcGlobalSettings,
-    public actual val sessions: DefaultPersistedSessionViewModelRegistry,
+    public actual val sessions: PersistedSessionViewModelRegistry,
     public actual val drafts: DefaultNewSessionViewModelFactory,
     public actual val models: StateFlow<List<ModelInfo>>,
     public actual val failures: StateFlow<List<Throwable>>,
@@ -109,17 +108,16 @@ public actual suspend fun startRpcFrontendFixture(
                                 val failures = MutableStateFlow<List<Throwable>>(emptyList())
                                 val views = RpcSessionViews(frontendScope, services, models,
                                     reportUnhandledError = { error -> failures.update { it + error } })
-                                val sessions = DefaultPersistedSessionViewModelRegistry(views, models, frontendScope)
-                                val drafts = DefaultNewSessionViewModelFactory(views, sessions, global, frontendScope)
+                                val drafts = DefaultNewSessionViewModelFactory(views, views, global, frontendScope)
                                 try {
                                     ready.complete(RpcFrontendFixture(
                                         frontendScope.coroutineContext, root, services, views, global,
-                                        sessions, drafts, models, failures, finish,
+                                        views, drafts, models, failures, finish,
                                     ))
                                     finish.await()
-                                } finally { withContext(NonCancellable) { sessions.shutdown() } }
+                                } finally { withContext(NonCancellable) { views.shutdown() } }
                             } finally { withContext(NonCancellable) {
-                                global.close(); global.join()
+                                global.close()
                             } }
                         } finally { withContext(NonCancellable) {
                             frontendJob.cancelAndJoin()

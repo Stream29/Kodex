@@ -118,7 +118,7 @@ internal class HistoryItemLoadContext(
 
     fun logFailure(descriptor: HistoryItemDescriptor, failure: Throwable) {
         historyLogger.error(failure) {
-            "Failed to load History ${descriptor.source} entry ${descriptor.index} from ${agentState.storage.uri}."
+            "Failed to load History ${descriptor.source} entry ${descriptor.index} from agent ${agentState.storage.agentId}."
         }
     }
 }

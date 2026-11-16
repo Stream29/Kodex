@@ -49,7 +49,6 @@ internal sealed interface AuthLoadResult {
 
     data class Unavailable(
         val reason: OpenAiAuthState.Unavailable,
-        val failure: Throwable? = null,
     ) : AuthLoadResult
 }
 

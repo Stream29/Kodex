@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.rpc.client
 
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
-import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
+import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -15,6 +15,5 @@ import kotlinx.coroutines.CoroutineScope
  */
 public expect suspend fun CoroutineScope.rpcCachedAgentStorage(
     sessionIndex: Int,
-    uri: String,
-    rpc: AgentStorageRpc,
+    rpc: AgentRuntimeRpc,
 ): ObservableKodexAgentStorage

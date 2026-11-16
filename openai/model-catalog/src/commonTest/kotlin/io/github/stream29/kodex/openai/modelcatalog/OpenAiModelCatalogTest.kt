@@ -12,14 +12,21 @@ import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ReasoningEffortPreset
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.openai.availableServiceTiers
+import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.contextWindowTokenStatus
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.seconds
+
+private fun testCatalog(client: OpenAiClient): OpenAiModelCatalogStore =
+    CoroutineScope(SupervisorJob() + Dispatchers.Default).ownedOpenAiModelCatalog(client = client)
 
 private fun model(
     slug: String,
@@ -44,7 +51,7 @@ val ultrafastModelCatalogTest by testSuite(compartment = { TestCompartment.RealT
             BuiltInModelCatalog.filter { ServiceTier.Ultrafast in it.availableServiceTiers() }.map { it.slug.value },
         )
         val remote = model("gpt-6-astra")
-        val catalog = OpenAiModelCatalog(
+        val catalog = testCatalog(
             client = mockOpenAiClient { listModels { OpenAiResult.Success(ModelsResponse(listOf(remote))) } },
         )
         try {
@@ -58,7 +65,7 @@ val ultrafastModelCatalogTest by testSuite(compartment = { TestCompartment.RealT
 
 val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
     test("starts with the bundled Codex model catalog") {
-        val catalog = OpenAiModelCatalog(
+        val catalog = testCatalog(
             client = mockOpenAiClient {
                 listModels { OpenAiResult.Success(ModelsResponse(BuiltInModelCatalog)) }
             },
@@ -90,7 +97,7 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
     }
 
     test("resolves the longest matching model prefix and keeps the requested slug") {
-        val catalog = OpenAiModelCatalog(
+        val catalog = testCatalog(
             client = mockOpenAiClient {
                 listModels { OpenAiResult.Success(ModelsResponse(BuiltInModelCatalog)) }
             },
@@ -106,7 +113,7 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
     }
 
     test("resolves one provider namespace segment but not multiple segments") {
-        val catalog = OpenAiModelCatalog(
+        val catalog = testCatalog(
             client = mockOpenAiClient {
                 listModels { OpenAiResult.Success(ModelsResponse(BuiltInModelCatalog)) }
             },
@@ -128,7 +135,7 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
     test("keeps the built-in catalog until the remote refresh completes") {
         val remoteStarted = CompletableDeferred<Unit>()
         val continueRemote = CompletableDeferred<Unit>()
-        val catalog = OpenAiModelCatalog(
+        val catalog = testCatalog(
             client = mockOpenAiClient {
                 listModels {
                     remoteStarted.complete(Unit)
@@ -153,7 +160,7 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
 
     test("publishes the remote catalog") {
         val freshModel = model("fresh-model")
-        val catalog = OpenAiModelCatalog(
+        val catalog = testCatalog(
             client = mockOpenAiClient {
                 listModels { OpenAiResult.Success(ModelsResponse(listOf(freshModel))) }
             },
@@ -168,7 +175,7 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
         }
     }
 
-    test("normalizes duplicate remote reasoning presets at startup and explicit refresh") {
+    test("normalizes duplicate remote reasoning presets at startup") {
         val providerMax = ReasoningEffortPreset(ReasoningEffort.Max, "Provider Max")
         val legacyUltra = ReasoningEffortPreset(ReasoningEffort.Max, "Legacy Ultra")
         val future = ReasoningEffortPreset(ReasoningEffort.Custom("future"), "Future")
@@ -179,7 +186,7 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
         val expectedModel = remoteModel.copy(
             supportedReasoningLevels = listOf(providerMax, future),
         )
-        val catalog = OpenAiModelCatalog(
+        val catalog = testCatalog(
             client = mockOpenAiClient {
                 listModels { OpenAiResult.Success(ModelsResponse(listOf(remoteModel))) }
             },
@@ -191,8 +198,6 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
                 }
             }
             assertEquals(listOf(expectedModel), startupModels)
-
-            assertEquals(listOf(expectedModel), catalog.refresh())
             assertEquals(listOf(expectedModel), catalog.models.value)
         } finally {
             catalog.close()
@@ -202,7 +207,7 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
     test("close cancels a pending startup refresh") {
         val remoteStarted = CompletableDeferred<Unit>()
         val remoteCancelled = CompletableDeferred<Unit>()
-        val catalog = OpenAiModelCatalog(
+        val catalog = testCatalog(
             client = mockOpenAiClient {
                 listModels {
                     remoteStarted.complete(Unit)

@@ -4,7 +4,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEve
 import io.github.stream29.kodex.openai.FreeformTool
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.ResponsesApiTool
-import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.ToolName
 
@@ -40,9 +39,6 @@ internal object ToolRouting {
         when (val spec = spec) {
             is ResponsesApiTool -> ToolName.plain(spec.name)
             is FreeformTool -> ToolName.plain(spec.name)
-            is ResponsesApiNamespace,
-            is ToolSpec.ImageGeneration,
-            is ToolSpec.ToolSearch,
-            is ToolSpec.WebSearch -> error("KodexToolRuntime only accepts callable local tool specs.")
+            is ResponsesApiNamespace -> error("KodexToolRuntime only accepts callable local tool specs.")
         }
 }

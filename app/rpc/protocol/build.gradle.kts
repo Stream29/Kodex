@@ -11,6 +11,5 @@ kotlin {
         api(libs.kotlinx.serialization.json)
         api(project(":openai-models"))
         api(project(":openai-account-usage"))
-        api(libs.kotlinx.io.core)
     }
 }

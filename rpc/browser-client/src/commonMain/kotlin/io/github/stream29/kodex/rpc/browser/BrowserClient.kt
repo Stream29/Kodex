@@ -2,8 +2,10 @@ package io.github.stream29.kodex.rpc.browser
 
 import io.github.stream29.kodex.backend.*
 import io.github.stream29.kodex.rpc.client.RpcWireSerializers
-import io.github.stream29.kodex.rpc.local.FrontendRpcConnection
+import io.github.stream29.kodex.rpc.local.ActiveRpcPeer
 import io.github.stream29.kodex.rpc.local.BackendConnectionState
+import io.github.stream29.kodex.rpc.local.FrontendRpcConnection
+import io.github.stream29.kodex.rpc.local.ManagedFrontendRpcConnection
 import io.github.stream29.kodex.rpc.websocket.WebSocketRpcTransport
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.js.Js
@@ -21,6 +23,9 @@ import kotlinx.rpc.krpc.rpcClientConfig
 import kotlinx.rpc.krpc.serialization.json.json
 import kotlinx.serialization.json.*
 
+internal const val BrowserRejectedMessage: String =
+    "Backend rejected this connection. Re-import its current private connection record."
+
 private class BrowserConnectionRejected : IllegalStateException("Local browser connection was rejected.")
 private class BrowserRecoveryFailed(val failure: Throwable) : IllegalStateException()
 
@@ -35,9 +40,8 @@ internal fun validateBrowserEndpoint(endpoint: LocalBrowserEndpoint) {
     require(endpoint.businessProtocol == BackendBusinessProtocol) { "Backend business protocol is incompatible." }
 }
 
-internal fun heartbeatInterval(reply: JsonObject, endpoint: LocalBrowserEndpoint): Long {
-    return heartbeatInterval(reply, endpoint.instanceId)
-}
+internal fun heartbeatInterval(reply: JsonObject, endpoint: LocalBrowserEndpoint): Long =
+    heartbeatInterval(reply, endpoint.instanceId)
 
 private fun heartbeatInterval(reply: JsonObject, instanceId: String): Long {
     if (reply["instance"]?.jsonPrimitive?.content != instanceId ||
@@ -45,8 +49,7 @@ private fun heartbeatInterval(reply: JsonObject, instanceId: String): Long {
         reply["phase"]?.jsonPrimitive?.content != "ready"
     ) throw BrowserConnectionRejected()
     val ttl = requireNotNull(reply["idle_ttl_seconds"]?.jsonPrimitive?.longOrNull)
-    require(ttl == -1L || ttl > 0L) { "Invalid backend idle timeout." }
-    return if (ttl == -1L || ttl >= 60L) 20_000L else maxOf(100L, ttl * 1000L / 3)
+    return backendHeartbeatIntervalMillis(ttl)
 }
 
 public actual suspend fun <R> withLocalBrowserClient(
@@ -80,7 +83,7 @@ internal suspend fun <R> withBrowserConnection(
         install(WebSockets)
         install(HttpTimeout) { requestTimeoutMillis = 10_000; connectTimeoutMillis = 5_000 }
     }
-    val connection = BrowserConnection()
+    val connection = ManagedFrontendRpcConnection()
     val initial = CompletableDeferred<String>()
     var canonicalDirectory: String? = null
     var renewals: Job? = null
@@ -102,7 +105,7 @@ internal suspend fun <R> withBrowserConnection(
         while (true) {
             if (connection.state.value == BackendConnectionState.Failed) return@connectionLoop
             var transport: WebSocketRpcTransport? = null
-            var peer: BrowserPeer? = null
+            var peer: ActiveRpcPeer? = null
             try {
                 // Reject stale credentials/instances before opening the business transport.
                 renew()
@@ -132,7 +135,7 @@ internal suspend fun <R> withBrowserConnection(
                     val client = object : InitializedKrpcClient(
                         rpcClientConfig { serialization { json { serializersModule = RpcWireSerializers } } }, opened,
                     ) {}
-                    val replacement = BrowserPeer(client) { opened.alive }.also { peer = it }
+                    val replacement = ActiveRpcPeer(client) { opened.alive }.also { peer = it }
                     // A recovery business failure on a live replacement is never a network retry.
                     try { connection.install(replacement) }
                     catch (failure: Throwable) {
@@ -146,8 +149,8 @@ internal suspend fun <R> withBrowserConnection(
                             renewals = owner.launch renewalLoop@ {
                                 while (true) {
                                     val interval = try { renew() }
-                                    catch (rejected: BrowserConnectionRejected) {
-                                        connection.reject()
+                                    catch (_: BrowserConnectionRejected) {
+                                        connection.fail(BrowserRejectedMessage)
                                         currentTransport?.shutdown()
                                         return@renewalLoop
                                     } catch (failure: Throwable) {
@@ -166,7 +169,7 @@ internal suspend fun <R> withBrowserConnection(
             } catch (recovery: BrowserRecoveryFailed) {
                 throw recovery.failure
             } catch (rejected: BrowserConnectionRejected) {
-                connection.reject()
+                connection.fail(BrowserRejectedMessage)
                 initial.completeExceptionally(rejected)
                 return@connectionLoop
             } catch (failure: Throwable) {

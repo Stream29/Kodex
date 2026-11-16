@@ -15,7 +15,7 @@ import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
-import io.github.stream29.kodex.rpc.contract.GlobalRpc
+import io.github.stream29.kodex.rpc.control.BackendControlClient
 import io.github.stream29.kodex.rpc.local.withLocalRpcClient
 import io.github.stream29.kodex.rpc.models.*
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -48,7 +48,8 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
     test("frontend owner never renews an idle backend and closes safely after its expiry") {
         withRoundTrip(ttlSeconds = 5) { f ->
             f.host { page ->
-                assertEquals(FrontendCapabilityStatus.NoCompanion, page.info.host.capabilities.frontendErrorObservation)
+                assertEquals(FrontendCapabilityStatus.Ready, page.info.host.capabilities.directoryBrowsing)
+                assertEquals(FrontendCapabilityStatus.Ready, page.info.host.capabilities.contextPathEvaluation)
                 withTimeout(15.seconds) {
                     while (BackendInstance.discover(f.home) != null) delay(50)
                 }
@@ -120,11 +121,11 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
         }
     }
 
-    test("typed host HTTP authenticates exact owner and Origin and rejects retired effects") {
+    test("typed host HTTP authenticates exact owner and Origin and isolates independent leases") {
         withRoundTrip { f ->
             f.host { page ->
                 val second = f.bootstrap(page.launchUrl)
-                val probe = LocalFrontendHostRequest.ReserveCallback(LocalOAuthProvider.Mcp, f.wire.spareRedirect())
+                val probe = LocalFrontendHostRequest.RenewOwner
                 for ((credential, owner) in listOf(
                     f.endpoint.password to page.info.host.owner,
                     page.info.endpoint.password to page.info.host.owner,
@@ -135,16 +136,7 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
                 }
                 assertEquals(403, page.raw(probe, origin = "http://127.0.0.1:1").status)
                 assertEquals(403, page.raw(probe, authority = "localhost:${Url(page.info.host.baseUrl).port}").status)
-                assertEquals(
-                    LocalFrontendHostFailure.CapabilityUnavailable,
-                    assertIs<LocalFrontendHostReply.Failure>(page.call(probe)).reason,
-                )
-                assertEquals(
-                    LocalFrontendHostFailure.CapabilityUnavailable,
-                    assertIs<LocalFrontendHostReply.Failure>(
-                        page.call(LocalFrontendHostRequest.ObserveError("not-admitted")),
-                    ).reason,
-                )
+                assertIs<LocalFrontendHostReply.OwnerRenewed>(page.call(probe))
                 assertIs<LocalFrontendHostReply.OwnerClosed>(page.call(LocalFrontendHostRequest.CloseOwner))
                 assertEquals(401, page.raw(LocalFrontendHostRequest.RenewOwner).status)
                 assertIs<LocalFrontendHostReply.OwnerRenewed>(second.call(LocalFrontendHostRequest.RenewOwner))
@@ -157,12 +149,10 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
     test("expired owner HTTP is rejected without renewing the backend") {
         withRoundTrip { f ->
             f.host { page ->
-                val request = LocalFrontendHostRequest.ReserveCallback(LocalOAuthProvider.Mcp, f.wire.spareRedirect())
-                assertIs<LocalFrontendHostReply.Failure>(page.call(request))
                 // The HTTP composition intentionally has no fake clock; exercise the real finite lease.
                 delay(page.info.host.leaseMillis + 100)
                 assertEquals(401, page.raw(LocalFrontendHostRequest.RenewOwner).status)
-                assertEquals(401, page.raw(request).status)
+                assertEquals(401, page.raw(LocalFrontendHostRequest.CloseOwner).status)
                 assertTrue(frontendBackendReady(f.endpoint))
             }
         }
@@ -327,7 +317,7 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
                         f.awaitFile(started)
                         assertFalse(SystemFileSystem.exists(input))
                         assertIs<LocalFrontendHostReply.OwnerClosed>(page.call(LocalFrontendHostRequest.CloseOwner))
-                        assertEquals(401, page.raw(LocalFrontendHostRequest.ObserveError("must-not-replay")).status)
+                        assertEquals(401, page.raw(LocalFrontendHostRequest.RenewOwner).status)
                     }
                     // The original frontend's owner and RPC connection are both gone.
                     SystemCoroutineFileSystem.writeString(release, "release")
@@ -389,8 +379,8 @@ private class RoundTripFixture(val root: Path, val wire: RoundTripWire, val prov
         assertEquals(endpoint.instanceId, info.endpoint.instanceId)
         assertEquals(launch.toString(), info.workingDirectory)
         assertEquals(launch.toString(), info.host.launchDirectory)
-        assertEquals(FrontendCapabilityStatus.NoCompanion, info.host.capabilities.oauthCallbacks)
-        assertEquals(FrontendCapabilityStatus.NoCompanion, info.host.capabilities.frontendErrorObservation)
+        assertEquals(FrontendCapabilityStatus.Ready, info.host.capabilities.directoryBrowsing)
+        assertEquals(FrontendCapabilityStatus.Ready, info.host.capabilities.contextPathEvaluation)
         return RoundTripPage(launchUrl, info, wire)
     }
 
@@ -563,18 +553,20 @@ private suspend fun withRoundTrip(
                             createClient = { model }, createLoginClient = { f.login },
                         )
                     }
-                    withTimeout(20.seconds) {
-                        while (true) {
-                            val candidate = try { BackendInstance.discover(f.home) }
-                            catch (failure: Exception) {
-                                currentCoroutineContext().ensureActive()
-                                null
+                    BackendControlClient().use { controlClient ->
+                        withTimeout(20.seconds) {
+                            while (true) {
+                                val candidate = try { BackendInstance.discover(f.home) }
+                                catch (_: Exception) {
+                                    currentCoroutineContext().ensureActive()
+                                    null
+                                }
+                                if (candidate != null && frontendBackendReady(candidate, controlClient)) {
+                                    f.endpoint = candidate
+                                    break
+                                }
+                                delay(50)
                             }
-                            if (candidate != null && frontendBackendReady(candidate)) {
-                                f.endpoint = candidate
-                                break
-                            }
-                            delay(50)
                         }
                     }
                     setBackendWorkingDirectory(f.foreignCwd)

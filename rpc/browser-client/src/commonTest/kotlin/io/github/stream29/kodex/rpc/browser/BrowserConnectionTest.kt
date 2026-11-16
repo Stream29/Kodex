@@ -5,13 +5,15 @@ package io.github.stream29.kodex.rpc.browser
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.backend.BackendBusinessProtocol
 import io.github.stream29.kodex.backend.LocalBrowserEndpoint
-import io.github.stream29.kodex.rpc.local.BackendConnectionState
-import io.github.stream29.kodex.rpc.local.BackendConnectionLost
 import io.github.stream29.kodex.cli.rpc.RpcServices
+import io.github.stream29.kodex.rpc.local.ActiveRpcPeer
+import io.github.stream29.kodex.rpc.local.BackendConnectionLost
+import io.github.stream29.kodex.rpc.local.BackendConnectionState
+import io.github.stream29.kodex.rpc.local.ManagedFrontendRpcConnection
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.rpc.RpcCall
 import kotlinx.rpc.RpcClient
 import kotlinx.serialization.json.buildJsonObject
@@ -46,8 +48,8 @@ internal val browserConnectionTest by testSuite {
         assertFails { heartbeatInterval(status(300, phase = "stopping"), endpoint) }
     }
     test("recovery precedes publication and rejects dead replacement") {
-        val connection = BrowserConnection()
-        val first = BrowserPeer(unusedClient) { true }
+        val connection = ManagedFrontendRpcConnection()
+        val first = ActiveRpcPeer(unusedClient) { true }
         connection.install(first)
         connection.detach(first)
         var recovered = false
@@ -56,48 +58,48 @@ internal val browserConnectionTest by testSuite {
             assertTrue(alive())
             recovered = true
         }
-        val second = BrowserPeer(unusedClient) { true }
+        val second = ActiveRpcPeer(unusedClient) { true }
         connection.install(second)
         assertTrue(recovered)
         connection.detach(first)
         assertTrue(connection.available)
         connection.detach(second)
         connection.onReconnection { _, _ -> }
-        assertFailsWith<IllegalStateException> { connection.install(BrowserPeer(unusedClient) { false }) }
+        assertFailsWith<IllegalStateException> { connection.install(ActiveRpcPeer(unusedClient) { false }) }
         assertFalse(connection.available)
     }
     test("live recovery failure is not swallowed or published") {
-        val connection = BrowserConnection()
-        val first = BrowserPeer(unusedClient) { true }
+        val connection = ManagedFrontendRpcConnection()
+        val first = ActiveRpcPeer(unusedClient) { true }
         connection.install(first); connection.detach(first)
         val failure = IllegalArgumentException("business recovery")
         connection.onReconnection { _, _ -> throw failure }
-        assertSame(failure, assertFailsWith<IllegalArgumentException> { connection.install(BrowserPeer(unusedClient) { true }) })
+        assertSame(failure, assertFailsWith<IllegalArgumentException> { connection.install(ActiveRpcPeer(unusedClient) { true }) })
         assertFalse(connection.available)
     }
     test("rejection remains terminal after stale detach") {
-        val connection = BrowserConnection()
-        val peer = BrowserPeer(unusedClient) { true }
-        connection.install(peer); connection.reject(); connection.detach(peer)
+        val connection = ManagedFrontendRpcConnection()
+        val peer = ActiveRpcPeer(unusedClient) { true }
+        connection.install(peer); connection.fail(BrowserRejectedMessage); connection.detach(peer)
         assertEquals(BackendConnectionState.Failed, connection.state.value)
         assertFalse(connection.available)
         assertNotNull(connection.failureReason.value)
-        assertFailsWith<IllegalStateException> { connection.install(BrowserPeer(unusedClient) { true }) }
+        assertFailsWith<IllegalStateException> { connection.install(ActiveRpcPeer(unusedClient) { true }) }
     }
     test("renewal rejection during recovery cannot publish a replacement") {
-        val connection = BrowserConnection()
-        val first = BrowserPeer(unusedClient) { true }
+        val connection = ManagedFrontendRpcConnection()
+        val first = ActiveRpcPeer(unusedClient) { true }
         connection.install(first); connection.detach(first)
-        connection.onReconnection { _, _ -> connection.reject() }
-        assertFailsWith<IllegalStateException> { connection.install(BrowserPeer(unusedClient) { true }) }
+        connection.onReconnection { _, _ -> connection.fail(BrowserRejectedMessage) }
+        assertFailsWith<IllegalStateException> { connection.install(ActiveRpcPeer(unusedClient) { true }) }
         assertFalse(connection.available)
         assertEquals(BackendConnectionState.Failed, connection.state.value)
     }
     test("offline command is never submitted") {
-        assertFailsWith<BackendConnectionLost> { RpcServices(BrowserConnection()).runtime.resume(41) }
+        assertFailsWith<BackendConnectionLost> { RpcServices(ManagedFrontendRpcConnection()).runtime.resume(41) }
     }
     test("unknown write result is not replayed on replacement") {
-        val connection = BrowserConnection()
+        val connection = ManagedFrontendRpcConnection()
         var alive = true
         var writes = 0
         val client = object : RpcClient by unusedClient {
@@ -107,16 +109,16 @@ internal val browserConnectionTest by testSuite {
                 error("Accepted write lost its reply")
             }
         }
-        val first = BrowserPeer(client) { alive }
+        val first = ActiveRpcPeer(client) { alive }
         connection.install(first)
         assertFailsWith<BackendConnectionLost> { RpcServices(connection).runtime.resume(41) }
         connection.detach(first)
-        connection.install(BrowserPeer(unusedClient) { true })
+        connection.install(ActiveRpcPeer(unusedClient) { true })
         assertEquals(1, writes)
     }
     test("caller cancellation is not reported as transport loss") {
         runTest {
-            val connection = BrowserConnection()
+            val connection = ManagedFrontendRpcConnection()
             var failure: Throwable? = null
             launch {
                 currentCoroutineContext().job.cancel()
@@ -127,14 +129,14 @@ internal val browserConnectionTest by testSuite {
         }
     }
     test("live business failures retain their cause without reconnect or retry") {
-        val connection = BrowserConnection()
+        val connection = ManagedFrontendRpcConnection()
         val original = IllegalArgumentException("business failure")
         var calls = 0
         val client = object : RpcClient by unusedClient {
             override suspend fun <T> call(call: RpcCall): T { calls++; throw original }
             override fun <T> callServerStreaming(call: RpcCall): Flow<T> = flow { throw original }
         }
-        connection.install(BrowserPeer(client) { true })
+        connection.install(ActiveRpcPeer(client) { true })
         assertSame(original, assertFailsWith<IllegalArgumentException> { RpcServices(connection).runtime.getLatestIndex(41) })
         assertSame(original, assertFailsWith<IllegalArgumentException> { RpcServices(connection).runtime.getLatestIndexFlow(41).toList() })
         assertEquals(1, calls)
@@ -142,8 +144,8 @@ internal val browserConnectionTest by testSuite {
     }
     test("streams resume only after exact replacement recovery") {
         runTest {
-            val connection = BrowserConnection()
-            fun peer(index: Int) = BrowserPeer(object : RpcClient by unusedClient {
+            val connection = ManagedFrontendRpcConnection()
+            fun peer(index: Int) = ActiveRpcPeer(object : RpcClient by unusedClient {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T> callServerStreaming(call: RpcCall): Flow<T> = flow {
                     emit(index as T); awaitCancellation()

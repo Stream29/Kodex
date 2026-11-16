@@ -4,7 +4,7 @@ import io.github.reactivecircus.cache4k.Cache
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
-import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
+import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import kotlinx.coroutines.CancellationException
@@ -32,11 +32,9 @@ import kotlin.time.TimeSource
 
 public actual suspend fun CoroutineScope.rpcCachedAgentStorage(
     sessionIndex: Int,
-    uri: String,
-    rpc: AgentStorageRpc,
+    rpc: AgentRuntimeRpc,
 ): ObservableKodexAgentStorage = rpcCachedAgentStorage(
     sessionIndex = sessionIndex,
-    uri = uri,
     rpc = rpc,
     valueCacheSize = 1_024,
     timeSource = TimeSource.Monotonic,
@@ -44,8 +42,7 @@ public actual suspend fun CoroutineScope.rpcCachedAgentStorage(
 
 internal suspend fun CoroutineScope.rpcCachedAgentStorage(
     sessionIndex: Int,
-    uri: String,
-    rpc: AgentStorageRpc,
+    rpc: AgentRuntimeRpc,
     valueCacheSize: Int,
     timeSource: TimeSource,
 ): ObservableKodexAgentStorage {
@@ -67,7 +64,6 @@ internal suspend fun CoroutineScope.rpcCachedAgentStorage(
         binding.ensureActive()
         return RpcCachedAgentStorage(
             sessionIndex = sessionIndex,
-            uri = uri,
             rpc = rpc,
             binding = binding,
             cacheNonce = nonce,
@@ -126,14 +122,14 @@ private val SingleCommitCategorySets: Set<Set<AgentCommitType>> = setOf(
 
 private class RpcCachedAgentStorage(
     private val sessionIndex: Int,
-    override val uri: String,
-    private val rpc: AgentStorageRpc,
+    private val rpc: AgentRuntimeRpc,
     private val binding: Job,
     override val cacheNonce: StateFlow<Long>,
     override val latestIndexFlow: StateFlow<Int>,
     valueCacheSize: Int,
     timeSource: TimeSource,
 ) : ObservableKodexAgentStorage {
+    override val uri: String = "rpc://session/$sessionIndex"
     override val agentId: Int = sessionIndex
     private val mutex = Mutex()
     private var valuesNonce: Long? = null
