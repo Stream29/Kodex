@@ -20,8 +20,7 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
@@ -480,8 +479,8 @@ val sessionSidebarTest by testSuite {
     }
 
     test("requestUserInputHoverReusesTheHistoryReadOnlyForm") {
-        val event = StableRequestUserInputToolEvent(
-            callId = "request",
+        val event = StableAskUserEvent(
+            askId = 1,
             arguments = RequestUserInputArgs(
                 questions = listOf(
                     RequestUserInputQuestion(
@@ -500,12 +499,10 @@ val sessionSidebarTest by testSuite {
                     ),
                 ),
             ),
-            result = StableRequestUserInputResult.Answered(
-                RequestUserInputResponse(
-                    answers = mapOf(
-                        "layout" to RequestUserInputAnswer(listOf("Compact")),
-                        "note" to RequestUserInputAnswer(listOf("Keep it readable")),
-                    ),
+            response = RequestUserInputResponse(
+                answers = mapOf(
+                    "layout" to RequestUserInputAnswer(listOf("Compact")),
+                    "note" to RequestUserInputAnswer(listOf("Keep it readable")),
                 ),
             ),
         )

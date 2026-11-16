@@ -3,9 +3,8 @@ package io.github.stream29.kodex.cli.app
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.cli.agent.*
 import io.github.stream29.kodex.rpc.models.AgentStateValue
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import kotlin.test.*
 
 val agentRuntimeControlTest by testSuite {
@@ -15,8 +14,8 @@ val agentRuntimeControlTest by testSuite {
         assertFalse(AgentStateValue.AssistantMessage.canEditHistory(true))
     }
     test("idle pending input can be cleared") {
-        val pending = AgentStateValue.ToolPending(listOf(PendingRequestUserInputToolEvent(
-            "question", arguments = RequestUserInputArgs(listOf(RequestUserInputQuestion("id", "header", "question"))),
+        val pending = AgentStateValue.ToolPending(listOf(PendingReadMediaToolEvent(
+            "media-1", arguments = ReadMediaToolArguments(path = "/tmp/example.png"),
         )))
         assertEquals(AgentRuntimeControl.ClearPending, pending.runtimeControl(false))
         assertTrue(pending.canEditHistory(false))

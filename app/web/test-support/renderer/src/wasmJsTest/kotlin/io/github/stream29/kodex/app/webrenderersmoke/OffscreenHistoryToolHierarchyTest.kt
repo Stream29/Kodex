@@ -22,7 +22,7 @@ import io.github.stream29.kodex.app.history.contract.item.*
 import io.github.stream29.kodex.app.ui.compose.rememberComposeHistoryItemRenderer
 import io.github.stream29.kodex.cli.history.*
 import io.github.stream29.kodex.openai.*
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecOutput
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -171,19 +171,19 @@ val offscreenHistoryToolHierarchyTest by testSuite {
                 assertEquals(FontFamily.Monospace, scene.hierarchyLayout("raw\n  output").layoutInput.style.fontFamily)
             } finally { scene.close() }
         } }
-        test("running title and image failure preserve status and error semantics dark=$dark") { offscreenTest {
+        test("running title and media failure preserve status and error semantics dark=$dark") { offscreenTest {
             val scheme = if (dark) darkColorScheme() else lightColorScheme()
             val scene = OffscreenScene.create(width = 360, height = 1000) {
                 MaterialTheme(colorScheme = scheme) {
                     val renderer = rememberComposeHistoryItemRenderer()
                     renderer.Text("Body reference", HistoryTextStyle.Normal)
                     HistoryEventContent(PendingFunctionToolEvent("running", name = "external", arguments = JsonObject(emptyMap())), renderer)
-                    HistoryEventContent(StableImageGenerationToolEvent("image", arguments = ImageGenToolArguments("prompt"),
-                        result = StableImageGenerationResult.Failure("fixture failed")), renderer)
+                    HistoryEventContent(StableReadMediaToolEvent("media", arguments = ReadMediaToolArguments("sample.png"),
+                        result = StableReadMediaResult.Failure("fixture failed")), renderer)
                 }
             }
             try {
-                scene.settle { scene.hasDescription("History tool: Running external") && scene.hasDescription("History tool: Generate image") }
+                scene.settle { scene.hasDescription("History tool: Running external") && scene.hasDescription("History tool: Read media: sample.png") }
                 val title = scene.hierarchyLayout("Running external").layoutInput.style
                 assertTrue(title.fontSize.value >= scene.hierarchyLayout("Body reference").layoutInput.style.fontSize.value)
                 assertTrue((title.fontWeight?.weight ?: 0) >= FontWeight.SemiBold.weight)
@@ -191,10 +191,9 @@ val offscreenHistoryToolHierarchyTest by testSuite {
                 scene.clickDescription("History tool: Running external")
                 scene.settle { scene.hasText("Tool: external") }
                 assertEquals(scheme.onSurfaceVariant, scene.hierarchyLayout("Tool: external").layoutInput.style.color)
-                scene.clickDescription("History tool: Generate image")
+                scene.clickDescription("History tool: Read media: sample.png")
                 scene.settle { scene.hasText("error: fixture failed") }
-                assertEquals(scheme.onSurfaceVariant, scene.hierarchyLayout("image_gen.imagegen").layoutInput.style.color)
-                assertEquals(scheme.onSurface, scene.hierarchyLayout("prompt: prompt").layoutInput.style.color)
+                assertEquals(scheme.onSurfaceVariant, scene.hierarchyLayout("read_media").layoutInput.style.color)
                 assertEquals(scheme.onSurface, scene.hierarchyLayout("error: fixture failed").layoutInput.style.color)
             } finally { scene.close() }
         } }

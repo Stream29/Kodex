@@ -1,8 +1,6 @@
 package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
-import io.github.stream29.kodex.app.agent.contract.AgentViewModel
-import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
@@ -309,28 +307,6 @@ internal class ApplicationViewModelImpl(
                     sessionOwner = sessionOwner,
                     picker = createDirectoryPicker(target.settings.value.cwd),
                     dependencies = WorkingDirectoryDependencies(target::updateWorkingDirectory),
-                ),
-            ),
-        )
-    }
-
-    override suspend fun openSuggestedWorkingDirectoryPopup(
-        target: AgentViewModel,
-        callId: String,
-    ): ApplicationPopupState.WorkingDirectory? = commandMutex.withLock {
-        ensureOpen()
-        val sessionOwner = requireOwned(target)
-        val suggestion = target.suggestSubagentTask
-        val pending = (suggestion.state.value as? SuggestSubagentTaskState.Pending)
-            ?.takeIf { it.callId == callId && !it.submitting }
-            ?: return@withLock null
-        installPopup(
-            ApplicationPopupState.WorkingDirectory(
-                ApplicationWorkingDirectoryAdapter(
-                    target = target,
-                    sessionOwner = sessionOwner,
-                    picker = createDirectoryPicker(pending.configuration.cwd),
-                    dependencies = bindSuggestedWorkingDirectory(suggestion, callId),
                 ),
             ),
         )

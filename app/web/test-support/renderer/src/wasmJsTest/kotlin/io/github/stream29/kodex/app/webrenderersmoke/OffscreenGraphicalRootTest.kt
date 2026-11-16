@@ -52,8 +52,8 @@ val offscreenGraphicalRootTest by testSuite {
     test("assistant display modes retain exact owner and reject stale menus during running") { runtimeScene { _, runtime, owner ->
         val firstBase = pageAgent("markdown-first", runtime, owner)
         val secondBase = pageAgent("markdown-second", runtime, owner)
-        val firstStorage = InMemoryKodexAgentStorage.empty()
-        val secondStorage = InMemoryKodexAgentStorage.empty()
+        val firstStorage = initializedTestStorage()
+        val secondStorage = initializedTestStorage()
         firstStorage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("# Alpha heading\n\n**Alpha result**"))))
         secondStorage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("# Beta heading\n\n**Beta result**"))))
         val firstMaximum = MutableStateFlow(1)

@@ -4,7 +4,6 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemViewModel
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
@@ -362,9 +361,6 @@ internal class AgentHistoryViewModelImpl(
 
             HistoryItemKind.RequestUserInput ->
                 RequestUserInputHistoryItemViewModelImpl(descriptor.index, descriptor, context)
-
-            HistoryItemKind.SuggestSubagentTask ->
-                SuggestSubagentTaskHistoryItemViewModelImpl(descriptor.index, descriptor, context)
 
             HistoryItemKind.PlanUpdate ->
                 PlanUpdateHistoryItemViewModelImpl(descriptor.index, descriptor, context)
@@ -1019,7 +1015,6 @@ private val HistoryItemViewModel.storageIndex: Int
         is ReasoningHistoryItemViewModel -> index
         is ToolHistoryItemViewModel -> index
         is RequestUserInputHistoryItemViewModel -> index
-        is SuggestSubagentTaskHistoryItemViewModel -> index
         is PatchHistoryItemViewModel -> index
         is PlanUpdateHistoryItemViewModel -> index
         is ContextCompactionHistoryItemViewModel -> index

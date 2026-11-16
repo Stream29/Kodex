@@ -25,9 +25,9 @@ public actual fun rememberComposeUserInputRenderer(): UserInputRenderer = rememb
 private class ComposeUserInputRenderer : UserInputRenderer {
     @Composable
     override fun Frame(
-        callId: String, revision: Long, questionCount: Int, content: @Composable (UserInputRenderScope) -> Unit,
+        askId: Int, revision: Long, questionCount: Int, content: @Composable (UserInputRenderScope) -> Unit,
     ) {
-        key(callId) {
+        key(askId) {
             val freeForms = List(questionCount) { rememberUiEditorFocusHandle() }
             val focus = remember(questionCount) { ComposeUserInputFocus(questionCount, freeForms) }
             val controls = remember(focus) { ComposeUserInputScope(focus) }

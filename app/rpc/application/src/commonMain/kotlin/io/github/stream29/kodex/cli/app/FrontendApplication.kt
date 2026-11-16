@@ -69,13 +69,6 @@ public actual suspend fun <R> withFrontendApplication(
         lateinit var root: ApplicationViewModel
         val sessionViews = RpcSessionViews(
             frontendScope, services, settings.models, reportUnhandledError,
-            onCreated = { created ->
-            frontendScope.launch {
-                try { root.openCreatedSessions(created.map { it.sessionIndex }) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Throwable) { ApplicationLogger.error(error) { "Unable to open created Session tabs." } }
-            }
-            },
             connectionAvailable = { connection.available },
         ).also { views = it }
         connection.onReconnection { client, isConnected ->

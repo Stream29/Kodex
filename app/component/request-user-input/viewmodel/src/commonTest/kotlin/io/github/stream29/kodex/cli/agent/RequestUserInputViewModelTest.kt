@@ -1,20 +1,17 @@
 package io.github.stream29.kodex.cli.agent
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDependencies
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDraftAnswer
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
-import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +27,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 @OptIn(ExperimentalCoroutinesApi::class)
 val requestUserInputViewModelTest by testSuite {
@@ -40,18 +38,20 @@ val requestUserInputViewModelTest by testSuite {
             runCurrent()
             val initial = model.pending()
             assertFalse(initial.canSubmit)
-            assertFalse(model.selectOption("obsolete", "scope", "Current module"))
-            assertFalse(model.selectOption(initial.callId, "missing", "Current module"))
-            assertFalse(model.selectOption(initial.callId, "scope", "Undeclared"))
-            assertFalse(model.updateFreeForm(initial.callId, "scope", "not Other"))
+            assertFalse(model.selectOption(999, "scope", "Current module"))
+            assertFalse(model.selectOption(initial.askId, "missing", "Current module"))
+            assertFalse(model.selectOption(initial.askId, "scope", "Undeclared"))
+            assertFalse(model.updateFreeForm(initial.askId, "scope", "not Other"))
             assertEquals(initial, model.state.value)
-            assertTrue(model.selectOption(initial.callId, "scope", "Current module"))
+            assertTrue(model.selectOption(initial.askId, "scope", "Current module"))
             val selected = model.pending()
             assertEquals(RequestUserInputDraftAnswer.Option("Current module"), selected.answers["scope"])
             assertTrue(selected.canSubmit)
-            assertEquals(RequestUserInputSubmissionResult.StaleRevision,
-                model.submit(initial.callId, initial.revision))
-            assertEquals(RequestUserInputSubmissionResult.StaleCall, model.submit("obsolete", 0))
+            assertEquals(
+                RequestUserInputSubmissionResult.StaleRevision,
+                model.submit(initial.askId, initial.revision),
+            )
+            assertEquals(RequestUserInputSubmissionResult.StaleAsk, model.submit(999, 0))
             model.close()
         }
     }
@@ -60,17 +60,17 @@ val requestUserInputViewModelTest by testSuite {
         runTest {
             val model = createRequestUserInputViewModel(RequestPorts(), backgroundScope)
             runCurrent()
-            assertEquals(RequestUserInputSubmissionResult.Incomplete, model.submit("call_scope", 0))
-            assertTrue(model.selectOther("call_scope", "scope"))
+            assertEquals(RequestUserInputSubmissionResult.Incomplete, model.submit(1, 0))
+            assertTrue(model.selectOther(1, "scope"))
             assertFalse(model.pending().canSubmit)
-            assertTrue(model.updateFreeForm("call_scope", "scope", "   "))
+            assertTrue(model.updateFreeForm(1, "scope", "   "))
             assertFalse(model.pending().canSubmit)
-            assertTrue(model.updateFreeForm("call_scope", "scope", " Whole workspace "))
+            assertTrue(model.updateFreeForm(1, "scope", " Whole workspace "))
             val valid = model.pending()
             assertTrue(valid.canSubmit)
-            assertTrue(model.updateFreeForm("call_scope", "scope", " Whole workspace "))
+            assertTrue(model.updateFreeForm(1, "scope", " Whole workspace "))
             assertEquals(valid.revision, model.pending().revision)
-            assertTrue(model.selectOther("call_scope", "scope"))
+            assertTrue(model.selectOther(1, "scope"))
             assertEquals(valid.revision + 1, model.pending().revision)
             model.close()
         }
@@ -78,48 +78,51 @@ val requestUserInputViewModelTest by testSuite {
 
     test("option-less questions accept direct text and completion keeps question order") {
         runTest {
-            val request = requestEvent().copy(arguments = RequestUserInputArgs(listOf(
-                RequestUserInputQuestion("text", "Text", "Explain"),
-                requestEvent().arguments.questions.single(),
-            )))
+            val request = requestEntry().copy(
+                questions = RequestUserInputArgs(
+                    listOf(
+                        RequestUserInputQuestion("text", "Text", "Explain"),
+                        requestEntry().questions.questions.single(),
+                    ),
+                ),
+            )
             val ports = RequestPorts(request)
             val model = createRequestUserInputViewModel(ports, backgroundScope)
             runCurrent()
-            assertFalse(model.selectOther(request.callId, "text"))
-            assertTrue(model.updateFreeForm(request.callId, "text", "  free form  "))
-            model.selectOption(request.callId, "scope", "Current module")
-            assertEquals(RequestUserInputSubmissionResult.Submitted,
-                model.submit(request.callId, model.pending().revision))
-            val event = assertIs<StableRequestUserInputToolEvent>(ports.completed.single())
-            val response = assertIs<StableRequestUserInputResult.Answered>(event.result).response
+            assertFalse(model.selectOther(request.askId, "text"))
+            assertTrue(model.updateFreeForm(request.askId, "text", "  free form  "))
+            model.selectOption(request.askId, "scope", "Current module")
+            assertEquals(
+                RequestUserInputSubmissionResult.Submitted,
+                model.submit(request.askId, model.pending().revision),
+            )
+            val (submittedAskId, response) = ports.submitted.single()
+            assertEquals(request.askId, submittedAskId)
             assertEquals(listOf("text", "scope"), response.answers.keys.toList())
             assertEquals(listOf("user_note: free form"), response.answers.getValue("text").answers)
             assertEquals(listOf("Current module"), response.answers.getValue("scope").answers)
-            assertEquals(request.callId, event.callId)
-            assertEquals(request.itemId, event.itemId)
-            assertEquals(request.arguments, event.arguments)
-            assertEquals(listOf("complete", "resume"), ports.order)
+            assertEquals(listOf("submit"), ports.order)
             assertIs<RequestUserInputState.Idle>(model.state.value)
             model.close()
         }
     }
 
-    test("same-call projection ignores changed arguments and replacement discards drafts") {
+    test("same-askId projection ignores changed arguments and replacement discards drafts") {
         runTest {
             val ports = RequestPorts()
             val model = createRequestUserInputViewModel(ports, backgroundScope)
             runCurrent()
-            model.selectOther("call_scope", "scope")
-            model.updateFreeForm("call_scope", "scope", "Whole workspace")
+            model.selectOther(1, "scope")
+            model.updateFreeForm(1, "scope", "Whole workspace")
             val edited = model.pending()
-            ports.pending.value = requestEvent().copy(itemId = ResponseItemId("updated-item"))
+            ports.pending.value = requestEntry().copy(createdAt = Instant.fromEpochMilliseconds(2000))
             runCurrent()
             assertEquals(edited, model.state.value)
-            ports.pending.value = requestEvent("replacement")
+            ports.pending.value = requestEntry(askId = 2)
             runCurrent()
-            assertEquals("replacement", model.pending().callId)
+            assertEquals(2, model.pending().askId)
             assertTrue(model.pending().answers.isEmpty())
-            assertFalse(model.updateFreeForm("call_scope", "scope", "late"))
+            assertFalse(model.updateFreeForm(1, "scope", "late"))
             model.close()
         }
     }
@@ -127,20 +130,24 @@ val requestUserInputViewModelTest by testSuite {
     test("Busy admission follows revision and submission freezes editing") {
         runTest {
             val gate = CompletableDeferred<Unit>()
-            val ports = RequestPorts().apply { completion = { gate.await(); 7 } }
+            val ports = RequestPorts().apply { submissionHook = { gate.await() } }
             val model = createRequestUserInputViewModel(ports, backgroundScope)
             runCurrent()
-            model.selectOption("call_scope", "scope", "Current module")
+            model.selectOption(1, "scope", "Current module")
             val editing = model.pending()
-            val submission = async { model.submit(editing.callId, editing.revision) }
+            val submission = async { model.submit(editing.askId, editing.revision) }
             runCurrent()
             val frozen = model.pending()
             assertIs<RequestUserInputSubmissionState.Submitting>(frozen.submission)
-            assertFalse(model.selectOther(frozen.callId, "scope"))
-            assertEquals(RequestUserInputSubmissionResult.StaleRevision,
-                model.submit(frozen.callId, editing.revision))
-            assertEquals(RequestUserInputSubmissionResult.Busy,
-                model.submit(frozen.callId, frozen.revision))
+            assertFalse(model.selectOther(frozen.askId, "scope"))
+            assertEquals(
+                RequestUserInputSubmissionResult.StaleRevision,
+                model.submit(frozen.askId, editing.revision),
+            )
+            assertEquals(
+                RequestUserInputSubmissionResult.Busy,
+                model.submit(frozen.askId, frozen.revision),
+            )
             gate.complete(Unit)
             assertEquals(RequestUserInputSubmissionResult.Submitted, submission.await())
             model.close()
@@ -149,83 +156,90 @@ val requestUserInputViewModelTest by testSuite {
 
     test("failure retains drafts and edit clears failure before explicit retry") {
         runTest {
-            val ports = RequestPorts().apply { completion = { error("completion failed") } }
+            val ports = RequestPorts().apply { submissionHook = { error("submission failed") } }
             val model = createRequestUserInputViewModel(ports, backgroundScope)
             runCurrent()
-            model.selectOther("call_scope", "scope")
-            model.updateFreeForm("call_scope", "scope", "answer")
+            model.selectOther(1, "scope")
+            model.updateFreeForm(1, "scope", "answer")
             val editing = model.pending()
-            assertEquals(RequestUserInputSubmissionResult.Failed("completion failed"),
-                model.submit(editing.callId, editing.revision))
+            assertEquals(
+                RequestUserInputSubmissionResult.Failed("submission failed"),
+                model.submit(editing.askId, editing.revision),
+            )
             val failed = model.pending()
             assertEquals(editing.answers, failed.answers)
             assertEquals(editing.revision + 2, failed.revision)
             assertIs<RequestUserInputSubmissionState.Failed>(failed.submission)
             assertTrue(failed.canSubmit)
-            assertEquals(listOf("complete"), ports.order)
-            model.updateFreeForm(failed.callId, "scope", "answer")
+            assertEquals(listOf("submit"), ports.order)
+            model.updateFreeForm(failed.askId, "scope", "answer")
             assertIs<RequestUserInputSubmissionState.Editing>(model.pending().submission)
-            ports.completion = { 8 }
-            assertEquals(RequestUserInputSubmissionResult.Submitted,
-                model.submit(failed.callId, model.pending().revision))
-            assertEquals(listOf("complete", "complete", "resume"), ports.order)
+            ports.submissionHook = {}
+            assertEquals(
+                RequestUserInputSubmissionResult.Submitted,
+                model.submit(failed.askId, model.pending().revision),
+            )
+            assertEquals(listOf("submit", "submit"), ports.order)
             model.close()
         }
     }
 
     test("dependency cancellation propagates and retains Submitting until replacement") {
         runTest {
-            val ports = RequestPorts().apply { completion = { throw CancellationException("cancel") } }
+            val ports = RequestPorts().apply { submissionHook = { throw CancellationException("cancel") } }
             val model = createRequestUserInputViewModel(ports, backgroundScope)
             runCurrent()
-            model.selectOption("call_scope", "scope", "Current module")
-            assertFailsWith<CancellationException> { model.submit("call_scope", model.pending().revision) }
+            model.selectOption(1, "scope", "Current module")
+            assertFailsWith<CancellationException> { model.submit(1, model.pending().revision) }
             assertIs<RequestUserInputSubmissionState.Submitting>(model.pending().submission)
-            assertEquals(listOf("complete"), ports.order)
-            ports.pending.value = requestEvent("replacement")
+            assertEquals(listOf("submit"), ports.order)
+            ports.pending.value = requestEntry(askId = 2)
             runCurrent()
             assertIs<RequestUserInputSubmissionState.Editing>(model.pending().submission)
             model.close()
         }
     }
 
-    test("caller cancellation and close release observation but accepted completion drains") {
+    test("caller cancellation and close release observation but accepted submission drains") {
         runTest {
             val gate = CompletableDeferred<Unit>()
-            val ports = RequestPorts().apply { completion = { gate.await(); 9 } }
+            val ports = RequestPorts().apply { submissionHook = { gate.await() } }
             val model = createRequestUserInputViewModel(ports, backgroundScope)
             runCurrent()
             assertEquals(1, ports.pending.subscriptionCount.value)
-            model.selectOption("call_scope", "scope", "Current module")
-            val waiting = async { model.submit("call_scope", model.pending().revision) }
+            model.selectOption(1, "scope", "Current module")
+            val waiting = async { model.submit(1, model.pending().revision) }
             runCurrent()
             waiting.cancel()
             model.close()
             model.close()
             runCurrent()
             assertEquals(0, ports.pending.subscriptionCount.value)
-            assertFalse(model.selectOther("call_scope", "scope"))
+            assertFalse(model.selectOther(1, "scope"))
             assertIs<RequestUserInputState.Idle>(model.state.value)
             gate.complete(Unit)
             runCurrent()
-            assertEquals(listOf("complete", "resume"), ports.order)
+            assertEquals(listOf("submit"), ports.order)
             assertIs<RequestUserInputState.Idle>(model.state.value)
         }
     }
 
     listOf(true, false).forEach { succeeds ->
-        test("replacement before late completion succeeds=$succeeds keeps new snapshot") {
+        test("replacement before late completion succeeds=$succeeds keeps new snapshot and remains submittable") {
             runTest {
                 val gate = CompletableDeferred<Unit>()
                 val ports = RequestPorts().apply {
-                    completion = { gate.await(); if (!succeeds) error("late"); 3 }
+                    submissionHook = {
+                        gate.await()
+                        if (!succeeds) error("late")
+                    }
                 }
                 val model = createRequestUserInputViewModel(ports, backgroundScope)
                 runCurrent()
-                model.selectOption("call_scope", "scope", "Current module")
-                val waiting = async { model.submit("call_scope", model.pending().revision) }
+                model.selectOption(1, "scope", "Current module")
+                val waiting = async { model.submit(1, model.pending().revision) }
                 runCurrent()
-                ports.pending.value = requestEvent("replacement")
+                ports.pending.value = requestEntry(askId = 2)
                 runCurrent()
                 val replacement = model.pending()
                 gate.complete(Unit)
@@ -233,69 +247,58 @@ val requestUserInputViewModelTest by testSuite {
                 if (succeeds) assertEquals(RequestUserInputSubmissionResult.Submitted, result)
                 else assertEquals(RequestUserInputSubmissionResult.Failed("late"), result)
                 assertEquals(replacement, model.state.value)
-                assertEquals(if (succeeds) listOf("complete", "resume") else listOf("complete"), ports.order)
-                // Existing success clears pendingEvent even after replacement; do not silently fix it.
+                assertEquals(listOf("submit"), ports.order)
                 if (succeeds) {
-                    model.selectOption("replacement", "scope", "Current module")
-                    assertEquals(RequestUserInputSubmissionResult.StaleCall,
-                        model.submit("replacement", model.pending().revision))
+                    ports.submissionHook = {}
+                    model.selectOption(2, "scope", "Current module")
+                    assertEquals(
+                        RequestUserInputSubmissionResult.Submitted,
+                        model.submit(2, model.pending().revision),
+                    )
                 }
                 model.close()
             }
         }
     }
 
-    test("owner cancellation closes observation and cancels accepted wait without resume") {
+    test("owner cancellation closes observation and cancels accepted wait") {
         runTest {
             val ownerJob = SupervisorJob(backgroundScope.coroutineContext[Job])
             val owner = CoroutineScope(backgroundScope.coroutineContext + ownerJob)
-            val ports = RequestPorts().apply { completion = { CompletableDeferred<Unit>().await(); 0 } }
+            val ports = RequestPorts().apply { submissionHook = { CompletableDeferred<Unit>().await() } }
             val model = createRequestUserInputViewModel(ports, owner)
             runCurrent()
-            model.selectOption("call_scope", "scope", "Current module")
-            val waiting = async { model.submit("call_scope", model.pending().revision) }
+            model.selectOption(1, "scope", "Current module")
+            val waiting = async { model.submit(1, model.pending().revision) }
             runCurrent()
             ownerJob.cancel()
             runCurrent()
             assertFailsWith<CancellationException> { waiting.await() }
             assertIs<RequestUserInputState.Idle>(model.state.value)
             assertEquals(0, ports.pending.subscriptionCount.value)
-            assertEquals(listOf("complete"), ports.order)
-        }
-    }
-
-    test("resume failure reports Failed after completed state already became Idle") {
-        runTest {
-            val ports = RequestPorts().apply { resume = { error("resume failed") } }
-            val model = createRequestUserInputViewModel(ports, backgroundScope)
-            runCurrent()
-            model.selectOption("call_scope", "scope", "Current module")
-            assertEquals(RequestUserInputSubmissionResult.Failed("resume failed"),
-                model.submit("call_scope", model.pending().revision))
-            assertIs<RequestUserInputState.Idle>(model.state.value)
-            assertEquals(listOf("complete", "resume"), ports.order)
-            model.close()
+            assertEquals(listOf("submit"), ports.order)
         }
     }
 
     test("revision exhaustion remains explicit rather than wrapping") {
-        val state = RequestUserInputState.Pending("call_scope", requestEvent().arguments,
-            revision = Long.MAX_VALUE)
+        val state = RequestUserInputState.Pending(
+            askId = 1,
+            arguments = requestEntry().questions,
+            revision = Long.MAX_VALUE,
+        )
         assertFailsWith<IllegalStateException> { state.nextRevision() }
     }
 
     test("empty dependency failure message retains existing representation exception") {
         runTest {
-            val ports = RequestPorts().apply { completion = { throw IllegalStateException("") } }
+            val ports = RequestPorts().apply { submissionHook = { throw IllegalStateException("") } }
             val ownerJob = SupervisorJob(backgroundScope.coroutineContext[Job])
             val owner = CoroutineScope(backgroundScope.coroutineContext + ownerJob)
-            // A non-cancellation async failure follows the owner policy. Capture it rather than
-            // failing runTest through a launched parent (the production owner policy is unchanged).
             val model = createRequestUserInputViewModel(ports, owner)
             runCurrent()
-            model.selectOption("call_scope", "scope", "Current module")
+            model.selectOption(1, "scope", "Current module")
             assertFailsWith<IllegalArgumentException> {
-                model.submit("call_scope", model.pending().revision)
+                model.submit(1, model.pending().revision)
             }
             assertIs<RequestUserInputSubmissionState.Submitting>(model.pending().submission)
             model.close()
@@ -303,7 +306,7 @@ val requestUserInputViewModelTest by testSuite {
         }
     }
 
-    test("removing pending publishes Idle without resume or hidden submission") {
+    test("removing pending publishes Idle without hidden submission") {
         runTest {
             val ports = RequestPorts()
             val model = createRequestUserInputViewModel(ports, backgroundScope)
@@ -311,45 +314,46 @@ val requestUserInputViewModelTest by testSuite {
             ports.pending.value = null
             runCurrent()
             assertIs<RequestUserInputState.Idle>(model.state.value)
-            assertEquals(RequestUserInputSubmissionResult.StaleCall, model.submit("call_scope", 0))
+            assertEquals(RequestUserInputSubmissionResult.StaleAsk, model.submit(1, 0))
             assertTrue(ports.order.isEmpty())
             model.close()
         }
     }
 }
 
-private class RequestPorts(initial: PendingRequestUserInputToolEvent = requestEvent()) :
+private class RequestPorts(initial: AskUserEntry = requestEntry()) :
     RequestUserInputDependencies {
-    override val pending = MutableStateFlow<PendingRequestUserInputToolEvent?>(initial)
-    val completed = mutableListOf<StableCleanEvent.CompletedTool>()
+    override val pending = MutableStateFlow<AskUserEntry?>(initial)
+    val submitted = mutableListOf<Pair<Int, RequestUserInputResponse>>()
     val order = mutableListOf<String>()
-    var completion: suspend () -> Int = { 0 }
-    var resume: () -> Unit = {}
-    override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int {
-        order += "complete"
-        this.completed += completed
-        return completion()
-    }
-    override fun resumeRuntime() {
-        order += "resume"
-        resume()
+    var submissionHook: suspend () -> Unit = {}
+
+    override suspend fun submitAnswer(askId: Int, response: RequestUserInputResponse) {
+        order += "submit"
+        submitted += askId to response
+        submissionHook()
     }
 }
 
 private fun RequestUserInputViewModel.pending(): RequestUserInputState.Pending =
     assertIs<RequestUserInputState.Pending>(state.value)
 
-private fun requestEvent(callId: String = "call_scope"): PendingRequestUserInputToolEvent =
-    PendingRequestUserInputToolEvent(
-        callId = callId,
-        arguments = RequestUserInputArgs(listOf(RequestUserInputQuestion(
-            id = "scope",
-            header = "Scope",
-            question = "Which scope should be changed?",
-            isOther = false,
-            options = listOf(
-                RequestUserInputQuestionOption("Current module", "Change only the active module."),
-                RequestUserInputQuestionOption("Whole workspace", "Change every affected module."),
+private fun requestEntry(askId: Int = 1): AskUserEntry =
+    AskUserEntry(
+        askId = askId,
+        questions = RequestUserInputArgs(
+            listOf(
+                RequestUserInputQuestion(
+                    id = "scope",
+                    header = "Scope",
+                    question = "Which scope should be changed?",
+                    isOther = false,
+                    options = listOf(
+                        RequestUserInputQuestionOption("Current module", "Change only the active module."),
+                        RequestUserInputQuestionOption("Whole workspace", "Change every affected module."),
+                    ),
+                ),
             ),
-        ))),
+        ),
+        createdAt = Instant.fromEpochMilliseconds(1000),
     )

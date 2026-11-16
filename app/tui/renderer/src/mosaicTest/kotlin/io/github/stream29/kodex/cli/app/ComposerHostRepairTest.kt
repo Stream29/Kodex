@@ -22,7 +22,6 @@ import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.app.test.testAnswer
-import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns
 import io.github.stream29.kodex.cli.agent.canEditHistory
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
@@ -438,10 +437,8 @@ private fun RepairHost(
             rows = 24,
             newLineKey = NewLineKey.ShiftEnter,
             dropdowns = RuntimeConfigurationDropdowns.remember(agent),
-            suggestionDropdowns = SuggestSubagentTaskDropdowns.remember(agent, null),
             onOpenHistoryEntryContextMenu = onOpenHistoryEntryContextMenu,
             onBrowseWorkingDirectory = {},
-            onBrowseSuggestedWorkingDirectory = {},
             onOpenSettings = {},
             composerFocusRequester = focus,
         )

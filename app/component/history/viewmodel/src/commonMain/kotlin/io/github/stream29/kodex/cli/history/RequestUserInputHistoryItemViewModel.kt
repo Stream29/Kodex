@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,8 +14,8 @@ internal class RequestUserInputHistoryItemViewModelImpl(
 ) : RequestUserInputHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<RequestUserInputHistoryItemState> = MutableStateFlow(
         try {
-            val event = descriptor.event as? StableRequestUserInputToolEvent
-                ?: error("History item $index is not a request-user-input tool.")
+            val event = descriptor.event as? StableAskUserEvent
+                ?: error("History item $index is not an ask_user event.")
             RequestUserInputHistoryItemState.Ready(
                 event = event,
                 elapsed = descriptor.elapsed,

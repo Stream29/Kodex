@@ -81,9 +81,8 @@
     "content": [{"type": "input_text", "text": "Most importantly, show only the message content by default, not its type. The sidebar has very limited horizontal space, so save as much as possible. Only on hover should a popup show the type and full content. We can also use color to represent the message type, making previews much more informative."}]
   },
   "783": {
-    "type": "request_user_input_tool_event",
-    "call_id": "docs-question-783",
-    "item_id": "docs-item-783",
+    "type": "event_ask_user",
+    "ask_id": 1,
     "arguments": {"questions": [{
       "id": "history_index_color_scope",
       "header": "Color scope",
@@ -96,9 +95,9 @@
         {"label": "Content only", "description": "Keep the branch line in a uniform color and encode the type in the text."}
       ]
     }]},
-    "result": {"type": "answered", "response": {"answers": {
+    "response": {"answers": {
       "history_index_color_scope": {"answers": ["Node and content (Recommended)"]}
-    }}}
+    }}
   },
   "792": {
     "type": "assistant_message",

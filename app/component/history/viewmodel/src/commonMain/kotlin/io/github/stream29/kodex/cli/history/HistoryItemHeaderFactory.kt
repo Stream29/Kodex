@@ -7,27 +7,17 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExe
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryResult
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemHeader
@@ -36,9 +26,7 @@ import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemTarget
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
 import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.WebSearchAction
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
-import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration
 
@@ -90,14 +78,8 @@ internal fun StableCleanEvent.CompletedTool.toHistoryHeader(
     is StableJsonToolEvent,
     is StableTextToolEvent,
     is StableCustomToolEvent,
-    is StableImageGenerationToolEvent,
-    is StableImageViewToolEvent,
-    is StableMcpToolEvent,
     is StablePlanUpdate,
-    is StableRequestUserInputToolEvent,
-    is StableSuggestSubagentTaskToolEvent,
-    is StableToolSearchEvent,
-    is StableWebSearchToolEvent -> {
+    is StableReadMediaToolEvent -> {
         val status = historyToolStatus()
         ToolHistoryItemHeader.Summary(
             summary = historyToolSummary(failed = status == "failed"),
@@ -123,16 +105,8 @@ private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): 
     is StableJsonToolEvent -> functionToolSummary(name, namespace, failed)
     is StableTextToolEvent -> functionToolSummary(name, namespace, failed)
     is StableCustomToolEvent -> customToolSummary(name, namespace, input, failed)
-    is StableImageGenerationToolEvent -> (result as? StableImageGenerationResult.Success)?.savedPath
-        ?.takeIf(String::isNotBlank)?.substringAfterLast('/')?.substringAfterLast('\\')
-        ?.takeIf(String::isNotBlank)?.let { "Generate $it" } ?: "Generate image"
-    is StableImageViewToolEvent -> arguments.historySummary(failed)
-    is StableMcpToolEvent -> qualifiedToolName(name, namespace).stableToolSummary(failed)
     is StablePlanUpdate -> if (failed) "Failed to update the plan" else "Update the plan"
-    is StableRequestUserInputToolEvent -> arguments.historySummary(failed)
-    is StableToolSearchEvent -> functionToolSummary("tool_search", null, failed)
-    is StableWebSearchToolEvent -> commands.historySummary(failed)
-    is StableSuggestSubagentTaskToolEvent -> "Suggested Sessions"
+    is StableReadMediaToolEvent -> arguments.historySummary(failed)
 }
 
 private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (this) {
@@ -155,25 +129,10 @@ private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (t
     is StableJsonToolEvent -> success.successHistoryStatus()
     is StableTextToolEvent -> success.successHistoryStatus()
     is StableCustomToolEvent -> success.successHistoryStatus()
-    is StableImageGenerationToolEvent -> result.historyStatus()
-    is StableImageViewToolEvent -> result.historyStatus()
-    is StableMcpToolEvent -> result.isError.mcpHistoryStatus()
     is StablePlanUpdate -> "completed"
-    is StableRequestUserInputToolEvent -> when (result) {
-        is StableRequestUserInputResult.Answered -> "completed"
-        is StableRequestUserInputResult.Failure -> "failed"
-    }
-
-    is StableToolSearchEvent -> when (result) {
-        is ToolSearchResult.Success -> "completed"
-        is ToolSearchResult.InvalidArguments -> "failed"
-        is ToolSearchResult.ExecutionFailure -> "failed"
-    }
-
-    is StableWebSearchToolEvent -> result.historyStatus()
-    is StableSuggestSubagentTaskToolEvent -> when (result) {
-        is StableSuggestSubagentTaskResult.Completed -> "completed"
-        is StableSuggestSubagentTaskResult.Failure -> "failed"
+    is StableReadMediaToolEvent -> when (result) {
+        is StableReadMediaResult.Success -> "completed"
+        is StableReadMediaResult.Failure -> "failed"
     }
 }
 
@@ -183,6 +142,7 @@ private fun functionToolSummary(name: String, namespace: String?, failed: Boolea
         "await_event" -> "Wait for events"
         "exec_command", "shell.run" -> "Run a command"
         "write_stdin" -> "Interact with a terminal session"
+        "read_media" -> "Read media"
         "view_image" -> "View an image"
         "image_gen.imagegen" -> "Generate an image"
         "request_user_input" -> "Ask the user for input"
@@ -204,6 +164,7 @@ private fun functionToolSummary(name: String, namespace: String?, failed: Boolea
         "await_event" -> "Failed to wait for events"
         "exec_command", "shell.run" -> "Failed to run a command"
         "write_stdin" -> "Failed to interact with a terminal session"
+        "read_media" -> "Failed to read media"
         "view_image" -> "Failed to view an image"
         "image_gen.imagegen", "hosted_image_generation" -> "Failed to generate an image"
         "request_user_input" -> "Failed to collect user input"
@@ -236,16 +197,10 @@ private fun customToolSummary(
     return commands?.historySummary(failed) ?: if (failed) "Failed to search the web" else "Search the web"
 }
 
-private fun ViewImageToolArguments.historySummary(failed: Boolean): String =
+private fun ReadMediaToolArguments.historySummary(failed: Boolean): String =
     path.historyPreview().takeIf(String::isNotBlank)
-        ?.let { path -> if (failed) "Failed to view image: $path" else "View image: $path" }
-        ?: if (failed) "Failed to view an image" else "View an image"
-
-private fun RequestUserInputArgs.historySummary(failed: Boolean): String =
-    questions.firstOrNull()?.question?.historyPreview()
-        ?.takeIf(String::isNotBlank)
-        ?.let { question -> if (failed) "Failed to collect user input: $question" else "Ask the user: $question" }
-        ?: if (failed) "Failed to collect user input" else "Ask the user for input"
+        ?.let { path -> if (failed) "Failed to read media: $path" else "Read media: $path" }
+        ?: if (failed) "Failed to read media" else "Read media"
 
 private fun SearchCommands.historySummary(failed: Boolean): String = when {
     !searchQuery.isNullOrEmpty() -> searchQuery.orEmpty().first().q.historyPreview()
@@ -294,27 +249,6 @@ private fun Boolean?.successHistoryStatus(): String = when (this) {
     false -> "failed"
     null -> "completed"
 }
-
-private fun Boolean?.mcpHistoryStatus(): String = when (this) {
-    true -> "failed"
-    false, null -> "completed"
-}
-
-private fun StableImageGenerationResult.historyStatus(): String = when (this) {
-    is StableImageGenerationResult.Success -> "completed"
-    is StableImageGenerationResult.Failure -> "failed"
-}
-
-private fun StableImageViewResult.historyStatus(): String = when (this) {
-    is StableImageViewResult.Success -> "completed"
-    is StableImageViewResult.Failure -> "failed"
-}
-
-private fun StableWebSearchResult.historyStatus(): String = when (this) {
-    is StableWebSearchResult.Success -> "completed"
-    is StableWebSearchResult.Failure -> "failed"
-}
-
 
 private fun List<String>.toPatchHistoryTarget(): PatchHistoryItemTarget {
     val distinctPaths = distinct()

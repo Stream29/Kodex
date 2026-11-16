@@ -4,11 +4,13 @@ package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.getAskUsersAt
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
@@ -20,6 +22,7 @@ import io.github.stream29.kodex.rpc.client.rpcStateIn
 import io.github.stream29.kodex.rpc.contract.SuspendMutableStateFlow
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.ShellSessionState
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
@@ -46,6 +49,7 @@ public actual class RpcSessionBinding private constructor(
     public actual val shellSessions: StateFlow<Map<Int, ShellSessionState>>,
     public actual val settings: SuspendMutableStateFlow<KodexAgentSettings>,
     public actual val pendingSteer: StateFlow<List<StableIndexEvent.Steerable>>,
+    internal val pendingAskUser: StateFlow<AskUserEntry?>,
     public actual val tokenCount: StateFlow<LlmRequestMeta?>,
     private val owner: Job,
     private val services: RpcServices,
@@ -78,6 +82,8 @@ public actual class RpcSessionBinding private constructor(
     public actual suspend fun clearPending(): Int = command { services.runtime.clearPending(sessionIndex) }
     public actual suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int =
         command { services.runtime.completeToolCall(sessionIndex, completed) }
+    public actual suspend fun submitAskUserAnswer(askId: Int, response: RequestUserInputResponse): Unit =
+        command { services.runtime.submitAskUserAnswer(sessionIndex, askId, response) }
     public actual suspend fun closeShellSession(id: Int): Unit =
         command { services.runtime.closeShellSession(sessionIndex, id) }
     public actual suspend fun revertHistory(untilExclusive: Int, selectedCacheNonce: Long): Unit =
@@ -120,6 +126,15 @@ public actual class RpcSessionBinding private constructor(
             val pending = scope.visibleValue(storage, latest) { position ->
                 if (position >= 0) storage.getSteerAt(position) else emptyList()
             }
+            val pendingAskUser = scope.visibleValue(storage, latest) { position ->
+                if (position >= 0) {
+                    storage.getAskUsersAt(position)
+                        .filter { it.answer == null }
+                        .minByOrNull { it.askId }
+                } else {
+                    null
+                }
+            }
             val settings = scope.visibleValue(storage, latest) { position -> storage.getSettingsAt(position) }
             val tokenCount = scope.visibleValue(storage, latest) { position ->
                 if (position >= 0) storage.getLlmRequestMetaAtOrNull(position) else null
@@ -142,6 +157,7 @@ public actual class RpcSessionBinding private constructor(
                     compare { services.storage.compareAndSetSettings(index, expect, update) }
                 },
                 pending,
+                pendingAskUser,
                 tokenCount, owner, services, invalidate,
             )
         }

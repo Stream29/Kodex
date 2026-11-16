@@ -121,7 +121,7 @@ val offscreenApplicationMenusTest by testSuite {
                     }
                 }
             }
-            AgentPageContent(agent, NewLineKey.ShiftEnter, page, {}, {}, {})
+            AgentPageContent(agent, NewLineKey.ShiftEnter, page, {}, {})
             ApplicationMenusContent(app, navigation, agent, null, opening, menu,
                 admitTab = { error("No tab opening") },
                 admitHistory = { expected ->
@@ -309,7 +309,7 @@ val offscreenApplicationMenusTest by testSuite {
                     }
                 }
             }
-            if (sourceMounted) AgentPageContent(agent, NewLineKey.ShiftEnter, renderer, {}, {}, {})
+            if (sourceMounted) AgentPageContent(agent, NewLineKey.ShiftEnter, renderer, {}, {})
             ApplicationHistoryMenuContent(
                 opening, session, agent, rememberComposeApplicationMenuRenderer(),
                 onDismiss = { if (opening === it) opening = null },

@@ -44,15 +44,4 @@ val workingDirectoryComponentOwnershipTest by testSuite {
             assertEquals(ApplicationPopupState.Closed, application.popup.value)
         }
     }
-    test("a nonpending suggestion cannot open a cwd chooser or edit its source Agent") {
-        applicationFixture { app, _ ->
-            val application = app.viewModel
-            val session = application.submitTestSession()
-            val agent = assertNotNull(session.rootAgent.value)
-            val before = agent.settings.value.cwd
-            assertNull(application.openSuggestedWorkingDirectoryPopup(agent, "not-pending"))
-            assertEquals(before, agent.settings.value.cwd)
-            assertEquals(ApplicationPopupState.Closed, application.popup.value)
-        }
-    }
 }

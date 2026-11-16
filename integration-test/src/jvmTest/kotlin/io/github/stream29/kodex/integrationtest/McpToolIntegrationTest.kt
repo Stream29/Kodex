@@ -3,35 +3,10 @@ package io.github.stream29.kodex.integrationtest
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
-import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
-import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.agentstate.contract.RequestFinish
-import io.github.stream29.kodex.agentstate.impl.KodexAgentState
-import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.contract.getCleanEventsIn
-import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpSettings
 import io.github.stream29.kodex.mcp.impl.McpServiceImpl
-import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.MessageRole
-import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.Reasoning
-import io.github.stream29.kodex.openai.ResponseInclude
-import io.github.stream29.kodex.openai.ResponseItem
-import io.github.stream29.kodex.openai.ResponsesApiRequest
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
-import io.github.stream29.kodex.openai.ServiceTier
-import io.github.stream29.kodex.openai.TextControls
-import io.github.stream29.kodex.openai.ToolChoice
-import io.github.stream29.kodex.openai.ToolSpec
-import io.github.stream29.kodex.openai.client.contract.OpenAiClient
-import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
-import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
-import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
@@ -45,28 +20,27 @@ import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.schema.json.StringPropertyDefinition
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlin.test.fail
 import kotlin.time.Duration.Companion.seconds
 
-val openAiMcpToolRoundTripProbeTest by testSuite {
+val mcpStreamableHttpIntegrationTest by testSuite {
     test(
-        "real Responses API invokes a Streamable HTTP MCP tool",
-        testConfig = TestConfig.testScope(isEnabled = true, timeout = 240.seconds),
+        "McpServiceImpl discovers and invokes a Streamable HTTP MCP tool",
+        testConfig = TestConfig.testScope(isEnabled = true, timeout = 60.seconds),
     ) {
         withContext(Dispatchers.Default) {
             val fixture = McpToolServerFixture().start()
@@ -79,179 +53,30 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                     ),
                 ),
             )
-            val client = McpRecordingOpenAiClient(realOpenAiClient())
-            val modelCatalog = testModelCatalog()
-            var state: KodexAgentStateContract? = null
             try {
-                withTimeout(20.seconds) {
-                    val mcpClient = service.clients.first { clients ->
-                        clients.values.any { client -> client.listTools().isNotEmpty() }
+                val mcpClient = withTimeout(20.seconds) {
+                    val client = service.clients.first { clients ->
+                        clients.values.any { candidate -> candidate.listTools().isNotEmpty() }
                     }.values.single()
-                    mcpClient.state.first { clientState -> clientState == McpClientState.Healthy }
+                    client.state.first { clientState -> clientState == McpClientState.Healthy }
+                    client
                 }
-                val storage = InMemoryKodexAgentStorage(
-                    KodexAgentSettings(
-                        model = testOpenAiModel(),
-                        instructions = McpProbeInstructions,
-                    ),
-                )
-                val createdState = KodexAgentState(
-                    client = client,
-                    storage = storage,
-                    contextSettings = TestAgentContextSettings,
-                    mcpService = service,
-                )
-                state = createdState
-                val runtime = McpRequestOnlyRuntime(createdState)
-                    .integrationResumableAgent(client, modelCatalog, service)
 
-                createdState.appendUserMessage(
-                    listOf(
-                        ContentItem.InputText(
-                            "Resolve key `$McpProbeKey` with the MCP marker tool. " +
-                                "You must call the tool before replying, then reply with exactly " +
-                                McpAssistantMarker,
-                        ),
-                    ),
-                )
-                runtime.resume()
+                val tool = mcpClient.listTools().single { it.toolName == McpToolName }
+                assertEquals(McpServerName, tool.serverName)
 
-                val history = storage.getCleanEventsIn(0..storage.latestIndex())
-                    .flatMap { (_, event) -> event.toResponseHistoryItems() }
-                val call = history
-                    .filterIsInstance<ResponseItem.FunctionCall>()
-                    .single { item ->
-                        item.namespace == "mcp__$McpServerName" &&
-                            item.name == McpToolName
-                    }
-                val output = history
-                    .filterIsInstance<ResponseItem.McpToolCallOutput>()
-                    .single { item -> item.callId == call.callId }
-
-                assertTrue(
-                    history.any { item -> item is ResponseItem.ClientToolSearchCall },
-                    "Expected the model to discover the deferred MCP tool.",
-                )
+                val result = tool.call(buildJsonObject { put("key", McpProbeKey) })
+                assertFalse(result.isError == true)
                 assertEquals(1, fixture.callCount.get())
                 assertEquals(McpProbeKey, fixture.receivedKey.get())
                 assertTrue(
-                    output.output.content.any { content -> content.toString().contains(McpServerMarker) },
-                    "Expected the MCP server result to be persisted.",
+                    result.content.any { content -> content.toString().contains("$McpServerMarker:$McpProbeKey") },
+                    "Expected the MCP server result to contain the resolved marker.",
                 )
-                assertTrue(
-                    client.requests.any { request ->
-                        ResponseItem.FunctionCallOutput(
-                            callId = output.callId,
-                            output = output.output.toFunctionCallOutputPayload(OpenAiJsonCodec),
-                        ) in request.input
-                    },
-                    "Expected the MCP output to be projected and sent back to the Responses API.",
-                )
-                val assistantText = history
-                    .filterIsInstance<ResponseItem.Message>()
-                    .lastOrNull { message -> message.role == MessageRole.Assistant }
-                    ?.mcpProbeText()
-                    ?: fail("Expected a final assistant response.")
-                assertTrue(assistantText.contains(McpAssistantMarker))
-                assertIs<KodexAgentStateValue.AssistantMessage>(createdState.state.value)
             } finally {
-                try {
-                    state?.cancelAndJoin()
-                } finally {
-                    modelCatalog.close()
-                    client.close()
-                    service.close()
-                    service.coroutineContext.job.join()
-                    fixture.stop()
-                }
-            }
-        }
-    }
-}
-
-private class McpRecordingOpenAiClient(
-    private val delegate: OpenAiClient,
-) : OpenAiClient by delegate {
-    val requests: MutableList<ResponsesApiRequest> = mutableListOf()
-
-    override suspend fun createResponse(
-        model: OpenAiModelId,
-        input: List<ResponseItem>,
-        instructions: String,
-        store: Boolean,
-        previousResponseId: String?,
-        tools: List<ToolSpec>,
-        toolChoice: ToolChoice,
-        parallelToolCalls: Boolean,
-        reasoning: Reasoning,
-        include: Set<ResponseInclude>,
-        serviceTier: ServiceTier,
-        promptCacheKey: String?,
-        text: TextControls,
-        installationId: String?,
-        sessionId: String?,
-        threadId: String?,
-        turnId: String?,
-        windowId: String?,
-        threadSource: String?,
-        turnTrigger: String?,
-        turnState: String?,
-        onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
-    ): Flow<ResponsesStreamEvent> {
-        requests += ResponsesApiRequest(
-            model = model,
-            input = input,
-            instructions = instructions,
-            store = store,
-            previousResponseId = previousResponseId,
-            tools = tools,
-            toolChoice = toolChoice,
-            parallelToolCalls = parallelToolCalls,
-            reasoning = reasoning,
-            include = include,
-            serviceTier = serviceTier,
-            promptCacheKey = promptCacheKey,
-            text = text,
-        )
-        return delegate.createResponse(
-            model = model,
-            input = input,
-            instructions = instructions,
-            store = store,
-            previousResponseId = previousResponseId,
-            tools = tools,
-            toolChoice = toolChoice,
-            parallelToolCalls = parallelToolCalls,
-            reasoning = reasoning,
-            include = include,
-            serviceTier = serviceTier,
-            promptCacheKey = promptCacheKey,
-            text = text,
-            installationId = installationId,
-            sessionId = sessionId,
-            threadId = threadId,
-            turnId = turnId,
-            windowId = windowId,
-            threadSource = threadSource,
-            turnTrigger = turnTrigger,
-            turnState = turnState,
-            onResponseHeaders = onResponseHeaders,
-        )
-    }
-}
-
-private class McpRequestOnlyRuntime(
-    private val delegate: KodexAgentStateContract,
-) : ResumableAgentLayer, KodexAgentStateContract by delegate {
-    override suspend fun resume() {
-        while (true) {
-            if (state.value is KodexAgentStateValue.ToolPending) return
-            when (requestResponseApi()) {
-                RequestFinish.Continue,
-                RequestFinish.Retryable,
-                -> Unit
-
-                RequestFinish.Finish -> return
+                service.close()
+                service.coroutineContext.job.join()
+                fixture.stop()
             }
         }
     }
@@ -260,15 +85,6 @@ private class McpRequestOnlyRuntime(
 private data class McpProbeSettings(
     override val mcpServers: Map<String, McpServerConfiguration>,
 ) : McpSettings
-
-private fun ResponseItem.Message.mcpProbeText(): String =
-    content.joinToString(separator = "") { item ->
-        when (item) {
-            is ContentItem.InputText -> item.text
-            is ContentItem.OutputText -> item.text
-            is ContentItem.InputImage -> ""
-        }
-    }
 
 private class McpToolServerFixture {
     val callCount: AtomicInteger = AtomicInteger()
@@ -334,7 +150,3 @@ private const val McpServerName: String = "integration_probe"
 private const val McpToolName: String = "lookup_marker"
 private const val McpProbeKey: String = "kodex-mcp-key"
 private const val McpServerMarker: String = "MCP_SERVER_EXECUTED"
-private const val McpAssistantMarker: String = "MCP_TOOL_ROUND_TRIP_COMPLETED"
-private const val McpProbeInstructions: String =
-    "For the integration probe, first use tool search to load " +
-        "`mcp__integration_probe.lookup_marker`, then call it exactly once with the requested key."

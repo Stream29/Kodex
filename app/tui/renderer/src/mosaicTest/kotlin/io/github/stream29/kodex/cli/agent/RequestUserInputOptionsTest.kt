@@ -71,7 +71,7 @@ val requestUserInputOptionsTest by testSuite {
 
     test("panelStartsWithTheQuestionWithoutARedundantTitle") {
         val state = RequestUserInputState.Pending(
-            callId = "call_scope",
+            askId = 1,
             arguments = RequestUserInputArgs(
                 questions = listOf(
                     RequestUserInputQuestion(
@@ -131,7 +131,7 @@ val requestUserInputOptionsTest by testSuite {
             val initial = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 val state = RequestUserInputState.Pending(
-                    callId = "call_scope",
+                    askId = 1,
                     arguments = RequestUserInputArgs(listOf(question)),
                     answers = answer?.let { mapOf(question.id to it) }.orEmpty(),
                 )
@@ -140,7 +140,7 @@ val requestUserInputOptionsTest by testSuite {
                         question = question,
                         draft = state.answers[question.id],
                         renderer = MosaicUserInputQuestionRenderer(
-                            state.callId, question.id, 64, FocusRequester(), FocusRequester(), false, {},
+                            state.askId.toString(), question.id, 64, FocusRequester(), FocusRequester(), false, {},
                         ),
                         autoFocus = true,
                         enabled = true,
@@ -278,7 +278,7 @@ val requestUserInputOptionsTest by testSuite {
 private fun pendingState(
     questions: List<RequestUserInputQuestion>,
 ): RequestUserInputState.Pending = RequestUserInputState.Pending(
-    callId = "call_scope",
+    askId = 1,
     arguments = RequestUserInputArgs(questions),
 )
 
@@ -316,7 +316,7 @@ private class MutableRequestUserInputViewModel(
         private set
 
     override fun selectOption(
-        callId: String,
+        askId: Int,
         questionId: String,
         label: String,
     ): Boolean = edit { current ->
@@ -328,7 +328,7 @@ private class MutableRequestUserInputViewModel(
     }
 
     override fun selectOther(
-        callId: String,
+        askId: Int,
         questionId: String,
     ): Boolean = edit { current ->
         current.copy(
@@ -339,7 +339,7 @@ private class MutableRequestUserInputViewModel(
     }
 
     override fun updateFreeForm(
-        callId: String,
+        askId: Int,
         questionId: String,
         text: String,
     ): Boolean = edit { current ->
@@ -351,7 +351,7 @@ private class MutableRequestUserInputViewModel(
     }
 
     override suspend fun submit(
-        callId: String,
+        askId: Int,
         expectedRevision: Long,
     ): RequestUserInputSubmissionResult {
         submitted = true
@@ -376,24 +376,24 @@ private class FakeRequestUserInputViewModel(
     override val state: StateFlow<RequestUserInputState> = MutableStateFlow(state)
 
     override fun selectOption(
-        callId: String,
+        askId: Int,
         questionId: String,
         label: String,
     ): Boolean = false
 
     override fun selectOther(
-        callId: String,
+        askId: Int,
         questionId: String,
     ): Boolean = false
 
     override fun updateFreeForm(
-        callId: String,
+        askId: Int,
         questionId: String,
         text: String,
     ): Boolean = false
 
     override suspend fun submit(
-        callId: String,
+        askId: Int,
         expectedRevision: Long,
     ): RequestUserInputSubmissionResult = RequestUserInputSubmissionResult.Incomplete
 

@@ -82,10 +82,17 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.datetime)
             implementation(libs.kotlinx.io.core)
+            implementation(libs.kotlinx.rpc.krpc.client)
             implementation(libs.kotlinx.serialization.json)
+            implementation(project(":agent-storage-clean-models"))
+            implementation(project(":agent-storage-core"))
+            implementation(project(":app-rpc"))
             implementation(project(":tool-image-generation-contract"))
+            implementation(project(":tool-unified-exec"))
             implementation(project(":utils-kauri"))
+            implementation(project(":utils-shell-client"))
             implementation(project(":app-backend-host"))
             implementation(project(":rpc-local"))
             implementation(project(":rpc-backend-control-client"))
@@ -101,6 +108,13 @@ kotlin {
             implementation(project(":utils-logging-backend-file"))
             implementation(project(":utils-kotlinx-io-coroutines-system"))
             implementation(project(":utils-os-environment"))
+        }
+        commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
+            implementation(project(":app-backend-settings"))
+            implementation(project(":openai-client-test"))
+            implementation(project(":rpc-in-memory"))
+            implementation(project(":rpc-server"))
         }
     }
 }

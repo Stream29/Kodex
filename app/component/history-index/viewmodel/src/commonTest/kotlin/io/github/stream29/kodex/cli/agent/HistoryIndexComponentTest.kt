@@ -6,12 +6,11 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
@@ -176,13 +175,14 @@ val historyIndexComponentTest by testSuite(compartment = { TestCompartment.RealT
             2 to StableAgentMessage("one", "two", listOf(
                 AgentMessageInputContent.InputText("private"), AgentMessageInputContent.EncryptedContent("cipher"),
             )),
-            3 to StableRequestUserInputToolEvent(
-                callId = "request", arguments = RequestUserInputArgs(listOf(RequestUserInputQuestion(
+            3 to StableAskUserEvent(
+                askId = 1,
+                arguments = RequestUserInputArgs(listOf(RequestUserInputQuestion(
                     "secret", "Credential", "Enter token", isSecret = true,
                 ))),
-                result = StableRequestUserInputResult.Answered(RequestUserInputResponse(mapOf(
+                response = RequestUserInputResponse(mapOf(
                     "secret" to RequestUserInputAnswer(listOf("never-display-secret")),
-                ))),
+                )),
             ),
             4 to StablePlanUpdate(callId = "plan", arguments = UpdatePlanArgs("Updated", listOf(
                 PlanItemArg("done", StepStatus.Completed),

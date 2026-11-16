@@ -7,27 +7,21 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
@@ -63,7 +57,6 @@ internal enum class HistoryItemKind {
     Tool,
     Patch,
     RequestUserInput,
-    SuggestSubagentTask,
     PlanUpdate,
     ContextCompaction,
 }
@@ -86,31 +79,25 @@ internal fun StableCleanEvent.toHistoryItemDescriptor(
         is StableAssistantMessage,
         is StableDeveloperMessage,
         is StableAgentMessage,
-        is StableAskUserEvent,
         is StableScheduleEvent,
         is StableTerminalExitedEvent,
             -> HistoryItemKind.Message
 
+        is StableAskUserEvent -> HistoryItemKind.RequestUserInput
         is StableReasoning -> HistoryItemKind.Reasoning
         is StableContextCompaction -> HistoryItemKind.ContextCompaction
-        is StableRequestUserInputToolEvent -> HistoryItemKind.RequestUserInput
-        is StableSuggestSubagentTaskToolEvent -> HistoryItemKind.SuggestSubagentTask
         is StablePatchToolEvent -> HistoryItemKind.Patch
         is StablePlanUpdate -> HistoryItemKind.PlanUpdate
         is StableAwaitEventToolEvent,
         is StableCommandExecutionToolEvent,
         is StableCustomToolEvent,
         is StableImageGenerationCall,
-        is StableImageGenerationToolEvent,
-        is StableImageViewToolEvent,
         is StableInvalidToolCall,
         is StableJsonToolEvent,
-        is StableMcpToolEvent,
+        is StableReadMediaToolEvent,
         is StableServerToolSearch,
         is StableTextToolEvent,
-        is StableToolSearchEvent,
-        is StableWebSearchCall,
-        is StableWebSearchToolEvent -> HistoryItemKind.Tool
+        is StableWebSearchCall -> HistoryItemKind.Tool
     },
 )
 
@@ -165,7 +152,6 @@ internal fun HistoryItemDescriptor.isFoldable(): Boolean = when (kind) {
 
     HistoryItemKind.Message,
     HistoryItemKind.RequestUserInput,
-    HistoryItemKind.SuggestSubagentTask,
     HistoryItemKind.PlanUpdate,
     HistoryItemKind.ContextCompaction,
         -> false

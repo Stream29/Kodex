@@ -1,0 +1,541 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
+package io.github.stream29.kodex.cli.app
+
+import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
+import io.github.stream29.kodex.agentschedule.contract.nextCronTriggerAt
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
+import io.github.stream29.kodex.backend.BackendEndpoint
+import io.github.stream29.kodex.backend.BackendInstance
+import io.github.stream29.kodex.backend.host.connectBackend
+import io.github.stream29.kodex.cli.rpc.RpcServices
+import io.github.stream29.kodex.mcp.contract.McpCatalogTool
+import io.github.stream29.kodex.mcp.contract.McpManagedServerState
+import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
+import io.github.stream29.kodex.mcp.contract.ReservedMcpServerNames
+import io.github.stream29.kodex.openai.CallToolResult
+import io.github.stream29.kodex.openai.SearchCommands
+import io.github.stream29.kodex.openai.contextWindowTokenStatus
+import io.github.stream29.kodex.openai.effectiveContextWindow
+import io.github.stream29.kodex.openai.resolvedAutoCompactionTokenLimit
+import io.github.stream29.kodex.rpc.client.RestoringRpcClient
+import io.github.stream29.kodex.rpc.contract.AgentStorageRpc
+import io.github.stream29.kodex.rpc.local.withLocalRpcClient
+import io.github.stream29.kodex.tool.imagegeneration.GeneratedImageArtifact
+import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.unifiedexec.KodexAgentIdEnvironmentVariable
+import io.github.stream29.kodex.tool.unifiedexec.KodexHomeEnvironmentVariable
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.osenvironment.environmentVariable
+import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
+import io.github.stream29.kodex.utils.shellclient.StdoutSlice
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.io.files.Path
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonObject
+
+@Serializable
+internal data class CliTerminalSummary(
+    @SerialName("session_id")
+    val sessionId: Int,
+    val command: String,
+    val workdir: String? = null,
+    val completed: Boolean,
+)
+
+@Serializable
+internal data class CliTerminalWriteOutput(
+    @SerialName("session_id")
+    val sessionId: Int,
+    @SerialName("bytes_written")
+    val bytesWritten: Int,
+    val eof: Boolean,
+)
+
+@Serializable
+internal data class CliTerminalKillOutput(
+    @SerialName("session_id")
+    val sessionId: Int,
+    val terminated: Boolean,
+)
+
+@Serializable
+internal data class CliScheduleDeleteOutput(
+    @SerialName("schedule_id")
+    val scheduleId: Long,
+    val deleted: Boolean,
+)
+
+@Serializable
+internal data class CliMcpServerSummary(
+    val state: McpManagedServerState,
+    @SerialName("reserved_name_conflict")
+    val reservedNameConflict: Boolean = false,
+)
+
+@Serializable
+internal data class CliMcpServerDetail(
+    val state: McpManagedServerState,
+    @SerialName("reserved_name_conflict")
+    val reservedNameConflict: Boolean = false,
+    val tools: List<McpCatalogTool> = emptyList(),
+)
+
+internal suspend fun resolveToolBackend(
+    target: CliBackendTarget?,
+    defaultHome: Path,
+    env: (String) -> String? = ::environmentVariable,
+    discover: suspend (Path) -> BackendEndpoint? = BackendInstance::discover,
+    connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
+): Pair<Path, BackendEndpoint> {
+    val rawHome = target?.backendHome ?: env(KodexHomeEnvironmentVariable)?.takeIf { it.isNotBlank() }
+    val candidate = if (rawHome == null) defaultHome else Path(rawHome)
+    val resolvedHome = if (SystemCoroutineFileSystem.exists(candidate)) {
+        SystemCoroutineFileSystem.resolve(candidate)
+    } else {
+        candidate
+    }
+    val port = target?.port
+    val endpoint = if (port != null) {
+        connect(resolvedHome, port)
+    } else {
+        discover(resolvedHome)
+            ?: error("No running Kodex backend found in $resolvedHome. Start 'kodex backend start' or open a Kodex frontend first.")
+    }
+    return resolvedHome to endpoint
+}
+
+internal fun resolveTargetAgentId(
+    options: AgentTargetOptions,
+    env: (String) -> String? = ::environmentVariable,
+): Int {
+    options.agentId?.let { return it }
+    val raw = env(KodexAgentIdEnvironmentVariable)?.trim()?.takeIf { it.isNotEmpty() }
+        ?: error("Missing target Agent ID: pass --agent <id> or set $KodexAgentIdEnvironmentVariable.")
+    val parsed = raw.toIntOrNull()
+        ?: error("Invalid $KodexAgentIdEnvironmentVariable '$raw': expected a non-negative integer.")
+    require(parsed >= 0) { "Invalid $KodexAgentIdEnvironmentVariable '$raw': Agent ID must be non-negative." }
+    return parsed
+}
+
+internal suspend fun discoverDynamicMcpDomains(
+    target: CliBackendTarget?,
+    defaultHome: Path,
+    env: (String) -> String? = ::environmentVariable,
+): List<McpServerDomainCommand> = try {
+    val rawHome = target?.backendHome ?: env(KodexHomeEnvironmentVariable)?.takeIf { it.isNotBlank() }
+    val candidate = if (rawHome == null) defaultHome else Path(rawHome)
+    val resolvedHome = if (SystemCoroutineFileSystem.exists(candidate)) {
+        SystemCoroutineFileSystem.resolve(candidate)
+    } else {
+        candidate
+    }
+    val port = target?.port
+    val endpoint = if (port != null) {
+        connectBackend(resolvedHome, port)
+    } else {
+        BackendInstance.discover(resolvedHome) ?: return emptyList()
+    }
+    withLocalRpcClient(resolvedHome, endpoint) { connection ->
+        loadDynamicMcpDomains(RpcServices(RestoringRpcClient(connection)))
+    }
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (_: Exception) {
+    emptyList()
+}
+
+internal suspend fun loadDynamicMcpDomains(services: RpcServices): List<McpServerDomainCommand> {
+    val toolsByServer = services.global.listMcpTools()
+        .filter { it.serverName !in ReservedMcpServerNames }
+        .groupBy { it.serverName }
+    return toolsByServer.entries
+        .sortedBy { it.key }
+        .map { (serverName, tools) ->
+            McpServerDomainCommand(
+                serverName = serverName,
+                serverInstructions = tools.first().serverInstructions,
+                tools = tools,
+            )
+        }
+}
+
+internal fun KodexLeafCommand.toolBackendTarget(): CliBackendTarget? = when (this) {
+    is TerminalListCommand -> backend.resolve()
+    is TerminalReadCommand -> backend.resolve()
+    is TerminalWriteCommand -> backend.resolve()
+    is TerminalKillCommand -> backend.resolve()
+    is AskCreateCommand -> backend.resolve()
+    is AskListCommand -> backend.resolve()
+    is AskGetCommand -> backend.resolve()
+    is ScheduleCreateCommand -> backend.resolve()
+    is ScheduleListCommand -> backend.resolve()
+    is ScheduleDeleteCommand -> backend.resolve()
+    is SessionStatusCommand -> backend.resolve()
+    is SearchCommand -> backend.resolve()
+    is ImageCommand -> backend.resolve()
+    is McpListCommand -> backend.resolve()
+    is McpStatusCommand -> backend.resolve()
+    is McpReconnectCommand -> backend.resolve()
+    is McpEnableCommand -> backend.resolve()
+    is McpDisableCommand -> backend.resolve()
+    is McpServerToolCommand -> backend.resolve()
+    is ToolListCommand -> backend.resolve()
+    else -> null
+}
+
+internal suspend fun executeCliToolCommand(
+    command: KodexLeafCommand,
+    services: RpcServices,
+    env: (String) -> String? = ::environmentVariable,
+    readStdin: () -> String = ::readCliStdinText,
+    writeStdout: (String) -> Unit = ::println,
+    now: () -> Instant = Clock.System::now,
+): Int {
+    when (command) {
+        is TerminalListCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            services.global.keepSessionAlive(agentId)
+            val sessions = services.runtime.getShellSessions(agentId)
+                .entries
+                .sortedBy { it.key }
+                .map { (id, state) ->
+                    CliTerminalSummary(
+                        sessionId = id,
+                        command = state.arguments.command,
+                        workdir = state.arguments.workdir,
+                        completed = state.completed,
+                    )
+                }
+            writeStdout(CliToolJson.encodeToString(ListSerializer(CliTerminalSummary.serializer()), sessions))
+        }
+        is TerminalReadCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            services.global.keepSessionAlive(agentId)
+            val slice = services.runtime.readShellSessionOutput(
+                sessionIndex = agentId,
+                shellSessionId = command.sessionId,
+                offset = command.offset,
+                limit = command.limit,
+            )
+            writeStdout(CliToolJson.encodeToString(StdoutSlice.serializer(), slice))
+        }
+        is TerminalWriteCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            val text = when {
+                command.useStdin -> readStdin()
+                command.chars != null -> command.chars!!
+                else -> ""
+            }
+            services.global.keepSessionAlive(agentId)
+            services.runtime.writeShellSessionStdin(
+                sessionIndex = agentId,
+                shellSessionId = command.sessionId,
+                chars = text,
+                closeInput = command.closeInput,
+            )
+            writeStdout(
+                CliToolJson.encodeToString(
+                    CliTerminalWriteOutput.serializer(),
+                    CliTerminalWriteOutput(
+                        sessionId = command.sessionId,
+                        bytesWritten = text.encodeToByteArray().size,
+                        eof = command.closeInput,
+                    ),
+                ),
+            )
+        }
+        is TerminalKillCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            services.global.keepSessionAlive(agentId)
+            services.runtime.closeShellSession(agentId, command.sessionId)
+            writeStdout(
+                CliToolJson.encodeToString(
+                    CliTerminalKillOutput.serializer(),
+                    CliTerminalKillOutput(sessionId = command.sessionId, terminated = true),
+                ),
+            )
+        }
+        is AskCreateCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            val args = command.arguments.resolve(RequestUserInputArgs.serializer(), readStdin)
+            services.global.keepSessionAlive(agentId)
+            val created = services.runtime.createAskUser(agentId, args)
+            writeStdout(CliToolJson.encodeToString(AskUserEntry.serializer(), created))
+        }
+        is AskListCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            services.global.keepSessionAlive(agentId)
+            val entries = readAskUsers(services.storage, agentId)
+            writeStdout(CliToolJson.encodeToString(ListSerializer(AskUserEntry.serializer()), entries))
+        }
+        is AskGetCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            services.global.keepSessionAlive(agentId)
+            val entry = readAskUsers(services.storage, agentId).firstOrNull { it.askId == command.askId }
+                ?: error("Ask entry ${command.askId} not found in Agent $agentId.")
+            writeStdout(CliToolJson.encodeToString(AskUserEntry.serializer(), entry))
+        }
+        is ScheduleCreateCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            val currentNow = now()
+            val (triggerAt, cron) = when (val trigger = command.trigger) {
+                is CliScheduleTrigger.DelaySeconds -> (currentNow + trigger.seconds.seconds) to null
+                is CliScheduleTrigger.At -> trigger.triggerAt to null
+                is CliScheduleTrigger.Cron -> nextCronTriggerAt(trigger.expression, currentNow) to trigger.expression
+            }
+            val created = services.global.createSchedule(
+                agentId = agentId,
+                triggerAt = triggerAt,
+                cron = cron,
+                description = command.description,
+            )
+            writeStdout(CliToolJson.encodeToString(ScheduleRecord.serializer(), created))
+        }
+        is ScheduleListCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            val records = services.global.listSchedules(agentId)
+            writeStdout(CliToolJson.encodeToString(ListSerializer(ScheduleRecord.serializer()), records))
+        }
+        is ScheduleDeleteCommand -> {
+            val deleted = services.global.deleteSchedule(command.scheduleId)
+            if (!deleted) error("Schedule ${command.scheduleId} not found.")
+            writeStdout(
+                CliToolJson.encodeToString(
+                    CliScheduleDeleteOutput.serializer(),
+                    CliScheduleDeleteOutput(scheduleId = command.scheduleId, deleted = true),
+                ),
+            )
+        }
+        is SessionStatusCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            services.global.keepSessionAlive(agentId)
+            val (latestIndex, settings, tokenMeta) = readSessionStatusSnapshot(services.storage, agentId)
+            val running = services.runtime.getRunningTurn(agentId)
+            val modelInfo = services.global.getModels().firstOrNull { it.slug == settings.model }
+            val contextWindow = modelInfo?.effectiveContextWindow()?.let { effectiveWindow ->
+                if (tokenMeta != null) {
+                    val status = modelInfo.contextWindowTokenStatus(
+                        activeContextTokens = tokenMeta.totalTokens,
+                        configuredAutoCompactionTokenLimit = settings.autoCompactionTokenLimit,
+                    )
+                    val budgetLimit = status.autoCompactionTokenLimit ?: effectiveWindow
+                    val remaining = status.tokensUntilCompaction
+                    val percent = if (budgetLimit > 0L && remaining != null) {
+                        ((remaining * 100L) / budgetLimit).toInt().coerceIn(0, 100)
+                    } else {
+                        null
+                    }
+                    CliContextWindowSummary(
+                        effectiveWindowTokens = effectiveWindow,
+                        usedTokens = tokenMeta.totalTokens,
+                        remainingTokens = remaining,
+                        remainingPercent = percent,
+                    )
+                } else {
+                    val autoLimit = modelInfo.resolvedAutoCompactionTokenLimit(settings.autoCompactionTokenLimit)
+                    val initialRemaining = if (autoLimit != null) minOf(autoLimit, effectiveWindow) else effectiveWindow
+                    CliContextWindowSummary(
+                        effectiveWindowTokens = effectiveWindow,
+                        usedTokens = null,
+                        remainingTokens = initialRemaining,
+                        remainingPercent = 100,
+                    )
+                }
+            }
+            val statusOutput = CliSessionStatusOutput(
+                agentId = agentId,
+                threadName = settings.threadName,
+                cwd = settings.cwd.toString(),
+                model = settings.model,
+                reasoningEffort = settings.reasoning.effort,
+                serviceTier = settings.serviceTier,
+                requestUserInputMode = settings.requestUserInputMode,
+                running = running,
+                latestIndex = latestIndex,
+                now = now().toString(),
+                contextWindow = contextWindow,
+            )
+            writeStdout(CliToolJson.encodeToString(CliSessionStatusOutput.serializer(), statusOutput))
+        }
+        is SearchCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            val commands = command.resolveCommands().resolve(SearchCommands.serializer(), readStdin)
+            services.global.keepSessionAlive(agentId)
+            val response = services.runtime.runWebSearch(agentId, commands)
+            writeStdout(response.output)
+        }
+        is ImageCommand -> {
+            val agentId = resolveTargetAgentId(command.agent, env)
+            services.global.keepSessionAlive(agentId)
+            val artifact = services.runtime.generateImage(
+                agentId,
+                ImageGenToolArguments(
+                    prompt = command.prompt,
+                    referencedImagePaths = command.referencedImagePaths,
+                ),
+            )
+            writeStdout(CliToolJson.encodeToString(GeneratedImageArtifact.serializer(), artifact))
+        }
+        is McpListCommand -> {
+            val summaries = services.global.getMcpServers().map { state ->
+                CliMcpServerSummary(
+                    state = state,
+                    reservedNameConflict = state.serverName in ReservedMcpServerNames,
+                )
+            }
+            writeStdout(CliToolJson.encodeToString(ListSerializer(CliMcpServerSummary.serializer()), summaries))
+        }
+        is McpStatusCommand -> {
+            val state = services.global.getMcpServers().firstOrNull { it.serverName == command.serverName }
+                ?: error("MCP server '${command.serverName}' is not configured.")
+            val tools = services.global.listMcpTools().filter { it.serverName == command.serverName }
+            writeStdout(
+                CliToolJson.encodeToString(
+                    CliMcpServerDetail.serializer(),
+                    CliMcpServerDetail(
+                        state = state,
+                        reservedNameConflict = state.serverName in ReservedMcpServerNames,
+                        tools = tools,
+                    ),
+                ),
+            )
+        }
+        is McpReconnectCommand -> {
+            services.global.reconnectMcpServer(command.serverName)
+            val state = services.global.getMcpServers().firstOrNull { it.serverName == command.serverName }
+                ?: error("MCP server '${command.serverName}' is not configured.")
+            writeStdout(CliToolJson.encodeToString(McpManagedServerState.serializer(), state))
+        }
+        is McpEnableCommand -> {
+            val state = setMcpServerEnabled(services, command.serverName, enabled = true)
+            writeStdout(CliToolJson.encodeToString(McpManagedServerState.serializer(), state))
+        }
+        is McpDisableCommand -> {
+            val state = setMcpServerEnabled(services, command.serverName, enabled = false)
+            writeStdout(CliToolJson.encodeToString(McpManagedServerState.serializer(), state))
+        }
+        is McpServerToolCommand -> {
+            val arguments = command.arguments.resolve(JsonObject.serializer(), readStdin)
+            val result = services.global.callMcpTool(command.tool.serverName, command.tool.toolName, arguments)
+            writeStdout(CliToolJson.encodeToString(CallToolResult.serializer(), result))
+        }
+        is ToolListCommand -> {
+            val mcpDomains = loadDynamicMcpDomains(services)
+            collectToolListLines(KodexCommand(mcpDomains)).forEach(writeStdout)
+        }
+        else -> error("Unsupported tool command: ${command.commandName}")
+    }
+    return 0
+}
+
+private fun <T> CliPayloadInput<T>.resolve(
+    serializer: KSerializer<T>,
+    readStdin: () -> String,
+): T = when (this) {
+    is CliPayloadInput.Inline -> value
+    CliPayloadInput.Stdin -> CliToolJson.decodeFromString(serializer, readStdin())
+}
+
+private suspend fun setMcpServerEnabled(
+    services: RpcServices,
+    serverName: String,
+    enabled: Boolean,
+): McpManagedServerState {
+    while (true) {
+        val current = services.global.getSettings()
+        val existing = current.mcpServers[serverName]
+            ?: error("MCP server '$serverName' is not configured.")
+        if (existing.enabled != enabled) {
+            val updatedConfig = when (existing) {
+                is McpServerConfiguration.StreamableHttp -> existing.copy(enabled = enabled)
+                is McpServerConfiguration.Stdio -> existing.copy(enabled = enabled)
+            }
+            val updated = current.copy(mcpServers = current.mcpServers + (serverName to updatedConfig))
+            if (!services.global.compareAndSetSettings(current, updated)) {
+                delay(25)
+                continue
+            }
+        }
+        return services.global.getMcpServers().firstOrNull { it.serverName == serverName }
+            ?: error("MCP server '$serverName' is not configured.")
+    }
+}
+
+private suspend fun readAskUsers(
+    storage: AgentStorageRpc,
+    sessionIndex: Int,
+): List<AskUserEntry> {
+    val commit = readLatestCommitOrNull(storage, sessionIndex, AgentCommitType.AskUserTypes)?.commit as? AskUserSnapshot
+    return commit?.entries ?: emptyList()
+}
+
+private suspend fun readSessionStatusSnapshot(
+    storage: AgentStorageRpc,
+    sessionIndex: Int,
+): Triple<Int, KodexAgentSettings, LlmRequestMeta?> {
+    while (true) {
+        val nonce = storage.getCacheNonce(sessionIndex)
+        val latestIndex = storage.getLatestIndex(sessionIndex)
+        if (latestIndex < 0) error("Agent $sessionIndex storage is not initialized.")
+        try {
+            val settingsCommit = storage.getLastCommitsIn(
+                sessionIndex = sessionIndex,
+                cacheNonce = nonce,
+                fromInclusive = 0,
+                toInclusive = latestIndex,
+                types = AgentCommitType.SettingsTypes,
+                limit = 1,
+            ).lastOrNull()?.commit as? KodexAgentSettings
+                ?: error("Agent $sessionIndex has no committed settings.")
+            val tokenMeta = storage.getLastCommitsIn(
+                sessionIndex = sessionIndex,
+                cacheNonce = nonce,
+                fromInclusive = 0,
+                toInclusive = latestIndex,
+                types = AgentCommitType.LlmRequestMetaTypes,
+                limit = 1,
+            ).lastOrNull()?.commit as? LlmRequestMeta
+            return Triple(latestIndex, settingsCommit, tokenMeta)
+        } catch (_: CacheNonceMismatch) {
+            delay(10)
+        }
+    }
+}
+
+private suspend fun readLatestCommitOrNull(
+    storage: AgentStorageRpc,
+    sessionIndex: Int,
+    types: Set<AgentCommitType>,
+): IndexedAgentCommit? {
+    while (true) {
+        val nonce = storage.getCacheNonce(sessionIndex)
+        val latestIndex = storage.getLatestIndex(sessionIndex)
+        if (latestIndex < 0) return null
+        try {
+            return storage.getLastCommitsIn(
+                sessionIndex = sessionIndex,
+                cacheNonce = nonce,
+                fromInclusive = 0,
+                toInclusive = latestIndex,
+                types = types,
+                limit = 1,
+            ).lastOrNull()
+        } catch (_: CacheNonceMismatch) {
+            delay(10)
+        }
+    }
+}

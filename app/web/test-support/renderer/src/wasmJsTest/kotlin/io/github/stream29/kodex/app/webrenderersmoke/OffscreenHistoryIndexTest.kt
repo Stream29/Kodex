@@ -179,7 +179,7 @@ val offscreenHistoryIndexTest by testSuite {
     } }
 
     test("two product bodies share the real Index owner") { offscreenTest {
-        val stored = InMemoryKodexAgentStorage.empty()
+        val stored = initializedTestStorage()
         for (index in 1..8) {
             if (index in setOf(1, 4, 8)) {
                 stored.commit(StableUserMessage(listOf(ContentItem.InputText("Index row $index"))))
@@ -242,13 +242,14 @@ val offscreenHistoryIndexTest by testSuite {
 
     test("hover delays display, redacts before drawing and dismisses cleanly") { offscreenTest {
         val model = IndexRenderFixture(listOf(1))
-        val question = StableRequestUserInputToolEvent(
-            "secret", arguments = RequestUserInputArgs(listOf(
+        val question = StableAskUserEvent(
+            askId = 1,
+            arguments = RequestUserInputArgs(listOf(
                 RequestUserInputQuestion("secret", "Password", "Enter password", isSecret = true),
             )),
-            result = StableRequestUserInputResult.Answered(RequestUserInputResponse(mapOf(
+            response = RequestUserInputResponse(mapOf(
                 "secret" to RequestUserInputAnswer(listOf("SECRET")),
-            ))),
+            )),
         )
         model.setDetail(1, HistoryIndexEntryDetail(
             HistoryIndexEntryKind.RequestUserInput, "SECRET raw fallback", question,

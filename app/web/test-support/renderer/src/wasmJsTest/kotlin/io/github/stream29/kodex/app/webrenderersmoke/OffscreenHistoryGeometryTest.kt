@@ -325,7 +325,7 @@ private fun OffscreenScene.entryBounds(index: Int) = nodes().single {
 private suspend fun historyGeometryModel(
     count: Int, newestText: String? = null, block: suspend (AgentHistoryViewModel) -> Unit,
 ) = offscreenTest {
-    val stored = InMemoryKodexAgentStorage.empty()
+    val stored = initializedTestStorage()
     for (index in 1..count) {
         stored.commit(
             StableUserMessage(listOf(ContentItem.InputText(

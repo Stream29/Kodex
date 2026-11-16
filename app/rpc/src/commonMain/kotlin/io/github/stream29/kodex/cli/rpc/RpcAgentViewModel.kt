@@ -1,7 +1,5 @@
 package io.github.stream29.kodex.cli.rpc
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
@@ -15,13 +13,9 @@ import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDependencies
-import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskViewModel
-import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskDependencies
-import io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.cli.agent.createHistoryIndexViewModel
 import io.github.stream29.kodex.cli.agent.createRequestUserInputViewModel
-import io.github.stream29.kodex.cli.agent.createSuggestSubagentTaskViewModel
 import io.github.stream29.kodex.cli.history.AgentHistorySource
 import io.github.stream29.kodex.cli.history.createAgentHistoryViewModel
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -31,12 +25,9 @@ import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
 import io.github.stream29.kodex.rpc.models.AgentStateValue
-import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.rpc.models.ShellSessionState
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
@@ -59,17 +50,16 @@ public actual fun createRpcAgentViewModel(
     scope: CoroutineScope,
     services: RpcServices,
     models: StateFlow<List<ModelInfo>>,
-    onCreated: (List<CreatedSuggestedSession>) -> Unit,
     reportUnhandledError: (Throwable) -> Unit,
-): AgentViewModel = RpcAgentViewModel(binding, scope, services, models, onCreated, reportUnhandledError)
+): AgentViewModel = RpcAgentViewModel(binding, scope, services, models, reportUnhandledError)
 
 /** Original Agent behavior and children share one disposable, binding-scoped owner. */
 private class RpcAgentViewModel(
     private val binding: RpcSessionBinding,
     scope: CoroutineScope,
+    @Suppress("UNUSED_PARAMETER")
     private val services: RpcServices,
     override val models: StateFlow<List<ModelInfo>>,
-    private val onCreated: (List<CreatedSuggestedSession>) -> Unit,
     private val reportUnhandledError: (Throwable) -> Unit,
 ) : AgentViewModel {
     private val owner = Job(scope.coroutineContext[Job])
@@ -125,46 +115,10 @@ private class RpcAgentViewModel(
     )
     override val requestUserInput: RequestUserInputViewModel = createRequestUserInputViewModel(
         dependencies = object : RequestUserInputDependencies {
-            override val pending = binding.state.map {
-                (it as? AgentStateValue.ToolPending)?.events
-                    ?.filterIsInstance<PendingRequestUserInputToolEvent>()?.firstOrNull()
+            override val pending = binding.pendingAskUser
+            override suspend fun submitAnswer(askId: Int, response: RequestUserInputResponse) {
+                binding.submitAskUserAnswer(askId, response)
             }
-            override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int =
-                binding.completeToolCall(completed)
-            override fun resumeRuntime() { resume() }
-        },
-        ownerScope = local,
-    )
-    override val suggestSubagentTask: SuggestSubagentTaskViewModel = createSuggestSubagentTaskViewModel(
-        dependencies = object : SuggestSubagentTaskDependencies {
-            override val pending = binding.state.map {
-                (it as? AgentStateValue.ToolPending)?.events
-                    ?.filterIsInstance<PendingSuggestSubagentTaskToolEvent>()?.firstOrNull()
-            }
-            override val models: StateFlow<List<ModelInfo>> = this@RpcAgentViewModel.models
-            override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int =
-                binding.completeToolCall(completed)
-            override suspend fun createSessions(
-                arguments: SuggestSubagentTaskArgs,
-                configuration: SuggestedSessionConfiguration,
-            ): List<SuggestedSessionMeta> {
-                binding.ensureActive()
-                val current = binding.settings.value
-                val initial = current.copy(
-                    model = configuration.model,
-                    reasoning = current.reasoning.copy(effort = configuration.reasoningEffort),
-                    serviceTier = configuration.serviceTier,
-                    cwd = configuration.cwd,
-                    requestUserInputMode = configuration.requestUserInputMode,
-                )
-                return services.global.createSuggestedSessions(arguments.tasks, initial)
-                    .also(onCreated).map { it.meta }
-            }
-            override fun resumeRuntime() { resume() }
-            override fun defaultConfiguration(): SuggestedSessionConfiguration =
-                binding.settings.value.let {
-                    SuggestedSessionConfiguration(it.model, it.reasoning.effort, it.serviceTier, it.cwd, it.requestUserInputMode)
-                }
         },
         ownerScope = local,
     )
@@ -175,7 +129,7 @@ private class RpcAgentViewModel(
             runtimeConfiguration.close()
             composer.close()
             history.close()
-            historyIndex.close(); requestUserInput.close(); suggestSubagentTask.close()
+            historyIndex.close(); requestUserInput.close()
         }
         updateShells(binding.shellSessions.value)
         local.launch {

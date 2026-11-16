@@ -4,9 +4,6 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.kodex.openai.ClickOperation
 import io.github.stream29.kodex.openai.FindOperation
 import io.github.stream29.kodex.openai.FinanceAssetType
@@ -266,35 +263,6 @@ val webRunToolClientTest by testSuite {
             )
 
             screenshot.assertContainsReference("view")
-        }
-
-        test(
-            "tool handler forwards a real web search result",
-            testConfig = TestConfig.testScope(isEnabled = true, timeout = 120.seconds),
-        ) { client ->
-            val commands = SearchCommands(searchQuery = listOf(SearchQuery("OpenAI Codex")))
-            val tool = WebRunTools.createTool(
-                WebRunToolClient(
-                    client = client,
-                    sessionId = testSessionId(),
-                    modelProvider = { TestModel },
-                ),
-            )
-            val completed = withContext(Dispatchers.Default) {
-                assertIs<StableWebSearchToolEvent>(
-                    tool.handle(
-                        PendingWebSearchToolEvent(
-                            callId = "call_web_run",
-                            commands = commands,
-                        ),
-                    ),
-                )
-            }
-            val output = assertIs<StableWebSearchResult.Success>(completed.result).response
-
-            val text = output.output
-            assertTrue(text.isNotBlank())
-            text.assertContainsReference("search")
         }
     }
 }

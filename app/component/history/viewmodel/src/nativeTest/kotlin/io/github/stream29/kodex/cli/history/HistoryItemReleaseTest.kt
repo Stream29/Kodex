@@ -3,17 +3,14 @@ package io.github.stream29.kodex.cli.history
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.UpdatePlanArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.Job
@@ -26,7 +23,6 @@ val historyItemReleaseTest by testSuite {
         HistoryItemKind.Message,
         HistoryItemKind.PlanUpdate,
         HistoryItemKind.RequestUserInput,
-        HistoryItemKind.SuggestSubagentTask,
     )) {
         test("leaf $kind initializes synchronously without spawning background jobs") {
             coroutineScope {
@@ -44,15 +40,10 @@ val historyItemReleaseTest by testSuite {
                             callId = "call",
                             arguments = UpdatePlanArgs(plan = emptyList()),
                         )
-                        HistoryItemKind.RequestUserInput -> StableRequestUserInputToolEvent(
-                            callId = "call",
+                        HistoryItemKind.RequestUserInput -> StableAskUserEvent(
+                            askId = 1,
                             arguments = RequestUserInputArgs(questions = emptyList()),
-                            result = StableRequestUserInputResult.Failure("none"),
-                        )
-                        HistoryItemKind.SuggestSubagentTask -> StableSuggestSubagentTaskToolEvent(
-                            callId = "call",
-                            arguments = SuggestSubagentTaskArgs(tasks = emptyList()),
-                            result = StableSuggestSubagentTaskResult.Failure("none"),
+                            response = RequestUserInputResponse(emptyMap()),
                         )
                         else -> error("Not a leaf kind")
                     }
@@ -63,8 +54,6 @@ val historyItemReleaseTest by testSuite {
                         HistoryItemKind.Message -> MessageHistoryItemViewModelImpl(1, descriptor, context)
                         HistoryItemKind.PlanUpdate -> PlanUpdateHistoryItemViewModelImpl(1, descriptor, context)
                         HistoryItemKind.RequestUserInput -> RequestUserInputHistoryItemViewModelImpl(1, descriptor, context)
-                        HistoryItemKind.SuggestSubagentTask ->
-                            SuggestSubagentTaskHistoryItemViewModelImpl(1, descriptor, context)
                     }
                     val ownerJob = requireNotNull(itemOwner.coroutineContext[Job])
                     assertEquals(0, ownerJob.children.count())

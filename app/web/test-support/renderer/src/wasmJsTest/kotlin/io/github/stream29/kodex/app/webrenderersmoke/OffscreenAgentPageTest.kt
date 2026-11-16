@@ -11,7 +11,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
@@ -69,8 +68,7 @@ val offscreenAgentPageTest by testSuite {
       for (scale in listOf(1f, 1.5f)) {
         test("short Agent page can reveal Settings after all auxiliary content height=$height font=$scale") { runtimeScene { _, runtime, owner ->
             val agent = pageAgent("short", runtime, owner)
-            agent.inputPorts.pending.value = inputEvent("short-input")
-            agent.suggestionPorts.pending.value = suggestionEvent("short-suggestion")
+            agent.inputPorts.pending.value = inputEvent(10)
             agent.pendingSteer.value = List(6) { StableUserMessage(listOf(ContentItem.InputText("Queued $it"))) }
             agent.notification.value = AgentNotification(21, AgentNotificationLevel.Information, "Saved ".repeat(60))
             val scene = OffscreenScene.create(width = 320, height = height) {
@@ -159,27 +157,17 @@ val offscreenAgentPageTest by testSuite {
     test("shared pending branches borrow exact children and disable only ordinary Composer focus and editing") { runtimeScene { _, runtime, owner ->
         val agent = pageAgent("pending", runtime, owner)
         val probe = AgentPageProbe()
-        val browsed = mutableListOf<String>()
-        val scene = OffscreenScene.create { ProbedAgentPage(agent, probe, browsed::add) }
+        val scene = OffscreenScene.create { ProbedAgentPage(agent, probe) }
         try {
             scene.settle { probe.enabled == true }
-            agent.inputPorts.pending.value = inputEvent("input-page")
+            agent.inputPorts.pending.value = inputEvent(20)
             scene.settle { probe.input != null && probe.enabled == false && scene.hasText("Scope: Which scope?") }
             assertSame(agent.requestUserInput, probe.input)
             assertSame<RequestUserInputState?>(agent.requestUserInput.state.value, probe.inputState)
-            agent.suggestionPorts.pending.value = suggestionEvent("suggest-page")
-            scene.settle { probe.suggestion != null && scene.hasText("First task") }
-            assertSame(agent.suggestSubagentTask, probe.suggestion)
-            assertSame<SuggestSubagentTaskState?>(agent.suggestSubagentTask.state.value, probe.suggestionState)
-            assertEquals(listOf("history", "input", "suggestion", "composer"), probe.calls)
-            assertEquals(2, probe.pendingPanels)
-            assertNotNull(probe.browseSuggestion).invoke("suggest-page")
-            assertEquals(listOf("suggest-page"), browsed)
-            agent.inputPorts.pending.value = null
-            scene.settle { probe.input == null && probe.enabled == false }
+            assertEquals(listOf("history", "input", "composer"), probe.calls)
             assertEquals(1, probe.pendingPanels)
-            agent.suggestionPorts.pending.value = null
-            scene.settle { probe.suggestion == null && probe.enabled == true }
+            agent.inputPorts.pending.value = null
+            scene.settle { probe.input == null && probe.enabled == true }
             assertEquals(0, probe.pendingPanels)
             assertEquals("retained pending", agent.composer.state.value.text)
             scene.frame()
@@ -218,7 +206,7 @@ val offscreenAgentPageTest by testSuite {
 
 /** DOM Composer is probed as a slot here; its actual root mount/focus remains a host integration check. */
 @Composable
-private fun ProbedAgentPage(agent: PageTestAgent, probe: AgentPageProbe, onBrowseSuggestion: (String) -> Unit = {}) {
+private fun ProbedAgentPage(agent: PageTestAgent, probe: AgentPageProbe) {
     val retained = remember(agent.history) { ComposeHistoryViewState() }
     val graphical = rememberComposeAgentPageRenderer(retained)
     val renderer = object : AgentPageRenderer by graphical {
@@ -226,7 +214,6 @@ private fun ProbedAgentPage(agent: PageTestAgent, probe: AgentPageProbe, onBrows
         override fun Frame(inputs: AgentPageMeasureInputs, content: @Composable (AgentPageRenderScope) -> Unit) {
             probe.calls.clear()
             probe.input = null
-            probe.suggestion = null
             probe.pendingPanels = inputs.pendingToolPanelCount
             graphical.Frame(inputs) { slots ->
                 content(object : AgentPageRenderScope by slots {
@@ -241,12 +228,6 @@ private fun ProbedAgentPage(agent: PageTestAgent, probe: AgentPageProbe, onBrows
                         slots.UserInput(viewModel, state)
                     }
                     @Composable
-                    override fun Suggestion(viewModel: SuggestSubagentTaskViewModel, state: SuggestSubagentTaskState.Pending, onBrowseWorkingDirectory: (String) -> Unit) {
-                        probe.calls += "suggestion"; probe.suggestion = viewModel; probe.suggestionState = state
-                        probe.browseSuggestion = onBrowseWorkingDirectory
-                        slots.Suggestion(viewModel, state, onBrowseWorkingDirectory)
-                    }
-                    @Composable
                     override fun PendingSteer() { probe.calls += "pending"; slots.PendingSteer() }
                     @Composable
                     override fun Notice(message: String) { probe.calls += "notice"; slots.Notice(message) }
@@ -259,7 +240,7 @@ private fun ProbedAgentPage(agent: PageTestAgent, probe: AgentPageProbe, onBrows
             }
         }
     }
-    AgentPageContent(agent, NewLineKey.ShiftEnter, renderer, {}, onBrowseSuggestion, {})
+    AgentPageContent(agent, NewLineKey.ShiftEnter, renderer, {}, {})
 }
 
 private class AgentPageProbe {
@@ -269,15 +250,15 @@ private class AgentPageProbe {
     var composer: ComposerViewModel? = null
     var input: RequestUserInputViewModel? = null
     var inputState: RequestUserInputState.Pending? = null
-    var suggestion: SuggestSubagentTaskViewModel? = null
-    var suggestionState: SuggestSubagentTaskState.Pending? = null
-    var browseSuggestion: ((String) -> Unit)? = null
     var enabled: Boolean? = null
     var canEdit = false
 }
 
+internal fun initializedTestStorage(): InMemoryKodexAgentStorage =
+    InMemoryKodexAgentStorage(KodexAgentSettings(model = OpenAiModelId("fixture")))
+
 internal suspend fun pageAgent(name: String, runtime: RuntimeConfigurationViewModel, owner: CoroutineScope): PageTestAgent {
-    val stored = InMemoryKodexAgentStorage.empty()
+    val stored = initializedTestStorage()
     stored.commit(
         StableUserMessage(listOf(ContentItem.InputText("History $name"))),
         timestamp = Instant.fromEpochMilliseconds(1_000),
@@ -303,20 +284,14 @@ internal class PageTestAgent(
     override val settings = MutableStateFlow(KodexAgentSettings(OpenAiModelId("test-model"), cwd = Path("/opaque/$name")))
     override val notification = MutableStateFlow<AgentNotification?>(null)
     val inputPorts = InputPorts().also { it.pending.value = null }
-    val suggestionPorts = SuggestionPorts().also { it.pending.value = null }
     var inputCloses = 0
-    var suggestionCloses = 0
     var historyCloses = 0
     override val history = object : AgentHistoryViewModel by historyOwner {
         override fun close() { historyCloses++; historyOwner.close() }
     }
     private val inputOwner = createRequestUserInputViewModel(inputPorts, owner)
-    private val suggestionOwner = createSuggestSubagentTaskViewModel(suggestionPorts, owner)
     override val requestUserInput = object : RequestUserInputViewModel by inputOwner {
         override fun close() { inputCloses++; inputOwner.close() }
-    }
-    override val suggestSubagentTask = object : SuggestSubagentTaskViewModel by suggestionOwner {
-        override fun close() { suggestionCloses++; suggestionOwner.close() }
     }
     override val composer = createComposerViewModel(ComposerOwnerId(name), object : ComposerDependencies {
         override val runtime = object : ComposerRuntimePort {
@@ -332,7 +307,7 @@ internal class PageTestAgent(
     }, owner).also { it.update("retained $name") }
 
     fun closeFixture() {
-        composer.close(); requestUserInput.close(); suggestSubagentTask.close(); history.close()
+        composer.close(); requestUserInput.close(); history.close()
     }
 }
 
@@ -340,5 +315,5 @@ private fun assertPageBorrowed(agent: PageTestAgent) {
     assertEquals(0, agent.closeCount)
     assertEquals(ComposerLifecycle.Open, agent.composer.state.value.lifecycle)
     assertFalse(agent.runtimeConfiguration.state.value.closed)
-    assertEquals(0, agent.inputCloses + agent.suggestionCloses + agent.historyCloses)
+    assertEquals(0, agent.inputCloses + agent.historyCloses)
 }

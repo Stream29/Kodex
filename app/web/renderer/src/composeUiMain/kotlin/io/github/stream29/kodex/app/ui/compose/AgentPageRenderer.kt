@@ -118,16 +118,6 @@ private class ComposeAgentPageScope(
     }
 
     @Composable
-    override fun Suggestion(
-        viewModel: SuggestSubagentTaskViewModel, state: SuggestSubagentTaskState.Pending,
-        onBrowseWorkingDirectory: (String) -> Unit,
-    ) {
-        Box(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
-            SuggestSubagentTaskContent(viewModel, state, rememberComposeSuggestionRenderer(), onBrowseWorkingDirectory)
-        }
-    }
-
-    @Composable
     override fun PendingSteer() {
         Column(Modifier.fillMaxWidth()) {
             pendingSteerPreviewContent(inputs.pendingSteer, maximumRows = 6).forEach { line ->

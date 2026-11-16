@@ -98,6 +98,7 @@ private class ComposeHistoryListRenderer(
         val currentWindow by rememberUpdatedState(window)
         val streaming = model.streamingItem.collectAsState().value as? HistoryStreamingItem.Output
         var lastUserScrollDelta by remember(model, state, window.generation) { mutableFloatStateOf(0f) }
+        var clampedTargetItem by remember(model, state, window.generation) { mutableStateOf<HistoryItemViewModel?>(null) }
         LaunchedEffect(state, model, window.generation) {
             state.markdownModes.retainGeneration(window.generation)
         }
@@ -148,10 +149,24 @@ private class ComposeHistoryListRenderer(
             }
         }
         LaunchedEffect(model, state, window, followsLatest, effect, firstCommittedIndex) {
-            if (followsLatest && !window.hasNewer && effect == null) list.requestScrollToItem(0)
+            if (followsLatest && !window.hasNewer && effect == null) {
+                clampedTargetItem = null
+                list.requestScrollToItem(0)
+            } else if (!followsLatest && effect == null) {
+                val anchored = clampedTargetItem
+                val targetPos = if (anchored == null) null else (0 until window.size).firstOrNull { window.peek(it) === anchored }
+                if (targetPos != null) {
+                    val targetIdx = targetPos + firstCommittedIndex
+                    val before = list.layoutInfo
+                    list.requestScrollToItem(targetIdx)
+                    snapshotFlow { list.layoutInfo }.first { it !== before }
+                    if (list.firstVisibleItemIndex >= targetIdx) clampedTargetItem = null
+                }
+            }
         }
         LaunchedEffect(model, state, window, effect, firstCommittedIndex, latestKey) {
             val expected = effect ?: return@LaunchedEffect
+            clampedTargetItem = null
             if (expected.generation != window.generation || model.pendingScrollEffect.value !== expected) return@LaunchedEffect
             val target = expected.target
             val index = when (target) {
@@ -180,12 +195,18 @@ private class ComposeHistoryListRenderer(
             }
             if (model.pendingScrollEffect.value === expected && model.historyItems.value === window &&
                 window.generation == expected.generation
-            ) model.acknowledgeScrollEffect(expected)
+            ) {
+                if (target is HistoryScrollTarget.Item && list.firstVisibleItemIndex < index) {
+                    clampedTargetItem = target.item
+                }
+                model.acknowledgeScrollEffect(expected)
+            }
         }
         val gesture = remember(model, state, window.generation) {
             object : NestedScrollConnection {
                 override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
                     if (source == NestedScrollSource.UserInput && consumed.y != 0f) {
+                        clampedTargetItem = null
                         val newest = list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset == 0
                         lastUserScrollDelta = if (currentWindow.hasNewer && model.pendingScrollEffect.value == null) consumed.y else 0f
                         model.setFollowsLatest(currentWindow, newest && !currentWindow.hasNewer)
@@ -212,6 +233,7 @@ private class ComposeHistoryListRenderer(
                         val consumed = list.scrollBy(direction * (viewport / 2f).coerceAtLeast(1f))
                         if (consumed == 0f || state.owner !== model || model.historyItems.value.generation != generation)
                             return@launch
+                        clampedTargetItem = null
                         val newest = list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset == 0
                         lastUserScrollDelta = if (currentWindow.hasNewer && model.pendingScrollEffect.value == null) -consumed else 0f
                         model.setFollowsLatest(currentWindow, newest && !currentWindow.hasNewer)
@@ -327,7 +349,6 @@ private fun HistoryItemViewModel.initialLoadingJobs(): List<Job> = when (this) {
     is PatchHistoryItemViewModel -> listOfNotNull((state.value as? PatchHistoryItemState.Loading)?.loadingJob)
     is PlanUpdateHistoryItemViewModel -> listOfNotNull((state.value as? PlanUpdateHistoryItemState.Loading)?.loadingJob)
     is RequestUserInputHistoryItemViewModel -> listOfNotNull((state.value as? RequestUserInputHistoryItemState.Loading)?.loadingJob)
-    is SuggestSubagentTaskHistoryItemViewModel -> listOfNotNull((state.value as? SuggestSubagentTaskHistoryItemState.Loading)?.loadingJob)
     is WorkGroupHistoryItemViewModel -> when (val current = state.value) {
         is WorkGroupHistoryItemState.Loading -> listOf(current.loadingJob)
         is WorkGroupHistoryItemState.Expanded -> current.children.flatMap { it.initialLoadingJobs() }

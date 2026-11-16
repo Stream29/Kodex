@@ -14,8 +14,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.AnnotatedString
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.app.ui.UiText
 import io.github.stream29.kodex.app.ui.compose.rememberComposeUserInputRenderer
@@ -24,12 +23,17 @@ import io.github.stream29.kodex.tool.requestuserinput.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.*
+import kotlin.time.Instant
 
 val offscreenUserInputTest by testSuite {
     test("secret metadata freeform keeps keyboard submission and in-flight disabled guards") { userInputScene { ports, vm, _ ->
-        ports.pending.value = PendingRequestUserInputToolEvent("secret-input", arguments = RequestUserInputArgs(listOf(
-            RequestUserInputQuestion("secret", "Secret", "Value", isSecret = true),
-        )))
+        ports.pending.value = AskUserEntry(
+            askId = 9,
+            questions = RequestUserInputArgs(listOf(
+                RequestUserInputQuestion("secret", "Secret", "Value", isSecret = true),
+            )),
+            createdAt = Instant.fromEpochMilliseconds(1_000),
+        )
         ports.gate = CompletableDeferred()
         val scene = OffscreenScene.create { UserInputHost(vm) }
         try {
@@ -41,17 +45,17 @@ val offscreenUserInputTest by testSuite {
             scene.doneUserAnswer("secret")
             scene.settle { scene.overlayTextFocused("Submit") }
             scene.key(Key.Spacebar)
-            scene.settle { scene.hasText("Submitting…") && ports.completed.size == 1 }
+            scene.settle { scene.hasText("Submitting…") && ports.submitted.size == 1 }
             edit(AnnotatedString("late edit"))
             scene.key(Key.Enter)
             scene.key(Key.Tab)
             scene.settle { true }
             assertEquals(RequestUserInputDraftAnswer.FreeForm("test value"), vm.pendingInput().answers["secret"])
-            assertEquals(1, ports.completed.size)
+            assertEquals(1, ports.submitted.size)
             assertFalse(vm.pendingInput().canSubmit)
             ports.gate!!.complete(Unit)
             scene.settle { scene.hasText("No pending input") }
-            assertEquals(listOf("complete", "resume"), ports.order)
+            assertEquals(listOf("submit"), ports.order)
         } finally { scene.close() }
     } }
 
@@ -76,8 +80,8 @@ val offscreenUserInputTest by testSuite {
             scene.settle { scene.overlayTextFocused("Submit") }
             scene.key(Key.Enter)
             scene.settle { scene.hasText("No pending input") }
-            assertEquals(listOf("complete", "resume"), ports.order)
-            assertEquals(1, ports.completed.size)
+            assertEquals(listOf("submit"), ports.order)
+            assertEquals(1, ports.submitted.size)
             assertTrue(vm.state.value !is RequestUserInputState.Pending)
         } finally { scene.close() }
     } }
@@ -86,7 +90,7 @@ val offscreenUserInputTest by testSuite {
         val enabled = mutableStateOf(true)
         var calls = 0
         val scene = OffscreenScene.create(width = 400, height = 160) {
-            rememberComposeUserInputRenderer().Frame("compact-submit", 0, 1) { controls ->
+            rememberComposeUserInputRenderer().Frame(1, 0, 1) { controls ->
                 controls.Submit("Go", enabled.value) { calls++ }
                 LaunchedEffect(Unit) { controls.requestFocus(UserInputFocusTarget.Submit) }
             }
@@ -112,7 +116,7 @@ val offscreenUserInputTest by testSuite {
     test("compact option has radio semantics, full description and less height than the original button") { offscreenTest {
         val description = "Only this module"
         val scene = OffscreenScene.create(width = 480) {
-            rememberComposeUserInputRenderer().Frame("density", 0, 1) { controls ->
+            rememberComposeUserInputRenderer().Frame(2, 0, 1) { controls ->
                 controls.question(0, "density").Option("Compact", description, false, true, false, true) {}
                 OutlinedButton({}, Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth()) { Text("Baseline"); Text(description) }
@@ -138,7 +142,7 @@ val offscreenUserInputTest by testSuite {
         val selected = mutableStateOf(false)
         var calls = 0
         val scene = OffscreenScene.create {
-            rememberComposeUserInputRenderer().Frame("keyboard", 0, 1) { controls ->
+            rememberComposeUserInputRenderer().Frame(3, 0, 1) { controls ->
                 controls.question(0, "keyboard").Option("Choose", "Complete description", selected.value, enabled.value, true, true) {
                     calls++; selected.value = true
                 }
@@ -183,13 +187,12 @@ val offscreenUserInputTest by testSuite {
             scene.settle { vm.pendingInput().canSubmit && targets.last() == UserInputFocusTarget.Submit }
             scene.click("Submit")
             scene.settle { scene.hasText("No pending input") }
-            val completed = assertIs<StableRequestUserInputToolEvent>(ports.completed.single())
-            val response = assertIs<StableRequestUserInputResult.Answered>(completed.result).response
+            val (submittedAskId, response) = ports.submitted.single()
             assertEquals(listOf("scope", "note"), response.answers.keys.toList())
             assertEquals(listOf("Current module"), response.answers.getValue("scope").answers)
             assertEquals(listOf("user_note: details"), response.answers.getValue("note").answers)
-            assertEquals("call-input", completed.callId)
-            assertEquals(listOf("complete", "resume"), ports.order)
+            assertEquals(1, submittedAskId)
+            assertEquals(listOf("submit"), ports.order)
             scene.frame()
         } finally { scene.close() }
     } }
@@ -205,17 +208,17 @@ val offscreenUserInputTest by testSuite {
             assertEquals(UserInputFocusTarget.FreeForm(0), targets.last())
             scene.doneUserAnswer("scope")
             assertFalse(vm.pendingInput().canSubmit)
-            assertTrue(ports.completed.isEmpty())
+            assertTrue(ports.submitted.isEmpty())
             scene.setUserAnswer("scope", "chosen text")
             scene.doneUserAnswer("scope")
             scene.settle { targets.last() == UserInputFocusTarget.FreeForm(1) }
             assertEquals(RequestUserInputDraftAnswer.FreeForm("chosen text"), vm.pendingInput().answers["scope"])
             assertFalse(vm.pendingInput().canSubmit)
-            assertTrue(ports.completed.isEmpty())
+            assertTrue(ports.submitted.isEmpty())
         } finally { scene.close() }
     } }
 
-    test("old option and text callbacks cannot edit a replacement call or move focus") { userInputScene { ports, vm, _ ->
+    test("old option and text callbacks cannot edit a replacement ask or move focus") { userInputScene { ports, vm, _ ->
         var option: (() -> Unit)? = null
         var edit: ((String) -> Boolean)? = null
         val targets = mutableListOf<UserInputFocusTarget>()
@@ -224,9 +227,9 @@ val offscreenUserInputTest by testSuite {
             val renderer = object : UserInputRenderer {
                 @Composable
                 override fun Frame(
-                    callId: String, revision: Long, questionCount: Int, content: @Composable (UserInputRenderScope) -> Unit,
+                    askId: Int, revision: Long, questionCount: Int, content: @Composable (UserInputRenderScope) -> Unit,
                 ) {
-                    graphical.Frame(callId, revision, questionCount) { controls ->
+                    graphical.Frame(askId, revision, questionCount) { controls ->
                         content(object : UserInputRenderScope by controls {
                             override fun requestFocus(target: UserInputFocusTarget) { targets += target; controls.requestFocus(target) }
                             override fun question(index: Int, questionId: String): UserInputQuestionRenderer {
@@ -236,14 +239,14 @@ val offscreenUserInputTest by testSuite {
                                         label: String, description: String, selected: Boolean, enabled: Boolean,
                                         autoFocus: Boolean, first: Boolean, onClick: () -> Unit,
                                     ) {
-                                        if (callId == "call-input" && first) option = onClick
+                                        if (askId == 1 && first) option = onClick
                                         original.Option(label, description, selected, enabled, autoFocus, first, onClick)
                                     }
                                     @Composable override fun FreeForm(
                                         text: String, enabled: Boolean, autoFocus: Boolean,
                                         onChange: (String) -> Boolean, onSubmitted: () -> Unit,
                                     ) {
-                                        if (callId == "call-input") edit = onChange
+                                        if (askId == 1) edit = onChange
                                         original.FreeForm(text, enabled, autoFocus, onChange, onSubmitted)
                                     }
                                 }
@@ -258,14 +261,14 @@ val offscreenUserInputTest by testSuite {
             scene.settle { option != null && edit != null }
             val oldOption = assertNotNull(option)
             val oldEdit = assertNotNull(edit)
-            ports.pending.value = inputEvent("replacement", "Replacement prompt")
-            scene.settle { vm.pendingInput().callId == "replacement" && scene.hasText("Scope: Replacement prompt") }
+            ports.pending.value = inputEvent(2, "Replacement prompt")
+            scene.settle { vm.pendingInput().askId == 2 && scene.hasText("Scope: Replacement prompt") }
             oldOption()
             assertFalse(oldEdit("late text"))
             scene.settle { true }
             assertTrue(vm.pendingInput().answers.isEmpty())
             assertTrue(targets.isEmpty())
-            assertTrue(ports.completed.isEmpty())
+            assertTrue(ports.submitted.isEmpty())
         } finally { scene.close() }
     } }
 
@@ -275,8 +278,8 @@ val offscreenUserInputTest by testSuite {
             val graphical = rememberComposeUserInputRenderer()
             val renderer = object : UserInputRenderer {
                 @Composable
-                override fun Frame(callId: String, revision: Long, questionCount: Int, content: @Composable (UserInputRenderScope) -> Unit) {
-                    graphical.Frame(callId, revision, questionCount) { controls ->
+                override fun Frame(askId: Int, revision: Long, questionCount: Int, content: @Composable (UserInputRenderScope) -> Unit) {
+                    graphical.Frame(askId, revision, questionCount) { controls ->
                         content(object : UserInputRenderScope by controls {
                             @Composable override fun Submit(label: String, enabled: Boolean, onClick: () -> Unit) {
                                 if (enabled) submit = onClick
@@ -297,16 +300,16 @@ val offscreenUserInputTest by testSuite {
             scene.setUserAnswer("note", "newer")
             old()
             scene.settle { vm.pendingInput().answers["note"] == RequestUserInputDraftAnswer.FreeForm("newer") }
-            assertTrue(ports.completed.isEmpty())
+            assertTrue(ports.submitted.isEmpty())
             assertIs<RequestUserInputSubmissionState.Editing>(vm.pendingInput().submission)
             scene.click("Submit")
-            scene.settle { ports.order == listOf("complete", "resume") }
-            val response = (ports.completed.single() as StableRequestUserInputToolEvent).result as StableRequestUserInputResult.Answered
-            assertEquals(listOf("user_note: newer"), response.response.answers.getValue("note").answers)
+            scene.settle { ports.order == listOf("submit") }
+            val (_, response) = ports.submitted.single()
+            assertEquals(listOf("user_note: newer"), response.answers.getValue("note").answers)
         } finally { scene.close() }
     } }
 
-    test("unmount cancels the caller, not an accepted Agent-owned completion or the borrowed child") { userInputScene { ports, vm, owner ->
+    test("unmount cancels the caller, not an accepted Agent-owned submission or the borrowed child") { userInputScene { ports, vm, owner ->
         ports.gate = CompletableDeferred()
         val visible = mutableStateOf(true)
         val scene = OffscreenScene.create {
@@ -318,23 +321,24 @@ val offscreenUserInputTest by testSuite {
             scene.setUserAnswer("note", "done")
             scene.settle { vm.pendingInput().canSubmit }
             scene.click("Submit")
-            scene.settle { ports.completed.size == 1 && scene.hasText("Submitting…") }
+            scene.settle { ports.submitted.size == 1 && scene.hasText("Submitting…") }
             val frozen = vm.pendingInput()
-            assertFalse(vm.selectOption(frozen.callId, "scope", "Whole workspace"))
-            assertFalse(vm.updateFreeForm(frozen.callId, "note", "changed"))
+            assertFalse(vm.selectOption(frozen.askId, "scope", "Whole workspace"))
+            assertFalse(vm.updateFreeForm(frozen.askId, "note", "changed"))
             visible.value = false
             scene.settle { scene.hasText("Unmounted") }
             assertEquals(0, ports.cancellations)
             ports.gate!!.complete(Unit)
-            scene.settle { ports.order == listOf("complete", "resume") }
+            scene.settle { vm.state.value !is RequestUserInputState.Pending }
+            assertEquals(listOf("submit"), ports.order)
             assertEquals(0, ports.cancellations)
-            ports.pending.value = inputEvent("next")
-            scene.settle { vm.pendingInput().callId == "next" }
+            ports.pending.value = inputEvent(2)
+            scene.settle { vm.pendingInput().askId == 2 }
             assertTrue(owner.coroutineContext.job.isActive)
         } finally { scene.close() }
     } }
 
-    test("ordinary submission failure renders once and only an explicit retry completes again") { userInputScene { ports, vm, _ ->
+    test("ordinary submission failure renders once and only an explicit retry submits again") { userInputScene { ports, vm, _ ->
         ports.failure = IllegalStateException("receipt missing")
         val scene = OffscreenScene.create { UserInputHost(vm) }
         try {
@@ -344,17 +348,17 @@ val offscreenUserInputTest by testSuite {
             scene.settle { vm.pendingInput().canSubmit }
             scene.click("Submit")
             scene.settle { scene.hasText("Unable to submit: receipt missing") }
-            assertEquals(1, ports.completed.size)
-            assertEquals(listOf("complete"), ports.order)
+            assertEquals(1, ports.submitted.size)
+            assertEquals(listOf("submit"), ports.order)
             assertEquals(RequestUserInputDraftAnswer.FreeForm("retained"), vm.pendingInput().answers["note"])
             ports.failure = null
             scene.setUserAnswer("note", "explicit")
             scene.settle { !scene.hasText("Unable to submit: receipt missing") }
-            assertEquals(1, ports.completed.size)
+            assertEquals(1, ports.submitted.size)
             scene.click("Submit")
             scene.settle { scene.hasText("No pending input") }
-            assertEquals(2, ports.completed.size)
-            assertEquals(listOf("complete", "complete", "resume"), ports.order)
+            assertEquals(2, ports.submitted.size)
+            assertEquals(listOf("submit", "submit"), ports.order)
         } finally { scene.close() }
     } }
 }
@@ -368,8 +372,8 @@ private fun UserInputHost(
     val state = vm.state.collectAsState().value
     if (state is RequestUserInputState.Pending) {
         val tracked = object : UserInputRenderer {
-            @Composable override fun Frame(callId: String, revision: Long, questionCount: Int, content: @Composable (UserInputRenderScope) -> Unit) {
-                renderer.Frame(callId, revision, questionCount) { controls ->
+            @Composable override fun Frame(askId: Int, revision: Long, questionCount: Int, content: @Composable (UserInputRenderScope) -> Unit) {
+                renderer.Frame(askId, revision, questionCount) { controls ->
                     content(object : UserInputRenderScope by controls {
                         override fun requestFocus(target: UserInputFocusTarget) { targets?.add(target); controls.requestFocus(target) }
                     })
@@ -408,29 +412,29 @@ private suspend fun userInputScene(block: suspend (InputPorts, RequestUserInputV
     try { block(ports, vm, owner) } finally { vm.close(); owner.coroutineContext.job.cancelAndJoin() }
 }
 
-internal fun inputEvent(callId: String = "call-input", prompt: String = "Which scope?") = PendingRequestUserInputToolEvent(
-    callId, arguments = RequestUserInputArgs(listOf(
+internal fun inputEvent(askId: Int = 1, prompt: String = "Which scope?") = AskUserEntry(
+    askId = askId,
+    questions = RequestUserInputArgs(listOf(
         RequestUserInputQuestion("scope", "Scope", prompt, options = listOf(
             RequestUserInputQuestionOption("Current module", "Only this module"),
             RequestUserInputQuestionOption("Whole workspace", "All modules"),
         )),
         RequestUserInputQuestion("note", "Note", "Explain"),
     )),
+    createdAt = Instant.fromEpochMilliseconds(1_000),
 )
 
 internal class InputPorts : RequestUserInputDependencies {
-    override val pending = MutableStateFlow<PendingRequestUserInputToolEvent?>(inputEvent())
-    val completed = mutableListOf<StableCleanEvent.CompletedTool>()
+    override val pending = MutableStateFlow<AskUserEntry?>(inputEvent())
+    val submitted = mutableListOf<Pair<Int, RequestUserInputResponse>>()
     val order = mutableListOf<String>()
     var gate: CompletableDeferred<Unit>? = null
     var failure: Throwable? = null
     var cancellations = 0
-    override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int {
-        this.completed += completed
-        order += "complete"
+    override suspend fun submitAnswer(askId: Int, response: RequestUserInputResponse) {
+        this.submitted += askId to response
+        order += "submit"
         try { gate?.await() } catch (failure: CancellationException) { cancellations++; throw failure }
         failure?.let { throw it }
-        return 123
     }
-    override fun resumeRuntime() { order += "resume" }
 }

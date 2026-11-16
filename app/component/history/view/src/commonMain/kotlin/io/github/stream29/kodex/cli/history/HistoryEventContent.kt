@@ -5,74 +5,55 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import io.github.stream29.kodex.cli.history.HistoryTextStyle as TextStyle
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageViewToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
-import io.github.stream29.kodex.openai.CallToolResult
+import io.github.stream29.kodex.cli.history.HistoryTextStyle as TextStyle
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
+import io.github.stream29.kodex.tool.readmedia.MediaDetail
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
-import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -94,7 +75,6 @@ public actual fun HistoryEventContent(
             is StableAssistantMessage,
             is StableDeveloperMessage,
             is StableAgentMessage,
-            is StableAskUserEvent,
             is StableScheduleEvent,
             is StableTerminalExitedEvent,
                 ->
@@ -104,6 +84,7 @@ public actual fun HistoryEventContent(
                     body = { text, supporting -> DetailText(text, if (supporting) TextStyle.Dim else TextStyle.Normal) },
                     assistantBody = { renderer.AssistantText(it) },
                 )
+            is StableAskUserEvent -> renderer.RequestUserInput(this, elapsed)
             is StableReasoning -> renderReasoning()
             is StableInvalidToolCall -> renderInvalidToolCall()
             is StableServerToolSearch -> renderServerToolSearch()
@@ -117,14 +98,8 @@ public actual fun HistoryEventContent(
             is StableJsonToolEvent -> renderJsonTool()
             is StableTextToolEvent -> renderTextTool()
             is StableCustomToolEvent -> renderCustomTool()
-            is StableImageGenerationToolEvent -> renderImageGeneration()
-            is StableImageViewToolEvent -> renderImageView()
-            is StableMcpToolEvent -> renderMcpTool()
+            is StableReadMediaToolEvent -> renderReadMedia()
             is StablePlanUpdate -> HistoryPlanContent(this, renderer)
-            is StableRequestUserInputToolEvent -> renderer.RequestUserInput(this, elapsed)
-            is StableSuggestSubagentTaskToolEvent -> HistorySuggestionContent(this, elapsed, renderer)
-            is StableToolSearchEvent -> renderToolSearch()
-            is StableWebSearchToolEvent -> renderWebSearch()
         } }
     }
 }
@@ -169,67 +144,13 @@ public actual fun HistoryEventContent(
 
         is PendingCommandExecutionToolEvent -> renderCommandExecution(shellSessions)
 
-        is PendingImageGenerationToolEvent -> ToolEvent(
+        is PendingReadMediaToolEvent -> ToolEvent(
             summary = arguments.ongoingToolSummary(),
-            rawName = "image_gen.imagegen",
+            rawName = "read_media",
             status = "running",
             expansionKey = callId,
         ) {
             section("Arguments") { arguments.renderDetails() }
-        }
-
-        is PendingImageViewToolEvent -> ToolEvent(
-            summary = arguments.ongoingToolSummary(),
-            rawName = "view_image",
-            status = "running",
-            expansionKey = callId,
-        ) {
-            section("Arguments") { arguments.renderDetails() }
-        }
-
-        is PendingMcpToolEvent -> ToolEvent(
-            summary = "Running ${qualifiedName(name, namespace)}",
-            rawName = qualifiedName(name, namespace),
-            status = "running",
-            expansionKey = callId,
-        ) {
-            section("Arguments") { McpJsonDetail("Arguments", arguments) }
-        }
-
-        is PendingRequestUserInputToolEvent -> ToolEvent(
-            summary = arguments.ongoingToolSummary(),
-            rawName = "request_user_input",
-            status = "running",
-            expansionKey = callId,
-        ) {
-            section("Arguments") { arguments.renderDetails() }
-        }
-
-        is PendingSuggestSubagentTaskToolEvent -> ToolEvent(
-            summary = "Waiting for approval to create ${arguments.tasks.size} Session(s)",
-            rawName = "suggest_subagent_task",
-            status = "running",
-            expansionKey = callId,
-        ) {
-            section("Arguments") { arguments.renderDetails() }
-        }
-
-        is PendingToolSearchEvent -> ToolEvent(
-            summary = arguments.ongoingToolSummary(),
-            rawName = "tool_search",
-            status = "running",
-            expansionKey = callId,
-        ) {
-            section("Arguments") { arguments.renderDetails() }
-        }
-
-        is PendingWebSearchToolEvent -> ToolEvent(
-            summary = commands.ongoingToolSummary(),
-            rawName = "web.run",
-            status = "running",
-            expansionKey = callId,
-        ) {
-            section("Arguments") { commands.renderDetails() }
         }
 
         is PendingInvalidToolCall -> renderInvalidToolCall()
@@ -270,7 +191,6 @@ private fun StableInvalidToolCall.renderInvalidToolCall() {
             when (val input = invocation) {
                 is InvalidToolInvocation.Function -> RecordedField("arguments", input.arguments)
                 is InvalidToolInvocation.Custom -> RecordedField("input", input.input)
-                is InvalidToolInvocation.ToolSearch -> RecordedField("arguments", input.arguments.toString())
             }
             RecordedErrorField("error", message)
         }
@@ -407,64 +327,25 @@ private fun StableCustomToolEvent.renderCustomTool() {
 }
 
 @Composable
-private fun StableImageGenerationToolEvent.renderImageGeneration() {
-    val outcome = result
+private fun StableReadMediaToolEvent.renderReadMedia() {
     BuiltInToolEvent(
-        summary = recordedImageTitle((outcome as? StableImageGenerationResult.Success)?.savedPath),
+        summary = "Read media: ${arguments.path}",
         firstLine = compactToolLine(
-            "image_gen.imagegen",
-            "referenced_image_paths" to arguments.referencedImagePaths
-                ?.takeIf { it.isNotEmpty() }?.joinToString(),
-            "num_last_images_to_include" to arguments.numLastImagesToInclude,
-        ),
-        status = result.status(),
-        expansionKey = callId,
-    ) {
-        RecordedField("prompt", arguments.prompt)
-        when (outcome) {
-            is StableImageGenerationResult.Success -> {
-                outcome.savedPath?.takeIf(String::isNotEmpty)?.let { RecordedField("saved_path", it) }
-                outcome.output.outputHint?.takeIf(String::isNotEmpty)?.let { RecordedField("output_hint", it) }
-            }
-            is StableImageGenerationResult.Failure -> RecordedField("error", outcome.message)
-        }
-    }
-}
-
-@Composable
-private fun StableImageViewToolEvent.renderImageView() {
-    BuiltInToolEvent(
-        summary = "View image: ${arguments.path}",
-        firstLine = compactToolLine(
-            "view_image",
-            "detail" to arguments.detail?.takeUnless { it == io.github.stream29.kodex.tool.viewimage.ViewImageDetail.High }
-                ?.name?.lowercase(),
+            "read_media",
+            "detail" to arguments.detail?.takeUnless { it == MediaDetail.High }?.name?.lowercase(),
         ),
         status = result.status(),
         expansionKey = callId,
     ) {
         when (val outcome = result) {
-            is StableImageViewResult.Success -> {
-                val requested = arguments.detail ?: io.github.stream29.kodex.tool.viewimage.ViewImageDetail.High
+            is StableReadMediaResult.Success -> {
+                val requested = arguments.detail ?: MediaDetail.High
                 if (outcome.output.detail != requested) {
                     RecordedField("output_detail", outcome.output.detail.name.lowercase())
                 }
             }
-            is StableImageViewResult.Failure -> RecordedField("error", outcome.message)
+            is StableReadMediaResult.Failure -> RecordedField("error", outcome.message)
         }
-    }
-}
-
-@Composable
-private fun StableMcpToolEvent.renderMcpTool() {
-    ToolEvent(
-        summary = qualifiedName(name, namespace).stableToolSummary(result.completedStatus() == "failed"),
-        rawName = qualifiedName(name, namespace),
-        status = result.completedStatus(),
-        expansionKey = callId,
-    ) {
-        section("Arguments") { McpJsonDetail("Arguments", arguments) }
-        section("Result") { result.renderDetails() }
     }
 }
 
@@ -490,40 +371,6 @@ private fun StableAwaitEventToolEvent.renderAwaitEvent() {
 }
 
 @Composable
-private fun StableToolSearchEvent.renderToolSearch() {
-    BuiltInToolEvent(
-        summary = functionToolSummary("tool_search", null, failed = result !is ToolSearchResult.Success),
-        firstLine = compactToolLine("tool_search", "query" to arguments.query, "limit" to arguments.limit),
-        status = result.status(),
-        expansionKey = callId,
-    ) {
-        when (val result = result) {
-            is ToolSearchResult.Success -> DiscoveredTools(result.tools) {
-                LocalHistoryRenderer.current.RecordedJson(it, TextStyle.Normal)
-            }
-            is ToolSearchResult.InvalidArguments -> RecordedErrorField("error", result.message)
-            is ToolSearchResult.ExecutionFailure -> RecordedErrorField("error", result.message)
-        }
-    }
-}
-
-@Composable
-private fun StableWebSearchToolEvent.renderWebSearch() {
-    BuiltInToolEvent(
-        summary = commands.toolSummary(failed = result.status() == "failed"),
-        firstLine = compactToolLine("web.run", "response_length" to commands.responseLength?.name?.lowercase()),
-        status = result.status(),
-        expansionKey = callId,
-    ) {
-        commands.operationTitles().forEach { WrappedHistoryText(it) }
-        when (val result = result) {
-            is StableWebSearchResult.Success -> RecordedField("output", result.response.output)
-            is StableWebSearchResult.Failure -> RecordedErrorField("error", result.message)
-        }
-    }
-}
-
-@Composable
 private fun PendingInvalidToolCall.renderInvalidToolCall() {
     if (isRedesignedInternalCall(invocation.displayName())) {
         BuiltInToolEvent(
@@ -535,7 +382,6 @@ private fun PendingInvalidToolCall.renderInvalidToolCall() {
             when (val input = invocation) {
                 is PendingInvalidToolInvocation.Function -> RecordedField("arguments", input.arguments)
                 is PendingInvalidToolInvocation.Custom -> RecordedField("input", input.input)
-                is PendingInvalidToolInvocation.ToolSearch -> RecordedField("arguments", input.arguments.toString())
             }
             RecordedErrorField("error", message)
         }
@@ -640,25 +486,12 @@ private fun JsonDetail(
 }
 
 @Composable
-private fun McpJsonDetail(label: String, value: JsonElement) {
-    val preview = value.historyPreview()
-    if (preview.isBlank()) return
-    val contentType = (value as? JsonObject)?.stringOrNull("type")
-    if (value.containsInlineMedia() || contentType == "image") {
-        Detail(label, preview)
-    } else {
-        LocalHistoryRenderer.current.RecordedJson("$label: $preview", TextStyle.Normal)
-    }
-}
-
-@Composable
 private fun InvalidToolInvocation.renderDetails(
     textStyle: TextStyle = TextStyle.Normal,
 ) {
     when (this) {
         is InvalidToolInvocation.Function -> Detail("Arguments", arguments, textStyle)
         is InvalidToolInvocation.Custom -> Detail("Input", input, textStyle)
-        is InvalidToolInvocation.ToolSearch -> JsonDetail("Arguments", arguments, textStyle)
     }
 }
 
@@ -669,7 +502,6 @@ private fun PendingInvalidToolInvocation.renderDetails(
     when (this) {
         is PendingInvalidToolInvocation.Function -> Detail("Arguments", arguments, textStyle)
         is PendingInvalidToolInvocation.Custom -> Detail("Input", input, textStyle)
-        is PendingInvalidToolInvocation.ToolSearch -> JsonDetail("Arguments", arguments, textStyle)
     }
 }
 
@@ -727,43 +559,11 @@ private fun FunctionCallOutputPayload.renderDetails() {
 }
 
 @Composable
-private fun CallToolResult.renderDetails() {
-    structuredContent?.let { McpJsonDetail("Structured result", it) }
-    if (content.isEmpty() && structuredContent == null) {
-        Detail("Result", "no content")
-    } else {
-        content.forEach { item -> item.renderMcpContent() }
-    }
-}
-
-@Composable
-private fun JsonElement.renderMcpContent() {
-    val objectValue = this as? JsonObject
-    when (objectValue?.stringOrNull("type")) {
-        "text" -> Detail("Content", objectValue.stringOrNull("text").orEmpty())
-        "image" -> Detail("Image", objectValue.binaryReference())
-        else -> McpJsonDetail("Content", this)
-    }
-}
-
-@Composable
-private fun ImageGenToolArguments.renderDetails(
-    textStyle: TextStyle = TextStyle.Normal,
-) {
-    Detail("Prompt", prompt, textStyle)
-    referencedImagePaths
-        ?.takeIf { it.isNotEmpty() }
-        ?.let { Detail("Referenced images", it.joinToString(), textStyle) }
-    numLastImagesToInclude?.let { Detail("Recent images", it.toString(), textStyle) }
-}
-
-@Composable
-private fun ViewImageToolArguments.renderDetails(
+private fun ReadMediaToolArguments.renderDetails(
     textStyle: TextStyle = TextStyle.Normal,
 ) {
     Detail("Path", path, textStyle)
     Detail("Detail", detail?.name?.lowercase() ?: "high", textStyle)
-    environmentId?.takeIf(String::isNotBlank)?.let { Detail("Environment", it, textStyle) }
 }
 
 @Composable
@@ -775,92 +575,6 @@ private fun AwaitEventArguments.renderDetails(
     } else {
         Detail("Terminals", terminals.joinToString(), textStyle)
     }
-}
-
-@Composable
-private fun SearchToolCallParams.renderDetails(
-    textStyle: TextStyle = TextStyle.Normal,
-) {
-    Detail("Query", query, textStyle)
-    limit?.let { Detail("Limit", it.toString(), textStyle) }
-}
-
-@Composable
-private fun RequestUserInputArgs.renderDetails(
-    textStyle: TextStyle = TextStyle.Normal,
-) {
-    autoResolutionMs?.let { Detail("Auto resolution", "${it}ms", textStyle) }
-    questions.forEach { question ->
-        Detail(question.header, question.question, textStyle)
-        question.options
-            ?.takeIf { it.isNotEmpty() }
-            ?.joinToString { option ->
-                if (option.description.isBlank()) option.label else "${option.label} (${option.description})"
-            }
-            ?.let { Detail("Options", it, textStyle) }
-    }
-}
-
-@Composable
-private fun SuggestSubagentTaskArgs.renderDetails(
-    textStyle: TextStyle = TextStyle.Normal,
-) {
-    tasks.forEach { task ->
-        Detail(task.name, task.prompt, textStyle)
-    }
-}
-
-@Composable
-private fun SearchCommands.renderDetails(
-    textStyle: TextStyle = TextStyle.Normal,
-) {
-    var hasOperation = false
-    searchQuery.orEmpty().forEach { query ->
-        hasOperation = true
-        Detail("Search", query.q, textStyle)
-    }
-    imageQuery.orEmpty().forEach { query ->
-        hasOperation = true
-        Detail("Image search", query.q, textStyle)
-    }
-    open.orEmpty().forEach { operation ->
-        hasOperation = true
-        Detail("Open", operation.refId + operation.lineno?.let { " at line $it" }.orEmpty(), textStyle)
-    }
-    click.orEmpty().forEach { operation ->
-        hasOperation = true
-        Detail("Click", "${operation.refId} #${operation.id}", textStyle)
-    }
-    find.orEmpty().forEach { operation ->
-        hasOperation = true
-        Detail("Find", "${operation.pattern} in ${operation.refId}", textStyle)
-    }
-    screenshot.orEmpty().forEach { operation ->
-        hasOperation = true
-        Detail("Screenshot", "${operation.refId} page ${operation.pageno}", textStyle)
-    }
-    finance.orEmpty().forEach { operation ->
-        hasOperation = true
-        Detail("Finance", "${operation.ticker} (${operation.type.name.lowercase()})", textStyle)
-    }
-    weather.orEmpty().forEach { operation ->
-        hasOperation = true
-        Detail("Weather", operation.location, textStyle)
-    }
-    sports.orEmpty().forEach { operation ->
-        hasOperation = true
-        Detail(
-            "Sports",
-            "${operation.league.name.lowercase()} ${operation.function.name.lowercase()}",
-            textStyle,
-        )
-    }
-    time.orEmpty().forEach { operation ->
-        hasOperation = true
-        Detail("Time", operation.utcOffset, textStyle)
-    }
-    responseLength?.let { Detail("Response length", it.name.lowercase(), textStyle) }
-    if (!hasOperation) Detail("Request", "web search", textStyle)
 }
 
 private fun PendingCommandExecutionAction.activeSessionId(): Int? = when (this) {
@@ -893,25 +607,9 @@ private fun AgentShellSession.renderProcessStatus(completed: Boolean) {
     )
 }
 
-private fun StableImageGenerationResult.status(): String = when (this) {
-    is StableImageGenerationResult.Success -> "succeeded"
-    is StableImageGenerationResult.Failure -> "failed"
-}
-
-private fun StableImageViewResult.status(): String = when (this) {
-    is StableImageViewResult.Success -> "succeeded"
-    is StableImageViewResult.Failure -> "failed"
-}
-
-private fun ToolSearchResult.status(): String = when (this) {
-    is ToolSearchResult.Success -> "succeeded"
-    is ToolSearchResult.InvalidArguments -> "failed"
-    is ToolSearchResult.ExecutionFailure -> "failed"
-}
-
-private fun StableWebSearchResult.status(): String = when (this) {
-    is StableWebSearchResult.Success -> "succeeded"
-    is StableWebSearchResult.Failure -> "failed"
+private fun StableReadMediaResult.status(): String = when (this) {
+    is StableReadMediaResult.Success -> "succeeded"
+    is StableReadMediaResult.Failure -> "failed"
 }
 
 private fun Boolean?.completedStatus(): String = when (this) {
@@ -920,22 +618,14 @@ private fun Boolean?.completedStatus(): String = when (this) {
     null -> "completed"
 }
 
-private fun CallToolResult.completedStatus(): String = when (isError) {
-    true -> "failed"
-    false -> "succeeded"
-    null -> "completed"
-}
-
 private fun InvalidToolInvocation.displayName(): String = when (this) {
     is InvalidToolInvocation.Function -> qualifiedName(name, namespace)
     is InvalidToolInvocation.Custom -> qualifiedName(name, namespace)
-    is InvalidToolInvocation.ToolSearch -> "tool_search"
 }
 
 private fun PendingInvalidToolInvocation.displayName(): String = when (this) {
     is PendingInvalidToolInvocation.Function -> qualifiedName(name, namespace)
     is PendingInvalidToolInvocation.Custom -> qualifiedName(name, namespace)
-    is PendingInvalidToolInvocation.ToolSearch -> "tool_search"
 }
 
 private fun qualifiedName(
@@ -953,6 +643,7 @@ internal fun functionToolOngoingSummary(
         -> "Running a command"
 
     "write_stdin" -> "Interacting with a terminal session"
+    "read_media" -> "Reading media"
     "view_image" -> "Viewing an image"
     "image_gen.imagegen",
     "hosted_image_generation",
@@ -1021,25 +712,11 @@ private fun WriteStdinArguments.ongoingToolSummary(
     }
 }
 
-private fun ImageGenToolArguments.ongoingToolSummary(): String =
-    prompt.singleLineSummary()
-        .takeIf(String::isNotBlank)
-        ?.let { prompt -> "Generating an image: $prompt" }
-        ?: "Generating an image"
-
-private fun ViewImageToolArguments.ongoingToolSummary(): String =
+private fun ReadMediaToolArguments.ongoingToolSummary(): String =
     path.singleLineSummary()
         .takeIf(String::isNotBlank)
-        ?.let { path -> "Viewing image: $path" }
-        ?: "Viewing an image"
-
-private fun RequestUserInputArgs.ongoingToolSummary(): String =
-    questions.firstOrNull()
-        ?.question
-        ?.singleLineSummary()
-        ?.takeIf(String::isNotBlank)
-        ?.let { question -> "Waiting for user input: $question" }
-        ?: "Waiting for user input"
+        ?.let { path -> "Reading media: $path" }
+        ?: "Reading media"
 
 private fun AwaitEventArguments.ongoingToolSummary(): String =
     if (terminals.isEmpty()) {
@@ -1047,12 +724,6 @@ private fun AwaitEventArguments.ongoingToolSummary(): String =
     } else {
         "Waiting for events (terminals: ${terminals.joinToString()})"
     }
-
-private fun SearchToolCallParams.ongoingToolSummary(): String =
-    query.singleLineSummary()
-        .takeIf(String::isNotBlank)
-        ?.let { query -> "Searching available tools: $query" }
-        ?: "Searching available tools"
 
 internal fun JsonElement.ongoingServerToolSearchSummary(): String {
     val paths = ((this as? JsonObject)?.get("paths") as? JsonArray)
@@ -1098,6 +769,7 @@ internal fun functionToolSummary(
         -> if (failed) "Failed to run a command" else "Run a command"
 
     "write_stdin" -> if (failed) "Failed to interact with a terminal session" else "Interact with a terminal session"
+    "read_media" -> if (failed) "Failed to read media" else "Read media"
     "view_image" -> if (failed) "Failed to view an image" else "View an image"
     "image_gen.imagegen" -> if (failed) "Failed to generate an image" else "Generate an image"
     "request_user_input" -> if (failed) "Failed to collect user input" else "Ask the user for input"

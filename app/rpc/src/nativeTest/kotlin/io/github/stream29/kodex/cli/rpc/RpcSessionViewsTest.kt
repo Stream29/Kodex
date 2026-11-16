@@ -8,15 +8,10 @@ import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
 import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
-import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
-import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskSubmissionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.contract.getAskUsersAt
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
@@ -928,71 +923,30 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         }
     }
 
-    test("revision-bound secret answer drafts submit through the original tool completion contract") {
-        val pending = PendingRequestUserInputToolEvent("question", arguments = RequestUserInputArgs(
-            listOf(RequestUserInputQuestion("secret", "Secret", "Value?", isSecret = true)),
-        ))
-        val firstRequest = MutableStateFlow(true)
-        frontend(response = {
-            if (firstRequest.compareAndSet(true, false)) {
-                emit(ResponsesStreamEvent.OutputItemDone(0, pending.toResponseHistoryItems().single() as ResponseItem.ToolCall))
-                emit(ResponsesStreamEvent.Completed(Response(id = "pending", endTurn = true)))
-            } else answer()
-        }) {
-            val view = views.open(services.global.createSession(home))
-            view.current().appendUserMessage(listOf(ContentItem.InputText("question please")))
-            view.current().resume()
+    test("revision-bound secret answer drafts submit through AskUserSnapshot and steer the Agent") {
+        frontend {
+            val sessionIndex = services.global.createSession(home)
+            val view = views.open(sessionIndex)
+            val created = services.runtime.createAskUser(
+                sessionIndex,
+                RequestUserInputArgs(
+                    listOf(RequestUserInputQuestion("secret", "Secret", "Value?", isSecret = true)),
+                ),
+            )
             val questions = requireNotNull(view.agent.value).requestUserInput
             val observed = questions.state.filterIsInstance<RequestUserInputState.Pending>().first()
+            assertEquals(created.askId, observed.askId)
             assertTrue(observed.arguments.questions.single().isSecret)
-            assertTrue(questions.updateFreeForm(observed.callId, "secret", "private answer"))
+            assertTrue(questions.updateFreeForm(observed.askId, "secret", "private answer"))
             val edited = assertIs<RequestUserInputState.Pending>(questions.state.value)
-            assertEquals(RequestUserInputSubmissionResult.StaleRevision, questions.submit(observed.callId, observed.revision))
-            assertEquals(RequestUserInputSubmissionResult.Submitted, questions.submit(edited.callId, edited.revision))
+            assertEquals(RequestUserInputSubmissionResult.StaleRevision, questions.submit(observed.askId, observed.revision))
+            assertEquals(RequestUserInputSubmissionResult.Submitted, questions.submit(edited.askId, edited.revision))
             view.current().state.first { it == AgentStateValue.AssistantMessage }
-            assertEquals(RequestUserInputState.Idle, questions.state.value)
-        }
-    }
-
-    test("suggestion confirmation creates children in one RPC and submits the parent tool separately") {
-        val pending = PendingSuggestSubagentTaskToolEvent("suggest", arguments = SuggestSubagentTaskArgs(
-            listOf(SuggestedSubagentTask("one", "first"), SuggestedSubagentTask("two", "second")),
-        ))
-        val firstRequest = MutableStateFlow(true)
-        var batchCalls = 0
-        var createCalls = 0
-        var completeCalls = 0
-        frontend(
-            response = {
-                if (firstRequest.compareAndSet(true, false)) {
-                    emit(ResponsesStreamEvent.OutputItemDone(0, pending.toResponseHistoryItems().single() as ResponseItem.ToolCall))
-                    emit(ResponsesStreamEvent.Completed(Response(id = "pending", endTurn = true)))
-                } else answer()
-            },
-            decorate = { delegate ->
-                object : RpcClient by delegate {
-                    override suspend fun <T> call(call: RpcCall): T {
-                        when (call.callableName) {
-                            "createSession" -> createCalls++
-                            "createSuggestedSessions" -> batchCalls++
-                            "completeToolCall" -> completeCalls++
-                        }
-                        return delegate.call(call)
-                    }
-                }
-            },
-        ) {
-            val view = views.open(services.global.createSession(home))
-            view.current().appendUserMessage(listOf(ContentItem.InputText("children please")))
-            view.current().resume()
-            val suggestions = requireNotNull(view.agent.value).suggestSubagentTask
-            val observed = suggestions.state.filterIsInstance<SuggestSubagentTaskState.Pending>().first()
-            assertEquals(SuggestSubagentTaskSubmissionResult.Submitted, suggestions.submit(observed.callId, observed.revision, true))
-            assertEquals(1, batchCalls)
-            assertEquals(1, createCalls)
-            assertEquals(1, completeCalls)
-            assertEquals(3, services.global.getSessionCatalog(true).size)
-            view.current().state.first { it == AgentStateValue.AssistantMessage }
+            view.current().running.first { !it }
+            questions.state.first { it == RequestUserInputState.Idle }
+            val answered = view.current().storage.getAskUsersAt(view.current().latestIndex.value).single()
+            assertEquals(created.askId, answered.askId)
+            assertEquals(listOf("user_note: private answer"), answered.answer?.response?.answers?.get("secret")?.answers)
         }
     }
 }

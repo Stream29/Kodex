@@ -20,8 +20,7 @@ import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import com.jakewharton.mosaic.ui.unit.IntSize
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryKind
@@ -46,12 +45,12 @@ import kotlin.time.Duration.Companion.milliseconds
 
 val historyIndexRendererTest by testSuite {
     test("keyboard menu Details renders redacted question rows and never their raw fallback") {
-        val secret = StableRequestUserInputToolEvent(
-            "secret",
+        val secret = StableAskUserEvent(
+            askId = 1,
             arguments = RequestUserInputArgs(listOf(RequestUserInputQuestion("password", "Password", "Enter password", isSecret = true))),
-            result = StableRequestUserInputResult.Answered(RequestUserInputResponse(mapOf(
+            response = RequestUserInputResponse(mapOf(
                 "password" to RequestUserInputAnswer(listOf("SECRET")),
-            ))),
+            )),
         )
         val vm = RenderIndex(listOf(
             entry(7, "Question").copy(
@@ -268,8 +267,8 @@ val historyIndexRendererTest by testSuite {
         }
     }
     test("hover uses shared read-only questions projection and never reveals secret answers") {
-        val event = StableRequestUserInputToolEvent(
-            callId = "request",
+        val event = StableAskUserEvent(
+            askId = 1,
             arguments = RequestUserInputArgs(listOf(
                 RequestUserInputQuestion("layout", "Layout", "Which layout?", options = listOf(
                     RequestUserInputQuestionOption("Compact", "Use less space"),
@@ -277,10 +276,10 @@ val historyIndexRendererTest by testSuite {
                 )),
                 RequestUserInputQuestion("secret", "Credential", "Enter token", isSecret = true),
             )),
-            result = StableRequestUserInputResult.Answered(RequestUserInputResponse(mapOf(
+            response = RequestUserInputResponse(mapOf(
                 "layout" to RequestUserInputAnswer(listOf("Compact")),
                 "secret" to RequestUserInputAnswer(listOf("never-render-secret")),
-            ))),
+            )),
         )
         runMosaicTest {
             setContentAndSnapshot {
@@ -478,6 +477,5 @@ private fun expectedIndexKindName(kind: HistoryIndexEntryKind): String = when (k
     HistoryIndexEntryKind.DeveloperMessage -> "Developer message"
     HistoryIndexEntryKind.AgentMessage -> "Agent message"
     HistoryIndexEntryKind.RequestUserInput -> "Request user input"
-    HistoryIndexEntryKind.SuggestSubagents -> "suggest subagents"
     HistoryIndexEntryKind.PlanUpdate -> "Plan update"
 }

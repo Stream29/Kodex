@@ -12,13 +12,12 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
 import io.github.stream29.kodex.app.ui.compose.*
 import io.github.stream29.kodex.cli.app.*
 import io.github.stream29.kodex.rpc.models.AgentStateValue
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import kotlinx.io.files.Path
 import kotlin.test.*
 import kotlin.time.Duration.Companion.milliseconds
@@ -82,8 +81,8 @@ val offscreenAgentStatusTest by testSuite {
                 scene.click("Compact")
                 assertEquals(listOf("resume", "compact"), agent.commands)
             }
-            phase = AgentStateValue.ToolPending(listOf(PendingRequestUserInputToolEvent(
-                "question", arguments = RequestUserInputArgs(listOf(RequestUserInputQuestion("id", "header", "question"))),
+            phase = AgentStateValue.ToolPending(listOf(PendingReadMediaToolEvent(
+                "media", arguments = ReadMediaToolArguments("sample.png"),
             )))
             tokens = 0L
             scene.settle { scene.hasText("Clear pending") && scene.hasText("0t") }

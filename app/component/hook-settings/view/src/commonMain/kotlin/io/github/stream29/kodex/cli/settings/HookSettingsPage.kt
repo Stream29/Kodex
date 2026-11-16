@@ -116,7 +116,6 @@ public actual fun HookDeleteContent(
 
 internal fun NotificationHookType.settingsLabel(): String = when (this) {
     NotificationHookType.StopAssistantMessage -> "Assistant message"
-    NotificationHookType.StopRequestUserInput -> "Request user input"
-    NotificationHookType.StopSuggestSubagent -> "Suggest subagent"
+    NotificationHookType.AskUserCreated -> "Ask user created"
     NotificationHookType.StopUnhandledError -> "Unhandled error"
 }

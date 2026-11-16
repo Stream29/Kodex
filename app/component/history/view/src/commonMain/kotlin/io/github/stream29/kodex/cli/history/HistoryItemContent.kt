@@ -75,14 +75,6 @@ private fun StoredContent(
                 is RequestUserInputHistoryItemState.Ready -> renderer.Event(current.event, current.elapsed, null, shellSessions)
             }
         }
-        is SuggestSubagentTaskHistoryItemViewModel -> {
-            val state by item.state.collectAsState()
-            when (val current = state) {
-                is SuggestSubagentTaskHistoryItemState.Loading -> renderer.Loading()
-                SuggestSubagentTaskHistoryItemState.Failed -> renderer.Error()
-                is SuggestSubagentTaskHistoryItemState.Ready -> renderer.Event(current.event, current.elapsed, null, shellSessions)
-            }
-        }
         is PlanUpdateHistoryItemViewModel -> {
             val state by item.state.collectAsState()
             when (val current = state) {
@@ -169,7 +161,6 @@ private fun HistoryItemViewModel.storageIndex(): Int = when (this) {
     is ReasoningHistoryItemViewModel -> index
     is ToolHistoryItemViewModel -> index
     is RequestUserInputHistoryItemViewModel -> index
-    is SuggestSubagentTaskHistoryItemViewModel -> index
     is PatchHistoryItemViewModel -> index
     is PlanUpdateHistoryItemViewModel -> index
     is ContextCompactionHistoryItemViewModel -> index

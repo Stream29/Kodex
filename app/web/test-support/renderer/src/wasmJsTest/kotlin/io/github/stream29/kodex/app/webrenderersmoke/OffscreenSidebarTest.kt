@@ -404,7 +404,6 @@ internal open class SidebarTestAgent(
     override val history: AgentHistoryViewModel get() = unused()
     override val runtimeConfiguration: RuntimeConfigurationViewModel get() = unused()
     override val requestUserInput: RequestUserInputViewModel get() = unused()
-    override val suggestSubagentTask: SuggestSubagentTaskViewModel get() = unused()
     override val state: StateFlow<AgentStateValue> get() = unused()
     override val running: StateFlow<Boolean> get() = unused()
     override val latestIndex: StateFlow<Int> get() = unused()

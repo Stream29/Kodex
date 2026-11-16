@@ -36,6 +36,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
@@ -51,7 +52,10 @@ val agentHistoryBoundedWindowTest by testSuite {
             // A round trip visits 2,000 rows across multi-item pages. This is a
             // hang guard, not a platform-independent throughput benchmark.
             val navigationBudget = 300.seconds
-            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val repository = InMemoryKodexSessionRepository(
+                testKodexAgentDependencies(),
+                sessionTtl = Duration.INFINITE,
+            )
             val modelOwner = supervisorChildScope()
             var ownedModel: AgentHistoryViewModel? = null
             try {

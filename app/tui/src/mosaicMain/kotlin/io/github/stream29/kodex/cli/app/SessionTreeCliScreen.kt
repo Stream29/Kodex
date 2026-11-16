@@ -5,14 +5,10 @@ import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationMen
 import io.github.stream29.kodex.cli.historyindex.HistoryIndexInteractionRequest
 import io.github.stream29.kodex.cli.historyindex.HistoryIndexSide
 
-import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns
-import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskConfigurationMenus
-
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -157,12 +153,6 @@ public actual fun SessionTreeCliScreen(
         else -> null
     }
     val runtimeDropdowns = RuntimeConfigurationDropdowns.remember(runtimeConfiguration)
-    val pendingSuggestion = selectedAgent?.let { agent ->
-        key(agent) { agent.suggestSubagentTask.state.collectAsState().value }
-    } as? io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState.Pending
-    val suggestionDropdowns = SuggestSubagentTaskDropdowns.remember(
-        selectedAgent?.suggestSubagentTask, pendingSuggestion?.callId,
-    )
 
     fun updateShellSessionRowHover(
         request: ShellSessionInteractionRequest,
@@ -359,7 +349,6 @@ public actual fun SessionTreeCliScreen(
                                             rows = contentRows,
                                             newLineKey = currentNewLineKey,
                                             dropdowns = runtimeDropdowns,
-                                            suggestionDropdowns = suggestionDropdowns,
                                             composerFocusRequester = composerFocusRequester,
                                             onOpenHistoryEntryContextMenu = { generation, storageIndex, item, anchor, position ->
                                                 overlays.openMenu(ApplicationOverlayMenu.History(ApplicationHistoryMenuOpening(
@@ -373,9 +362,6 @@ public actual fun SessionTreeCliScreen(
                                             },
                                             onBrowseWorkingDirectory = {
                                                 rootActions.browseWorkingDirectory(agent)
-                                            },
-                                            onBrowseSuggestedWorkingDirectory = { callId ->
-                                                rootActions.browseSuggestedWorkingDirectory(agent, callId)
                                             },
                                             onOpenSettings = {
                                                 rootActions.openSettings(selected)
@@ -582,13 +568,6 @@ public actual fun SessionTreeCliScreen(
                 },
                 onOperationFailure = onOperationFailure,
             )
-            if (selectedAgent != null && pendingSuggestion != null) {
-                SuggestSubagentTaskConfigurationMenus(
-                    viewModel = selectedAgent.suggestSubagentTask,
-                    state = pendingSuggestion,
-                    dropdowns = suggestionDropdowns,
-                )
-            }
             if (runtimeConfiguration != null) {
                 RuntimeConfigurationMenus(
                     viewModel = runtimeConfiguration,

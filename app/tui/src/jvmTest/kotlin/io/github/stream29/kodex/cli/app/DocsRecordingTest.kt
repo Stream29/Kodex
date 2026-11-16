@@ -26,8 +26,6 @@ import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.cli.agent.RequestUserInputPanel
-import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskPanel
-import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskConfigurationMenus
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
@@ -35,6 +33,7 @@ import io.github.stream29.kodex.cli.components.rememberScrollState
 import io.github.stream29.kodex.cli.components.verticalScroll
 import io.github.stream29.kodex.cli.history.render
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
 import io.github.stream29.kodex.utils.applypatch.Patch
 import io.github.stream29.kodex.utils.applypatch.UpdateFileHunk
 import io.github.stream29.kodex.utils.applypatch.UpdateFileChunk
@@ -42,15 +41,12 @@ import io.github.stream29.kodex.utils.applypatch.AddFileHunk
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.rpc.models.AgentStateValue
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.requestuserinput.*
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.io.files.Path
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -141,80 +137,6 @@ val docsRecordingTest by testSuite {
         clip.save()
     }
 
-    test("suggestion rejection uses the production approval panel") {
-        val initial = SuggestSubagentTaskState.Pending(
-            callId = "docs-suggestions",
-            arguments = SuggestSubagentTaskArgs(listOf(
-                SuggestedSubagentTask("Review tests", "Review the changed tests; do not edit files."),
-                SuggestedSubagentTask("Review docs", "Check examples against the implementation."),
-            )),
-            configuration = SuggestedSessionConfiguration(
-                OpenAiModelId("demo-model"), ReasoningEffort.Medium, ServiceTier.Default,
-                Path("/work/demo"), RequestUserInputMode.AskUser,
-            ),
-        )
-        var decision: Boolean? = null
-        val model = object : io.github.stream29.kodex.app.test.SuggestionTestViewModel() {
-            override val state = MutableStateFlow<SuggestSubagentTaskState>(initial)
-            override fun updateFeedback(callId: String, text: String): Boolean {
-                val current = state.value as SuggestSubagentTaskState.Pending
-                state.value = current.copy(feedback = text, revision = current.revision + 1)
-                return true
-            }
-            override fun updateConfiguration(callId: String, configuration: SuggestedSessionConfiguration): Boolean {
-                val current = state.value as SuggestSubagentTaskState.Pending
-                state.value = current.copy(configuration = configuration, revision = current.revision + 1)
-                return true
-            }
-            override suspend fun submit(callId: String, expectedRevision: Long, accepted: Boolean): SuggestSubagentTaskSubmissionResult {
-                assertEquals((state.value as SuggestSubagentTaskState.Pending).revision, expectedRevision)
-                decision = accepted
-                return SuggestSubagentTaskSubmissionResult.Submitted
-            }
-            override fun close() = Unit
-        }
-        val clip = DocsClip("suggestions")
-        model.models.value = listOf(ModelInfo(
-            initial.configuration.model, "Offline model fixture",
-            supportedReasoningLevels = listOf(
-                ReasoningEffortPreset(ReasoningEffort.Medium, "Medium"),
-                ReasoningEffortPreset(ReasoningEffort.High, "High"),
-            ),
-        ))
-        runMosaicTest(MosaicSnapshots) {
-            setContentAndSnapshot {
-                val state by model.state.collectAsState()
-                val pending = state as SuggestSubagentTaskState.Pending
-                val dropdowns = io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(model, pending.callId)
-                TuiPopupHost(Modifier.width(80).height(18)) {
-                    SuggestSubagentTaskPanel(model, pending, 80, 18, dropdowns, {})
-                    SuggestSubagentTaskConfigurationMenus(model, pending, dropdowns)
-                }
-            }
-            clip.add(settle(), "Review tests")
-            clickLabel("[ask user]")
-            clip.add(settle(), "no question")
-            clickLabel("no question")
-            clip.add(settle(), "[no question]")
-            clickLabel("[demo-model medium]")
-            clip.add(settle(), "demo-model")
-            clickLabel("[demo-model ")
-            clip.add(settle(), "high")
-            clickLabel("[high")
-            clip.add(settle(), "default")
-            clickLabel("[default")
-            clip.add(settle(), "demo-model high")
-            clickLabel("Reject")
-            clip.add(settle(), "Submit rejection")
-            for (char in "Keep this review in one session") sendKeyEvent(KeyboardEvent(codepoint = char.code))
-            clip.add(settle(), "Keep this review")
-            sendKeyEvent(KeyboardEvent(codepoint = 13))
-            settle()
-            assertEquals(false, decision)
-        }
-        clip.save()
-    }
-
     test("runtime screen renders running steer and distinct idle controls") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
@@ -271,10 +193,7 @@ val docsRecordingTest by testSuite {
                         AgentRuntimeScreen(
                             model, 80, 18, NewLineKey.ShiftEnter,
                             RuntimeConfigurationDropdowns.remember(model),
-                            io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(
-                                model.suggestSubagentTask, null,
-                            ),
-                            { _, _, _, _, _ -> }, {}, {}, {},
+                            { _, _, _, _, _ -> }, {}, {},
                         )
                     }
                 }
@@ -285,8 +204,8 @@ val docsRecordingTest by testSuite {
                 clip.add(settle(), "Pending steer")
                 clickLabel("Stop")
                 clip.add(settle(), "Resume")
-                phase.value = AgentStateValue.ToolPending(listOf(PendingRequestUserInputToolEvent(
-                    "example", arguments = RequestUserInputArgs(listOf(RequestUserInputQuestion("id", "Header", "Question"))),
+                phase.value = AgentStateValue.ToolPending(listOf(PendingReadMediaToolEvent(
+                    "example", arguments = ReadMediaToolArguments("sample.png"),
                 )))
                 clip.add(settle(), "Clear pending")
                 clickLabel("Clear pending")
@@ -358,7 +277,7 @@ val docsRecordingTest by testSuite {
 
 private class DocsQuestions : RequestUserInputViewModel {
     override val state = MutableStateFlow<RequestUserInputState>(RequestUserInputState.Pending(
-        callId = "docs-questions",
+        askId = 1,
         arguments = RequestUserInputArgs(listOf(
             RequestUserInputQuestion("scope", "Scope", "What should the review preserve?", options = listOf(
                 RequestUserInputQuestionOption("Public API", "Keep existing callers working."),
@@ -374,15 +293,15 @@ private class DocsQuestions : RequestUserInputViewModel {
         state.value = current.copy(answers = current.answers + (id to answer), revision = current.revision + 1)
         return true
     }
-    override fun selectOption(callId: String, questionId: String, label: String) =
+    override fun selectOption(askId: Int, questionId: String, label: String) =
         answer(questionId, RequestUserInputDraftAnswer.Option(label))
-    override fun selectOther(callId: String, questionId: String): Boolean {
+    override fun selectOther(askId: Int, questionId: String): Boolean {
         val previous = (state.value as RequestUserInputState.Pending).answers[questionId]
         return answer(questionId, previous as? RequestUserInputDraftAnswer.FreeForm ?: RequestUserInputDraftAnswer.FreeForm(""))
     }
-    override fun updateFreeForm(callId: String, questionId: String, text: String) =
+    override fun updateFreeForm(askId: Int, questionId: String, text: String) =
         answer(questionId, RequestUserInputDraftAnswer.FreeForm(text))
-    override suspend fun submit(callId: String, expectedRevision: Long): RequestUserInputSubmissionResult {
+    override suspend fun submit(askId: Int, expectedRevision: Long): RequestUserInputSubmissionResult {
         val current = state.value as RequestUserInputState.Pending
         assertEquals(current.revision, expectedRevision)
         assertTrue(current.canSubmit)

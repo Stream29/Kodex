@@ -148,12 +148,12 @@ val offscreenHookSettingsTest by testSuite {
             scene.settle { scene.hasText("Edit Hook") }
             scene.editHookField(0, " New name ")
             scene.editHookField(1, "echo value")
-            scene.click("Request user input")
+            scene.click("Ask user created")
             scene.click("Assistant message")
             scene.click("Save")
             scene.settle { child.state.value.dialog == HookSettingsDialog.Hidden }
             assertEquals(listOf(NotificationHook(
-                "New name", setOf(NotificationHookType.StopRequestUserInput), "echo value",
+                "New name", setOf(NotificationHookType.AskUserCreated), "echo value",
             )), ports.saved)
             assertEquals("notify", ports.hooks.value.single().name)
             assertEquals(1, ports.releases)
@@ -183,7 +183,7 @@ val offscreenHookSettingsTest by testSuite {
             }
             try {
                 scene.settle { scene.hasText("Add Hook") }
-                assertFalse(scene.hasText("Request user input"))
+                assertFalse(scene.hasText("Ask user created"))
                 val staleDismiss = assertNotNull(dismiss)
                 val staleSave = assertNotNull(save)
                 val staleDraft = assertNotNull(draft)

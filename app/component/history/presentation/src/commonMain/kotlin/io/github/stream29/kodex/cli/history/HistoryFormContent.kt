@@ -1,8 +1,7 @@
 package io.github.stream29.kodex.cli.history
 
 import androidx.compose.runtime.Composable
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import kotlin.time.Duration
@@ -11,14 +10,14 @@ import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 public actual fun HistoryRequestUserInputContent(
-    event: StableRequestUserInputToolEvent, elapsed: Duration?, renderer: HistoryFormRenderer,
+    event: StableAskUserEvent, elapsed: Duration?, renderer: HistoryFormRenderer,
 ) {
     renderer.Frame {
         event.requestUserInputHistoryRows(elapsed).forEach { renderer.Row(it) }
     }
 }
 
-public actual fun StableRequestUserInputToolEvent.requestUserInputHistoryRows(
+public actual fun StableAskUserEvent.requestUserInputHistoryRows(
     elapsed: Duration?,
 ): List<RequestUserInputHistoryRowModel> = buildList {
     if (arguments.questions.isEmpty()) {
@@ -29,7 +28,7 @@ public actual fun StableRequestUserInputToolEvent.requestUserInputHistoryRows(
             ),
         )
     } else {
-        val answered = (result as? StableRequestUserInputResult.Answered)?.response?.answers
+        val answered = response.answers
         arguments.questions.forEachIndexed { index, question ->
             add(
                 RequestUserInputHistoryRowModel(
@@ -38,19 +37,10 @@ public actual fun StableRequestUserInputToolEvent.requestUserInputHistoryRows(
                     role = RequestUserInputHistoryRowRole.Header,
                 ),
             )
-            answered?.get(question.id)?.let { answer ->
+            answered[question.id]?.let { answer ->
                 addAll(answer.readOnlyRows(question))
             }
         }
-    }
-
-    (result as? StableRequestUserInputResult.Failure)?.let { failure ->
-        add(
-            RequestUserInputHistoryRowModel(
-                value = "Failed to submit: ${failure.message}",
-                role = RequestUserInputHistoryRowRole.Error,
-            ),
-        )
     }
 }
 

@@ -23,11 +23,11 @@ public actual fun RequestUserInputPanel(
 private class MosaicUserInputRenderer(private val columns: Int, private val rows: Int) : UserInputRenderer {
     @Composable
     override fun Frame(
-        callId: String, revision: Long, questionCount: Int, content: @Composable (UserInputRenderScope) -> Unit,
+        askId: Int, revision: Long, questionCount: Int, content: @Composable (UserInputRenderScope) -> Unit,
     ) {
-        val scroll = remember(callId) { ScrollState() }
-        val focus = remember(callId) { MosaicUserInputFocus(questionCount) }
-        val controls = remember(callId, columns, focus) { MosaicUserInputScope(callId, columns, focus) }
+        val scroll = remember(askId) { ScrollState() }
+        val focus = remember(askId) { MosaicUserInputFocus(questionCount) }
+        val controls = remember(askId, columns, focus) { MosaicUserInputScope(askId.toString(), columns, focus) }
         Column(Modifier.width(columns.coerceAtLeast(1)).height(rows).verticalScroll(scroll)) { content(controls) }
         SideEffect { focus.applyPending() }
         LaunchedEffect(focus.pending, revision) {

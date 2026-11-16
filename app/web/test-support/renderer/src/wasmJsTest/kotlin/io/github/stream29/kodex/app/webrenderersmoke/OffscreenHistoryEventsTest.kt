@@ -33,17 +33,16 @@ import kotlin.time.Duration.Companion.seconds
 import io.github.stream29.kodex.app.ui.compose.rememberComposeHistoryContentRenderer
 import io.github.stream29.kodex.cli.history.*
 import io.github.stream29.kodex.openai.*
-import io.github.stream29.kodex.tool.imagegeneration.*
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.toolsearch.*
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventOutput
+import io.github.stream29.kodex.tool.readmedia.*
 import io.github.stream29.kodex.tool.unifiedexec.*
-import io.github.stream29.kodex.tool.viewimage.*
 import io.github.stream29.kodex.utils.applypatch.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.serialization.json.*
 import kotlin.test.*
 import kotlin.math.abs
+import kotlin.time.Instant
 
 private val emptyHistoryArguments = JsonObject(emptyMap())
 
@@ -129,122 +128,6 @@ val offscreenHistoryEventsTest by testSuite {
         } }
     }
 
-    for (width in listOf(180, 360)) for (scale in listOf(1f, 1.5f)) for (pending in listOf(false, true)) {
-        test("MCP typed JSON preserves fields and wraps width=$width scale=$scale pending=$pending") { offscreenTest {
-            val payload = "漢字 " + "preserve ".repeat(23)
-            val arguments = Json.parseToJsonElement("""{"query":"$payload","values":[1,true]}""")
-            val structured = Json.parseToJsonElement("""[{"value":"$payload"},2,false]""")
-            val argsText = "Arguments: $arguments"
-            val resultText = "Structured result: $structured"
-            val plain = "Content: ordinary text [unchanged]"
-            val summary = if (pending) "Running mcp.inspect" else "mcp.inspect"
-            val scene = OffscreenScene.create(width = width, height = 2500) {
-                CompositionLocalProvider(LocalDensity provides Density(1f, scale)) {
-                    val renderer = rememberComposeHistoryContentRenderer()
-                    if (pending) HistoryEventContent(
-                        PendingMcpToolEvent("mcp-pending", name = "inspect", namespace = "mcp", arguments = arguments),
-                        renderer,
-                    ) else HistoryEventContent(
-                        StableMcpToolEvent("mcp-stable", name = "inspect", namespace = "mcp", arguments = arguments,
-                            result = CallToolResult(content = listOf(
-                                Json.parseToJsonElement("""{"type":"text","text":"ordinary text [unchanged]"}"""),
-                                Json.parseToJsonElement("""{"type":"image","data":"BASE64SECRET"}"""),
-                            ), structuredContent = structured, meta = JsonPrimitive("META-SECRET"))),
-                        renderer,
-                    )
-                }
-            }
-            try {
-                scene.settle { scene.hasDescription("History tool: $summary") }
-                scene.clickDescription("History tool: $summary")
-                scene.settle { scene.hasText("Arguments") }
-                assertFalse(scene.hasText(argsText))
-                scene.click("Arguments")
-                scene.settle { scene.hasText(argsText) }
-                fun layout(value: String): TextLayoutResult {
-                    val layouts = mutableListOf<TextLayoutResult>()
-                    assertTrue(assertNotNull(scene.text(value).config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
-                    return layouts.single()
-                }
-                assertEquals(argsText, layout(argsText).layoutInput.text.text)
-                assertEquals(FontFamily.Monospace, layout(argsText).layoutInput.style.fontFamily)
-                assertTrue(layout(argsText).layoutInput.softWrap && layout(argsText).lineCount > 1)
-                if (!pending) {
-                    assertFalse(scene.hasText(resultText))
-                    scene.click("Result")
-                    scene.settle { scene.hasText(resultText) && scene.hasText(plain) }
-                    assertEquals(resultText, layout(resultText).layoutInput.text.text)
-                    assertEquals(FontFamily.Monospace, layout(resultText).layoutInput.style.fontFamily)
-                    assertTrue(layout(resultText).layoutInput.softWrap && layout(resultText).lineCount > 1)
-                    assertNotEquals(FontFamily.Monospace, layout(plain).layoutInput.style.fontFamily)
-                    assertTrue(scene.hasText("Image: [inline image, 12 characters]"))
-                    assertFalse(scene.containsHistoryText("BASE64SECRET"))
-                    assertFalse(scene.containsHistoryText("META-SECRET"))
-                }
-            } finally { scene.close() }
-        } }
-    }
-    test("MCP media previews stay redacted for arguments and structured results") { offscreenTest {
-        val media = Json.parseToJsonElement("""{"nested":[{"data":"SECRET-DATA"}]}""")
-        val event = StableMcpToolEvent("mcp-media", name = "inspect", namespace = "mcp", arguments = media,
-            result = CallToolResult(content = emptyList(), structuredContent = media, isError = true))
-        val scene = OffscreenScene.create(width = 360) {
-            HistoryEventContent(event, rememberComposeHistoryContentRenderer())
-        }
-        try {
-            scene.settle { scene.hasDescription("History tool: Failed to run mcp.inspect") }
-            scene.clickDescription("History tool: Failed to run mcp.inspect")
-            scene.settle { scene.hasText("Arguments") && scene.hasText("Result") }
-            scene.click("Arguments")
-            scene.settle { scene.hasText("Arguments: [structured data with inline media]") }
-            scene.click("Result")
-            scene.settle {
-                scene.hasText("Arguments: [structured data with inline media]") &&
-                    scene.hasText("Structured result: [structured data with inline media]")
-            }
-            assertFalse(scene.containsHistoryText("SECRET-DATA"))
-        } finally { scene.close() }
-    } }
-    test("MCP primitive and array JSON use the recorded preview while plain text stays plain") { offscreenTest {
-        val event = StableMcpToolEvent("mcp-values", name = "inspect", namespace = "mcp", arguments = JsonPrimitive(42),
-            result = CallToolResult(content = listOf(Json.parseToJsonElement("[1,2]")),
-                structuredContent = JsonPrimitive(false)))
-        val scene = OffscreenScene.create(width = 360) {
-            HistoryEventContent(event, rememberComposeHistoryContentRenderer())
-        }
-        try {
-            scene.settle { scene.hasDescription("History tool: mcp.inspect") }
-            scene.clickDescription("History tool: mcp.inspect")
-            scene.settle { scene.hasText("Arguments") && scene.hasText("Result") }
-            scene.click("Arguments")
-            scene.settle { scene.hasText("Arguments: 42") }
-            scene.click("Result")
-            val values = listOf("Arguments: 42", "Structured result: false", "Content: [1,2]")
-            scene.settle { values.all(scene::hasText) }
-            values.forEach { value ->
-                val layouts = mutableListOf<TextLayoutResult>()
-                assertTrue(assertNotNull(scene.text(value).config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
-                assertEquals(FontFamily.Monospace, layouts.single().layoutInput.style.fontFamily)
-            }
-        } finally { scene.close() }
-    } }
-    test("empty MCP result remains an ordinary no-content message") { offscreenTest {
-        val event = StableMcpToolEvent("mcp-empty", name = "inspect", namespace = "mcp",
-            arguments = emptyHistoryArguments, result = CallToolResult(content = emptyList()))
-        val scene = OffscreenScene.create(width = 360) {
-            HistoryEventContent(event, rememberComposeHistoryContentRenderer())
-        }
-        try {
-            scene.settle { scene.hasDescription("History tool: mcp.inspect") }
-            scene.clickDescription("History tool: mcp.inspect")
-            scene.settle { scene.hasText("Result") }
-            scene.click("Result")
-            scene.settle { scene.hasText("Result: no content") }
-            val layouts = mutableListOf<TextLayoutResult>()
-            assertTrue(assertNotNull(scene.text("Result: no content").config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
-            assertNotEquals(FontFamily.Monospace, layouts.single().layoutInput.style.fontFamily)
-        } finally { scene.close() }
-    } }
     for (status in listOf("completed", "failed")) {
         test("empty server tool search retains status and arbitrary input status=$status") { offscreenTest {
             val event = StableServerToolSearch(
@@ -313,142 +196,6 @@ val offscreenHistoryEventsTest by testSuite {
             } finally { scene.close() }
         } }
     }
-    test("empty local tool search preserves the query without inventing results") { offscreenTest {
-        val event = StableToolSearchEvent("empty", arguments = SearchToolCallParams("no match"),
-            result = ToolSearchResult.Success(emptyList()))
-        val scene = OffscreenScene.create(width = 360) {
-            HistoryEventContent(event, rememberComposeHistoryContentRenderer())
-        }
-        try {
-            scene.settle { scene.hasDescription("History tool: Search available tools") }
-            scene.key(Key.Tab)
-            scene.key(Key.Enter)
-            scene.settle { scene.hasText("tool_search; query=no match") }
-            assertFalse(scene.hasText("Result"))
-            scene.key(Key.Enter)
-            scene.settle { !scene.hasText("tool_search; query=no match") }
-        } finally { scene.close() }
-    } }
-    for (width in listOf(180, 360)) for (scale in listOf(1f, 1.5f)) {
-        test("local tool search definition retains namespace and wraps in monospace width=$width scale=$scale") { offscreenTest {
-            val longDescription = "Unicode 漢字 and long content " + "preserved ".repeat(28)
-            val tools = Json.decodeFromString<List<LoadableToolSpec>>(
-                """[
-                  {"type":"namespace","name":"calendar","description":"$longDescription","tools":[
-                    {"type":"function","name":"create","description":"first","strict":true,
-                     "defer_loading":true,"parameters":{"type":"object","properties":{}}},
-                    {"type":"function","name":"delete","description":"second",
-                     "parameters":{"type":"object","properties":{}}}
-                  ]},
-                  {"type":"function","name":"independent","description":"independent body",
-                   "parameters":{"type":"object","properties":{}}}
-                ]""",
-            )
-            val expected = Json { prettyPrint = true; encodeDefaults = true }
-                .encodeToString(LoadableToolSpec.serializer(), tools.first())
-            val event = StableToolSearchEvent("search", arguments = SearchToolCallParams("calendar", 4),
-                result = ToolSearchResult.Success(tools))
-            val scene = OffscreenScene.create(width = width, height = 3000) {
-                CompositionLocalProvider(LocalDensity provides Density(1f, scale)) {
-                    HistoryEventContent(event, rememberComposeHistoryContentRenderer())
-                }
-            }
-            try {
-                scene.settle("outer") { scene.hasDescription("History tool: Search available tools") }
-                scene.key(Key.Tab)
-                scene.key(Key.Enter)
-                scene.settle("definitions listed") { scene.hasText("calendar.create") && scene.hasText("calendar.delete") }
-                assertFalse(scene.hasText(expected))
-                scene.click("calendar.create")
-                scene.settle("first definition open") { scene.hasText(expected) }
-                val layouts = mutableListOf<TextLayoutResult>()
-                assertTrue(assertNotNull(scene.text(expected).config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
-                val layout = layouts.single()
-                assertEquals(expected, layout.layoutInput.text.text)
-                assertEquals(FontFamily.Monospace, layout.layoutInput.style.fontFamily)
-                assertTrue(layout.layoutInput.softWrap)
-                assertTrue(layout.lineCount > expected.lines().size, "Long recorded JSON must visually wrap")
-                assertFalse(scene.containsHistoryText("independent body"))
-                val headingBounds = scene.text("calendar.create").boundsInWindow
-                assertTrue(headingBounds.top >= 0f && headingBounds.bottom <= 3000f,
-                    "First disclosure must remain within viewport: $headingBounds")
-                scene.click("calendar.create")
-                repeat(3) { scene.advance(); kotlinx.coroutines.delay(1) }
-                assertFalse(scene.hasText(expected), "First disclosure remains open after clicking $headingBounds")
-                scene.settle("first definition closed; heading=$headingBounds") { !scene.hasText(expected) }
-                scene.click("calendar.delete")
-                scene.settle("second definition open") { scene.hasText(expected) }
-            } finally { scene.close() }
-        } }
-    }
-    for (dark in listOf(false, true)) for (invalid in listOf(false, true)) {
-        test("local tool search failure uses recorded theme error dark=$dark invalid=$invalid") { offscreenTest {
-            val message = "  preserved error\n  details  "
-            val result = if (invalid) ToolSearchResult.InvalidArguments(message)
-                else ToolSearchResult.ExecutionFailure(message)
-            val event = StableToolSearchEvent("search-error", arguments = SearchToolCallParams("my query", 3),
-                result = result)
-            val scheme = if (dark) darkColorScheme() else lightColorScheme()
-            val text = "error: $message"
-            val scene = OffscreenScene.create(width = 360) {
-                MaterialTheme(colorScheme = scheme) {
-                    HistoryEventContent(event, rememberComposeHistoryContentRenderer())
-                }
-            }
-            try {
-                scene.settle { scene.hasDescription("History tool: Failed to search available tools") }
-                scene.key(Key.Tab)
-                scene.key(Key.Enter)
-                scene.settle { scene.hasText(text) }
-                assertTrue(scene.hasText("tool_search; query=my query; limit=3"))
-                val layouts = mutableListOf<TextLayoutResult>()
-                assertTrue(assertNotNull(scene.text(text).config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
-                assertEquals(text, layouts.single().layoutInput.text.text)
-                assertEquals(scheme.error, layouts.single().layoutInput.style.color)
-            } finally { scene.close() }
-        } }
-    }
-    for (dark in listOf(false, true)) for (failure in listOf(false, true)) for (empty in listOf(false, true)) {
-        test("web.run result preserves operations and recorded text dark=$dark failure=$failure empty=$empty") { offscreenTest {
-            val value = if (empty) "" else "  recorded [value]\n  second line  "
-            val result = if (failure) StableWebSearchResult.Failure(value)
-                else StableWebSearchResult.Success(SearchResponse(output = value, encryptedOutput = "PRIVATE-SIDE-CHANNEL"))
-            val event = StableWebSearchToolEvent(
-                "web-fake", commands = SearchCommands(
-                    searchQuery = listOf(SearchQuery("alpha"), SearchQuery("beta")),
-                    open = listOf(OpenOperation("ref", 3)),
-                ), result = result,
-            )
-            val scheme = if (dark) darkColorScheme() else lightColorScheme()
-            val summary = if (failure) "Failed to search the web: alpha" else "Search the web: alpha"
-            val text = "${if (failure) "error" else "output"}: $value"
-            val scene = OffscreenScene.create(width = 360) {
-                MaterialTheme(colorScheme = scheme) {
-                    HistoryEventContent(event, rememberComposeHistoryContentRenderer())
-                }
-            }
-            try {
-                scene.settle { scene.hasDescription("History tool: $summary") }
-                assertFalse(scene.hasText(text))
-                scene.key(Key.Tab)
-                scene.key(Key.Enter)
-                scene.settle { scene.hasText(text) }
-                val metadataLayouts = mutableListOf<TextLayoutResult>()
-                assertTrue(assertNotNull(scene.text("web.run").config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(metadataLayouts))
-                assertEquals(scheme.onSurfaceVariant, metadataLayouts.single().layoutInput.style.color)
-                assertTrue(scene.hasText("Search alpha"))
-                assertTrue(scene.hasText("Search beta"))
-                assertTrue(scene.hasText("Open ref at line 3"))
-                assertFalse(scene.hasText("PRIVATE-SIDE-CHANNEL"))
-                val layouts = mutableListOf<TextLayoutResult>()
-                assertTrue(assertNotNull(scene.text(text).config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
-                assertEquals(text, layouts.single().layoutInput.text.text)
-                assertEquals(if (failure) scheme.error else scheme.onSurface, layouts.single().layoutInput.style.color)
-                scene.key(Key.Enter)
-                scene.settle { !scene.hasText(text) }
-            } finally { scene.close() }
-        } }
-    }
     for (dark in listOf(false, true)) for (pending in listOf(false, true)) for (kind in 0..1) {
         test("external invalid recorded error keeps nested disclosure and theme color dark=$dark pending=$pending kind=$kind") { offscreenTest {
             val message = "  External failure [preserve]\n  second line  "
@@ -494,16 +241,16 @@ val offscreenHistoryEventsTest by testSuite {
     for (dark in listOf(false, true)) for (pending in listOf(false, true)) for (kind in 0..2) {
         test("internal invalid recorded error uses theme color dark=$dark pending=$pending kind=$kind") { offscreenTest {
             val message = "  Bad input [preserve]\n  second line  "
-            val json = Json.parseToJsonElement("""{"query":[1,2],"private":"recorded"}""")
+            val json = Json.parseToJsonElement("""{"query":[1,2],"private":"recorded"}""").toString()
             val stableInput = when (kind) {
                 0 -> InvalidToolInvocation.Function("exec_command", arguments = "{BROKEN")
                 1 -> InvalidToolInvocation.Custom("apply_patch", input = "  RAW\n  INPUT")
-                else -> InvalidToolInvocation.ToolSearch(json)
+                else -> InvalidToolInvocation.Function("tool_search", arguments = json)
             }
             val pendingInput = when (kind) {
                 0 -> PendingInvalidToolInvocation.Function("exec_command", arguments = "{BROKEN")
                 1 -> PendingInvalidToolInvocation.Custom("apply_patch", input = "  RAW\n  INPUT")
-                else -> PendingInvalidToolInvocation.ToolSearch(json)
+                else -> PendingInvalidToolInvocation.Function("tool_search", arguments = json)
             }
             val expectedInput = when (kind) {
                 0 -> "arguments: {BROKEN"
@@ -618,20 +365,10 @@ val offscreenHistoryEventsTest by testSuite {
             "Running: pwd", "Tool: exec_command"),
         Triple(PendingCommandExecutionToolEvent("poll", action = PendingCommandExecutionAction.WriteStdin(WriteStdinArguments(77, yieldTimeMillis = 250))),
             "Waiting for terminal session 77", "Tool: write_stdin"),
-        Triple(PendingImageGenerationToolEvent("generate", arguments = ImageGenToolArguments("a prompt")),
-            "Generating an image: a prompt", "Tool: image_gen.imagegen"),
-        Triple(PendingImageViewToolEvent("view", arguments = ViewImageToolArguments("/image.png")),
-            "Viewing image: /image.png", "Tool: view_image"),
-        Triple(PendingMcpToolEvent("mcp", name = "inspect", namespace = "mcp", arguments = emptyHistoryArguments),
-            "Running mcp.inspect", "Tool: mcp.inspect"),
-        Triple(PendingRequestUserInputToolEvent("input", arguments = RequestUserInputArgs(emptyList())),
-            "Waiting for user input", "Tool: request_user_input"),
-        Triple(PendingSuggestSubagentTaskToolEvent("suggest", arguments = SuggestSubagentTaskArgs(emptyList())),
-            "Waiting for approval to create 0 Session(s)", "Tool: suggest_subagent_task"),
-        Triple(PendingToolSearchEvent("search", arguments = SearchToolCallParams("lookup")),
-            "Searching available tools: lookup", "Tool: tool_search"),
-        Triple(PendingWebSearchToolEvent("web", commands = SearchCommands(searchQuery = listOf(SearchQuery("Kotlin")))),
-            "Searching the web: Kotlin", "Tool: web.run"),
+        Triple(PendingReadMediaToolEvent("media", arguments = ReadMediaToolArguments("/image.png")),
+            "Reading media: /image.png", "Tool: read_media"),
+        Triple(PendingAwaitEventToolEvent("await", arguments = AwaitEventArguments(listOf(3, 5))),
+            "Waiting for events (terminals: 3, 5)", "Tool: await_event"),
         Triple(PendingInvalidToolCall("invalid", invocation = PendingInvalidToolInvocation.Function(
             name = "exec_command", arguments = "{BROKEN"), message = "Invalid"),
             "Model emitted an invalid tool call", "error: Invalid"),
@@ -668,35 +405,21 @@ val offscreenHistoryEventsTest by testSuite {
         } finally { scene.close() }
     } }
 
-    test("MCP image output is a safe reference and definitions remain lazy") { offscreenTest {
-        val event = StableMcpToolEvent("mcp", name = "inspect", namespace = "mcp", arguments = emptyHistoryArguments,
-            result = CallToolResult(content = listOf(Json.parseToJsonElement("""{"type":"image","data":"BASE64SECRET"}"""))))
-        val scene = OffscreenScene.create { HistoryEventContent(event, rememberComposeHistoryContentRenderer()) }
-        try {
-            scene.settle { scene.hasDescription("History tool: mcp.inspect") }
-            scene.clickDescription("History tool: mcp.inspect")
-            scene.settle { scene.hasText("Result") }
-            scene.click("Result")
-            scene.settle { scene.hasText("Image: [inline image, 12 characters]") }
-            assertFalse(scene.containsHistoryText("BASE64SECRET"))
-            scene.frame()
-        } finally { scene.close() }
-    } }
-
     val recorded = listOf(
         Triple<StableCleanEvent, String, String>(
-            StableImageGenerationToolEvent("image", arguments = ImageGenToolArguments("full\nprompt"),
-                result = StableImageGenerationResult.Success(GeneratedImageOutput("BASE64SECRET", "saved"), "/out/final.png")),
-            "Generate final.png", "saved_path: /out/final.png",
+            StableImageGenerationCall(ResponseItem.ImageGenerationCall(
+                status = "completed", result = "BASE64SECRET", revisedPrompt = "revised prompt",
+            )),
+            "Generate image", "revised_prompt: revised prompt",
         ),
         Triple(
             StableWebSearchCall(ResponseItem.WebSearchCall(action = WebSearchAction.Search("first", listOf("second", "third")))),
             "Search first", "hosted_web_search",
         ),
         Triple(
-            StableToolSearchEvent("search", arguments = SearchToolCallParams("lookup"),
-                result = ToolSearchResult.InvalidArguments("Invalid query")),
-            "Failed to search available tools", "error: Invalid query",
+            StableAwaitEventToolEvent("await", arguments = AwaitEventArguments(listOf(7)),
+                result = StableAwaitEventResult.Output(AwaitEventOutput(Instant.fromEpochMilliseconds(0)))),
+            "Wait for events", "timestamp: 1970-01-01T00:00:00Z",
         ),
         Triple(
             StableTextToolEvent("utility", name = "get_context_remaining", arguments = emptyHistoryArguments,
@@ -704,9 +427,9 @@ val offscreenHistoryEventsTest by testSuite {
             "Check remaining context", "Original returned sentence.",
         ),
         Triple(
-            StableImageViewToolEvent("view", arguments = ViewImageToolArguments("/image.png", ViewImageDetail.Original),
-                result = StableImageViewResult.Success(ViewImageToolOutput("data:image/png;base64,SECRET", ViewImageDetail.High))),
-            "View image: /image.png", "output_detail: high",
+            StableReadMediaToolEvent("media", arguments = ReadMediaToolArguments("/image.png", MediaDetail.Original),
+                result = StableReadMediaResult.Success(ReadMediaToolOutput("data:image/png;base64,SECRET", MediaDetail.High))),
+            "Read media: /image.png", "output_detail: high",
         ),
     )
     for ((index, case) in recorded.withIndex()) {

@@ -65,7 +65,6 @@ val offscreenApplicationFrameTest by testSuite {
         val oldSession = NavigationSession(7, "old", oldAgent)
         val replacement = NavigationSession(7, "new", newAgent)
         val directory = mutableListOf<AgentSettingsViewModel>()
-        val suggestion = mutableListOf<Pair<AgentViewModel, String>>()
         val settings = mutableListOf<Pair<PersistedSessionViewModel?, SettingsPage>>()
         val gate = CompletableDeferred<Unit>()
         val failure = IllegalStateException("directory unavailable in root fixture")
@@ -74,10 +73,6 @@ val offscreenApplicationFrameTest by testSuite {
                 directory += target
                 gate.await()
                 throw failure
-            }
-            override suspend fun openSuggestedWorkingDirectoryPopup(target: AgentViewModel, callId: String): ApplicationPopupState.WorkingDirectory? {
-                suggestion += target to callId
-                throw CancellationException("caller wait only")
             }
             override suspend fun openSettingsPopup(target: PersistedSessionViewModel?, initialPage: SettingsPage): ApplicationPopupState.Settings {
                 settings += target to initialPage
@@ -101,15 +96,12 @@ val offscreenApplicationFrameTest by testSuite {
             app.navigation.value = ApplicationNavigationState(listOf(replacement), ApplicationTabSelection.SelectedTab(0))
             newerOutlet = true
             scene.settle { scene.hasText("New outlet") }
-            captured.browseSuggestedWorkingDirectory(oldAgent, "exact-call")
             captured.openSettings(oldSession)
             captured.openSettings(null)
-            scene.settle { settings.size == 2 && suggestion.size == 1 }
+            scene.settle { settings.size == 2 }
             gate.complete(Unit)
             scene.settle { newFailures.size == 1 }
             assertSame(oldAgent, directory.single())
-            assertSame(oldAgent, suggestion.single().first)
-            assertEquals("exact-call", suggestion.single().second)
             assertSame(oldSession, settings.first().first)
             assertEquals(SettingsPage.CurrentSession, settings.first().second)
             assertNull(settings.last().first)

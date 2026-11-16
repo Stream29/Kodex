@@ -6,19 +6,13 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.TextStyle
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.cli.components.TuiTheme
 import kotlin.time.Duration
 
 @Composable
-public actual fun StableRequestUserInputToolEvent.renderRequestUserInput(elapsed: Duration?) {
+public actual fun StableAskUserEvent.renderRequestUserInput(elapsed: Duration?) {
     HistoryRequestUserInputContent(this, elapsed, MosaicHistoryFormRenderer)
-}
-
-@Composable
-public actual fun StableSuggestSubagentTaskToolEvent.renderSuggestion(elapsed: Duration?) {
-    HistorySuggestionContent(this, elapsed, MosaicHistoryFormRenderer)
 }
 
 private object MosaicHistoryFormRenderer : HistoryFormRenderer {

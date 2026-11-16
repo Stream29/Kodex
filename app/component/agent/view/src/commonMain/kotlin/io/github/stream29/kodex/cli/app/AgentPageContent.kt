@@ -11,7 +11,6 @@ public actual fun AgentPageContent(
     newLineKey: NewLineKey,
     renderer: AgentPageRenderer,
     onBrowseWorkingDirectory: () -> Unit,
-    onBrowseSuggestedWorkingDirectory: (String) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     key(AgentPageOwnerKey(viewModel)) {
@@ -19,27 +18,22 @@ public actual fun AgentPageContent(
         val running = viewModel.running.collectAsState().value
         val pendingSteer = viewModel.pendingSteer.collectAsState().value
         val pendingRequest = viewModel.requestUserInput.state.collectAsState().value as? RequestUserInputState.Pending
-        val pendingSuggestion = viewModel.suggestSubagentTask.state.collectAsState().value as? SuggestSubagentTaskState.Pending
         val settings = viewModel.settings.collectAsState().value
         val tokenCount = viewModel.tokenCount.collectAsState().value
         val composer = viewModel.composer.state.collectAsState().value
         val notification = viewModel.notification.collectAsState().value
         val duration = viewModel.history.activeTurnDuration.collectAsState().value
         val followsLatest = viewModel.history.followsLatest.collectAsState().value
-        val hostInteractionPending = pendingRequest != null || pendingSuggestion != null
+        val hostInteractionPending = pendingRequest != null
         val notice = notification?.takeIf { it.level == AgentNotificationLevel.Information }?.let {
             listOfNotNull(it.message, it.detail).joinToString(" ")
         }
         val inputs = AgentPageMeasureInputs(
             composer, pendingSteer, hostInteractionPending, notice, state, running, settings, tokenCount,
-            pendingToolPanelCount = (if (pendingRequest != null) 1 else 0) + (if (pendingSuggestion != null) 1 else 0),
         )
         renderer.Frame(inputs) { slots ->
             slots.History(viewModel.history, viewModel.shellSessions, state.canEditHistory(running))
             pendingRequest?.let { slots.UserInput(viewModel.requestUserInput, it) }
-            pendingSuggestion?.let {
-                slots.Suggestion(viewModel.suggestSubagentTask, it, onBrowseSuggestedWorkingDirectory)
-            }
             if (pendingSteer.isNotEmpty()) slots.PendingSteer()
             AgentHistorySeparatorContent(duration, !followsLatest, viewModel.history::requestScrollToLatest, renderer.separator)
             notice?.let { slots.Notice(it) }

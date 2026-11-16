@@ -63,9 +63,6 @@ public actual fun rememberApplicationRootActions(
             override fun browseWorkingDirectory(owner: AgentSettingsViewModel) = command {
                 viewModel.openWorkingDirectoryPopup(owner)
             }
-            override fun browseSuggestedWorkingDirectory(owner: AgentViewModel, callId: String) = command {
-                viewModel.openSuggestedWorkingDirectoryPopup(owner, callId)
-            }
             override fun openSettings(target: PersistedSessionViewModel?) = command {
                 viewModel.openSettingsPopup(target, if (target == null) SettingsPage.NewSession else SettingsPage.CurrentSession)
             }

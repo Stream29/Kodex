@@ -24,13 +24,11 @@ public actual fun AgentRuntimeScreen(
     rows: Int,
     newLineKey: NewLineKey,
     dropdowns: RuntimeConfigurationDropdowns,
-    suggestionDropdowns: SuggestSubagentTaskDropdowns,
     onOpenHistoryEntryContextMenu: (
         generation: Long, storageIndex: Int, item: HistoryItemViewModel,
         anchor: TuiPopupAnchor, clickPosition: IntOffset?,
     ) -> Unit,
     onBrowseWorkingDirectory: () -> Unit,
-    onBrowseSuggestedWorkingDirectory: (String) -> Unit,
     onOpenSettings: () -> Unit,
     composerFocusRequester: FocusRequester?,
     historyViewState: AgentHistoryViewState,
@@ -38,10 +36,10 @@ public actual fun AgentRuntimeScreen(
     AgentPageContent(
         viewModel, newLineKey,
         MosaicAgentPageRenderer(
-            columns, rows, dropdowns, suggestionDropdowns, onOpenHistoryEntryContextMenu,
+            columns, rows, dropdowns, onOpenHistoryEntryContextMenu,
             composerFocusRequester, historyViewState,
         ),
-        onBrowseWorkingDirectory, onBrowseSuggestedWorkingDirectory, onOpenSettings,
+        onBrowseWorkingDirectory, onOpenSettings,
     )
 }
 
@@ -49,7 +47,6 @@ private class MosaicAgentPageRenderer(
     private val columns: Int,
     private val rows: Int,
     dropdowns: RuntimeConfigurationDropdowns,
-    private val suggestionDropdowns: SuggestSubagentTaskDropdowns,
     private val onOpenHistoryEntryContextMenu: (Long, Int, HistoryItemViewModel, TuiPopupAnchor, IntOffset?) -> Unit,
     private val composerFocusRequester: FocusRequester?,
     private val historyViewState: AgentHistoryViewState,
@@ -61,7 +58,7 @@ private class MosaicAgentPageRenderer(
     override fun Frame(inputs: AgentPageMeasureInputs, content: @Composable (AgentPageRenderScope) -> Unit) {
         val layout = measureAgentPage(inputs, columns, rows)
         val slots = MosaicAgentPageScope(
-            columns, layout, suggestionDropdowns, onOpenHistoryEntryContextMenu, composerFocusRequester, historyViewState,
+            columns, layout, onOpenHistoryEntryContextMenu, composerFocusRequester, historyViewState,
         )
         Column(Modifier.width(columns).height(rows)) { content(slots) }
     }
@@ -70,7 +67,6 @@ private class MosaicAgentPageRenderer(
 private class MosaicAgentPageScope(
     private val columns: Int,
     private val layout: AgentPageLayout,
-    private val suggestionDropdowns: SuggestSubagentTaskDropdowns,
     private val onOpenHistoryEntryContextMenu: (Long, Int, HistoryItemViewModel, TuiPopupAnchor, IntOffset?) -> Unit,
     private val composerFocusRequester: FocusRequester?,
     private val historyViewState: AgentHistoryViewState,
@@ -88,16 +84,6 @@ private class MosaicAgentPageScope(
     @Composable
     override fun UserInput(viewModel: RequestUserInputViewModel, state: RequestUserInputState.Pending) {
         if (layout.toolRows > 0) RequestUserInputPanel(viewModel, state, columns, layout.toolRows)
-    }
-
-    @Composable
-    override fun Suggestion(
-        viewModel: SuggestSubagentTaskViewModel, state: SuggestSubagentTaskState.Pending,
-        onBrowseWorkingDirectory: (String) -> Unit,
-    ) {
-        if (layout.toolRows > 0) SuggestSubagentTaskPanel(
-            viewModel, state, columns, layout.toolRows, suggestionDropdowns, onBrowseWorkingDirectory,
-        )
     }
 
     @Composable

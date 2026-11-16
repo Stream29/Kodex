@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.app.agent.contract.ComposerDependencies
 import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
 import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
@@ -12,7 +11,6 @@ import io.github.stream29.kodex.app.agent.contract.ComposerSubmitPort
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.cli.agent.createComposerViewModel
-import io.github.stream29.kodex.rpc.models.AgentStateValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -25,17 +23,13 @@ public actual fun createRpcComposerViewModel(
     cancellationPort: ComposerCancellationPort,
     failureReporter: ComposerFailureReporter,
 ): ComposerViewModel {
-    val presentation = combine(binding.state, binding.settings) { state, settings ->
-        val pending = (state as? AgentStateValue.ToolPending)
-            ?.events
-            ?.filterIsInstance<PendingRequestUserInputToolEvent>()
-            ?.firstOrNull()
+    val presentation = combine(binding.pendingAskUser, binding.settings) { pending, settings ->
         pending?.let {
             ComposerRequestInputPresentation.Pending(
-                callId = it.callId,
+                callId = "ask-${it.askId}",
                 mode = settings.requestUserInputMode,
                 title = "Request user input",
-                questionCount = it.arguments.questions.size,
+                questionCount = it.questions.questions.size,
             )
         } ?: ComposerRequestInputPresentation.None
     }.stateIn(ownerScope, SharingStarted.Eagerly, ComposerRequestInputPresentation.None)

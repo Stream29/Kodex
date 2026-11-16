@@ -9,10 +9,10 @@ import kotlinx.coroutines.launch
 public actual fun RequestUserInputContent(
     viewModel: RequestUserInputViewModel, state: RequestUserInputState.Pending, renderer: UserInputRenderer,
 ) {
-    key(viewModel, state.callId) {
+    key(viewModel, state.askId) {
         val scope = rememberCoroutineScope()
         val submitting = state.submission is RequestUserInputSubmissionState.Submitting
-        renderer.Frame(state.callId, state.revision, state.arguments.questions.size) { controls ->
+        renderer.Frame(state.askId, state.revision, state.arguments.questions.size) { controls ->
             state.arguments.questions.forEachIndexed { index, question ->
                 val next = when {
                     index + 1 >= state.arguments.questions.size -> UserInputFocusTarget.Submit
@@ -22,17 +22,17 @@ public actual fun RequestUserInputContent(
                 RequestUserInputQuestionContent(
                     question, state.answers[question.id], controls.question(index, question.id), !submitting, index == 0,
                     onSelectOption = { label ->
-                        viewModel.selectOption(state.callId, question.id, label).also { if (it) controls.requestFocus(next) }
+                        viewModel.selectOption(state.askId, question.id, label).also { if (it) controls.requestFocus(next) }
                     },
                     onSelectOther = {
-                        viewModel.selectOther(state.callId, question.id).also {
+                        viewModel.selectOther(state.askId, question.id).also {
                             if (it) controls.requestFocus(UserInputFocusTarget.FreeForm(index))
                         }
                     },
-                    onFreeFormChanged = { viewModel.updateFreeForm(state.callId, question.id, it) },
+                    onFreeFormChanged = { viewModel.updateFreeForm(state.askId, question.id, it) },
                     onFreeFormSubmitted = {
                         val current = viewModel.state.value as? RequestUserInputState.Pending
-                        if (current?.callId == state.callId &&
+                        if (current?.askId == state.askId &&
                             (current.answers[question.id] as? RequestUserInputDraftAnswer.FreeForm)?.text?.isNotBlank() == true
                         ) controls.requestFocus(next)
                     },
@@ -42,7 +42,7 @@ public actual fun RequestUserInputContent(
                 controls.Failure("Unable to submit: ${it.message}")
             }
             controls.Submit(if (submitting) "Submitting…" else "Submit", state.canSubmit) {
-                scope.launch { viewModel.submit(state.callId, state.revision) }
+                scope.launch { viewModel.submit(state.askId, state.revision) }
             }
         }
     }

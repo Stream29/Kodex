@@ -5,7 +5,6 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.rpc.models.AgentStateValue
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.FlowCollector
@@ -14,7 +13,7 @@ import kotlinx.rpc.RpcClient
 import kotlin.test.*
 
 val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("real JSON RPC preserves Ultrafast through defaults draft submission CAS reopen fork and child creation") {
+    test("real JSON RPC preserves Ultrafast through defaults draft submission CAS reopen and fork") {
         val requests = mutableListOf<ResponsesApiRequest>()
         frontend(onRequest = { requests.add(it) }) {
             val old = services.global.getSettings()
@@ -43,11 +42,6 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 val forked = services.global.forkSession(view.index)
                 val fork = views.open(forked)
                 assertEquals(ServiceTier.Ultrafast, fork.current().settings.value.serviceTier)
-                val children = services.global.createSuggestedSessions(
-                    listOf(SuggestedSubagentTask("child", "independent prompt")), current,
-                )
-                val child = views.open(children.single().sessionIndex)
-                assertEquals(ServiceTier.Ultrafast, child.current().settings.value.serviceTier)
                 views.release(view)
                 val reopened = views.open(view.index)
                 assertEquals(ServiceTier.Ultrafast, reopened.current().settings.value.serviceTier)

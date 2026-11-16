@@ -251,7 +251,6 @@ private fun GraphicalApplication(
                                         AgentPageContent(
                                             agent, currentNewLineKey, renderer,
                                             { actions.browseWorkingDirectory(agent) },
-                                            { actions.browseSuggestedWorkingDirectory(agent, it) },
                                             { actions.openSettings(selected) },
                                         )
                                     }, status = { Text(it, Modifier.padding(16.dp)) })

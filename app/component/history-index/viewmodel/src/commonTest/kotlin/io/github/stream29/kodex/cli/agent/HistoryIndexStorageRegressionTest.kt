@@ -4,17 +4,12 @@ package io.github.stream29.kodex.cli.agent
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CommitTimestamp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
@@ -93,34 +88,6 @@ val historyIndexViewModelTest by testSuite {
             latest.value = 0
             model.awaitIndexes(emptyList())
             assertFalse(model.contains(refreshed.generation, 1))
-        } finally {
-            scope.cancelAndJoin()
-        }
-    }
-
-    test("suggestions use only the simple sidebar label") {
-        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test")))
-        storage.commit(
-            StableSuggestSubagentTaskToolEvent(
-                "suggest",
-                arguments = SuggestSubagentTaskArgs(listOf(SuggestedSubagentTask("Hidden name", "Hidden prompt"))),
-                result = StableSuggestSubagentTaskResult.Failure("Hidden reason"),
-            ),
-        )
-        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-        val model = storageIndex(
-            storage = storage,
-            latestIndex = MutableStateFlow(1),
-            agentState = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty),
-            scope = scope,
-        )
-        try {
-            val window = model.awaitIndexes(listOf(1))
-            val entry = assertNotNull(window.entryAtOrNull(1))
-            assertEquals(HistoryIndexEntryKind.SuggestSubagents, entry.kind)
-            assertEquals("suggest subagents", entry.summary)
-            assertEquals("suggest subagents", entry.detail.content)
-            assertEquals(null, entry.detail.requestUserInput)
         } finally {
             scope.cancelAndJoin()
         }
@@ -230,8 +197,8 @@ val historyIndexViewModelTest by testSuite {
                 ),
             )
             storage.commit(
-                StableRequestUserInputToolEvent(
-                    callId = "request",
+                StableAskUserEvent(
+                    askId = 1,
                     arguments = RequestUserInputArgs(
                         questions = listOf(
                             RequestUserInputQuestion(
@@ -248,11 +215,9 @@ val historyIndexViewModelTest by testSuite {
                             ),
                         ),
                     ),
-                    result = StableRequestUserInputResult.Answered(
-                        RequestUserInputResponse(
-                            answers = mapOf(
-                                "secret" to RequestUserInputAnswer(listOf("do-not-render")),
-                            ),
+                    response = RequestUserInputResponse(
+                        answers = mapOf(
+                            "secret" to RequestUserInputAnswer(listOf("do-not-render")),
                         ),
                     ),
                 ),

@@ -65,10 +65,7 @@ val docsWorkspaceRecordingTest by testSuite {
                             AgentRuntimeScreen(
                                 model, 52, 18, NewLineKey.ShiftEnter,
                                 RuntimeConfigurationDropdowns.remember(model),
-                                io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(
-                                    model.suggestSubagentTask, null,
-                                ),
-                                { _, _, _, _, _ -> }, {}, {}, {},
+                                { _, _, _, _, _ -> }, {}, {},
                             )
                         }
                         ShellSessionHoverPopup(hover, 52, 18, {}, { hover = null })
@@ -117,10 +114,7 @@ val docsWorkspaceRecordingTest by testSuite {
                             AgentRuntimeScreen(
                                 agent, 80, 17, NewLineKey.ShiftEnter,
                                 RuntimeConfigurationDropdowns.remember(agent),
-                                io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(
-                                    agent.suggestSubagentTask, null,
-                                ),
-                                { _, _, _, _, _ -> }, {}, {}, {},
+                                { _, _, _, _, _ -> }, {}, {},
                             )
                         }
                         anchor?.let {

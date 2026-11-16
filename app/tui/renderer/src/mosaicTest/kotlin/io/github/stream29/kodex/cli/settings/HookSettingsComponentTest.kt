@@ -48,7 +48,7 @@ val hookSettingsComponentTest by testSuite {
                     }
                     val initialComposition = compositions
                     sendKeyEvent(KeyboardEvent(codepoint = 'N'.code))
-                    repeat(5) { sendKeyEvent(KeyboardEvent(codepoint = 9)) }
+                    repeat(4) { sendKeyEvent(KeyboardEvent(codepoint = 9)) }
                     sendKeyEvent(KeyboardEvent(codepoint = 'C'.code))
                     // No awaitSnapshot/frame between these two genuine TextInput callbacks.
                     // Mosaic drains the entire queued burst before applying this frame.
@@ -120,8 +120,8 @@ val hookSettingsComponentTest by testSuite {
                 }
                 sendKeyEvent(KeyboardEvent(codepoint = 'N'.code))
                 awaitHookSnapshot("N")
-                // Name -> four type buttons -> Command.
-                repeat(5) { sendKeyEvent(KeyboardEvent(codepoint = 9)) }
+                // Name -> three type buttons -> Command.
+                repeat(4) { sendKeyEvent(KeyboardEvent(codepoint = 9)) }
                 sendKeyEvent(KeyboardEvent(codepoint = 'C'.code))
                 awaitHookSnapshot("C")
                 assertEquals("C", (vm.state.value.dialog as HookSettingsDialog.Editing).draft.command)

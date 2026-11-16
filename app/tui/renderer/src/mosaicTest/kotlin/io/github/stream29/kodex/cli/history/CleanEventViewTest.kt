@@ -16,12 +16,10 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExe
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
@@ -32,7 +30,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpd
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.openai.AgentMessageInputContent
-import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.MessagePhase
@@ -545,13 +542,11 @@ val cleanEventViewTest by testSuite {
                 ),
             ),
         )
-        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
-            callId = "input",
+        val event = StableAskUserEvent(
+            askId = 1,
             arguments = arguments,
-            result = StableRequestUserInputResult.Answered(
-                RequestUserInputResponse(
-                    answers = mapOf("password" to RequestUserInputAnswer(listOf("correct horse"))),
-                ),
+            response = RequestUserInputResponse(
+                answers = mapOf("password" to RequestUserInputAnswer(listOf("correct horse"))),
             ),
         )
 
@@ -570,8 +565,8 @@ val cleanEventViewTest by testSuite {
     }
 
     test("completedRequestUserInputRendersOtherAsReadOnlyFreeForm") {
-        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
-            callId = "input",
+        val event = StableAskUserEvent(
+            askId = 1,
             arguments = RequestUserInputArgs(
                 questions = listOf(
                     RequestUserInputQuestion(
@@ -585,11 +580,9 @@ val cleanEventViewTest by testSuite {
                     ),
                 ),
             ),
-            result = StableRequestUserInputResult.Answered(
-                RequestUserInputResponse(
-                    answers = mapOf(
-                        "layout" to RequestUserInputAnswer(listOf("user_note: Dense")),
-                    ),
+            response = RequestUserInputResponse(
+                answers = mapOf(
+                    "layout" to RequestUserInputAnswer(listOf("user_note: Dense")),
                 ),
             ),
         )
@@ -597,33 +590,6 @@ val cleanEventViewTest by testSuite {
         runMosaicTest {
             assertEquals(
                 "Layout: Which layout should be used?\n[● Other]\n  > Dense",
-                setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box(Modifier.width(60)) { event.render() }
-                }
-                },
-            )
-        }
-    }
-
-    test("failedRequestUserInputRendersItsQuestionAndErrorDirectly") {
-        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
-            callId = "input",
-            arguments = RequestUserInputArgs(
-                questions = listOf(
-                    RequestUserInputQuestion(
-                        id = "layout",
-                        header = "Layout",
-                        question = "Which layout should be used?",
-                    ),
-                ),
-            ),
-            result = StableRequestUserInputResult.Failure("No answer"),
-        )
-
-        runMosaicTest {
-            assertEquals(
-                "Layout: Which layout should be used?\nFailed to submit: No answer",
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     Box(Modifier.width(60)) { event.render() }
@@ -650,41 +616,6 @@ val cleanEventViewTest by testSuite {
             val expanded = clickFirstRow()
             assertTrue("short summary" in expanded)
             assertFalse("private full reasoning" in expanded)
-        }
-    }
-
-    test("mcpImageContentDoesNotDumpInlineData") {
-        val event = StableMcpToolEvent(
-            callId = "mcp",
-            name = "inspect",
-            namespace = "mcp",
-            arguments = JsonObject(emptyMap()),
-            result = CallToolResult(
-                content = listOf(
-                    JsonObject(
-                        mapOf(
-                            "type" to JsonPrimitive("image"),
-                            "data" to JsonPrimitive("base64-image-data"),
-                        ),
-                    ),
-                ),
-            ),
-        )
-
-        runMosaicTest {
-            val collapsed = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box(Modifier.width(60)) { event.render() }
-            }
-            }
-            assertEquals("> mcp.inspect", collapsed)
-            val expanded = clickFirstRow()
-            assertTrue("> Result" in expanded)
-            assertFalse("Image: [inline image, 17 characters]" in expanded)
-
-            val result = clickRow(3)
-            assertTrue("Image: [inline image, 17 characters]" in result)
-            assertFalse("base64-image-data" in result)
         }
     }
 

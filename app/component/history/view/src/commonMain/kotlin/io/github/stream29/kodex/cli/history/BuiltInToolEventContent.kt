@@ -164,9 +164,9 @@ internal fun HistoryContentDetailsScope.DiscoveredTools(
 }
 
 internal fun isRedesignedInternalCall(name: String): Boolean = name in setOf(
-    "exec_command", "write_stdin", "apply_patch", "web.run", "tool_search",
-    "server_tool_search", "clock.curr_time", "get_context_remaining",
-    "image_gen.imagegen", "view_image",
+    "exec_command", "write_stdin", "apply_patch", "read_media", "await_event",
+    "web.run", "tool_search", "server_tool_search", "clock.curr_time",
+    "get_context_remaining", "image_gen.imagegen", "view_image",
 )
 
 internal fun isReadOnlyUtility(name: String): Boolean =

@@ -25,12 +25,13 @@ import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemView
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.PlanUpdateHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.ReasoningHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemViewModel
-import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemViewModel
-import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemState
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
-import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
 import kotlin.test.assertNotEquals
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
@@ -99,7 +100,7 @@ val agentHistoryModelsTest by testSuite {
         }
     }
 
-    test("invalid suggestion event payload becomes a load failure rather than a rejected decision") {
+    test("invalid ask_user event payload becomes a load failure") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             try {
@@ -107,7 +108,7 @@ val agentHistoryModelsTest by testSuite {
                 val descriptor = HistoryItemDescriptor(
                     99,
                     HistoryItemSource.Index,
-                    HistoryItemKind.SuggestSubagentTask,
+                    HistoryItemKind.RequestUserInput,
                     Duration.ZERO,
                     StableUserMessage(listOf(ContentItem.InputText("unexpected"))),
                 )
@@ -115,11 +116,11 @@ val agentHistoryModelsTest by testSuite {
                     AgentHistorySource(session.storage, session.runtime.latestIndex, session.runtime.state),
                     this, { true },
                 )
-                val item = SuggestSubagentTaskHistoryItemViewModelImpl(99, descriptor, context)
+                val item = RequestUserInputHistoryItemViewModelImpl(99, descriptor, context)
                 item.ensureLoaded()
                 assertEquals(
-                    SuggestSubagentTaskHistoryItemState.Failed,
-                    awaitState(item.state) { it !is SuggestSubagentTaskHistoryItemState.Loading },
+                    RequestUserInputHistoryItemState.Failed,
+                    awaitState(item.state) { it !is RequestUserInputHistoryItemState.Loading },
                 )
             } finally {
                 repository.cancelAndJoin()
@@ -127,44 +128,43 @@ val agentHistoryModelsTest by testSuite {
         }
     }
 
-    test("persisted suggestions load as independent readonly items between work groups") {
-        for (result in listOf(
-            """{"type":"completed","response":{"type":"accepted","sessions":[{"uri":"file:///tmp/synthetic/1","name":"Worker"}],"decision":"accepted"}}""",
-            """{"type":"completed","response":{"type":"rejected","feedback":"Narrow scope","decision":"rejected"}}""",
-            """{"type":"failure","message":"Hook stopped suggestion"}""",
-        )) {
-            coroutineScope {
-                val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-                try {
-                    val runtime = repository.open(repository.create()).runtime
-                    val event = OpenAiJsonCodec.decodeFromString(
-                        CleanIndexEntry.serializer(),
-                        """{"type":"suggest_subagent_task_tool_event","call_id":"suggest","arguments":{"tasks":[{"name":"Worker","prompt":"Inspect tests."}]},"result":$result}""",
-                    ) as StableSuggestSubagentTaskToolEvent
-                    runtime.modify { storage ->
-                        storage.initialize(KodexAgentSettings(OpenAiModelId("test")))
-                        storage.commit(userMessage("Start"))
-                        storage.commit(textTool("before"))
-                        storage.commit(event)
-                        storage.commit(textTool("after"))
-                        storage.commit(userMessage("End"))
-                    }
-                    val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
-                    try {
-                        model.awaitReady(itemCount = 5, hasOlder = false)
-                        val window = model.historyItems.value
-                        assertEquals(4..4, assertIs<WorkGroupHistoryItemViewModel>(window[1]).indexRange)
-                        val item = assertIs<SuggestSubagentTaskHistoryItemViewModel>(window[2])
-                        val ready = awaitState(item.state) { it !is SuggestSubagentTaskHistoryItemState.Loading }
-                        assertEquals(event, assertIs<SuggestSubagentTaskHistoryItemState.Ready>(ready).event)
-                        assertEquals(3, item.index)
-                        assertEquals(2..2, assertIs<WorkGroupHistoryItemViewModel>(window[3]).indexRange)
-                    } finally {
-                        model.close()
-                    }
-                } finally {
-                    repository.cancelAndJoin()
+    test("persisted ask_user events load as independent readonly items between work groups") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            try {
+                val runtime = repository.open(repository.create()).runtime
+                val event = StableAskUserEvent(
+                    askId = 1,
+                    arguments = RequestUserInputArgs(
+                        listOf(RequestUserInputQuestion("q1", "Scope", "Choose target")),
+                    ),
+                    response = RequestUserInputResponse(
+                        mapOf("q1" to RequestUserInputAnswer(listOf("CLI"))),
+                    ),
+                )
+                runtime.modify { storage ->
+                    storage.initialize(KodexAgentSettings(OpenAiModelId("test")))
+                    storage.commit(userMessage("Start"))
+                    storage.commit(textTool("before"))
+                    storage.commit(event)
+                    storage.commit(textTool("after"))
+                    storage.commit(userMessage("End"))
                 }
+                val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+                try {
+                    model.awaitReady(itemCount = 5, hasOlder = false)
+                    val window = model.historyItems.value
+                    assertEquals(4..4, assertIs<WorkGroupHistoryItemViewModel>(window[1]).indexRange)
+                    val item = assertIs<RequestUserInputHistoryItemViewModel>(window[2])
+                    val ready = awaitState(item.state) { it !is RequestUserInputHistoryItemState.Loading }
+                    assertEquals(event, assertIs<RequestUserInputHistoryItemState.Ready>(ready).event)
+                    assertEquals(3, item.index)
+                    assertEquals(2..2, assertIs<WorkGroupHistoryItemViewModel>(window[3]).indexRange)
+                } finally {
+                    model.close()
+                }
+            } finally {
+                repository.cancelAndJoin()
             }
         }
     }
@@ -879,7 +879,6 @@ private val HistoryItemViewModel.storageIndex: Int
         is ReasoningHistoryItemViewModel -> index
         is ToolHistoryItemViewModel -> index
         is RequestUserInputHistoryItemViewModel -> index
-        is SuggestSubagentTaskHistoryItemViewModel -> index
         is PatchHistoryItemViewModel -> index
         is PlanUpdateHistoryItemViewModel -> index
         is ContextCompactionHistoryItemViewModel -> index

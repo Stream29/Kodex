@@ -10,10 +10,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCom
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
@@ -266,7 +263,7 @@ private fun IndexedAgentCommit.toHistoryIndexEntryOrNull(): HistoryIndexEntry? {
     val detail = HistoryIndexEntryDetail(
         kind = kind,
         content = event.toHistoryIndexDetail(),
-        requestUserInput = event as? StableRequestUserInputToolEvent,
+        requestUserInput = event as? StableAskUserEvent,
         plan = event as? StablePlanUpdate,
     )
     val messageTimestamp = if (event is StableIndexEvent.Steerable) {
@@ -286,7 +283,6 @@ private fun IndexedAgentCommit.toHistoryIndexEntryOrNull(): HistoryIndexEntry? {
 private fun CleanIndexEntry.toHistoryIndexEntryKind(): HistoryIndexEntryKind = when (this) {
     is StableContextCompaction -> HistoryIndexEntryKind.CompactionPoint
     is StableUserMessage,
-    is StableAskUserEvent,
     is StableScheduleEvent,
     is StableTerminalExitedEvent,
         -> HistoryIndexEntryKind.UserMessage
@@ -297,8 +293,7 @@ private fun CleanIndexEntry.toHistoryIndexEntryKind(): HistoryIndexEntryKind = w
     }
     is StableDeveloperMessage -> HistoryIndexEntryKind.DeveloperMessage
     is StableAgentMessage -> HistoryIndexEntryKind.AgentMessage
-    is StableRequestUserInputToolEvent -> HistoryIndexEntryKind.RequestUserInput
-    is StableSuggestSubagentTaskToolEvent -> HistoryIndexEntryKind.SuggestSubagents
+    is StableAskUserEvent -> HistoryIndexEntryKind.RequestUserInput
     is StablePlanUpdate -> HistoryIndexEntryKind.PlanUpdate
 }
 
@@ -308,15 +303,13 @@ private fun CleanIndexEntry.toHistoryIndexSummary(): String = when (this) {
     is StableAssistantMessage -> content.toDisplayContent().toSummary()
     is StableDeveloperMessage -> content.toDisplayContent().toSummary()
     is StableAgentMessage -> content.toAgentDisplayContent().toSummary()
-    is StableAskUserEvent -> "ask_user #$askId answered".toSummary()
+    is StableAskUserEvent ->
+        arguments.questions.joinToString(separator = " ") { it.question }.toSummary()
     is StableScheduleEvent -> "schedule #$scheduleId: $description".toSummary()
     is StableTerminalExitedEvent -> {
         val label = if (!name.isNullOrBlank()) "terminal #$sessionId ($name)" else "terminal #$sessionId"
         "$label exited ($exitCode): $command".toSummary()
     }
-    is StableRequestUserInputToolEvent ->
-        arguments.questions.joinToString(separator = " ") { it.question }.toSummary()
-    is StableSuggestSubagentTaskToolEvent -> "suggest subagents"
     is StablePlanUpdate -> {
         val selected = arguments.plan.lastOrNull { it.status != StepStatus.Pending } ?: arguments.plan.firstOrNull()
         selected?.step.orEmpty().toSummary()
@@ -334,26 +327,12 @@ private fun CleanIndexEntry.toHistoryIndexDetail(): String = when (this) {
         add("")
         add(content.toAgentDisplayContent().toDetail())
     }.joinToString("\n")
-    is StableAskUserEvent -> buildList {
-        add("ask_user #$askId answered")
-        arguments.questions.forEach { question ->
-            add("")
-            add(question.question.ifBlank { "[empty]" })
-            val answer = response.answers[question.id]
-            when {
-                answer == null -> add("[unanswered]")
-                question.isSecret -> add("[hidden]")
-                else -> answer.answers.ifEmpty { listOf("[empty]") }.forEach { add(it.ifBlank { "[empty]" }) }
-            }
-        }
-    }.joinToString("\n").toDetail()
+    is StableAskUserEvent -> toRequestUserInputDetail()
     is StableScheduleEvent -> "Schedule #$scheduleId\n\n$description".toDetail()
     is StableTerminalExitedEvent -> {
         val label = if (!name.isNullOrBlank()) "Terminal #$sessionId ($name)" else "Terminal #$sessionId"
         "$label exited with code $exitCode\n\n$command".toDetail()
     }
-    is StableRequestUserInputToolEvent -> toRequestUserInputDetail()
-    is StableSuggestSubagentTaskToolEvent -> "suggest subagents"
     is StablePlanUpdate -> toPlanDetail()
 }
 
@@ -372,9 +351,8 @@ private fun List<AgentMessageInputContent>.toAgentDisplayContent(): String = joi
     }
 }
 
-private fun StableRequestUserInputToolEvent.toRequestUserInputDetail(): String {
-    val completedResult = result
-    val answered = (completedResult as? StableRequestUserInputResult.Answered)?.response?.answers
+private fun StableAskUserEvent.toRequestUserInputDetail(): String {
+    val answered = response.answers
     val questions = arguments.questions.map { question ->
         buildList {
             if (question.header.isNotBlank()) add(question.header)
@@ -387,7 +365,7 @@ private fun StableRequestUserInputToolEvent.toRequestUserInputDetail(): String {
                     add(if (description == null) "- ${option.label}" else "- ${option.label} — $description")
                 }
             }
-            answered?.get(question.id)?.let { answer ->
+            answered[question.id]?.let { answer ->
                 add("")
                 add("Answer:")
                 if (question.isSecret) add("[hidden]")
@@ -395,13 +373,7 @@ private fun StableRequestUserInputToolEvent.toRequestUserInputDetail(): String {
             }
         }.joinToString("\n")
     }
-    return buildList {
-        addAll(questions)
-        if (completedResult is StableRequestUserInputResult.Failure) {
-            if (isNotEmpty()) add("")
-            add("Failed: ${completedResult.message.ifBlank { "[empty]" }}")
-        }
-    }.joinToString("\n\n").toDetail()
+    return questions.joinToString("\n\n").toDetail()
 }
 
 private fun StablePlanUpdate.toPlanDetail(): String = buildList {

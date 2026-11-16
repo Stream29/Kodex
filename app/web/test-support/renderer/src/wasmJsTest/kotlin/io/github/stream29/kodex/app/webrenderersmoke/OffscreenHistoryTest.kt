@@ -33,7 +33,7 @@ import kotlin.time.Instant
 
 val offscreenHistoryTest by testSuite {
     test("real History owner pages around a raster viewport and acknowledges exact item and Latest effects") { offscreenTest {
-        val stored = InMemoryKodexAgentStorage.empty()
+        val stored = initializedTestStorage()
         for (index in 1..640) {
             stored.commit(
                 StableUserMessage(listOf(ContentItem.InputText("Offscreen history $index"))),
@@ -158,7 +158,7 @@ val offscreenHistoryTest by testSuite {
     } }
 
     test("product list shares transient order, exact prefixed scroll and destructive empty-window replacement") { offscreenTest {
-        val stored = InMemoryKodexAgentStorage.empty()
+        val stored = initializedTestStorage()
         stored.commit(
             StableUserMessage(listOf(ContentItem.InputText("Committed row"))),
             timestamp = Instant.fromEpochMilliseconds(1_000),

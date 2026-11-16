@@ -64,7 +64,7 @@ val cliFailureBoundaryTest by testSuite {
             val output = mutableListOf<String>()
             var reported: Throwable? = null
             val code = dispatchCli(arguments, { msg, err -> parserOutput += msg to err }) { invocation ->
-                runCliSafely(invocation is CliInvocation.BackendStart, { 42 }, { reported = it }, { output += it }) {
+                runCliSafely(invocation is BackendStartCommand, { 42 }, { reported = it }, { output += it }) {
                     throw failure
                 }
             }

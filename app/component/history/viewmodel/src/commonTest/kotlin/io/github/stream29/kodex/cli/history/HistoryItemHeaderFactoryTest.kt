@@ -1,29 +1,26 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryResult
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemStatus
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemTarget
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
-import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.ResponseItem
-import io.github.stream29.kodex.tool.imagegeneration.GeneratedImageOutput
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
-import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
+import io.github.stream29.kodex.tool.readmedia.MediaDetail
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolOutput
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecOutput
 import io.github.stream29.kodex.utils.applypatch.Patch
@@ -31,43 +28,53 @@ import io.github.stream29.kodex.utils.applypatch.UpdateFileHunk
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 
 val historyItemHeaderFactoryTest by testSuite {
-    test("imageHeaderUsesTheRecordedFilenameOrTheNoPathFallback") {
-        fun title(path: String?): String = assertIs<ToolHistoryItemHeader.Summary>(
-            StableImageGenerationToolEvent(
-                callId = "image",
-                arguments = ImageGenToolArguments("not the filename"),
-                result = StableImageGenerationResult.Success(GeneratedImageOutput("encoded"), path),
+    test("readMediaHeaderUsesBoundedPathAndMapsFailureStatus") {
+        val success = assertIs<ToolHistoryItemHeader.Summary>(
+            StableReadMediaToolEvent(
+                callId = "media-1",
+                arguments = ReadMediaToolArguments("/tmp/diagram.png"),
+                result = StableReadMediaResult.Success(
+                    ReadMediaToolOutput("data:image/png;base64,AAAA", MediaDetail.High),
+                ),
             ).toHistoryHeader(1.milliseconds),
-        ).summary
-        assertEquals("Generate image", title(null))
-        assertEquals("Generate image", title("/"))
-        assertEquals("Generate picture.png", title("/images/picture.png"))
-        assertEquals("Generate picture.png", title("C:\\images\\picture.png"))
+        )
+        assertEquals("Read media: /tmp/diagram.png", success.summary)
+        assertEquals("completed", success.status)
+
+        val failure = assertIs<ToolHistoryItemHeader.Summary>(
+            StableReadMediaToolEvent(
+                callId = "media-2",
+                arguments = ReadMediaToolArguments("/tmp/missing.png"),
+                result = StableReadMediaResult.Failure("image file does not exist"),
+            ).toHistoryHeader(1.milliseconds),
+        )
+        assertEquals("Failed to read media: /tmp/missing.png", failure.summary)
+        assertEquals("failed", failure.status)
     }
 
-    test("localSearchHeaderDoesNotContainBodyInputs") {
-        val header = assertIs<ToolHistoryItemHeader.Summary>(
-            StableToolSearchEvent("search", arguments = SearchToolCallParams("calendar", 0),
-                result = ToolSearchResult.Success(emptyList())).toHistoryHeader(1.milliseconds),
+    test("migratedFunctionHeaderMapsSuccessAndFailureSummary") {
+        fun header(success: Boolean?) = assertIs<ToolHistoryItemHeader.Summary>(
+            StableJsonToolEvent(
+                callId = "mcp",
+                name = "inspect",
+                namespace = "filesystem",
+                arguments = JsonObject(emptyMap()),
+                result = JsonObject(emptyMap()),
+                success = success,
+            ).toHistoryHeader(1.milliseconds),
         )
-        assertEquals("Search available tools", header.summary)
-    }
 
-    test("invalidSearchHeaderRetainsFailureSummaryWithoutInputs") {
-        val header = assertIs<ToolHistoryItemHeader.Summary>(
-            StableToolSearchEvent("search", arguments = SearchToolCallParams("", 0),
-                result = ToolSearchResult.InvalidArguments("query must not be empty"))
-                .toHistoryHeader(1.milliseconds),
-        )
-        assertEquals("Failed to search available tools", header.summary)
-        assertEquals("failed", header.status)
+        assertEquals("completed", header(success = true).status)
+        assertEquals("filesystem.inspect", header(success = true).summary)
+        assertEquals("completed", header(success = null).status)
+        assertEquals("failed", header(success = false).status)
+        assertEquals("Failed to run filesystem.inspect", header(success = false).summary)
     }
 
     test("commandHeaderRetainsOnlyBoundedPresentationAndOutcomeDiscriminators") {
@@ -143,24 +150,6 @@ val historyItemHeaderFactoryTest by testSuite {
             event.toHistoryHeader(5.milliseconds),
         )
         assertEquals("Search the web: Kotlin Duration", header.summary)
-    }
-
-    test("mcpHeaderMapsIsErrorInsteadOfTreatingItAsSuccess") {
-        fun header(isError: Boolean?) = assertIs<ToolHistoryItemHeader.Summary>(
-            StableMcpToolEvent(
-                callId = "mcp",
-                name = "inspect",
-                namespace = "filesystem",
-                arguments = JsonObject(emptyMap()),
-                result = CallToolResult(content = emptyList(), isError = isError),
-            ).toHistoryHeader(1.milliseconds),
-        )
-
-        assertEquals("completed", header(isError = false).status)
-        assertEquals("filesystem.inspect", header(isError = false).summary)
-        assertEquals("completed", header(isError = null).status)
-        assertEquals("failed", header(isError = true).status)
-        assertEquals("Failed to run filesystem.inspect", header(isError = true).summary)
     }
 
     test("patchHeaderUsesBasenameForOneFileAndCountForMultipleFiles") {

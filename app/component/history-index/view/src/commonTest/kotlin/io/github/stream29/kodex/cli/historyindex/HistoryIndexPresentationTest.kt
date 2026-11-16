@@ -64,13 +64,14 @@ val historyIndexPresentationTest by testSuite {
     }
 
     test("read-only question projection redacts before any popup renderer and drops the raw fallback") {
-        val event = StableRequestUserInputToolEvent(
-            "secret", arguments = RequestUserInputArgs(listOf(
+        val event = StableAskUserEvent(
+            askId = 1,
+            arguments = RequestUserInputArgs(listOf(
                 RequestUserInputQuestion("secret", "Password", "Enter password", isSecret = true),
             )),
-            result = StableRequestUserInputResult.Answered(RequestUserInputResponse(mapOf(
+            response = RequestUserInputResponse(mapOf(
                 "secret" to RequestUserInputAnswer(listOf("SECRET")),
-            ))),
+            )),
         )
         val presentation = historyIndexDetailPresentation(
             HistoryIndexEntryDetail(HistoryIndexEntryKind.RequestUserInput, "SECRET raw fallback", event),

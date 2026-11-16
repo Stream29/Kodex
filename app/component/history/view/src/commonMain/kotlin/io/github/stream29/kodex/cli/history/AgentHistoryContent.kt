@@ -79,7 +79,7 @@ private fun HistoryItemViewModel.historyContentType(): HistoryContentType = when
     is MessageHistoryItemViewModel -> HistoryContentType.Message
     is ReasoningHistoryItemViewModel -> HistoryContentType.Reasoning
     is ToolHistoryItemViewModel, is RequestUserInputHistoryItemViewModel,
-    is SuggestSubagentTaskHistoryItemViewModel, is PlanUpdateHistoryItemViewModel -> HistoryContentType.CompletedTool
+    is PlanUpdateHistoryItemViewModel -> HistoryContentType.CompletedTool
     is PatchHistoryItemViewModel -> HistoryContentType.Patch
     is ContextCompactionHistoryItemViewModel -> HistoryContentType.Context
     is WorkGroupHistoryItemViewModel -> HistoryContentType.WorkGroup

@@ -118,7 +118,6 @@ private val HistoryIndexEntryKind.displayName: String
         HistoryIndexEntryKind.DeveloperMessage -> "Developer message"
         HistoryIndexEntryKind.AgentMessage -> "Agent message"
         HistoryIndexEntryKind.RequestUserInput -> "Request user input"
-        HistoryIndexEntryKind.SuggestSubagents -> "suggest subagents"
         HistoryIndexEntryKind.PlanUpdate -> "Plan update"
     }
 

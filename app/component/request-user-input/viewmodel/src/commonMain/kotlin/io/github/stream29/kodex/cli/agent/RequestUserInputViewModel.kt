@@ -1,15 +1,12 @@
 package io.github.stream29.kodex.cli.agent
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
+import io.github.stream29.kodex.app.agent.contract.RequestUserInputDependencies
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDraftAnswer
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
-import io.github.stream29.kodex.app.agent.contract.RequestUserInputDependencies
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModelFactory
 import io.github.stream29.kodex.app.agent.contract.allowsOtherAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
@@ -30,34 +27,38 @@ public actual fun createRequestUserInputViewModel(
     dependencies: RequestUserInputDependencies,
     ownerScope: CoroutineScope,
 ): RequestUserInputViewModel = RequestUserInputViewModelImpl(
-    dependencies::completeToolCall, ownerScope, dependencies::resumeRuntime,
+    dependencies::submitAnswer,
+    ownerScope,
 ).also { view ->
     view.observation = ownerScope.launch {
-        try { dependencies.pending.collect(view::synchronize) } finally { view.close() }
+        try {
+            dependencies.pending.collect(view::synchronize)
+        } finally {
+            view.close()
+        }
     }
 }
 
 public actual val requestUserInputViewModelFactory: RequestUserInputViewModelFactory =
     RequestUserInputViewModelFactory(::createRequestUserInputViewModel)
 
-/** Revision-bound answer drafts for one Agent's current blocking interaction. */
+/** Revision-bound answer drafts for one Agent's live `AskUserSnapshot` interaction. */
 internal class RequestUserInputViewModelImpl(
-    private val completeToolCall: suspend (StableCleanEvent.CompletedTool) -> Int,
+    private val submitAnswer: suspend (Int, RequestUserInputResponse) -> Unit,
     private val ownerScope: CoroutineScope,
-    private val resumeRuntime: () -> Unit,
 ) : RequestUserInputViewModel {
     internal var observation: Job? = null
-    private var pendingEvent: PendingRequestUserInputToolEvent? = null
+    private var pendingEntry: AskUserEntry? = null
     private val mutableState = MutableStateFlow<RequestUserInputState>(RequestUserInputState.Idle)
     private var closed: Boolean = false
 
     override val state: StateFlow<RequestUserInputState> = mutableState.asStateFlow()
 
     override fun selectOption(
-        callId: String,
+        askId: Int,
         questionId: String,
         label: String,
-    ): Boolean = edit(callId, questionId) { current, question ->
+    ): Boolean = edit(askId, questionId) { current, question ->
         if (question.options.orEmpty().none { option -> option.label == label }) return@edit null
         current.copy(
             answers = current.answers + (questionId to RequestUserInputDraftAnswer.Option(label)),
@@ -67,9 +68,9 @@ internal class RequestUserInputViewModelImpl(
     }
 
     override fun selectOther(
-        callId: String,
+        askId: Int,
         questionId: String,
-    ): Boolean = edit(callId, questionId) { current, question ->
+    ): Boolean = edit(askId, questionId) { current, question ->
         if (!question.allowsOtherAnswer) return@edit null
         current.copy(
             answers = current.answers + (questionId to RequestUserInputDraftAnswer.FreeForm("")),
@@ -79,10 +80,10 @@ internal class RequestUserInputViewModelImpl(
     }
 
     override fun updateFreeForm(
-        callId: String,
+        askId: Int,
         questionId: String,
         text: String,
-    ): Boolean = edit(callId, questionId) { current, question ->
+    ): Boolean = edit(askId, questionId) { current, question ->
         val answer = current.answers[questionId]
         if (question.options.orEmpty().isNotEmpty() && answer !is RequestUserInputDraftAnswer.FreeForm) {
             return@edit null
@@ -100,19 +101,19 @@ internal class RequestUserInputViewModelImpl(
     }
 
     override suspend fun submit(
-        callId: String,
+        askId: Int,
         expectedRevision: Long,
     ): RequestUserInputSubmissionResult = ownerScope.async(
         start = CoroutineStart.UNDISPATCHED,
     ) {
-        if (closed) return@async RequestUserInputSubmissionResult.StaleCall
-        val event = pendingEvent
-            ?.takeIf { pending -> pending.callId == callId }
-            ?: return@async RequestUserInputSubmissionResult.StaleCall
+        if (closed) return@async RequestUserInputSubmissionResult.StaleAsk
+        val entry = pendingEntry
+            ?.takeIf { pending -> pending.askId == askId }
+            ?: return@async RequestUserInputSubmissionResult.StaleAsk
         val captured = state.value as? RequestUserInputState.Pending
-            ?: return@async RequestUserInputSubmissionResult.StaleCall
-        if (captured.callId != callId) {
-            return@async RequestUserInputSubmissionResult.StaleCall
+            ?: return@async RequestUserInputSubmissionResult.StaleAsk
+        if (captured.askId != askId) {
+            return@async RequestUserInputSubmissionResult.StaleAsk
         }
         if (captured.revision != expectedRevision) {
             return@async RequestUserInputSubmissionResult.StaleRevision
@@ -130,24 +131,18 @@ internal class RequestUserInputViewModelImpl(
         )
         if (!mutableState.compareAndSet(captured, submitting)) {
             val latest = state.value as? RequestUserInputState.Pending
-            return@async if (latest?.callId != callId) {
-                RequestUserInputSubmissionResult.StaleCall
+            return@async if (latest?.askId != askId) {
+                RequestUserInputSubmissionResult.StaleAsk
             } else {
                 RequestUserInputSubmissionResult.StaleRevision
             }
         }
         try {
-            completeToolCall(
-                StableRequestUserInputToolEvent(
-                    callId = event.callId,
-                    itemId = event.itemId,
-                    arguments = event.arguments,
-                    result = StableRequestUserInputResult.Answered(response),
-                ),
-            )
-            pendingEvent = null
+            submitAnswer(entry.askId, response)
+            if (pendingEntry?.askId == entry.askId) {
+                pendingEntry = null
+            }
             mutableState.compareAndSet(submitting, RequestUserInputState.Idle)
-            resumeRuntime()
             RequestUserInputSubmissionResult.Submitted
         } catch (failure: CancellationException) {
             throw failure
@@ -164,13 +159,13 @@ internal class RequestUserInputViewModelImpl(
         }
     }.await()
 
-    internal fun synchronize(pending: PendingRequestUserInputToolEvent?) {
-        if (closed || pendingEvent?.callId == pending?.callId) return
-        pendingEvent = pending
-        mutableState.value = pending?.let { call ->
+    internal fun synchronize(pending: AskUserEntry?) {
+        if (closed || pendingEntry?.askId == pending?.askId) return
+        pendingEntry = pending
+        mutableState.value = pending?.let { entry ->
             RequestUserInputState.Pending(
-                callId = call.callId,
-                arguments = call.arguments,
+                askId = entry.askId,
+                arguments = entry.questions,
             )
         } ?: RequestUserInputState.Idle
     }
@@ -180,12 +175,12 @@ internal class RequestUserInputViewModelImpl(
         closed = true
         observation?.cancel()
         observation = null
-        pendingEvent = null
+        pendingEntry = null
         mutableState.value = RequestUserInputState.Idle
     }
 
     private fun edit(
-        callId: String,
+        askId: Int,
         questionId: String,
         transform: (
             RequestUserInputState.Pending,
@@ -196,7 +191,7 @@ internal class RequestUserInputViewModelImpl(
         while (true) {
             val current = state.value as? RequestUserInputState.Pending ?: return false
             if (
-                current.callId != callId ||
+                current.askId != askId ||
                 current.submission is RequestUserInputSubmissionState.Submitting
             ) {
                 return false

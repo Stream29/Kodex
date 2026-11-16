@@ -5,7 +5,6 @@ package io.github.stream29.kodex.cli.rpc
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
-import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.rpc.local.BackendConnectionLost
 import io.github.stream29.kodex.openai.ModelInfo
 import kotlinx.coroutines.CancellationException
@@ -35,7 +34,6 @@ public actual class RpcSessionViews actual constructor(
     private val models: StateFlow<List<ModelInfo>>,
     private val reportUnhandledError: (Throwable) -> Unit,
     private val connectionAvailable: () -> Boolean,
-    private val onCreated: (List<CreatedSuggestedSession>) -> Unit,
 ) : AutoCloseable {
     private val owner = SupervisorJob(scope.coroutineContext[Job])
     private val localScope = CoroutineScope(scope.coroutineContext + owner)
@@ -45,7 +43,7 @@ public actual class RpcSessionViews actual constructor(
     public actual suspend fun open(index: Int): RpcSessionView {
         val view = mutex.withLock {
             owner.ensureActive()
-            views.getOrPut(index) { RpcSessionView(index, services, localScope, models, onCreated, reportUnhandledError, connectionAvailable) }
+            views.getOrPut(index) { RpcSessionView(index, services, localScope, models, reportUnhandledError, connectionAvailable) }
         }
         try {
             view.awaitReady()
@@ -112,7 +110,6 @@ public actual class RpcSessionView internal actual constructor(
     private val services: RpcServices,
     scope: CoroutineScope,
     private val models: StateFlow<List<ModelInfo>>,
-    private val onCreated: (List<CreatedSuggestedSession>) -> Unit,
     private val reportUnhandledError: (Throwable) -> Unit,
     private val connectionAvailable: () -> Boolean,
 ) : AutoCloseable {
@@ -192,7 +189,6 @@ public actual class RpcSessionView internal actual constructor(
                     bindingScope,
                     services,
                     models,
-                    onCreated,
                     reportUnhandledError,
                 )
                 mutableAgent.value = nextAgent

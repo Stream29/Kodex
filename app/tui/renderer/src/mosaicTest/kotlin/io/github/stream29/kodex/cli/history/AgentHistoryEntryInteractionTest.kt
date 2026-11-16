@@ -3,12 +3,6 @@ package io.github.stream29.kodex.cli.history
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
-import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemViewModel
-import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemState
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
@@ -16,10 +10,9 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
@@ -57,19 +50,22 @@ private val ansiSnapshots = SnapshotStrategy { mosaic ->
 }
 
 val agentHistoryEntryInteractionTest by testSuite {
-    test("suggestion rows preserve the original storage context action") {
+    test("requestUserInput rows preserve the original storage context action") {
         var selected: Int? = null
-        val item = object : SuggestSubagentTaskHistoryItemViewModel {
-            override val index = 31
-            override val state = MutableStateFlow<SuggestSubagentTaskHistoryItemState>(
-                SuggestSubagentTaskHistoryItemState.Ready(
-                    StableSuggestSubagentTaskToolEvent(
-                        "suggest", arguments = SuggestSubagentTaskArgs(emptyList()),
-                        result = StableSuggestSubagentTaskResult.Failure("Stopped"),
-                    ), Duration.ZERO,
+        val item = FakeRequestUserInput(
+            index = 31,
+            event = StableAskUserEvent(
+                askId = 1,
+                arguments = RequestUserInputArgs(
+                    questions = listOf(
+                        RequestUserInputQuestion(id = "q", header = "Scope", question = "Which scope?"),
+                    ),
                 ),
-            )
-        }
+                response = RequestUserInputResponse(
+                    answers = mapOf("q" to RequestUserInputAnswer(listOf("All"))),
+                ),
+            ),
+        )
         runMosaicTest {
             val rendered = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
@@ -81,8 +77,7 @@ val agentHistoryEntryInteractionTest by testSuite {
                 }
             }
             }
-            assertTrue("Suggested Sessions" in rendered)
-            assertTrue("Failed to submit: Stopped" in rendered)
+            assertTrue("Scope: Which scope?" in rendered)
             sendMouseEvent(com.jakewharton.mosaic.terminal.MouseEvent(
                 6, 0, com.jakewharton.mosaic.terminal.MouseEvent.Type.Press,
                 com.jakewharton.mosaic.terminal.MouseEvent.Button.Right,
@@ -239,8 +234,8 @@ val agentHistoryEntryInteractionTest by testSuite {
     test("renders completed user input as a read-only answered panel") {
         val item = FakeRequestUserInput(
             index = 31,
-            event = StableRequestUserInputToolEvent(
-                callId = "input",
+            event = StableAskUserEvent(
+                askId = 1,
                 arguments = RequestUserInputArgs(
                     questions = listOf(
                         RequestUserInputQuestion(
@@ -254,11 +249,9 @@ val agentHistoryEntryInteractionTest by testSuite {
                         ),
                     ),
                 ),
-                result = StableRequestUserInputResult.Answered(
-                    RequestUserInputResponse(
-                        answers = mapOf(
-                            "layout" to RequestUserInputAnswer(listOf("Compact")),
-                        ),
+                response = RequestUserInputResponse(
+                    answers = mapOf(
+                        "layout" to RequestUserInputAnswer(listOf("Compact")),
                     ),
                 ),
             ),
@@ -383,7 +376,7 @@ private class FakeTool(
 
 private class FakeRequestUserInput(
     override val index: Int,
-    event: StableRequestUserInputToolEvent,
+    event: StableAskUserEvent,
 ) : RequestUserInputHistoryItemViewModel {
     override val state = MutableStateFlow<RequestUserInputHistoryItemState>(
         RequestUserInputHistoryItemState.Ready(event, Duration.ZERO),
