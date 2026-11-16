@@ -1,4 +1,4 @@
-@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlin.time.ExperimentalTime::class)
 
 package io.github.stream29.kodex.cli.notification
 
@@ -9,12 +9,9 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.rpc.models.*
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -29,6 +26,7 @@ import kotlinx.serialization.json.Json
 import kotlin.random.Random
 import kotlin.test.*
 import kotlin.time.Duration
+import kotlin.time.Instant
 
 private val event = Notification.Stop.UnhandledError(4, "literal $(touch unwanted)\n\"JSON\"")
 private fun hook(name: String, command: String = name) = NotificationHook(
@@ -52,20 +50,22 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
             consumer.cancelAndJoin()
         }
     }
-    test("each concrete stop branch selects exactly its explicit type without interpreting payload text") {
+    test("each concrete notification branch selects exactly its explicit type without interpreting payload text") {
         runTest {
             val events = listOf(
                 Notification.Stop.AssistantMessage(4, StableAssistantMessage(listOf(ContentItem.OutputText("stop_unhandled_error")))),
-                Notification.Stop.RequestUserInput(4, listOf(PendingRequestUserInputToolEvent(
-                    "question", arguments = RequestUserInputArgs(questions = listOf(
-                        RequestUserInputQuestion("scope", "Scope", "stop_suggest_subagent"),
-                    )),
-                ))),
-                Notification.Stop.SuggestSubagent(4, listOf(PendingSuggestSubagentTaskToolEvent(
-                    "suggest", arguments = SuggestSubagentTaskArgs(tasks = listOf(
-                        SuggestedSubagentTask("Inspect", "stop_assistant_message"),
-                    )),
-                ))),
+                Notification.AskUserCreated(
+                    4,
+                    AskUserEntry(
+                        askId = 1,
+                        questions = RequestUserInputArgs(
+                            questions = listOf(
+                                RequestUserInputQuestion("scope", "Scope", "stop_assistant_message"),
+                            ),
+                        ),
+                        createdAt = Instant.fromEpochMilliseconds(1_700_000_000_000L),
+                    ),
+                ),
                 event,
             )
             val settings = MutableStateFlow(CliFrontendSettings(hooks = NotificationHookType.entries.map {
@@ -102,7 +102,7 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
     test("unmatched hooks do not run and ordinary failures do not stop later commands") {
         runTest {
             val settings = MutableStateFlow(CliFrontendSettings(hooks = listOf(
-                NotificationHook("skip", setOf(NotificationHookType.StopSuggestSubagent), "skip"),
+                NotificationHook("skip", setOf(NotificationHookType.AskUserCreated), "skip"),
                 hook("bad"), hook("good"),
             )))
             val commands = mutableListOf<String>()

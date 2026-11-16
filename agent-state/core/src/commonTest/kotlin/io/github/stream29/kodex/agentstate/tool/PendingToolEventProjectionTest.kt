@@ -5,38 +5,27 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEv
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageViewToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
+import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
-import io.github.stream29.kodex.openai.SearchCommands
-import io.github.stream29.kodex.openai.SearchQuery
+import io.github.stream29.kodex.openai.StepStatus
+import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventTools
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenNamespace
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolName
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputTools
-import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
+import io.github.stream29.kodex.tool.readmedia.MediaDetail
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
+import io.github.stream29.kodex.tool.readmedia.ReadMediaTools
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
-import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
-import io.github.stream29.kodex.tool.viewimage.ViewImageTools
-import io.github.stream29.kodex.tool.webrun.WebRunNamespace
-import io.github.stream29.kodex.tool.webrun.WebRunToolName
 import io.github.stream29.kodex.utils.applypatch.parsePatch
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.buildJsonObject
@@ -57,17 +46,10 @@ val pendingToolEventProjectionTest by testSuite {
             chars = "\u0003",
             yieldTimeMillis = 250,
         )
-        val web = SearchCommands(searchQuery = listOf(SearchQuery("Kotlin serialization")))
-        val imageGeneration = ImageGenToolArguments(prompt = "Draw the architecture.")
-        val imageView = ViewImageToolArguments(path = "diagram.png")
-        val requestUserInput = RequestUserInputArgs(
-            questions = listOf(
-                RequestUserInputQuestion(
-                    id = "scope",
-                    header = "Scope",
-                    question = "Which scope?",
-                ),
-            ),
+        val readMedia = ReadMediaToolArguments(path = "diagram.png", detail = MediaDetail.Original)
+        val planArgs = UpdatePlanArgs(
+            explanation = "Cut over model surface.",
+            plan = listOf(PlanItemArg("Verify tools.", StepStatus.InProgress)),
         )
         val awaitEvent = AwaitEventArguments(terminals = listOf(3, 9))
         val cases: List<Pair<ResponseItem.FunctionCall, PendingToolEvent>> = listOf(
@@ -99,42 +81,22 @@ val pendingToolEventProjectionTest by testSuite {
                 action = PendingCommandExecutionAction.WriteStdin(write),
             ),
             functionCall(
-                WebRunToolName,
-                SearchCommands.serializer(),
-                web,
-                namespace = WebRunNamespace,
-            ) to PendingWebSearchToolEvent(
-                callId = "call_$WebRunToolName",
+                ReadMediaTools.Name,
+                ReadMediaToolArguments.serializer(),
+                readMedia,
+            ) to PendingReadMediaToolEvent(
+                callId = "call_${ReadMediaTools.Name}",
                 itemId = ItemId,
-                commands = web,
+                arguments = readMedia,
             ),
             functionCall(
-                ImageGenToolName,
-                ImageGenToolArguments.serializer(),
-                imageGeneration,
-                namespace = ImageGenNamespace,
-            ) to PendingImageGenerationToolEvent(
-                callId = "call_$ImageGenToolName",
+                "update_plan",
+                UpdatePlanArgs.serializer(),
+                planArgs,
+            ) to PendingPlanUpdate(
+                callId = "call_update_plan",
                 itemId = ItemId,
-                arguments = imageGeneration,
-            ),
-            functionCall(
-                ViewImageTools.Name,
-                ViewImageToolArguments.serializer(),
-                imageView,
-            ) to PendingImageViewToolEvent(
-                callId = "call_${ViewImageTools.Name}",
-                itemId = ItemId,
-                arguments = imageView,
-            ),
-            functionCall(
-                RequestUserInputTools.Name,
-                RequestUserInputArgs.serializer(),
-                requestUserInput,
-            ) to PendingRequestUserInputToolEvent(
-                callId = "call_${RequestUserInputTools.Name}",
-                itemId = ItemId,
-                arguments = requestUserInput,
+                arguments = planArgs,
             ),
         )
 
@@ -151,15 +113,15 @@ val pendingToolEventProjectionTest by testSuite {
         }
     }
 
-    test("projects client tool search and apply patch with call metadata") {
-        val searchArguments = SearchToolCallParams("connected drive tools", limit = 3)
+    test("projects retired client tool search to invalid tool call and apply patch to patch event") {
+        val searchArguments = buildJsonObject {
+            put("query", "connected drive tools")
+            put("limit", 3)
+        }
         val searchCall = ResponseItem.ClientToolSearchCall(
             id = ItemId,
             callId = "call_search",
-            arguments = OpenAiJsonCodec.encodeToJsonElement(
-                SearchToolCallParams.serializer(),
-                searchArguments,
-            ),
+            arguments = searchArguments,
         )
         val patchText = """
             *** Begin Patch
@@ -174,7 +136,16 @@ val pendingToolEventProjectionTest by testSuite {
         )
 
         assertEquals(
-            PendingToolSearchEvent("call_search", ItemId, searchArguments),
+            PendingInvalidToolCall(
+                callId = "call_search",
+                itemId = ItemId,
+                invocation = PendingInvalidToolInvocation.Function(
+                    name = "tool_search",
+                    namespace = null,
+                    arguments = searchArguments.toString(),
+                ),
+                message = "Client tool_search is no longer supported.",
+            ),
             searchCall.toPendingToolEvent(),
         )
         assertEquals(
@@ -287,7 +258,7 @@ val pendingToolEventProjectionTest by testSuite {
         }
     }
 
-    test("distinguishes dynamic function and MCP calls after JSON parsing") {
+    test("routes unknown namespaced function calls to generic pending function events") {
         val arguments = buildJsonObject { put("query", "design context") }
         val function = ResponseItem.FunctionCall(
             id = ItemId,
@@ -295,10 +266,6 @@ val pendingToolEventProjectionTest by testSuite {
             namespace = "google_drive",
             name = "search",
             arguments = arguments.toString(),
-        )
-        val mcp = function.copy(
-            callId = "call_mcp",
-            namespace = "mcp__google_drive",
         )
 
         assertEquals(
@@ -310,16 +277,6 @@ val pendingToolEventProjectionTest by testSuite {
                 arguments = arguments,
             ),
             function.toPendingToolEvent(),
-        )
-        assertEquals(
-            PendingMcpToolEvent(
-                callId = mcp.callId,
-                itemId = mcp.id,
-                name = mcp.name,
-                namespace = checkNotNull(mcp.namespace),
-                arguments = arguments,
-            ),
-            mcp.toPendingToolEvent(),
         )
     }
 }

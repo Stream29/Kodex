@@ -418,6 +418,46 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
         }
     }
 
+    test("createAskUser rejects NoQuestion mode and runWebSearch uses session model") {
+        var capturedSearchModel: OpenAiModelId? = null
+        val client = mockOpenAiClient {
+            search { request ->
+                capturedSearchModel = request.model
+                OpenAiResult.Success(
+                    SearchResponse(
+                        output = "search result",
+                    ),
+                )
+            }
+        }
+        runtimeFixture(client) { repository, index, backend ->
+            withInMemoryRpc(registerServices = { registerService(AgentRuntimeRpc::class) { backend } }) { raw ->
+                val rpc = RestoringRpcClient(raw).withService<AgentRuntimeRpc>()
+                val session = repository.openSessions.value.getValue(index)
+                val searchResponse = rpc.runWebSearch(
+                    index,
+                    SearchCommands(searchQuery = listOf(SearchQuery(q = "kodex"))),
+                )
+                assertEquals(OpenAiModelId("test-model"), capturedSearchModel)
+                assertEquals("search result", searchResponse.output)
+
+                val current = session.storage.getSettingsAt(session.storage.latestIndex())
+                session.runtime.compareAndSetSettings(
+                    current,
+                    current.copy(requestUserInputMode = RequestUserInputMode.NoQuestion),
+                )
+                assertFails {
+                    rpc.createAskUser(
+                        index,
+                        RequestUserInputArgs(
+                            questions = listOf(RequestUserInputQuestion("q1", "H", "Blocked?")),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
     test("projection changes nonce only for stream identity and never offers compaction output") {
         val projection = RuntimeOutputProjection()
         val first = MutableSharedFlow<ResponsesStreamEvent>(replay = 4)
@@ -613,7 +653,16 @@ internal suspend fun runtimeFixture(
                 generator = generator,
             )
             coroutineScope {
-                block(repository, index, BackendAgentRuntimeRpc(repository, eventBus))
+                block(
+                    repository,
+                    index,
+                    BackendAgentRuntimeRpc(
+                        repository = repository,
+                        eventBus = eventBus,
+                        client = client,
+                        home = root,
+                    ),
+                )
             }
         } finally {
             withContext(NonCancellable) {

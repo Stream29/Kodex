@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.agentstate.impl
 
-import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.prefix.impl.AgentContextPrefixResolver
 import io.github.stream29.kodex.agentcontext.prefix.render.render
@@ -47,7 +46,6 @@ import io.github.stream29.kodex.agentstorage.contract.ext.createAskUser
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
-import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.openai.CodexResponsesMetadata
@@ -104,10 +102,7 @@ import kotlin.uuid.Uuid
  * resolves the complete context prefix internally; the prefix is never
  * persisted or included in remote compaction input.
  *
- * [mcpService] is sampled once for every normal Responses request and remote
- * compaction request. AgentState derives the matching tool-search definition
- * internally and never closes the application-owned service.
- * Client and storage are also borrowed. Suspending operations execute in the
+ * Client and storage are borrowed. Suspending operations execute in the
  * caller's coroutine; cancelling the created child scope does not close these
  * resources or promise cancellation/rollback of unrelated caller jobs.
  *
@@ -118,7 +113,6 @@ public actual suspend fun CoroutineScope.KodexAgentState(
     client: OpenAiClient,
     storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
-    mcpService: McpService,
 ): KodexAgentState {
     val stateScope = supervisorChildScope()
     try {
@@ -128,7 +122,6 @@ public actual suspend fun CoroutineScope.KodexAgentState(
             client = client,
             storage = storage,
             contextSettings = contextSettings,
-            mcpService = mcpService,
             loadedLatestIndex = loadedLatestIndex,
             initialState = storage.stateAt(loadedLatestIndex),
         )
@@ -151,7 +144,6 @@ private class KodexAgentStateImpl(
     private val client: OpenAiClient,
     override val storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
-    private val mcpService: McpService,
     loadedLatestIndex: Int,
     initialState: KodexAgentStateValue,
 ) : KodexAgentState, CoroutineScope by scope {
@@ -210,20 +202,16 @@ private class KodexAgentStateImpl(
             val settings = storage.getSettingsAt(snapshotIndex)
             val messageWindow = storage.activeMessageWindowAt(snapshotIndex)
             val durableInput = messageWindow.flatMap(StableCleanEvent::toResponseHistoryItems)
-            val planningContext = ResponseItem.Message(
-                role = MessageRole.Developer,
-                content = listOf(ContentItem.InputText(renderPlanningInstructions())),
-            )
             val contextPrefix = contextPrefixResolver.resolve(settings, storage.uri).render()
             val threadId = storage.uri.toCodexThreadId()
             val windowId = settings.codexRequestWindowId(threadId)
             client.createResponse(
                 model = settings.model,
-                input = (listOf(planningContext) + contextPrefix + durableInput).toResponsesApiInput(),
+                input = (contextPrefix + durableInput).toResponsesApiInput(),
                 instructions = settings.instructions,
                 store = false,
                 previousResponseId = settings.previousResponseId,
-                tools = mcpService.visibleToolSpecs(settings),
+                tools = visibleToolSpecs(),
                 toolChoice = settings.toolChoice,
                 parallelToolCalls = settings.parallelToolCalls,
                 reasoning = settings.reasoning,
@@ -412,7 +400,7 @@ private class KodexAgentStateImpl(
                 request = snapshot.settings.toResponsesApiRequest(
                     input = input + ResponseItem.CompactionTrigger,
                     clientMetadata = clientMetadata,
-                    tools = mcpService.visibleToolSpecs(snapshot.settings),
+                    tools = visibleToolSpecs(),
                 ),
             )
             commitCompaction(
@@ -921,17 +909,11 @@ private val StateTransitionCommitTypes: Set<AgentCommitType> = setOf(
     AgentCommitType.AssistantMessage,
     AgentCommitType.AssistantMessageCommentary,
     AgentCommitType.AssistantMessageFinal,
-    AgentCommitType.RequestUserInputToolEvent,
-    AgentCommitType.SuggestSubagentTaskToolEvent,
     AgentCommitType.AwaitEventToolEvent,
     AgentCommitType.PlanUpdate,
     AgentCommitType.CommandExecutionToolEvent,
     AgentCommitType.PatchToolEvent,
-    AgentCommitType.McpToolEvent,
-    AgentCommitType.WebSearchToolEvent,
-    AgentCommitType.ImageGenerationToolEvent,
-    AgentCommitType.ImageViewToolEvent,
-    AgentCommitType.ToolSearchEvent,
+    AgentCommitType.ReadMediaToolEvent,
     AgentCommitType.InvalidToolCall,
     AgentCommitType.ServerToolSearch,
     AgentCommitType.HostedWebSearch,

@@ -5,43 +5,27 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommand
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageViewToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.kodex.openai.ResponseItem
-import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventTools
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenNamespace
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolName
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputTools
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskTools
-import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
+import io.github.stream29.kodex.tool.readmedia.ReadMediaTools
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
-import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
-import io.github.stream29.kodex.tool.viewimage.ViewImageTools
-import io.github.stream29.kodex.tool.webrun.WebRunNamespace
-import io.github.stream29.kodex.tool.webrun.WebRunToolName
 import io.github.stream29.kodex.utils.applypatch.parsePatch
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 /** Converts one provider-issued local tool call at the AgentState boundary. */
 public actual fun ResponseItem.ToolCall.toPendingToolEvent(): PendingToolEvent =
@@ -87,45 +71,9 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
                 )
             }
 
-        namespace == WebRunNamespace && name == WebRunToolName ->
-            typed(SearchCommands.serializer()) { commands ->
-                PendingWebSearchToolEvent(
-                    callId = callId,
-                    itemId = id,
-                    commands = commands,
-                )
-            }
-
-        namespace == ImageGenNamespace && name == ImageGenToolName ->
-            typed(ImageGenToolArguments.serializer()) { arguments ->
-                PendingImageGenerationToolEvent(
-                    callId = callId,
-                    itemId = id,
-                    arguments = arguments,
-                )
-            }
-
-        namespace == null && name == ViewImageTools.Name ->
-            typed(ViewImageToolArguments.serializer()) { arguments ->
-                PendingImageViewToolEvent(
-                    callId = callId,
-                    itemId = id,
-                    arguments = arguments,
-                )
-            }
-
-        namespace == null && name == RequestUserInputTools.Name ->
-            typed(RequestUserInputArgs.serializer()) { arguments ->
-                PendingRequestUserInputToolEvent(
-                    callId = callId,
-                    itemId = id,
-                    arguments = arguments,
-                )
-            }
-
-        namespace == null && name == SuggestSubagentTaskTools.Name ->
-            typed(SuggestSubagentTaskArgs.serializer()) { arguments ->
-                PendingSuggestSubagentTaskToolEvent(
+        namespace == null && name == ReadMediaTools.Name ->
+            typed(ReadMediaToolArguments.serializer()) { arguments ->
+                PendingReadMediaToolEvent(
                     callId = callId,
                     itemId = id,
                     arguments = arguments,
@@ -140,17 +88,6 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
                     arguments = arguments,
                 )
             }
-
-        namespace?.startsWith("mcp__") == true ->
-            parsedJson()?.let { arguments ->
-                PendingMcpToolEvent(
-                    callId = callId,
-                    itemId = id,
-                    name = name,
-                    namespace = checkNotNull(namespace),
-                    arguments = arguments,
-                )
-            } ?: invalid("Invalid JSON arguments for ${qualifiedName()}.")
 
         else ->
             parsedJson()?.let { arguments ->
@@ -196,18 +133,16 @@ private fun ResponseItem.CustomToolCall.toPendingToolEvent(): PendingToolEvent =
     }
 
 private fun ResponseItem.ClientToolSearchCall.toPendingToolEvent(): PendingToolEvent =
-    try {
-        PendingToolSearchEvent(
-            callId = callId,
-            itemId = id,
-            arguments = OpenAiJsonCodec.decodeFromJsonElement(
-                SearchToolCallParams.serializer(),
-                arguments,
-            ),
-        )
-    } catch (_: IllegalArgumentException) {
-        invalidToolSearch()
-    }
+    PendingInvalidToolCall(
+        callId = callId,
+        itemId = id,
+        invocation = PendingInvalidToolInvocation.Function(
+            name = "tool_search",
+            namespace = null,
+            arguments = OpenAiJsonCodec.encodeToString(JsonElement.serializer(), arguments),
+        ),
+        message = "Client tool_search is no longer supported.",
+    )
 
 private fun ResponseItem.FunctionCall.invalid(message: String): PendingInvalidToolCall =
     PendingInvalidToolCall(
@@ -219,14 +154,6 @@ private fun ResponseItem.FunctionCall.invalid(message: String): PendingInvalidTo
             arguments = arguments,
         ),
         message = message,
-    )
-
-private fun ResponseItem.ClientToolSearchCall.invalidToolSearch(): PendingInvalidToolCall =
-    PendingInvalidToolCall(
-        callId = callId,
-        itemId = id,
-        invocation = PendingInvalidToolInvocation.ToolSearch(arguments),
-        message = "Invalid client tool-search arguments.",
     )
 
 private fun ResponseItem.FunctionCall.qualifiedName(): String =

@@ -121,7 +121,6 @@ public actual suspend fun <R> withBackendServices(
                 global.modelCatalog,
                 global.contextSettings,
                 global.contextSettings,
-                global.mcpService,
             )
             val persistence = LazySqliteBackendPersistence(
                 owner = owner,
@@ -142,6 +141,9 @@ public actual suspend fun <R> withBackendServices(
                 val runtime = BackendAgentRuntimeRpc(
                     repository = persistence.sessionRepository,
                     eventBus = eventBus,
+                    client = api,
+                    home = home,
+                    onAskUserCreated = persistence::emitNotification,
                     checkAdmission = persistence::ensureAdmission,
                 )
                 val management = BackendSessionManagement(
@@ -150,7 +152,7 @@ public actual suspend fun <R> withBackendServices(
                     titleSettings = { store.settings.value.sessionTitle },
                     titleGenerator = createTitleGenerator(api),
                     reportBackgroundFailure = {
-                        BackendLogger.error(it) { "Suggested Session operation failed." }
+                        BackendLogger.error(it) { "Background Session operation failed." }
                     },
                     checkAdmission = persistence::ensureAdmission,
                 )
@@ -161,6 +163,8 @@ public actual suspend fun <R> withBackendServices(
                     effects = effects,
                     sessions = management,
                     notifications = persistence.notifications,
+                    schedules = persistence.scheduleRepository,
+                    home = home,
                     checkAdmission = persistence::ensureAdmission,
                 )
                 val services = BackendServices(
@@ -274,6 +278,10 @@ internal class LazySqliteBackendPersistence(
 
     val notifications: Flow<Notification> = notificationsShared.asSharedFlow()
     val notificationSubscriptionCount: StateFlow<Int> get() = notificationsShared.subscriptionCount
+
+    fun emitNotification(notification: Notification) {
+        notificationsShared.tryEmit(notification)
+    }
 
     val sessionRepository: KodexRootSessionRepository = object : KodexRootSessionRepository {
         override val coroutineContext: CoroutineContext

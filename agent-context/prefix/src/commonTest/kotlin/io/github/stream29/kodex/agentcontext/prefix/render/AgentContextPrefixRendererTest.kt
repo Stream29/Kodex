@@ -10,17 +10,20 @@ import io.github.stream29.kodex.agentcontext.prefix.skill.contract.SkillScope
 import io.github.stream29.kodex.agentcontext.prefix.skill.contract.SkillSource
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellType
+import kotlin.test.assertContains
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.time.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.io.files.Path
-import kotlin.test.assertEquals
-import kotlin.time.Clock
 
 val agentContextPrefixRendererTest by testSuite {
-    test("renders every injection source") {
+    test("renders every injection source with Tool-CLI developer instructions") {
         val skills = listOf(testSkill(1))
         val rendered = contextPrefix(
             agentMd = AgentsMdInstructions(
@@ -36,12 +39,32 @@ val agentContextPrefixRendererTest by testSuite {
 
         assertEquals(
             listOf(
-                message(MessageRole.Developer, availableSkills(skills)),
+                message(
+                    MessageRole.Developer,
+                    renderToolCliInstructions(RequestUserInputMode.AskUser),
+                    availableSkills(skills),
+                ),
                 message(
                     MessageRole.User,
                     agentMd("agent instructions"),
                     environmentContext(),
                 ),
+            ),
+            rendered,
+        )
+        assertContains(renderToolCliInstructions(RequestUserInputMode.AskUser), "kodex ask")
+    }
+
+    test("NoQuestion mode omits kodex ask and instructs autonomous execution") {
+        val noQuestionText = renderToolCliInstructions(RequestUserInputMode.NoQuestion)
+        assertFalse(noQuestionText.contains("kodex ask"))
+        assertContains(noQuestionText, "NoQuestion")
+
+        val rendered = contextPrefix(requestUserInputMode = RequestUserInputMode.NoQuestion).render()
+        assertEquals(
+            listOf(
+                message(MessageRole.Developer, noQuestionText),
+                message(MessageRole.User, environmentContext()),
             ),
             rendered,
         )
@@ -75,6 +98,7 @@ val agentContextPrefixRendererTest by testSuite {
 
         assertEquals(
             listOf(
+                message(MessageRole.Developer, renderToolCliInstructions(RequestUserInputMode.AskUser)),
                 message(
                     MessageRole.User,
                     agentMdForDirectory(
@@ -101,7 +125,11 @@ val agentContextPrefixRendererTest by testSuite {
     test("renders the explicitly supplied catalog without shared provider state") {
         assertEquals(
             listOf(
-                message(MessageRole.Developer, availableSkills(listOf(testSkill(2)))),
+                message(
+                    MessageRole.Developer,
+                    renderToolCliInstructions(RequestUserInputMode.AskUser),
+                    availableSkills(listOf(testSkill(2))),
+                ),
                 message(MessageRole.User, environmentContext()),
             ),
             contextPrefix(availableSkills = listOf(testSkill(2))).render(),
@@ -125,6 +153,7 @@ private fun testSkill(revision: Int): AvailableSkill = AvailableSkill(
 private fun contextPrefix(
     agentMd: AgentsMdInstructions = AgentsMdInstructions(),
     availableSkills: List<AvailableSkill> = emptyList(),
+    requestUserInputMode: RequestUserInputMode = RequestUserInputMode.AskUser,
     sessionMeta: AgentSessionMeta = AgentSessionMeta(
         uri = "memory:test",
         name = "Test session",
@@ -135,6 +164,7 @@ private fun contextPrefix(
     agentMd = agentMd,
     availableSkills = availableSkills,
     sessionMeta = sessionMeta,
+    requestUserInputMode = requestUserInputMode,
 )
 
 private fun message(role: MessageRole, vararg sections: String): ResponseItem.Message =

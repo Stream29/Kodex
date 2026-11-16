@@ -2,14 +2,11 @@ package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agenteventbus.AgentEventBus
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.OpenAiModerationBlockedException
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.models.Notification
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported
@@ -54,44 +51,50 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
         }
     }
 
-    test("mixed host waits publish one ordered list per type without executing any hook") {
-        val question = PendingRequestUserInputToolEvent(
-            "question",
-            arguments = RequestUserInputArgs(
-                questions = listOf(RequestUserInputQuestion("id", "header", "question")),
-            ),
-        )
-        val suggestion = PendingSuggestSubagentTaskToolEvent(
-            "suggest",
-            arguments = SuggestSubagentTaskArgs(
-                listOf(SuggestedSubagentTask("child", "prompt")),
-            ),
-        )
-        val secondQuestion = question.copy(callId = "question-two")
+    test("createAskUser publishes AskUserCreated immediately even while runningTurn is active") {
+        val enteredTurn = CompletableDeferred<Unit>()
+        val releaseTurn = CompletableDeferred<Unit>()
         val client = mockOpenAiClient {
             createResponse {
                 flow {
-                    listOf(question, suggestion, secondQuestion).forEachIndexed { idx, pending ->
-                        emit(
-                            ResponsesStreamEvent.OutputItemDone(
-                                idx.toLong(),
-                                pending.toResponseHistoryItems().single() as ResponseItem.ToolCall,
+                    enteredTurn.complete(Unit)
+                    releaseTurn.await()
+                    emit(
+                        ResponsesStreamEvent.OutputItemDone(
+                            0,
+                            ResponseItem.Message(
+                                role = MessageRole.Assistant,
+                                content = listOf(ContentItem.OutputText("done")),
                             ),
-                        )
-                    }
+                        ),
+                    )
                     emit(ResponsesStreamEvent.Completed(Response(id = "response", endTurn = true)))
                 }
             }
         }
-        runtimeFixture(client) { repository, index, rpc ->
-            val notifications = async(start = CoroutineStart.UNDISPATCHED) {
-                repository.stopEvents.toNotifications().take(2).toList()
-            }
-            rpc.appendUserMessage(index, listOf(ContentItem.InputText("host")))
-            rpc.resume(index)
-            val result = notifications.await()
-            assertEquals(listOf(question, secondQuestion), assertIs<Notification.Stop.RequestUserInput>(result[0]).requests)
-            assertEquals(listOf(suggestion), assertIs<Notification.Stop.SuggestSubagent>(result[1]).requests)
+        runtimeFixture(client) { repository, index, _ ->
+            val createdEvents = mutableListOf<Notification.AskUserCreated>()
+            val rpc = BackendAgentRuntimeRpc(
+                repository = repository,
+                eventBus = AgentEventBus(repository),
+                client = client,
+                onAskUserCreated = { createdEvents += it },
+            )
+            rpc.appendUserMessage(index, listOf(ContentItem.InputText("start turn")))
+            val running = async { rpc.resume(index) }
+            enteredTurn.await()
+            assertTrue(rpc.getRunningTurn(index))
+
+            val args = RequestUserInputArgs(
+                questions = listOf(RequestUserInputQuestion("id", "header", "question")),
+            )
+            val entry1 = rpc.createAskUser(index, args)
+            val entry2 = rpc.createAskUser(index, args)
+            assertEquals(listOf(entry1, entry2), createdEvents.map { it.entry })
+            assertTrue(createdEvents.all { it.sessionIndex == index })
+
+            releaseTurn.complete(Unit)
+            running.await()
         }
     }
 

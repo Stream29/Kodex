@@ -251,7 +251,7 @@ val splitSettingsStoreTest by testSuite(
             assertEquals(expected, openCliFrontendSettings(directory).settings.value)
             val text = SystemCoroutineFileSystem.readString(store.settingsPath)
             assertTrue("types:" in text)
-            assertTrue("stop_request_user_input" in text)
+            assertTrue("ask_user_created" in text)
             assertFalse("auth_source:" in text)
             assertFalse("mcp_servers:" in text)
             assertFalse("left_width:" in text)

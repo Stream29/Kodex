@@ -3,7 +3,6 @@ package io.github.stream29.kodex.agentstate.contextwindow
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
-import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
@@ -32,7 +31,6 @@ private suspend fun CoroutineScope.testState(storage: MutableKodexAgentStorage) 
         client = mockOpenAiClient(),
         storage = storage,
         contextSettings = TestAgentContextSettings,
-        mcpService = TestMcpService(),
     )
 
 val contextWindowTokenBudgetTest by testSuite {

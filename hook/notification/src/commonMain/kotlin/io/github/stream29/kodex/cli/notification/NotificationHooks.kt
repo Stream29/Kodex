@@ -117,8 +117,7 @@ internal suspend fun executeNotificationProcess(
 private val Notification.type: NotificationHookType
     get() = when (this) {
         is Notification.Stop.AssistantMessage -> NotificationHookType.StopAssistantMessage
-        is Notification.Stop.RequestUserInput -> NotificationHookType.StopRequestUserInput
-        is Notification.Stop.SuggestSubagent -> NotificationHookType.StopSuggestSubagent
+        is Notification.AskUserCreated -> NotificationHookType.AskUserCreated
         is Notification.Stop.UnhandledError -> NotificationHookType.StopUnhandledError
     }
 

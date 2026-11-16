@@ -29,15 +29,6 @@ internal object ToolRouting {
         return routes.toMap()
     }
 
-    /** Merges fixed and dynamic catalogs, rejecting cross-catalog collisions. */
-    public fun merge(fixed: Map<ToolName, Tool>, dynamic: Map<ToolName, Tool>): Map<ToolName, Tool> {
-        val duplicateNames = fixed.keys intersect dynamic.keys
-        require(duplicateNames.isEmpty()) {
-            "Fixed and dynamic tools handle the same name: ${duplicateNames.joinToString()}"
-        }
-        return fixed + dynamic
-    }
-
     /** Requires a local route name from a pending event. */
     public fun requireName(pending: PendingToolEvent): ToolName =
         ToolName(

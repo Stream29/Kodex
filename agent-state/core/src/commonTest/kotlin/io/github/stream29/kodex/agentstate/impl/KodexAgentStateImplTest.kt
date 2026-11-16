@@ -7,12 +7,11 @@ import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
@@ -67,8 +66,10 @@ import io.github.stream29.kodex.openai.TokenUsage
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
@@ -887,8 +888,8 @@ val kodexAgentStateImplTest by testSuite {
                     ),
                 ),
             )
-            val requestUserInput = StableRequestUserInputToolEvent(
-                callId = "request-user-input-1",
+            val askUserEvent = StableAskUserEvent(
+                askId = 1,
                 arguments = RequestUserInputArgs(
                     questions = listOf(
                         RequestUserInputQuestion(
@@ -898,20 +899,22 @@ val kodexAgentStateImplTest by testSuite {
                         ),
                     ),
                 ),
-                result = StableRequestUserInputResult.Failure("Input unavailable."),
+                response = RequestUserInputResponse(
+                    answers = mapOf("scope" to RequestUserInputAnswer(answers = listOf("all"))),
+                ),
             )
 
             agent.injectHistory(listOf(firstUser))
             agent.forcedCompact()
             agent.modify { mutable ->
                 mutable.commit(planUpdate)
-                mutable.commit(requestUserInput)
+                mutable.commit(askUserEvent)
             }
             val compactIndex = agent.forcedCompact()
 
             val expectedCompaction = StableContextCompaction(
                 encryptedContent = "compact-2",
-                retainedItems = listOf(firstUser, planUpdate, requestUserInput),
+                retainedItems = listOf(firstUser, planUpdate, askUserEvent),
             )
             assertEquals(
                 listOf<StableCleanEvent>(expectedCompaction),

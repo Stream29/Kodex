@@ -10,16 +10,30 @@ import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.SearchCommands
+import io.github.stream29.kodex.openai.SearchResponse
+import io.github.stream29.kodex.openai.client.contract.OpenAiClient
+import io.github.stream29.kodex.openai.getOrThrow
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.models.AgentStateValue
+import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.ShellSessionState
+import io.github.stream29.kodex.tool.imagegeneration.GeneratedImageArtifact
+import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
+import io.github.stream29.kodex.tool.imagegeneration.ImageGenerationToolClient
+import io.github.stream29.kodex.tool.imagegeneration.imageArtifactDirectory
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecProcessSession
+import io.github.stream29.kodex.tool.webrun.WebRunToolClient
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
@@ -41,11 +55,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.io.files.Path
 import kotlin.random.Random
 
 public actual class BackendAgentRuntimeRpc actual constructor(
     private val repository: KodexSessionRepository,
     private val eventBus: AgentEventBus,
+    private val client: OpenAiClient?,
+    private val home: Path?,
+    private val onAskUserCreated: (Notification.AskUserCreated) -> Unit,
     private val checkAdmission: () -> Unit,
 ) : AgentRuntimeRpc {
     private val viewsMutex = Mutex()
@@ -139,6 +157,49 @@ public actual class BackendAgentRuntimeRpc actual constructor(
     ): Unit =
         command(sessionIndex) {
             eventBus.submitAskUserAnswer(sessionIndex, askId, response)
+        }
+
+    actual override suspend fun createAskUser(
+        sessionIndex: Int,
+        arguments: RequestUserInputArgs,
+    ): AskUserEntry =
+        command(sessionIndex) {
+            val currentSettings = runtime.storage.getSettingsAt(runtime.storage.latestIndex())
+            check(currentSettings.requestUserInputMode == RequestUserInputMode.AskUser) {
+                "Asking the user is disabled when RequestUserInputMode is NoQuestion."
+            }
+            val entry = runtime.createAskUser(arguments)
+            onAskUserCreated(Notification.AskUserCreated(sessionIndex, entry))
+            entry
+        }
+
+    actual override suspend fun runWebSearch(
+        sessionIndex: Int,
+        commands: SearchCommands,
+    ): SearchResponse =
+        command(sessionIndex) {
+            val openAi = checkNotNull(client) { "OpenAiClient is not configured on BackendAgentRuntimeRpc." }
+            WebRunToolClient(
+                client = openAi,
+                sessionId = runtime.storage.uri,
+                modelProvider = { runtime.storage.getSettingsAt(runtime.storage.latestIndex()).model },
+            ).run(commands).getOrThrow().copy(encryptedOutput = null)
+        }
+
+    actual override suspend fun generateImage(
+        sessionIndex: Int,
+        arguments: ImageGenToolArguments,
+    ): GeneratedImageArtifact =
+        command(sessionIndex) {
+            val openAi = checkNotNull(client) { "OpenAiClient is not configured on BackendAgentRuntimeRpc." }
+            val kodexHome = checkNotNull(home) { "Kodex Home is not configured on BackendAgentRuntimeRpc." }
+            ImageGenerationToolClient(
+                client = openAi,
+                workingDirectoryProvider = { runtime.storage.getSettingsAt(runtime.storage.latestIndex()).cwd },
+            ).generateToFile(
+                arguments = arguments,
+                outputDirectory = imageArtifactDirectory(kodexHome, sessionIndex.toString()),
+            )
         }
 
     actual override suspend fun appendUserMessage(sessionIndex: Int, content: List<ContentItem>): Int =

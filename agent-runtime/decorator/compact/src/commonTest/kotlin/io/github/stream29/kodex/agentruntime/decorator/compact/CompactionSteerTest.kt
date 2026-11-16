@@ -8,7 +8,6 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
-import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
@@ -45,7 +44,6 @@ import io.github.stream29.kodex.openai.TokenUsage
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.kodex.tool.contract.typedTool
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -650,9 +648,7 @@ val compactionSteerTest by testSuite {
                 }
                 try {
                     val composed = runtime.toolRuntime(
-                        fixedTools = listOf(tool),
-                        dynamicTools = MutableStateFlow(emptyList()),
-                        toolSearch = MutableStateFlow(ToolSearchEngine(emptyList())),
+                        tools = listOf(tool),
                         logger = KotlinLogging.logger {},
                     )
                     state.appendUserMessage(content("initial"))
@@ -776,7 +772,6 @@ private suspend fun CoroutineScope.withSteerRuntime(
         },
         storage = storage,
         contextSettings = TestAgentContextSettings,
-        mcpService = TestMcpService(),
     )
     val modelCatalog = OpenAiModelCatalog(
         client = mockOpenAiClient { listModels { OpenAiResult.Success(ModelsResponse()) } },

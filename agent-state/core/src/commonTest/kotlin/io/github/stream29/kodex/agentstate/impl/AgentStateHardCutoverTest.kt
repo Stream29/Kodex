@@ -9,7 +9,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessag
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
-import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessagePhase
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -49,28 +48,22 @@ val agentStateHardCutoverTest by testSuite {
             val client = object : OpenAiClient by mockOpenAiClient() {
                 override fun close() { clientClosed = true }
             }
-            var mcpClosed = false
-            val mcp = object : McpService by TestMcpService {
-                override fun close() { mcpClosed = true }
-            }
             val owner = supervisorChildScope()
             try {
                 assertSame(failure, assertFailsWith<IllegalStateException> {
                     owner.KodexAgentState(
-                        client, storage, TestAgentContextSettings, mcp,
+                        client, storage, TestAgentContextSettings,
                     )
                 })
                 assertTrue(owner.coroutineContext.job.isActive)
                 assertTrue(owner.coroutineContext.job.children.none { it.isActive })
                 assertFalse(clientClosed)
-                assertFalse(mcpClosed)
                 // Reuse the same owner and borrowed resources after failed construction.
                 val agent = owner.KodexAgentState(
-                    client, backing, TestAgentContextSettings, mcp,
+                    client, backing, TestAgentContextSettings,
                 )
                 agent.cancelAndJoin()
                 assertFalse(clientClosed)
-                assertFalse(mcpClosed)
             } finally {
                 owner.cancelAndJoin()
             }

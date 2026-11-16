@@ -14,8 +14,6 @@ import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.models.*
 import io.github.stream29.kodex.rpc.server.defaultBackendSettings
 import io.github.stream29.kodex.rpc.server.withBackendServices
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -97,32 +95,14 @@ val notificationHooksRpcTest by testSuite(compartment = { TestCompartment.RealTi
         }
     }
 
-    test("mixed host pending calls remain intact after actual local notification commands finish") {
+    test("createAskUser emits AskUserCreated immediately without stopping or mutating the unanswered entry") {
         val questions = RequestUserInputArgs(questions = listOf(
             RequestUserInputQuestion("scope", "Scope", "Which scope?"),
             RequestUserInputQuestion("target", "Target", "Which target?"),
         ))
-        val suggestions = SuggestSubagentTaskArgs(tasks = listOf(
-            SuggestedSubagentTask("Inspect", "Inspect the isolated fixture."),
-            SuggestedSubagentTask("Verify", "Verify the isolated fixture."),
-        ))
-        val calls = listOf(
-            ResponseItem.FunctionCall(
-                name = "request_user_input", callId = "question-1",
-                arguments = Json.encodeToString(questions),
-            ),
-            ResponseItem.FunctionCall(
-                name = "suggest_subagent_task", callId = "suggestion",
-                arguments = Json.encodeToString(suggestions),
-            ),
-            ResponseItem.FunctionCall(
-                name = "request_user_input", callId = "question-2",
-                arguments = Json.encodeToString(questions),
-            ),
-        )
-        withNotificationRpc(calls) { root, _, runtime, index, notifications, awaitSubscription ->
+        withNotificationRpc(expectedRequests = 0) { root, _, runtime, index, notifications, awaitSubscription ->
             val settings = MutableStateFlow(CliFrontendSettings(hooks = listOf(NotificationHook(
-                "capture", setOf(NotificationHookType.StopRequestUserInput, NotificationHookType.StopSuggestSubagent),
+                "capture", setOf(NotificationHookType.AskUserCreated),
                 captureCommand(append = true),
             ))))
             val collected = async(start = CoroutineStart.UNDISPATCHED) {
@@ -130,24 +110,18 @@ val notificationHooksRpcTest by testSuite(compartment = { TestCompartment.RealTi
             }
             try {
                 awaitSubscription()
-                runtime.appendUserMessage(index, listOf(ContentItem.InputText("actual question")))
-                runtime.resume(index)
-                val before = assertIs<AgentStateValue.ToolPending>(runtime.getState(index))
-                val beforeIndex = runtime.getLatestIndex(index)
-                assertEquals(listOf("question-1", "suggestion", "question-2"), before.events.map { it.callId })
+                val created1 = runtime.createAskUser(index, questions)
+                val created2 = runtime.createAskUser(index, questions)
                 collected.await()
                 val received = SystemCoroutineFileSystem.readString(Path(root, "received.json"))
                     .lineSequence().filter(String::isNotBlank).map { Json.decodeFromString<Notification>(it) }.toList()
                 assertEquals(2, received.size)
-                val input = assertIs<Notification.Stop.RequestUserInput>(received[0])
-                val subagent = assertIs<Notification.Stop.SuggestSubagent>(received[1])
-                assertEquals(index, input.sessionIndex)
-                assertEquals(index, subagent.sessionIndex)
-                assertEquals(listOf("question-1", "question-2"), input.requests.map { it.callId })
-                assertTrue(input.requests.all { it.arguments == questions })
-                assertEquals(suggestions, subagent.requests.single().arguments)
-                assertEquals(before, runtime.getState(index))
-                assertEquals(beforeIndex, runtime.getLatestIndex(index))
+                val ask1 = assertIs<Notification.AskUserCreated>(received[0])
+                val ask2 = assertIs<Notification.AskUserCreated>(received[1])
+                assertEquals(index, ask1.sessionIndex)
+                assertEquals(index, ask2.sessionIndex)
+                assertEquals(created1, ask1.entry)
+                assertEquals(created2, ask2.entry)
                 assertFalse(runtime.getRunningTurn(index))
             } finally {
                 collected.cancelAndJoin()
@@ -158,6 +132,7 @@ val notificationHooksRpcTest by testSuite(compartment = { TestCompartment.RealTi
 
 private suspend fun withNotificationRpc(
     calls: List<ResponseItem.ToolCall> = emptyList(),
+    expectedRequests: Int = 1,
     block: suspend CoroutineScope.(Path, GlobalRpc, AgentRuntimeRpc, Int, Flow<Notification>, suspend () -> Unit) -> Unit,
 ) = withTimeout(45.seconds) {
     val root = Path(SystemTemporaryDirectory, "kodex-hook-rpc-${Random.nextLong()}")
@@ -205,9 +180,9 @@ private suspend fun withNotificationRpc(
                 val ready = CompletableDeferred<Unit>()
                 val selected = global.getNotificationFlow()
                     .onEach { notification ->
-                        if ((notification as Notification.Stop).sessionIndex == probeIndex) ready.complete(Unit)
+                        if (notification.targetSessionIndex == probeIndex) ready.complete(Unit)
                     }
-                    .filter { (it as Notification.Stop).sessionIndex == index }
+                    .filter { it.targetSessionIndex == index }
                 val awaitSubscription: suspend () -> Unit = {
                     // Notification RPC intentionally has no subscription-ready acknowledgement.
                     // A real Stop on an excluded Session proves the no-replay stream is online;
@@ -221,13 +196,19 @@ private suspend fun withNotificationRpc(
                     }
                 }
                 block(root, global, runtime, index, selected, awaitSubscription)
-                assertEquals(1, actualRequests)
+                assertEquals(expectedRequests, actualRequests)
             }
         }
     } finally {
         withContext(NonCancellable) { removeNotificationFixture(root) }
     }
 }
+
+private val Notification.targetSessionIndex: Int
+    get() = when (this) {
+        is Notification.AskUserCreated -> sessionIndex
+        is Notification.Stop -> sessionIndex
+    }
 
 private const val SubscriptionProbe = "isolated subscription probe"
 

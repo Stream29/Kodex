@@ -3,21 +3,19 @@ package io.github.stream29.kodex.rpc.contract
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskResponse
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
+import io.github.stream29.kodex.openai.PlanItemArg
+import io.github.stream29.kodex.openai.StepStatus
+import io.github.stream29.kodex.openai.UpdatePlanArgs
+import io.github.stream29.kodex.tool.readmedia.MediaDetail
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolOutput
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlin.test.assertEquals
@@ -25,18 +23,24 @@ import kotlin.test.assertFailsWith
 
 val completedToolValuesTest by testSuite {
     val serializer = StableCleanEvent.CompletedTool.serializer()
-    val answer = StableRequestUserInputToolEvent(
-        callId = "answer-1",
-        arguments = RequestUserInputArgs(listOf(RequestUserInputQuestion("q1", "Topic", "Which?"))),
-        result = StableRequestUserInputResult.Answered(
-            RequestUserInputResponse(mapOf("q1" to RequestUserInputAnswer(listOf("Other answer")))),
+    val planUpdate = StablePlanUpdate(
+        callId = "plan-1",
+        arguments = UpdatePlanArgs(
+            explanation = "Track steps",
+            plan = listOf(PlanItemArg("Implement", StepStatus.InProgress)),
         ),
     )
-    val suggestion = StableSuggestSubagentTaskToolEvent(
-        callId = "suggest-1",
-        arguments = SuggestSubagentTaskArgs(listOf(SuggestedSubagentTask("Task", "Prompt"))),
-        result = StableSuggestSubagentTaskResult.Completed(
-            SuggestSubagentTaskResponse.Rejected(feedback = "Not now"),
+    val readMedia = StableReadMediaToolEvent(
+        callId = "media-1",
+        arguments = ReadMediaToolArguments(
+            path = "/tmp/diagram.png",
+            detail = MediaDetail.Original,
+        ),
+        result = StableReadMediaResult.Success(
+            ReadMediaToolOutput(
+                imageUrl = "data:image/png;base64,iVBORw0KGgo=",
+                detail = MediaDetail.Original,
+            ),
         ),
     )
     val work = StableTextToolEvent(
@@ -47,12 +51,11 @@ val completedToolValuesTest by testSuite {
         success = false,
     )
 
-    test("completion union round trips both frontend interactions and work events") {
+    test("completion union round trips index and work tool events") {
         for (event in listOf(
-            answer,
-            answer.copy(result = StableRequestUserInputResult.Failure("Cancelled")),
-            suggestion,
-            suggestion.copy(result = StableSuggestSubagentTaskResult.Failure("Failed")),
+            planUpdate,
+            readMedia,
+            readMedia.copy(result = StableReadMediaResult.Failure("Not found")),
             work,
         )) {
             assertEquals(event, Json.decodeFromString(serializer, Json.encodeToString(serializer, event)))
@@ -60,16 +63,16 @@ val completedToolValuesTest by testSuite {
     }
 
     test("completion encoding agrees with the existing timeline unions") {
-        for (event in listOf(answer, suggestion)) {
+        assertEquals(
+            Json.encodeToJsonElement(StableIndexEvent.serializer(), planUpdate),
+            Json.encodeToJsonElement(serializer, planUpdate),
+        )
+        for (event in listOf(readMedia, work)) {
             assertEquals(
-                Json.encodeToJsonElement(StableIndexEvent.serializer(), event),
+                Json.encodeToJsonElement(StableWorkEvent.serializer(), event),
                 Json.encodeToJsonElement(serializer, event),
             )
         }
-        assertEquals(
-            Json.encodeToJsonElement(StableWorkEvent.serializer(), work),
-            Json.encodeToJsonElement(serializer, work),
-        )
     }
 
     test("non tool and unknown events cannot decode as tool completions") {

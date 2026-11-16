@@ -8,50 +8,26 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.ToolName
-import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
 import io.github.stream29.kodex.utils.logging.tool
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Default [KodexToolRuntime] over borrowed tool catalogs.
+ * Default [KodexToolRuntime] over a static borrowed [tools] catalog.
  */
-public actual class KodexToolRuntime internal constructor(
+public actual class KodexToolRuntime public actual constructor(
     private val delegate: ResumableAgentLayer,
-    fixedTools: List<Tool>,
-    private val dynamicTools: StateFlow<List<Tool>>,
-    private val toolSearch: StateFlow<ToolSearchEngine>,
+    tools: List<Tool>,
     private val logger: KLogger,
-    private val searchOperation: (ToolSearchEngine, SearchToolCallParams) -> ToolSearchResult,
 ) : ResumableAgentLayer by delegate {
-    public actual constructor(
-        delegate: ResumableAgentLayer,
-        fixedTools: List<Tool>,
-        dynamicTools: StateFlow<List<Tool>>,
-        toolSearch: StateFlow<ToolSearchEngine>,
-        logger: KLogger,
-    ) : this(
-        delegate = delegate,
-        fixedTools = fixedTools,
-        dynamicTools = dynamicTools,
-        toolSearch = toolSearch,
-        logger = logger,
-        searchOperation = { engine, arguments -> engine.search(arguments) },
-    )
-
-    private val fixedToolsByName: Map<ToolName, Tool> = ToolRouting.index(fixedTools)
+    private val toolsByName: Map<ToolName, Tool> = ToolRouting.index(tools)
 
     public actual override suspend fun resume() {
         while (true) {
@@ -67,7 +43,6 @@ public actual class KodexToolRuntime internal constructor(
     }
 
     private suspend fun handlePendingTools(pending: KodexAgentStateValue.ToolPending): Boolean {
-        val toolsByName = ToolRouting.merge(fixedToolsByName, ToolRouting.index(dynamicTools.value))
         var handledEvent = false
         for (pendingEvent in pending.events) {
             when (pendingEvent) {
@@ -81,36 +56,12 @@ public actual class KodexToolRuntime internal constructor(
                     handledEvent = true
                 }
 
-                is PendingToolSearchEvent -> {
-                    logger
-                        .tool(pendingEvent.loggingToolName(), pendingEvent.callId)
-                        .runToolCall {
-                            handleToolCall(pendingEvent) { toolSearch.value.handle(pendingEvent, searchOperation) }
-                        }
-                    handledEvent = true
-                }
-
                 else -> {
                     val toolName = ToolRouting.requireName(pendingEvent)
-                    val tool = toolsByName[toolName]
-                    if (tool == null && toolName.namespace?.startsWith("mcp__") == true) {
-                        logger
-                            .tool(pendingEvent.loggingToolName(), pendingEvent.callId)
-                            .runToolCall {
-                                warn { "MCP tool route is no longer available." }
-                                completeToolCall(
-                                    pendingEvent.failedEvent(
-                                        "The MCP tool is no longer available in the current catalog.",
-                                    ),
-                                )
-                            }
-                    } else if (tool == null) {
-                        continue
-                    } else {
-                        val toolLogger = logger.tool(toolName.toString(), pendingEvent.callId)
-                        toolLogger.runToolCall {
-                            handleToolCall(pendingEvent) { tool.handle(pendingEvent) }
-                        }
+                    val tool = toolsByName[toolName] ?: continue
+                    val toolLogger = logger.tool(toolName.toString(), pendingEvent.callId)
+                    toolLogger.runToolCall {
+                        handleToolCall(pendingEvent) { tool.handle(pendingEvent) }
                     }
                     handledEvent = true
                 }
@@ -173,27 +124,10 @@ private fun PendingInvalidToolInvocation.toStableInvocation(): InvalidToolInvoca
                 namespace = namespace,
                 input = input,
             )
-
-        is PendingInvalidToolInvocation.ToolSearch ->
-            InvalidToolInvocation.ToolSearch(arguments)
     }
 
-private fun ToolSearchEngine.handle(
-    pending: PendingToolSearchEvent,
-    search: (ToolSearchEngine, SearchToolCallParams) -> ToolSearchResult,
-): StableToolSearchEvent =
-    StableToolSearchEvent(
-        callId = pending.callId,
-        itemId = pending.itemId,
-        arguments = pending.arguments,
-        result = search(this, pending.arguments),
-    )
-
-private fun PendingToolEvent.failedEvent(message: String): StableCleanEvent.CompletedTool =
-    toFailedToolEvent(message)
-
 private fun PendingToolEvent.loggingToolName(): String {
-    val name = toolName ?: ClientToolSearchName
+    val name = toolName ?: "unknown_tool"
     return toolNamespace?.let { namespace -> "$namespace.$name" } ?: name
 }
 
@@ -213,5 +147,3 @@ private suspend fun <Result> KLogger.runToolCall(
         throw failure
     }
 }
-
-private const val ClientToolSearchName: String = "tool_search"

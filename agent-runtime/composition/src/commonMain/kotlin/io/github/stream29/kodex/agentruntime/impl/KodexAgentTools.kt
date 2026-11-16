@@ -2,34 +2,19 @@ package io.github.stream29.kodex.agentruntime.impl
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
-import io.github.stream29.kodex.agentstate.tool.toDeferredToolSearchDocuments
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.mcp.contract.McpClient
-import io.github.stream29.kodex.mcp.contract.McpService
-import io.github.stream29.kodex.mcp.contract.McpTool
-import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchToolClient
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.contract.Tool
-import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
-import io.github.stream29.kodex.tool.getcontextremaining.getContextRemainingTool
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenerationToolClient
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenerationTools
 import io.github.stream29.kodex.tool.plan.updatePlanTool
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolClient
+import io.github.stream29.kodex.tool.readmedia.ReadMediaTools
+import io.github.stream29.kodex.tool.unifiedexec.KodexAgentIdEnvironmentVariable
+import io.github.stream29.kodex.tool.unifiedexec.KodexHomeEnvironmentVariable
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecToolClient
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
-import io.github.stream29.kodex.tool.viewimage.ViewImageToolClient
-import io.github.stream29.kodex.tool.viewimage.ViewImageTools
-import io.github.stream29.kodex.tool.webrun.WebRunToolClient
-import io.github.stream29.kodex.tool.webrun.WebRunTools
 import io.github.stream29.kodex.utils.coroutines.closeOnFailure
-import io.github.stream29.kodex.utils.kodexhome.KodexHome
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.io.files.Path
 
 internal data class KodexAgentFixedTools(
@@ -46,12 +31,16 @@ internal fun KodexAgentState.fixedTools(
     val workingDirectoryProvider: suspend () -> Path = {
         agentSettingsProvider().cwd
     }
-    val modelProvider: suspend () -> OpenAiModelId = {
-        agentSettingsProvider().model
+    val environmentProvider: suspend () -> Map<String, String> = {
+        buildMap {
+            put(KodexHomeEnvironmentVariable, dependencies.contextSettings.value.kodexHome.toString())
+            agentId?.let { id -> put(KodexAgentIdEnvironmentVariable, id.toString()) }
+        }
     }
     val unifiedExecClient = UnifiedExecToolClient(
         settingsProvider = { dependencies.shellSettings.value },
         workingDirectoryProvider = workingDirectoryProvider,
+        environmentProvider = environmentProvider,
     )
     return unifiedExecClient.closeOnFailure {
         KodexAgentFixedTools(
@@ -63,66 +52,17 @@ internal fun KodexAgentState.fixedTools(
                         ),
                     ),
                 )
-                add(CurrentTimeTools.createTool())
-                add(getContextRemainingTool(dependencies.modelCatalog))
+                add(
+                    ReadMediaTools.createTool(
+                        ReadMediaToolClient(
+                            workingDirectoryProvider = workingDirectoryProvider,
+                        ),
+                    ),
+                )
                 add(updatePlanTool())
                 addAll(UnifiedExecTools.createTools(unifiedExecClient))
-                add(
-                    WebRunTools.createTool(
-                        WebRunToolClient(
-                            client = dependencies.client,
-                            sessionId = storage.uri,
-                            modelProvider = modelProvider,
-                        ),
-                    ),
-                )
-                add(
-                    ViewImageTools.createTool(
-                        ViewImageToolClient(
-                            workingDirectoryProvider = workingDirectoryProvider,
-                        ),
-                    ),
-                )
-                add(
-                    ImageGenerationTools.createTool(
-                        client = ImageGenerationToolClient(
-                            client = dependencies.client,
-                            workingDirectoryProvider = workingDirectoryProvider,
-                        ),
-                        outputDirectory = ImageGenerationTools.outputDirectory(KodexHome, storage.uri),
-                    ),
-                )
             },
             unifiedExecToolClient = unifiedExecClient,
         )
     }
 }
-
-internal fun KodexAgentState.mcpToolsState(
-    mcpService: McpService,
-): StateFlow<List<McpTool>> =
-    mcpService.clients
-        .map { clients -> clients.listTools() }
-        .stateIn(
-            scope = this,
-            started = SharingStarted.Eagerly,
-            initialValue = mcpService.clients.value.listTools(),
-        )
-
-internal fun KodexAgentState.toolSearchState(
-    mcpTools: StateFlow<List<McpTool>>,
-): StateFlow<ToolSearchEngine> =
-    mcpTools
-        .map { tools ->
-            ToolSearchEngine(tools.toDeferredToolSearchDocuments())
-        }
-        .stateIn(
-            scope = this,
-            started = SharingStarted.Eagerly,
-            initialValue = ToolSearchEngine(
-                mcpTools.value.toDeferredToolSearchDocuments(),
-            ),
-        )
-
-private fun Map<String, McpClient>.listTools(): List<McpTool> =
-    values.flatMap(McpClient::listTools)

@@ -20,9 +20,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.openai.CompactionPhase
@@ -88,8 +87,6 @@ private fun KodexAgentState.masterRuntimeLayer(
     dependencies: KodexAgentDependencies,
     logger: KLogger,
 ): AgentRuntimeLayer {
-    val mcpTools = mcpToolsState(dependencies.mcpService)
-    val toolSearch = toolSearchState(mcpTools)
     val fixedTools = fixedTools(dependencies)
     return fixedTools.tools.closeOnFailure {
         AgentRuntimeLayer(
@@ -98,9 +95,7 @@ private fun KodexAgentState.masterRuntimeLayer(
                 logger = logger,
             )
                 .toolRuntime(
-                    fixedTools = fixedTools.tools,
-                    dynamicTools = mcpTools,
-                    toolSearch = toolSearch,
+                    tools = fixedTools.tools,
                     logger = logger,
                 )
                 .also {
@@ -173,10 +168,20 @@ private class AgentRuntimeImpl(
                     needsSubmittedSteerDrain.store(false)
                     delegate.resume()
                     val pending = delegate.state.value as? KodexAgentStateValue.ToolPending
-                    val awaitEvents = pending?.events
-                        ?.takeIf { events -> events.all { it is PendingAwaitEventToolEvent } }
-                        ?.filterIsInstance<PendingAwaitEventToolEvent>()
-                        .orEmpty()
+                        ?: break
+                    val unsupported = pending.events.filterNot { it is PendingAwaitEventToolEvent }
+                    if (unsupported.isNotEmpty()) {
+                        for (unmatched in unsupported) {
+                            val label = unmatched.loggingToolNameOrNull() ?: unmatched.callId
+                            completeToolCall(
+                                unmatched.toFailedToolEvent(
+                                    "unsupported tool call: $label",
+                                ),
+                            )
+                        }
+                        continue
+                    }
+                    val awaitEvents = pending.events.filterIsInstance<PendingAwaitEventToolEvent>()
                     if (awaitEvents.isEmpty()) {
                         break
                     }
@@ -368,7 +373,7 @@ private class AgentRuntimeImpl(
 
     private suspend fun emitStopEventsOnNormalStop(before: Int) {
         try {
-            when (val currentState = delegate.state.value) {
+            when (delegate.state.value) {
                 KodexAgentStateValue.AssistantMessage -> {
                     val latest = delegate.latestIndex.value
                     if (latest > before) {
@@ -384,17 +389,6 @@ private class AgentRuntimeImpl(
                         if (message != null) {
                             mutableStopEvents.tryEmit(AgentStopEvent.AssistantMessage(message))
                         }
-                    }
-                }
-
-                is KodexAgentStateValue.ToolPending -> {
-                    val questions = currentState.events.filterIsInstance<PendingRequestUserInputToolEvent>()
-                    val suggestions = currentState.events.filterIsInstance<PendingSuggestSubagentTaskToolEvent>()
-                    if (questions.isNotEmpty()) {
-                        mutableStopEvents.tryEmit(AgentStopEvent.RequestUserInput(questions))
-                    }
-                    if (suggestions.isNotEmpty()) {
-                        mutableStopEvents.tryEmit(AgentStopEvent.SuggestSubagent(suggestions))
                     }
                 }
 

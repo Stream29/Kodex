@@ -134,6 +134,7 @@ private class RpcCachedAgentStorage(
     valueCacheSize: Int,
     timeSource: TimeSource,
 ) : ObservableKodexAgentStorage {
+    override val agentId: Int = sessionIndex
     private val mutex = Mutex()
     private var valuesNonce: Long? = null
     private val values = Cache.Builder<ExactCacheKey, List<IndexedAgentCommit>>()

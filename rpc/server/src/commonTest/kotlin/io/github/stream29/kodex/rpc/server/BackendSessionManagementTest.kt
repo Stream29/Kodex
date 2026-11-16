@@ -20,7 +20,6 @@ import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.rpcexception.*
 import kotlinx.coroutines.*
@@ -224,43 +223,6 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             assertEquals(emptyList(), management.getSessionCatalog(false))
             assertFalse(management.deleteSession(index))
             assertEquals(index, management.createSession(Path(".")))
-        }
-    }
-
-    test("suggested batch returns ordered metadata and launches children without waiting for model completion") {
-        val entered = MutableStateFlow(0)
-        val release = CompletableDeferred<Unit>()
-        val failures = mutableListOf<Throwable>()
-        runtimeFixture(
-            mockOpenAiClient {
-                createResponse {
-                    flow {
-                        entered.update { it + 1 }
-                        release.await()
-                        emit(ResponsesStreamEvent.Completed(Response(id = "done", endTurn = true)))
-                    }
-                }
-            },
-        ) { repository, _, runtime ->
-            val management = testSessionManagement(
-                repository = repository,
-                newSessionDefaults = { error("Suggested batch must not read global defaults") },
-                reportBackgroundFailure = { failures += it },
-            )
-            val tasks = listOf(SuggestedSubagentTask("one", "first"), SuggestedSubagentTask("two", "second"))
-            val results = management.createSuggestedSessions(tasks, KodexAgentSettings(OpenAiModelId("test-model")))
-            assertEquals(listOf("one", "two"), results.map { it.meta.name })
-            entered.first { it == 2 }
-            for (result in results) {
-                assertEquals(runtime.getStorageUri(result.sessionIndex), result.meta.uri)
-                assertTrue(runtime.getRunningTurn(result.sessionIndex))
-                val sessionStorage = repository.openSessions.value.getValue(result.sessionIndex).storage
-                assertEquals(result.meta.name, sessionStorage.getSettingsAt(0).threadName)
-                assertEquals(OpenAiModelId("test-model"), sessionStorage.getSettingsAt(0).model)
-            }
-            release.complete(Unit)
-            results.forEach { result -> runtime.getRunningTurnFlow(result.sessionIndex).first { !it } }
-            assertTrue(failures.isEmpty())
         }
     }
 

@@ -3,20 +3,13 @@ package io.github.stream29.kodex.agentstate.impl
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
-import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
+import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
-import io.github.stream29.kodex.mcp.contract.McpClient
-import io.github.stream29.kodex.mcp.contract.McpClientState
-import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
-import io.github.stream29.kodex.mcp.contract.McpService
-import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
@@ -24,18 +17,14 @@ import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesApiRequest
-import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
-import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ThreadGoal
-import io.github.stream29.kodex.openai.ThreadGoalStatus
-import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
-import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -48,7 +37,6 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 val agentContextProjectionTest by testSuite {
@@ -57,7 +45,7 @@ val agentContextProjectionTest by testSuite {
     } closeWith {
         cancelAndJoin()
     } asContextForEach {
-        test("projects filesystem context without persisting it") {
+        test("projects filesystem context and tool CLI instructions without persisting them") {
             val fixture = contextFixture("projection")
             try {
                 fixture.writeUserAgentsMd("user instructions")
@@ -69,7 +57,6 @@ val agentContextProjectionTest by testSuite {
                     client = recordingClient(requests),
                     storage = storage,
                     contextSettings = fixture.settings,
-                    mcpService = ProjectionMcpService(),
                 )
                 val user = userMessage("hello")
 
@@ -77,7 +64,8 @@ val agentContextProjectionTest by testSuite {
                 agent.requestResponseApi()
 
                 val input = requests.single().input
-                assertEquals(planningMessage(), input[0])
+                assertTrue(input.developerText().contains("<tool_cli_instructions>"))
+                assertTrue(input.developerText().contains("kodex ask (create | list | get)"))
                 assertTrue(
                     input.contextText().contains(
                         "user instructions\n\nkodex instructions\n\n--- project-doc ---\n\nproject instructions",
@@ -92,7 +80,7 @@ val agentContextProjectionTest by testSuite {
             }
         }
 
-        test("samples current context and tool-search state for every response request") {
+        test("samples current context and RequestUserInputMode for every response request while keeping static 5 tools") {
             val fixture = contextFixture("live-state")
             try {
                 fixture.writeUserAgentsMd("first instructions")
@@ -105,12 +93,10 @@ val agentContextProjectionTest by testSuite {
                 )
                 val storage = InMemoryKodexAgentStorage(initialSettings)
                 val requests = mutableListOf<ResponsesApiRequest>()
-                val mcpService = ProjectionMcpService()
                 val agent = KodexAgentState(
                     client = recordingClient(requests),
                     storage = storage,
                     contextSettings = fixture.settings,
-                    mcpService = mcpService,
                 )
                 val user = userMessage("continue")
 
@@ -128,26 +114,23 @@ val agentContextProjectionTest by testSuite {
                         requestUserInputMode = RequestUserInputMode.NoQuestion,
                     ),
                 )
-                mcpService.clients.value = mapOf("projection" to ProjectionMcpClient)
                 agent.requestResponseApi()
 
                 assertTrue(requests[0].input.contextText().contains("first instructions"))
                 assertTrue(requests[0].input.contextText().contains("<shell>bash</shell>"))
+                assertTrue(requests[0].input.developerText().contains("kodex ask (create | list | get)"))
                 assertTrue(requests[1].input.contextText().contains("second instructions"))
                 assertTrue(requests[1].input.contextText().contains("updated project instructions"))
                 assertTrue(requests[1].input.contextText().contains("<shell>zsh</shell>"))
-                val firstToolSearchSpec = assertIs<ToolSpec.ToolSearch>(requests[0].tools.last())
-                val secondToolSearchSpec = assertIs<ToolSpec.ToolSearch>(requests[1].tools.last())
-                assertTrue(firstToolSearchSpec.description.contains("None currently enabled."))
-                assertTrue(secondToolSearchSpec.description.contains("- projection: Projection tools."))
-                assertTrue(requests[0].hasRequestUserInputTool())
-                assertFalse(requests[1].hasRequestUserInputTool())
+                assertFalse(requests[1].input.developerText().contains("kodex ask (create | list | get)"))
+                assertEquals(visibleToolSpecs(), requests[0].tools)
+                assertEquals(visibleToolSpecs(), requests[1].tools)
             } finally {
                 deleteRecursively(fixture.root)
             }
         }
 
-        test("remote compaction excludes transient context") {
+        test("remote compaction excludes transient context and uses static 5 tools") {
             val fixture = contextFixture("compaction")
             try {
                 fixture.writeUserAgentsMd("must not be compacted")
@@ -171,7 +154,6 @@ val agentContextProjectionTest by testSuite {
                     },
                     storage = storage,
                     contextSettings = fixture.settings,
-                    mcpService = ProjectionMcpService(listOf(ProjectionMcpTool)),
                 )
                 val user = userMessage("compact this")
 
@@ -186,10 +168,7 @@ val agentContextProjectionTest by testSuite {
                     listOf(user, ResponseItem.CompactionTrigger),
                     compactionRequests.single().input,
                 )
-                val toolSearchSpec =
-                    assertIs<ToolSpec.ToolSearch>(compactionRequests.single().tools.last())
-                assertTrue(toolSearchSpec.description.contains("- projection: Projection tools."))
-                assertFalse(compactionRequests.single().hasRequestUserInputTool())
+                assertEquals(visibleToolSpecs(), compactionRequests.single().tools)
                 assertEquals(2, compactIndex)
                 assertEquals(StableUserMessage(user.content), storage.getIndexEntryAt(1))
                 assertEquals(
@@ -215,10 +194,6 @@ private fun recordingClient(
     }
 }
 
-private fun ResponsesApiRequest.hasRequestUserInputTool(): Boolean =
-    tools.filterIsInstance<ResponsesApiTool>()
-        .any { tool -> tool.name == "request_user_input" }
-
 private fun settings(
     cwd: Path,
     plan: UpdatePlanArgs = UpdatePlanArgs(plan = emptyList()),
@@ -234,14 +209,18 @@ private fun settings(
 private fun userMessage(text: String): ResponseItem.Message =
     message(MessageRole.User, text)
 
-private fun planningMessage(): ResponseItem.Message =
-    message(MessageRole.Developer, renderPlanningInstructions())
-
 private fun message(role: MessageRole, vararg sections: String): ResponseItem.Message =
     ResponseItem.Message(
         role = role,
         content = sections.map(ContentItem::InputText),
     )
+
+private fun List<ResponseItem>.developerText(): String =
+    filterIsInstance<ResponseItem.Message>()
+        .filter { message -> message.role == MessageRole.Developer }
+        .flatMap(ResponseItem.Message::content)
+        .filterIsInstance<ContentItem.InputText>()
+        .joinToString(separator = "\n", transform = ContentItem.InputText::text)
 
 private fun List<ResponseItem>.contextText(): String =
     filterIsInstance<ResponseItem.Message>()
@@ -251,12 +230,6 @@ private fun List<ResponseItem>.contextText(): String =
                     .any { content -> "<environment_context>" in content.text }
         }
         .content
-        .filterIsInstance<ContentItem.InputText>()
-        .joinToString(separator = "\n", transform = ContentItem.InputText::text)
-
-private fun List<ResponseItem>.text(): String =
-    filterIsInstance<ResponseItem.Message>()
-        .flatMap(ResponseItem.Message::content)
         .filterIsInstance<ContentItem.InputText>()
         .joinToString(separator = "\n", transform = ContentItem.InputText::text)
 
@@ -277,21 +250,6 @@ private class ContextFixture(
 
     suspend fun writeKodexAgentsMd(text: String) {
         SystemCoroutineFileSystem.writeString(Path(kodexHome, "AGENTS.md"), text)
-    }
-
-    suspend fun writeSkill(name: String, description: String) {
-        val directory = Path(agentsHome, "skills/$name")
-        SystemCoroutineFileSystem.createDirectories(directory)
-        SystemCoroutineFileSystem.writeString(
-            Path(directory, "SKILL.md"),
-            """
-            ---
-            name: $name
-            description: $description
-            ---
-            Skill instructions.
-            """.trimIndent(),
-        )
     }
 }
 
@@ -325,56 +283,6 @@ private data class ProjectionContextSettings(
     override val codexHome: Path = Path(kodexHome, "codex-home"),
     override val sources: AgentContextSourceSettings = AgentContextSourceSettings(),
 ) : AgentContextSettings
-
-private class ProjectionMcpService(
-    initialTools: List<McpTool> = emptyList(),
-) : McpService {
-    override val clients: MutableStateFlow<Map<String, McpClient>> = MutableStateFlow(
-        initialTools
-            .groupBy(McpTool::serverName)
-            .mapValues { (serverName, tools) ->
-                FixedProjectionMcpClient(serverName, tools)
-            },
-    )
-    override val authentication = MutableStateFlow<Map<String, McpAuthenticationState>>(emptyMap())
-
-    override suspend fun invalidate(serverName: String) = Unit
-
-    override suspend fun refresh() = Unit
-
-    override fun close() = Unit
-}
-
-private class FixedProjectionMcpClient(
-    override val serverName: String,
-    private val tools: List<McpTool>,
-) : McpClient {
-    override val state = MutableStateFlow<McpClientState>(McpClientState.Healthy)
-
-    override fun listTools(): List<McpTool> = tools
-
-    override suspend fun reconnect() = Unit
-}
-
-private object ProjectionMcpClient : McpClient {
-    override val serverName: String = "projection"
-    override val state = MutableStateFlow<McpClientState>(McpClientState.Healthy)
-
-    override fun listTools(): List<McpTool> = listOf(ProjectionMcpTool)
-
-    override suspend fun reconnect() = Unit
-}
-
-private object ProjectionMcpTool : McpTool {
-    override val serverName: String = "projection"
-    override val serverInstructions: String = "Projection tools."
-    override val spec: ToolSpec = CurrentTimeTools.spec
-
-    override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
-        error("Projection tests never execute MCP tools.")
-
-    override fun close() = Unit
-}
 
 private suspend fun deleteRecursively(path: Path) {
     val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return

@@ -15,7 +15,7 @@ val notificationHookSpecTest by testSuite {
             NotificationHookType.serializer().descriptor.serialName,
         )
         assertEquals(
-            listOf("\"stop_assistant_message\"", "\"stop_request_user_input\"", "\"stop_suggest_subagent\"", "\"stop_unhandled_error\""),
+            listOf("\"stop_assistant_message\"", "\"ask_user_created\"", "\"stop_unhandled_error\""),
             NotificationHookType.entries.map { Json.encodeToString(it) },
         )
         val original = NotificationHook(" keep spaces ", NotificationHookType.entries.toSet(), " literal command ")

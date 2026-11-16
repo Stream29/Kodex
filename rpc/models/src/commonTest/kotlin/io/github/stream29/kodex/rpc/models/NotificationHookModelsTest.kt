@@ -26,8 +26,7 @@ val notificationHookModelsTest by testSuite {
         assertEquals(
             setOf(
                 "stop_assistant_message",
-                "stop_request_user_input",
-                "stop_suggest_subagent",
+                "ask_user_created",
                 "stop_unhandled_error",
             ),
             encoded.getValue("types").jsonArray.map { it.jsonPrimitive.content }.toSet(),

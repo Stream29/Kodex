@@ -6,6 +6,7 @@ import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellType
@@ -107,6 +108,13 @@ val agentContextPrefixResolverTest by testSuite {
             assertTrue(prefix.agentMd.projectInstructions.isEmpty())
             assertEquals(cwd, prefix.cwd)
             assertEquals(testShell, prefix.shell)
+            assertEquals(RequestUserInputMode.AskUser, prefix.requestUserInputMode)
+
+            val noQuestionPrefix = resolver.resolve(
+                settings(cwd).copy(requestUserInputMode = RequestUserInputMode.NoQuestion),
+                "memory:test",
+            )
+            assertEquals(RequestUserInputMode.NoQuestion, noQuestionPrefix.requestUserInputMode)
         } finally {
             deleteRecursively(root)
         }

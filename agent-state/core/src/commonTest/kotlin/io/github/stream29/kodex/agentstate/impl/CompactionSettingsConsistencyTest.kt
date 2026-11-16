@@ -126,7 +126,7 @@ val compactionSettingsConsistencyTest by testSuite {
                     assertEquals(initial.reasoning, request.reasoning)
                     assertEquals(initial.serviceTier, request.serviceTier)
                     assertEquals(initial.instructions, request.instructions)
-                    assertEquals(TestMcpService.visibleToolSpecs(initial), request.tools)
+                    assertEquals(visibleToolSpecs(), request.tools)
                     assertEquals(initial.codexRequestWindowId(storage.uri.toCodexThreadId()),
                         request.clientMetadata?.windowId)
                     assertEquals(initial.turnId, request.clientMetadata?.turnId)

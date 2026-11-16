@@ -13,7 +13,6 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgen
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
-import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
@@ -75,7 +74,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             client = mockOpenAiClient {},
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime: KodexAgentCompactionRuntime = state.compactionRuntime(
             modelCatalog = testModelCatalog(),
@@ -96,7 +94,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             client = mockOpenAiClient {},
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime: ResumableAgentLayer = DelegatingRuntime(
             KodexAgentCompactionRuntime(
@@ -133,7 +130,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             },
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
@@ -188,7 +184,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             },
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
@@ -223,7 +218,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             },
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
@@ -260,7 +254,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             },
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
@@ -295,7 +288,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
                 },
                 storage = storage,
                 contextSettings = TestAgentContextSettings,
-                mcpService = TestMcpService(),
             )
             val runtime = KodexAgentCompactionRuntime(
                 delegate = state,
@@ -347,7 +339,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             },
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
@@ -391,7 +382,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             },
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
@@ -439,7 +429,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             },
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
@@ -490,7 +479,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
                 },
                 storage = storage,
                 contextSettings = TestAgentContextSettings,
-                mcpService = TestMcpService(),
             )
             val runtime = KodexAgentCompactionRuntime(
                 delegate = state,
@@ -541,7 +529,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             },
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
@@ -608,7 +595,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             },
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
@@ -650,7 +636,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             },
             storage = storage,
             contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
         )
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,

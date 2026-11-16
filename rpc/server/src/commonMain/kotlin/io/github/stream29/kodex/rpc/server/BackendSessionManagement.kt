@@ -13,23 +13,17 @@ import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.sessiontitle.attachSessionTitleGeneration
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
-import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.Reasoning
-import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
-import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -170,29 +164,9 @@ public actual class BackendSessionManagement actual constructor(
         }
     }
 
-    public actual suspend fun createSuggestedSessions(
-        tasks: List<SuggestedSubagentTask>,
-        initialSettings: KodexAgentSettings,
-    ): List<CreatedSuggestedSession> = inBackend {
+    internal suspend fun ensureSessionExists(sessionIndex: Int): Unit = inBackend {
         commands.withLock {
-            val created = tasks.map { task ->
-                val (index, session) = create(initialSettings, attachAutoTitle = false) { task.name }
-                CreatedSuggestedSession(index, SuggestedSessionMeta(session.storage.uri, task.name)) to session
-            }
-            created.zip(tasks).forEach { (pair, task) ->
-                val session = pair.second
-                session.supervisorChildScope().launch {
-                    try {
-                        session.runtime.appendUserMessage(listOf(ContentItem.InputText(task.prompt)))
-                        session.runtime.resume()
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (failure: Throwable) {
-                        reportBackgroundFailure(failure)
-                    }
-                }
-            }
-            created.map { it.first }
+            requireEntry(sessionIndex)
         }
     }
 
