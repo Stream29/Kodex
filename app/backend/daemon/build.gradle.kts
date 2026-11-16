@@ -37,7 +37,7 @@ kotlin {
             }
         }
         commonMain.dependencies {
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":utils-os-environment"))
             implementation(libs.kotlinx.serialization.json)
         }

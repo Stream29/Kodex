@@ -15,15 +15,9 @@ kotlinx-io = "0.9.0"
 kotlinx-schema = "0.5.0"
 ktor = "3.5.0"
 ktor-network-native = "3.5.0-kodex.64cf7fdbcf65"
-lucene-kmp = "10.2.0-alpha14-kodex.549f8afc9570"
-kotlin-wrappers-node = "2026.6.7-24.12.4"
 korim = "4.0.10"
-sharp = "0.35.2"
 skiko = "0.9.18"
-twelvemonkeys-imageio = "3.13.1"
 test-balloon = "1.0.1-K2.4.0"
-pty4j = "0.13.12"
-node-pty = "1.2.0-beta.12"
 mosaic = "0.19.0-SNAPSHOT-kodex.b25147d2d805"
 clikt = "5.1.0"
 poko = "0.22.1"
@@ -70,26 +64,20 @@ ktor-client-winhttp = { module = "io.ktor:ktor-client-winhttp", version.ref = "k
 ktor-utils = { module = "io.ktor:ktor-utils", version.ref = "ktor" }
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
 ktor-server-cio = { module = "io.ktor:ktor-server-cio", version.ref = "ktor" }
-ktor-server-cors = { module = "io.ktor:ktor-server-cors", version.ref = "ktor" }
 ktor-server-websockets = { module = "io.ktor:ktor-server-websockets", version.ref = "ktor" }
 ktor-client-websockets = { module = "io.ktor:ktor-client-websockets", version.ref = "ktor" }
 ktor-websockets = { module = "io.ktor:ktor-websockets", version.ref = "ktor" }
-lucene-kmp-core = { module = "org.gnit.lucene-kmp:lucene-kmp-core", version.ref = "lucene-kmp" }
-kotlin-wrappers-node = { module = "org.jetbrains.kotlin-wrappers:kotlin-node", version.ref = "kotlin-wrappers-node" }
 korim = { module = "com.soywiz.korlibs.korim:korim", version.ref = "korim" }
 skiko = { module = "org.jetbrains.skiko:skiko", version.ref = "skiko" }
-twelvemonkeys-imageio-jpeg = { module = "com.twelvemonkeys.imageio:imageio-jpeg", version.ref = "twelvemonkeys-imageio" }
 test-balloon-framework-core = { module = "de.infix.testBalloon:testBalloon-framework-core", version.ref = "test-balloon" }
 navigation-event = { module = "androidx.navigationevent:navigationevent", version.ref = "navigation-event" }
 navigation-event-compose = { module = "org.jetbrains.androidx.navigationevent:navigationevent-compose", version.ref = "navigation-event-compose" }
 test-balloon-gradle-plugin = { module = "de.infix.testBalloon:de.infix.testBalloon.gradle.plugin", version.ref = "test-balloon" }
-pty4j = { module = "org.jetbrains.pty4j:pty4j", version.ref = "pty4j" }
 mosaic-runtime = { module = "com.jakewharton.mosaic:mosaic-runtime", version.ref = "mosaic" }
 mosaic-animation = { module = "com.jakewharton.mosaic:mosaic-animation", version.ref = "mosaic" }
 mosaic-testing = { module = "com.jakewharton.mosaic:mosaic-testing", version.ref = "mosaic" }
 clikt-core = { module = "com.github.ajalt.clikt:clikt-core", version.ref = "clikt" }
 mcp-kotlin-sdk-client = { module = "io.modelcontextprotocol:kotlin-sdk-client", version.ref = "mcp-kotlin-sdk" }
-mcp-kotlin-sdk-server = { module = "io.modelcontextprotocol:kotlin-sdk-server", version.ref = "mcp-kotlin-sdk" }
 unicode-segmentation-kotlin = { module = "io.github.kotlinmania:unicode-segmentation-kotlin", version.ref = "unicode-kotlin" }
 unicode-width-kotlin = { module = "io.github.kotlinmania:unicode-width-kotlin", version.ref = "unicode-kotlin" }
 kaml = { module = "com.charleskorn.kaml:kaml", version.ref = "kaml" }
@@ -100,8 +88,6 @@ kermit-core = { module = "co.touchlab:kermit", version.ref = "kermit" }
 cache4k = { module = "io.github.reactivecircus.cache4k:cache4k", version.ref = "cache4k" }
 
 [bundles]
-ktor-client-jvm-engines = ["ktor-client-cio"]
-ktor-client-js-engines = ["ktor-client-js"]
 ktor-client-linux-engines = ["ktor-client-curl"]
 ktor-client-macos-engines = ["ktor-client-darwin"]
 ktor-client-mingw-engines = ["ktor-client-winhttp"]

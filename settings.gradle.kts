@@ -36,7 +36,6 @@ dependencyResolutionManagement {
             }
             filter {
                 includeGroup("com.jakewharton.mosaic")
-                includeGroup("org.gnit.lucene-kmp")
                 includeGroup("io.modelcontextprotocol")
                 includeVersionByRegex(
                     "io\\.ktor",
@@ -65,7 +64,6 @@ class ModuleTreeScope(
     private val settings: Settings,
     private val segments: List<String>,
     private val declaredPaths: MutableSet<String>,
-    private val includeGroupingRoot: Boolean = true,
 ) {
     private val path = segments.joinToString("/")
 
@@ -79,7 +77,7 @@ class ModuleTreeScope(
         val directory = settings.settingsDir.resolve(path)
         require(directory.isDirectory) { "Missing module directory: $path" }
         require(declaredPaths.add(path)) { "Duplicate declared module path: $path" }
-        if ((segments.size == 1 && includeGroupingRoot) || directory.resolve("build.gradle.kts").isFile) {
+        if (directory.resolve("build.gradle.kts").isFile) {
             val projectPath = ":${segments.joinToString("-")}"
             require(settings.findProject(projectPath) == null) {
                 "Duplicate module path or flat project ID: $path -> $projectPath"
@@ -103,8 +101,8 @@ class ModuleTreeScope(
     }
 }
 
-fun Settings.moduleTree(name: String, includeGroupingRoot: Boolean = true, block: ModuleTreeScope.() -> Unit) {
-    ModuleTreeScope(this, listOf(name), declaredModulePaths, includeGroupingRoot).block()
+fun Settings.moduleTree(name: String, block: ModuleTreeScope.() -> Unit) {
+    ModuleTreeScope(this, listOf(name), declaredModulePaths).block()
 }
 
 moduleTree("agent-context") {
@@ -154,7 +152,7 @@ moduleTree("agent-storage") {
     module("filesystem-layout")
 }
 
-moduleTree("app", includeGroupingRoot = false) {
+moduleTree("app") {
     moduleTree("backend") {
         module("daemon")
         module("host")
@@ -309,7 +307,7 @@ moduleTree("hook") {
 moduleTree("integration-test") {
 }
 
-moduleTree("mcp", includeGroupingRoot = false) {
+moduleTree("mcp") {
     module("contract")
     module("backend")
 }
@@ -364,12 +362,9 @@ moduleTree("utils") {
     module("external-url")
     module("filesystem-lease")
     module("images")
-    module("images-codec")
     module("kauri")
     module("kodex-home")
-    moduleTree("kotlinx-io-coroutines") {
-        module("system")
-    }
+    module("kotlinx-io-coroutines")
     module("kotlinx-io-serialization")
     module("ktor-client-ext")
     moduleTree("logging") {
@@ -378,15 +373,10 @@ moduleTree("utils") {
     }
     module("os-environment")
     module("oauth-loopback")
-    moduleTree("patch") {
-        module("system")
-    }
-    moduleTree("process-client") {
-        module("system")
-    }
+    module("patch")
+    module("process-client")
     module("read-write-mutex")
     module("rpc-exception")
-    module("search-index")
     moduleTree("shell-client") {
         module("system")
     }

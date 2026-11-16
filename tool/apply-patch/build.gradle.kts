@@ -10,7 +10,7 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(project(":tool-core"))
-                api(project(":utils-kotlinx-io-coroutines-system"))
+                api(project(":utils-kotlinx-io-coroutines"))
                 api(project(":utils-patch"))
             }
         }

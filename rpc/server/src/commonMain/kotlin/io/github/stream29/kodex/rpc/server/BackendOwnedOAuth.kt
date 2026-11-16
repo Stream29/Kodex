@@ -2,7 +2,6 @@ package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
-import io.github.stream29.kodex.utils.oauthloopback.OAuthCallbackValuePolicy
 import io.github.stream29.kodex.utils.oauthloopback.OAuthLoopbackListener
 import io.github.stream29.kodex.utils.oauthloopback.openOAuthLoopbackListener
 import io.ktor.http.Url
@@ -139,7 +138,7 @@ internal class BackendOwnedOAuth(
                 val state = authorizationState(authorization.url, opened.redirectUri)
                 check(state == waitingState(prepared.id)) { "OAuth state binding mismatch." }
                 check(attempts.waiting(slot)) { "OAuth attempt is no longer pending." }
-                opened.armStateWithAdmission(state, OAuthCallbackValuePolicy.RequireNonBlank) {
+                opened.armStateWithAdmission(state) {
                     holdPendingDeadline(prepared.id) && attempts.accept(slot)
                 }
                 ready.trySend(OAuthAuthorization(slot.id, authorization.url)).getOrThrow()

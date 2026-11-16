@@ -28,7 +28,7 @@ kotlin {
             implementation(project(":utils-patch"))
         }
         nativeTest.dependencies {
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
         }
     }
 }

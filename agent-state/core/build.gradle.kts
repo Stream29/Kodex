@@ -32,7 +32,7 @@ kotlin {
             implementation(project(":agent-context-prefix"))
             implementation(project(":agent-storage-core"))
             implementation(project(":openai-client-test"))
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

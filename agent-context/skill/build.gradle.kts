@@ -11,7 +11,7 @@ kotlin {
             dependencies {
                 api(libs.kotlinx.io.core)
                 api(project(":agent-context-settings"))
-                api(project(":utils-kotlinx-io-coroutines-system"))
+                api(project(":utils-kotlinx-io-coroutines"))
                 api(libs.kotlinx.coroutines.core)
             }
         }
@@ -19,7 +19,7 @@ kotlin {
             implementation(project(":agent-context-prompt-dsl"))
         }
         commonTest.dependencies {
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
         }
     }
 }

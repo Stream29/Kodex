@@ -20,7 +20,6 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellType
-import io.github.stream29.kodex.utils.oauthloopback.OAuthCallbackValuePolicy
 import io.github.stream29.kodex.utils.oauthloopback.OAuthLoopbackListener
 import io.ktor.http.URLBuilder
 import io.ktor.http.Url
@@ -53,7 +52,7 @@ val backendOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 val owned = f.ownedOAuth(this, listener)
                 try {
                     val login = owned.start(OAuthTarget.OpenAi(source))
-                    assertEquals(OAuthCallbackValuePolicy.RequireNonBlank, listener.policy)
+                    assertTrue(!listener.armedState.isNullOrBlank())
                     val entered = CompletableDeferred<Unit>()
                     val release = CompletableDeferred<Unit>()
                     f.login.exchange = {
@@ -115,7 +114,7 @@ val backendOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
             try {
                 val failure = assertFailsWith<IllegalStateException> { owned.start(OpenAiTarget) }
                 assertFalse(failure.toString().contains("wrong-state"))
-                assertNull(listener.policy)
+                assertNull(listener.armedState)
                 assertTrue(f.login.exchanged.isEmpty())
             } finally { owned.closeAndJoin() }
         }
@@ -558,17 +557,15 @@ private class OAuthTestLoginClient : OpenAiLoginClient {
 
 private class OwnedIntegrationListener(override val redirectUri: String) : OAuthLoopbackListener {
     val callback = CompletableDeferred<String>()
-    var policy: OAuthCallbackValuePolicy? = null
+    var armedState: String? = null
     private var admit: suspend () -> Boolean = { true }
 
-    override suspend fun armState(state: String, valuePolicy: OAuthCallbackValuePolicy) =
-        armStateWithAdmission(state, valuePolicy) { true }
-
     override suspend fun armStateWithAdmission(
-        state: String, valuePolicy: OAuthCallbackValuePolicy, admit: suspend () -> Boolean,
+        state: String,
+        admit: suspend () -> Boolean,
     ) {
         require(state.isNotBlank())
-        policy = valuePolicy
+        armedState = state
         this.admit = admit
     }
 

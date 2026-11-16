@@ -19,12 +19,6 @@ import kotlin.time.Duration
 import kotlin.time.Instant
 import kotlin.coroutines.CoroutineContext
 
-public actual suspend fun CoroutineScope.FileSystemLease(
-    lockPath: Path,
-    fileSystem: CoroutineFileSystem,
-    duration: Duration,
-): FileSystemLease = acquireRenewableFileSystemLease(lockPath, fileSystem, duration)
-
 internal class RenewableFileSystemLease(
     private val lockPath: Path,
     private val acquiredAt: Instant,

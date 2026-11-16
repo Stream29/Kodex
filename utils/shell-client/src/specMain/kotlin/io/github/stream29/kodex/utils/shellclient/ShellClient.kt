@@ -15,10 +15,9 @@ public interface ShellClient : CoroutineScope, AutoCloseable {
      * Starts [command] using its explicitly selected shell and pipe/PTY mode.
      *
      * @throws ProcessException when the client is closed, the command is blank,
-     * or the platform cannot create the requested PTY; Node also wraps platform
-     * startup failures in this exception.
-     * @throws io.github.stream29.kodex.utils.processclient.ProcessException when
-     * a pipe backend forwards a direct-process startup failure.
+     * or the platform cannot create the requested PTY.
+     * @throws IllegalStateException when a pipe backend forwards a direct-process
+     * startup failure.
      * @throws kotlinx.coroutines.CancellationException when suspendable startup
      * is cancelled outside a platform failure-wrapping boundary.
      */

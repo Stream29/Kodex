@@ -26,10 +26,10 @@ public val fileSystemLeaseImplTest by testSuite {
         test("exclusive lease is released before its owner completes") { directory ->
             val owner = testOwner()
             val lock = Path(directory, "lock.json")
-            val lease = owner.scope.FileSystemLease(lock, duration = 30.seconds)
+            val lease = owner.scope.acquireRenewableFileSystemLease(lock, SystemCoroutineFileSystem, 30.seconds)
 
             assertFailsWith<FileSystemLeaseInUseException> {
-                owner.scope.FileSystemLease(lock, duration = 30.seconds)
+                owner.scope.acquireRenewableFileSystemLease(lock, SystemCoroutineFileSystem, 30.seconds)
             }
             assertTrue(lease.isActive)
 

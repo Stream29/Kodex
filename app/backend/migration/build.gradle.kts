@@ -1,11 +1,13 @@
+@file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
+
 import org.gradle.api.tasks.testing.AbstractTestTask
+import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 
 plugins {
     id("kodex.spec-api-module")
     id("kodex.kmp-spec-impl")
     id("kodex.kmp-host")
-    id("kodex.kmp-cli-host-layer")
     id("kodex.ktor-native-network-override")
     id("kodex.kmp-tests")
 }
@@ -25,7 +27,23 @@ val generateKodexVersion = tasks.register<GenerateKodexVersion>("generateKodexVe
 }
 
 kotlin {
+    applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
+        common {
+            group("cliHost") {
+                group("desktopNative") {
+                    withLinuxX64()
+                    withLinuxArm64()
+                    withMacosArm64()
+                    withMingwX64()
+                }
+            }
+        }
+    }
+
     sourceSets {
+        named("specMain").dependencies {
+            api(project(":utils-kotlinx-io-coroutines"))
+        }
         named("cliHostMain") {
             kotlin.srcDir(files(generatedVersionDirectory).builtBy(generateKodexVersion))
             dependencies {
@@ -68,13 +86,4 @@ tasks.withType<AbstractTestTask>().configureEach {
     filter.excludeTestsMatching(
         "*migrateToV0_4_3Test*does not activate the future skill at application version*",
     )
-}
-
-kotlin {
-    sourceSets {
-        named("specMain").dependencies {
-            api(project(":utils-kotlinx-io-coroutines"))
-            api(project(":utils-kotlinx-io-coroutines-system"))
-        }
-    }
 }

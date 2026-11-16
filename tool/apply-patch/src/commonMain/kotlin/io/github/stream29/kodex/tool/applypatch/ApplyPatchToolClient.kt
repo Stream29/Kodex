@@ -4,7 +4,6 @@ package io.github.stream29.kodex.tool.applypatch
 
 import io.github.stream29.kodex.utils.applypatch.Patch
 import io.github.stream29.kodex.utils.applypatch.PatchApplyResult
-import io.github.stream29.kodex.utils.applypatch.applyToFileSystem
 import io.github.stream29.kodex.utils.applypatch.parsePatch
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import kotlinx.io.files.Path

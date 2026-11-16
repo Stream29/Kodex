@@ -57,7 +57,7 @@ kotlin {
             implementation(project(":rpc-server"))
             implementation(project(":rpc-in-memory"))
             implementation(project(":openai-client-test"))
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.ktor.client.cio)
         }

@@ -2,7 +2,7 @@
 
 ## Maintenance layout
 
-- Sources are maintained as gitlinks at `dependency-fix/{mosaic,kotlin-mcp-sdk,lucene-kmp,ktor,compose-ui}`.
+- Sources are maintained as gitlinks at `dependency-fix/{mosaic,kotlin-mcp-sdk,ktor,compose-ui}`.
   Their repository identities, submodule names and commit pins are unchanged by relocation.
   These directories are producers, not product `includeBuild` inputs.
 - Shared publication tools live in `dependency-fix/scripts/`; GitHub workflow entrypoints
@@ -59,53 +59,27 @@
 
 | Fork | Original group / module closure | Version derived from current gitlink |
 | --- | --- | --- |
-| Mosaic | `com.jakewharton.mosaic`, `mosaic-{runtime,animation,testing,terminal,tty-terminal,tty}` | `0.19.0-SNAPSHOT-kodex.78f94c4c2e13` |
-| MCP | `io.modelcontextprotocol`, `kotlin-sdk-{core,client,server}` | `0.14.0-kodex.51ca6e0243f8` |
-| Lucene | `org.gnit.lucene-kmp`, `lucene-kmp-core` (project `:core`) | `10.2.0-alpha14-kodex.549f8afc9570` |
+| Mosaic | `com.jakewharton.mosaic`, `mosaic-{runtime,animation,testing,terminal,tty-terminal,tty}` | `0.19.0-SNAPSHOT-kodex.b25147d2d805` |
+| MCP | `io.modelcontextprotocol`, `kotlin-sdk-{core,client}` | `0.14.0-kodex.51ca6e0243f8` |
 | Ktor | `io.ktor`, only `ktor-network-{linuxx64,linuxarm64,macosarm64,mingwx64}` | `3.5.0-kodex.64cf7fdbcf65` |
 
 - Version = the **literal** pinned `VERSION_NAME`/`version` + `-kodex.` + first
   12 commit characters. Mosaic's embedded `SNAPSHOT` is retained; the resulting
   version does not end in `-SNAPSHOT` and is not a timestamped Maven snapshot.
-- Mosaic commit `78f94c4c2e136d908b838f09cd3231dc37ee67fd`;
-  MCP `51ca6e0243f82e4bd7a521132a1445a9ff59fc1f`;
-  Lucene `549f8afc9570bd4289f1047653d4cd6dc9665bbd`;
-  Ktor `64cf7fdbcf65eac0186df0954a03a98b922a52e3`.
-  The derived versions identify source pins; this table does not certify remote availability.
 - Matrix tasks are the Cartesian product of each fork's project closure and its
   host publications, using `:<project>:publish<Publication>PublicationToForkStagingRepository`.
-  There are 36 Mosaic, **21 MCP**, 6 Lucene and 4 Ktor tasks across hosts.
-- Read-only baseline catalog/module-use audit confirmed direct runtime/animation/
-  testing, MCP client/server and Lucene core usage. The declared package closure
-  adds Mosaic terminal/tty-terminal/tty and MCP core; SDK umbrella and Lucene
-  test-framework/codecs are not production dependencies.
+  There are 30 Mosaic, 10 MCP and 4 Ktor tasks across hosts (`root` + 4 desktop Native targets; Ktor publishes only the 4 Native leaves).
 
 | Host | Standard runner | Publications | Binary smoke tasks |
 | --- | --- | --- | --- |
-| Linux x64 | `ubuntu-24.04` | `LinuxX64`, `LinuxArm64` | `verifyForkJvm`, `runDebugExecutableLinuxX64`, `compileKotlinLinuxArm64`; **MCP additionally `compileKotlinJs`, `jsNodeDevelopmentRun`** |
-| macOS Arm64 | `macos-14` | `KotlinMultiplatform`, `Jvm`, `MacosArm64`; **MCP additionally `Js`** | `verifyForkJvm`, `runDebugExecutableMacosArm64` |
-| Windows x64 | `windows-2022` | `MingwX64` | `verifyForkJvm`, `runDebugExecutableMingwX64` |
+| Linux x64 | `ubuntu-24.04` | `LinuxX64`, `LinuxArm64` | `runDebugExecutableLinuxX64`, `compileKotlinLinuxArm64` (Ktor additionally `verifyForkJvm`, `verifyNativeNetworkRepair`) |
+| macOS Arm64 | `macos-14` | `KotlinMultiplatform`, `MacosArm64` (Ktor: `MacosArm64` only) | `runDebugExecutableMacosArm64` (Ktor additionally `verifyForkJvm`, `verifyNativeNetworkRepair`) |
+| Windows x64 | `windows-2022` | `MingwX64` | `runDebugExecutableMingwX64` (Ktor additionally `verifyForkJvm`, `verifyNativeNetworkRepair`) |
 
-- Mosaic additionally runs `verifyForkJvmJni` with an explicit Java21 launcher
-  on all three hosts. Java25 tests the real multi-release FFM path; it is not
-  a substitute for exercising the Java21 JNI loader.
-- macOS is the **only authority for root/JVM artifacts and MCP JS**, including root POM and
-  metadata. Other hosts contribute disjoint target publications, never competing
-  root artifact lists. Root metadata redirects retain the five approved targets
-  **plus JS only for MCP**; target component URLs/dependency versions are checked after merging.
-- **User-approved SDK exception:** Kodex's stdio and Streamable HTTP host modules
-  have real JS/Node consumers. Publish `kotlin-sdk-{core,client,server}-js`, each
-  with its real generated JS KLIB, source JAR, POM and Gradle module metadata.
-  Existing SDK targets already generate these components; the recipe never invents
-  a module or replaces its payload with a JSON redirect/fake JAR.
-- MCP Mac runs four tasks per module (`KotlinMultiplatform`, `Jvm`, `MacosArm64`,
-  `Js`): 12 tasks. Linux stays six (`LinuxX64`, `LinuxArm64`), Windows three
-  (`MingwX64`). The SDK umbrella is still excluded.
-- No Wasm, Apple mobile, macOS x64 or Android publication is advertised.
-  Mosaic/Lucene do not publish JS. Excluded source sets can remain metadata prerequisites.
-- All required source/project dependencies and real generated sources remain.
-  Signing/javadoc attachments are excluded by the isolated recipe; metadata,
-  source JARs, JNI/FFM and Native cinterop/C bitcode are not replaced by fake JARs.
+- macOS is the **only authority for root metadata artifacts** on Mosaic and MCP.
+  Other hosts contribute disjoint Native target publications (`linuxX64`, `linuxArm64`, `mingwX64`).
+  No JVM, JS, Wasm, Apple mobile, macOS x64 or Android publication is advertised on Mosaic/MCP/Ktor.
+  Ktor's smoke gate alone retains `verifyForkJvm` + `verifyNativeNetworkRepair` to prove official JVM coordinates remain unreplaced.
 
 ## Coordinator commands
 

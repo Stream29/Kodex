@@ -11,7 +11,7 @@ kotlin {
             dependencies {
                 api(project(":agent-session-contract"))
                 api(project(":agent-storage-sqlite"))
-                api(project(":utils-kotlinx-io-coroutines-system"))
+                api(project(":utils-kotlinx-io-coroutines"))
                 api(libs.kotlinx.coroutines.core)
             }
         }

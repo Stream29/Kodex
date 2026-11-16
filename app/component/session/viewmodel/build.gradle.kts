@@ -19,7 +19,7 @@ kotlin {
         nativeTest.dependencies {
             implementation(project(":rpc-server"))
             implementation(project(":rpc-in-memory"))
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":app-component-session-catalog-viewmodel"))
             implementation(project(":app-rpc-test-support"))
             implementation(project(":agent-storage-core"))

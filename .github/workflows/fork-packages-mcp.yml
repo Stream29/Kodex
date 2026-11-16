@@ -188,10 +188,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-      - uses: actions/setup-node@v4
-        if: matrix.host == 'linux'
-        with:
-          node-version: "22.14.0"
       - uses: actions/download-artifact@v4
         with:
           name: mcp-validated-bundle

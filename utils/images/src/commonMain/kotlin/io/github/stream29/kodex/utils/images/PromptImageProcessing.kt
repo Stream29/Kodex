@@ -4,7 +4,6 @@ public actual fun ImageInfo.planPromptImage(mode: PromptImageMode): PromptImageP
     val outputDimensions = when (mode) {
         PromptImageMode.Original -> dimensions
         PromptImageMode.ResizeToFit -> dimensions.fitWithinMaxDimension(PromptImages.MaxDimension)
-        is PromptImageMode.ResizeWithLimits -> dimensions.fitPromptImageLimits(mode.limits)
     }
     val outputMimeType = if (mimeType.canPreserveSourceBytes) mimeType else ImageMimeType.Png
     val preservesSourceBytes = outputDimensions == dimensions && mimeType.canPreserveSourceBytes
@@ -14,15 +13,6 @@ public actual fun ImageInfo.planPromptImage(mode: PromptImageMode): PromptImageP
         outputMimeType = outputMimeType,
         preservesSourceBytes = preservesSourceBytes,
     )
-}
-
-public actual fun ByteArray.toPromptImage(mode: PromptImageMode): EncodedImage {
-    val info = requireImageInfo()
-    val plan = info.planPromptImage(mode)
-    if (plan.requiresTransformation) {
-        throw ImageTransformRequiredException(plan)
-    }
-    return EncodedImage(this, info.mimeType, info.dimensions)
 }
 
 public actual suspend fun ByteArray.toPromptImage(
@@ -44,12 +34,3 @@ public actual suspend fun ByteArray.toPromptImage(
     }
     return transformed
 }
-
-public actual fun String.toPromptImage(mode: PromptImageMode): EncodedImage =
-    decodePromptImageDataUrlBytes().toPromptImage(mode)
-
-public actual suspend fun String.toPromptImage(
-    mode: PromptImageMode,
-    transformer: PromptImageTransformer,
-): EncodedImage =
-    decodePromptImageDataUrlBytes().toPromptImage(mode, transformer)

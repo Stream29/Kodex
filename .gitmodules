@@ -4,9 +4,6 @@
 [submodule "KotlinMcpSdk"]
 	path = dependency-fix/kotlin-mcp-sdk
 	url = git@github.com:Stream29/kotlin-mcp-sdk.git
-[submodule "LuceneKmp"]
-	path = dependency-fix/lucene-kmp
-	url = git@github.com:Stream29/lucene-kmp.git
 [submodule "Ktor"]
 	path = dependency-fix/ktor
 	url = git@github.com:Stream29/ktor.git

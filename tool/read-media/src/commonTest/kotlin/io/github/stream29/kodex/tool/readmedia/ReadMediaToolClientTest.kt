@@ -5,7 +5,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaR
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
 import io.github.stream29.kodex.utils.images.ImageMimeType
-import io.github.stream29.kodex.utils.images.decodePromptImageDataUrlBytes
 import io.github.stream29.kodex.utils.images.detectImageInfo
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
@@ -50,7 +49,8 @@ val readMediaToolClientTest by testSuite {
 
             assertEquals(MediaDetail.High, output.detail)
             assertTrue(output.imageUrl.startsWith("data:image/png;base64,"))
-            assertEquals(ImageMimeType.Png, output.imageUrl.decodePromptImageDataUrlBytes().detectImageInfo()?.mimeType)
+            val decoded = Base64.decode(output.imageUrl.substringAfter(";base64,"))
+            assertEquals(ImageMimeType.Png, decoded.detectImageInfo()?.mimeType)
         }
 
         test("tool returns protocol-native image content and supports original detail") { root ->

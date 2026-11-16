@@ -1,14 +1,10 @@
 package io.github.stream29.kodex.utils.images
 
 import de.infix.testBalloon.framework.core.testSuite
-
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-
-
 
 val imageMimeTypesTest by testSuite {
     test("detect image mime type recognizes supported signatures") {
@@ -23,9 +19,6 @@ val imageMimeTypesTest by testSuite {
     test("detect image mime type returns null for unknown bytes") {
         assertNull("not an image".encodeToByteArray().detectImageMimeType())
         assertNull("RIFFxxxxWEBP".encodeToByteArray().detectImageMimeType())
-        assertFailsWith<UnsupportedImageFormatException> {
-            "not an image".encodeToByteArray().requireImageMimeType()
-        }
     }
 
     test("can preserve source bytes matches codex supported formats") {

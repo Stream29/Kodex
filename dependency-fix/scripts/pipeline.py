@@ -13,7 +13,7 @@ import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
-from contract import (FORKS, HOSTS, coordinate, digest, encoded,
+from contract import (FORKS, HOSTS, digest, encoded,
                       expected_artifacts, files, host_targets, normalize_module, require,
                       target_closure, target_set, validate)
 
@@ -163,16 +163,6 @@ def native_compiler_evidence(kgp):
     return compiler_archive_evidence(native_archives, kgp)
 
 
-def mcp_compiler_evidence(kgp, host):
-    result = {"native": native_compiler_evidence(kgp)}
-    if "js" in host_targets(FORKS["mcp"], host):
-        cache = Path(os.environ["GRADLE_USER_HOME"]) / "caches/modules-2/files-2.1"
-        result["js"] = compiler_archive_evidence(
-            (cache / "org.jetbrains.kotlin/kotlin-compiler-embeddable" / kgp).glob(
-                f"*/kotlin-compiler-embeddable-{kgp}.jar"), kgp)
-    return result
-
-
 def isolated_environment(output):
     for variable, default in (("GRADLE_USER_HOME", ".gradle"), ("KONAN_DATA_DIR", ".konan")):
         value = os.environ.get(variable)
@@ -201,28 +191,6 @@ def extract_source(archive, source):
         tar.extractall(source, filter="data")
 
 
-def prepare_android(host):
-    value = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
-    require(value, "Standard runner Android SDK is missing; Lucene's original AGP requires it")
-    sdk = Path(value)
-    manager = sdk / "cmdline-tools/latest/bin" / ("sdkmanager.bat" if host == "windows" else "sdkmanager")
-    require(manager.is_file(), "Standard runner sdkmanager is missing")
-    required = {
-        "platforms/android-36/android.jar",
-        "platforms/android-36/source.properties",
-        "build-tools/36.0.0/source.properties",
-    }
-    if not all((sdk / name).is_file() for name in required):
-        launcher = ["cmd", "/c", str(manager)] if host == "windows" else [str(manager)]
-        # Use runner-provided licenses. No license-acceptance or system-policy mutation.
-        run(launcher + [f"--sdk_root={sdk}", "platforms;android-36", "build-tools;36.0.0"],
-            capture=False, timeout=600)
-    require(all((sdk / name).is_file() for name in required), "Incomplete SDK36/build-tools36 install")
-    os.environ["ANDROID_HOME"] = str(sdk)
-    return {"platform": "android-36", "buildTools": "36.0.0",
-            "inputs": {name: digest((sdk / name).read_bytes()) for name in sorted(required)}}
-
-
 def build(args):
     expected_os = {"linux": "Linux", "mac": "Darwin", "windows": "Windows"}
     require(platform.system() == expected_os[args.host], "Wrong publication host")
@@ -249,9 +217,8 @@ def build(args):
     os.environ["FORK_SOURCE_DIR"] = str(source.resolve())
     os.environ["FORK_NAME"] = args.fork
     java = Path(os.environ["JAVA_HOME"])
-    jdk21 = Path(os.environ["FORK_JDK21"])
+    jdk21 = Path(os.environ["FORK_JDK21"]) if args.fork in ("mcp", "ktor") else None
     jdk8 = Path(os.environ["FORK_JDK8"]) if args.fork == "ktor" else None
-    android = prepare_android(args.host) if args.fork == "lucene" else None
     if args.fork == "ktor":
         java = jdk21
         os.environ["JAVA_HOME"] = str(java)
@@ -260,22 +227,18 @@ def build(args):
             properties.write(b"\ntarget.androidNative=false\n")
     tasks = task_set(args.fork, args.host)
     wrapper = ["cmd", "/c", "gradlew.bat"] if args.host == "windows" else ["bash", "gradlew"]
-    # Native compiler work can live in the Gradle JVM. Preserve the proven
-    # Lucene 4g/one-worker publication budget instead of moving it to a JVM-only daemon.
-    gradle_heap, kotlin_heap = ("4g", "2g") if args.fork in ("lucene", "ktor") else ("2g", "2g")
+    gradle_heap, kotlin_heap = ("4g", "2g") if args.fork == "ktor" else ("2g", "2g")
+    installations = ",".join(str(p) for p in (java, jdk21, jdk8) if p is not None)
     command = wrapper + [
         f"-Dorg.gradle.java.home={java}",
         f"-Dorg.gradle.jvmargs=-Xmx{gradle_heap} -Dfile.encoding=UTF-8",
         "--max-workers=1", "--no-parallel", "--no-configuration-cache", "--no-build-cache", "--no-scan",
         "-Pkotlin.compiler.execution.strategy=daemon",
         "-Pkotlin.daemon.useFallbackStrategy=false", f"-Pkotlin.daemon.jvmargs=-Xmx{kotlin_heap}",
-        f"-Porg.gradle.java.installations.paths={java},{jdk21}" + (f",{jdk8}" if jdk8 else ""),
+        f"-Porg.gradle.java.installations.paths={installations}",
         "-Porg.gradle.java.installations.auto-download=false",
         *([f"-Pversion={data['version']}"] if args.fork != "ktor" else []),
-        # Lucene establishes coordinates itself; VERSION_NAME makes Vanniktech
-        # finalize its version before that callback, so do not inject a second
-        # version property into that fork.
-        *([f"-PVERSION_NAME={data['version']}"] if args.fork not in ("lucene", "ktor") else []),
+        *([f"-PVERSION_NAME={data['version']}"] if args.fork != "ktor" else []),
         "-PmavenCentralPublishing=false", "-PsignAllPublications=false",
         "-I", str(HERE / "publish.init.gradle"), "--console=plain", "--stacktrace", *tasks,
     ]
@@ -296,35 +259,22 @@ def build(args):
     toolchain = json.loads((args.output / "toolchain.json").read_bytes())
     if resize_receipt is not None:
         toolchain["windowsResizeRegression"] = resize_receipt
-    # java -version uses stderr; collect separately without mixing secrets/environment.
-    info = subprocess.run([str(jdk21 / "bin" / ("java.exe" if args.host == "windows" else "java")),
-                           "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    toolchain["java21"] = info.stderr.decode().strip()
+    if jdk21:
+        info = subprocess.run([str(jdk21 / "bin" / ("java.exe" if args.host == "windows" else "java")),
+                               "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        toolchain["java21"] = info.stderr.decode().strip()
     if jdk8:
         info8 = subprocess.run([str(jdk8 / "bin" / ("java.exe" if args.host == "windows" else "java")),
                                 "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         toolchain["java8"] = info8.stderr.decode().strip()
     toolchain["compilerArchives"] = {"native": native_compiler_evidence(toolchain["kgp"])}
     toolchain["nativeCompiler"] = toolchain["compilerArchives"]["native"]["version"]
-    if args.fork == "mcp":
-        toolchain["compilerArchives"] = mcp_compiler_evidence(toolchain["kgp"], args.host)
-        toolchain["nativeCompiler"] = toolchain["compilerArchives"]["native"]["version"]
-        if args.host == "mac":
-            toolchain["jsCompiler"] = toolchain["compilerArchives"]["js"]["version"]
     toolchain["gradleHeap"] = gradle_heap
     toolchain["kotlinHeap"] = kotlin_heap
-    if android:
-        toolchain["androidSdk"] = android
     if args.fork == "mosaic":
-        toolchain["declaredNativeTools"] = {
-            "zig": "0.15.1", "cklib": "0.3.5", "jextract": "1.0.0",
-        }
+        toolchain["declaredNativeTools"] = {"cklib": "0.3.5"}
         if args.host == "mac":
             toolchain["appleSdk"] = run(["xcrun", "--sdk", "macosx", "--show-sdk-version"]).strip()
-            sdk_env = dict(os.environ, DEVELOPER_DIR=os.environ["FORK_DEVELOPER_DIR"])
-            toolchain["jniAppleSdk"] = subprocess.run(
-                ["xcrun", "--sdk", "macosx", "--show-sdk-version"], env=sdk_env,
-                check=True, stdout=subprocess.PIPE, text=True).stdout.strip()
     toolchain["sourceInputs"] = {
         name: digest((source / name).read_bytes()) for name in
         ("gradle.properties", "gradle/libs.versions.toml", "gradle/wrapper/gradle-wrapper.properties",
@@ -403,8 +353,7 @@ def merge(args):
     version = identity_value["version"]
     raw = validate(args.output / "repo", FORKS[args.fork], version,
                    compiler_version=tools["mac"]["toolchain"].get("nativeCompiler",
-                                                                tools["mac"]["toolchain"]["kgp"]),
-                   js_compiler_version=tools["mac"]["toolchain"].get("jsCompiler"))
+                                                                tools["mac"]["toolchain"]["kgp"]))
     require(len({tools[h]["toolchain"]["kgp"] for h in HOSTS}) == 1 and
             len({tools[h]["toolchain"]["gradle"] for h in HOSTS}) == 1 and
             all(tools[h]["toolchain"]["sourceInputs"] == tools["mac"]["toolchain"]["sourceInputs"]
@@ -450,25 +399,20 @@ def verify_bundle(bundle, fork, identity_sha256=None):
         for host in HOSTS:
             toolchain = doc["hosts"][host]["toolchain"]
             archives = toolchain.get("compilerArchives", {})
-            wanted = {"native", "js"} if host == "mac" else {"native"}
-            require(set(archives) == wanted, "Missing SDK platform compiler evidence")
-            for evidence in archives.values():
-                require(set(evidence) == {"version", "sha256"} and
-                        re.fullmatch(re.escape(toolchain["kgp"]) + r"(?:-[A-Za-z0-9.-]+)?",
-                                     evidence["version"]) and
-                        re.fullmatch(r"[0-9a-f]{64}", evidence["sha256"]),
-                        "Invalid SDK compiler evidence")
-            require(toolchain.get("nativeCompiler") == archives["native"]["version"],
+            require(set(archives) == {"native"}, "Missing SDK platform compiler evidence")
+            evidence = archives["native"]
+            require(set(evidence) == {"version", "sha256"} and
+                    re.fullmatch(re.escape(toolchain["kgp"]) + r"(?:-[A-Za-z0-9.-]+)?",
+                                 evidence["version"]) and
+                    re.fullmatch(r"[0-9a-f]{64}", evidence["sha256"]),
+                    "Invalid SDK compiler evidence")
+            require(toolchain.get("nativeCompiler") == evidence["version"],
                     "SDK Native compiler evidence mismatch")
             native_versions.add(toolchain["nativeCompiler"])
-            if host == "mac":
-                require(toolchain.get("jsCompiler") == archives["js"]["version"],
-                        "SDK JS compiler evidence mismatch")
         require(len(native_versions) == 1, "Mixed SDK Native compiler versions")
     raw = validate(bundle / "repo", FORKS[fork], ident["version"],
                    compiler_version=doc["hosts"]["mac"]["toolchain"].get(
-                       "nativeCompiler", doc["hosts"]["mac"]["toolchain"]["kgp"]),
-                   js_compiler_version=doc["hosts"]["mac"]["toolchain"].get("jsCompiler"))
+                       "nativeCompiler", doc["hosts"]["mac"]["toolchain"]["kgp"]))
     require({n: {"sha256": digest(b), "size": len(b)} for n, b in raw.items()} == doc["files"],
             "Bundle checksum mismatch")
     require(set(files(bundle)) == {"manifest.json"} | {"repo/" + n for n in raw},

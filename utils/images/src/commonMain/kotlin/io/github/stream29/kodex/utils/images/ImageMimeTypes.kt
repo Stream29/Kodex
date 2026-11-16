@@ -8,9 +8,6 @@ public actual fun ByteArray.detectImageMimeType(): ImageMimeType? =
         else -> null
     }
 
-public actual fun ByteArray.requireImageMimeType(): ImageMimeType =
-    detectImageMimeType() ?: throw UnsupportedImageFormatException()
-
 public actual val ImageMimeType.canPreserveSourceBytes: Boolean
     get() = when (this) {
         ImageMimeType.Png,

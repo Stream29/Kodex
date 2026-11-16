@@ -9,8 +9,3 @@ package io.github.stream29.kodex.utils.kotlinxiocoroutines
  * suppressed. If only closing fails, its failure is thrown.
  */
 public expect suspend inline fun <T : CoroutineCloseable, R> T.use(block: suspend (T) -> R): R
-
-public expect suspend fun CoroutineRawSource.copyTo(
-    sink: CoroutineRawSink,
-    byteCount: Long = Long.MAX_VALUE,
-): Long

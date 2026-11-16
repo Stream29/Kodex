@@ -19,13 +19,10 @@ kotlin {
 
     applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
         common {
-            group("processClient") {
-                withMingwX64()
-                group("posix") {
-                    withLinuxX64()
-                    withLinuxArm64()
-                    withMacosArm64()
-                }
+            group("posix") {
+                withLinuxX64()
+                withLinuxArm64()
+                withMacosArm64()
             }
         }
     }
@@ -40,14 +37,12 @@ kotlin {
             api(libs.kotlinx.serialization.core)
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-os-environment"))
-        }
-        named("processClientMain").dependencies {
-            implementation(project(":utils-process-client-system"))
+            implementation(project(":utils-process-client"))
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.kotlinx.serialization.json)
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
         }
     }
 

@@ -8,11 +8,6 @@ internal fun ByteArray.hasAsciiAt(offset: Int, value: String): Boolean {
     return value.indices.all { index -> u8(offset + index) == value[index].code }
 }
 
-internal fun ByteArray.hasBytesAt(offset: Int, vararg values: Int): Boolean {
-    if (offset < 0 || size < offset + values.size) return false
-    return values.indices.all { index -> u8(offset + index) == values[index] }
-}
-
 internal fun ByteArray.u8(index: Int): Int =
     this[index].toInt() and 0xff
 

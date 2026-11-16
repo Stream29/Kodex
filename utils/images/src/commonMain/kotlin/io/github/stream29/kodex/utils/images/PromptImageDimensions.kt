@@ -1,9 +1,6 @@
 package io.github.stream29.kodex.utils.images
 
-import kotlin.math.floor
-import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 public actual fun ImageDimensions.fitWithinMaxDimension(maxDimension: Int): ImageDimensions {
     require(maxDimension >= 1) { "maxDimension must be positive" }
@@ -15,54 +12,3 @@ public actual fun ImageDimensions.fitWithinMaxDimension(maxDimension: Int): Imag
         (height.toDouble() * scale).roundToInt().coerceAtLeast(1),
     )
 }
-
-public actual fun ImageDimensions.fitPromptImageLimits(
-    limits: PromptImageResizeLimits,
-): ImageDimensions {
-    var outputWidth = width
-    var outputHeight = height
-    if (fitsPromptImageLimits(limits)) {
-        return ImageDimensions(outputWidth, outputHeight)
-    }
-
-    val maxDimensionScale = min(
-        limits.maxDimension.toDouble() / maxOf(outputWidth, outputHeight).toDouble(),
-        1.0,
-    )
-    outputWidth = (outputWidth.toDouble() * maxDimensionScale).roundToInt().coerceAtLeast(1)
-    outputHeight = (outputHeight.toDouble() * maxDimensionScale).roundToInt().coerceAtLeast(1)
-    if (ImageDimensions(outputWidth, outputHeight).fitsPromptImageLimits(limits)) {
-        return ImageDimensions(outputWidth, outputHeight)
-    }
-
-    val widthDouble = outputWidth.toDouble()
-    val heightDouble = outputHeight.toDouble()
-    val patchSize = PromptImages.PatchSize.toDouble()
-    var scale = sqrt(patchSize * patchSize * limits.maxPatches.toDouble() / widthDouble / heightDouble)
-
-    val scaledPatchesWide = widthDouble * scale / patchSize
-    val scaledPatchesHigh = heightDouble * scale / patchSize
-    scale *= min(
-        floor(scaledPatchesWide) / scaledPatchesWide,
-        floor(scaledPatchesHigh) / scaledPatchesHigh,
-    )
-
-    return ImageDimensions(
-        floor(widthDouble * scale).toInt().coerceAtLeast(1),
-        floor(heightDouble * scale).toInt().coerceAtLeast(1),
-    )
-}
-
-public actual fun ImageDimensions.fitsPromptImageLimits(
-    limits: PromptImageResizeLimits,
-): Boolean {
-    val patchesWide = width.ceilDiv(PromptImages.PatchSize)
-    val patchesHigh = height.ceilDiv(PromptImages.PatchSize)
-    val patchCount = patchesWide.toLong() * patchesHigh.toLong()
-    return width <= limits.maxDimension &&
-        height <= limits.maxDimension &&
-        patchCount <= limits.maxPatches.toLong()
-}
-
-private fun Int.ceilDiv(divisor: Int): Int =
-    ((toLong() + divisor.toLong() - 1L) / divisor.toLong()).toInt()

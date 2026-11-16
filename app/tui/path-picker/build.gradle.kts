@@ -11,7 +11,7 @@ kotlin {
             api(project(":app-component-path-picker-viewmodel"))
         }
         commonMain.dependencies {
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":utils-os-environment"))
         }
         commonTest.dependencies {

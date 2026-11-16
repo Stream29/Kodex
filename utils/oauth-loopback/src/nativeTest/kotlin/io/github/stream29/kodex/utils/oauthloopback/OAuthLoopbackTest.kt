@@ -63,7 +63,7 @@ public val oauthLoopbackTest by testSuite {
                     FakeLoopbackEngine(scope, url, receive).also { engine = it }
                 }
                 assertFalse(engine.request("state=expected&code=private-code"))
-                listener.armState("expected")
+                listener.armStateWithAdmission("expected")
                 for (query in listOf(
                     "code=private-code",
                     "state=wrong&code=private-code",
@@ -81,7 +81,7 @@ public val oauthLoopbackTest by testSuite {
                 assertFalse(engine.request("state=expected&error=second"))
                 assertEquals("${listener.redirectUri}?$raw", listener.awaitCallback())
                 assertFailsWith<IllegalStateException> { listener.awaitCallback() }
-                assertFailsWith<IllegalStateException> { listener.armState("replacement") }
+                assertFailsWith<IllegalStateException> { listener.armStateWithAdmission("replacement") }
                 listener.closeAndJoin()
                 assertEquals(1, engine.stops)
                 assertTrue(owner.isActive)
@@ -89,16 +89,16 @@ public val oauthLoopbackTest by testSuite {
         }
     }
 
-    test("state replacement and provider errors remain mechanical and empty code or error is accepted") {
+    test("state replacement and provider errors remain mechanical") {
         runTest {
             withLoopbackOwner { owner ->
-                for (result in listOf("code=", "error=", "error=access_denied&error_description=private-description")) {
+                for (result in listOf("code=accepted", "error=access_denied&error_description=private-description")) {
                     lateinit var engine: FakeLoopbackEngine
                     val listener = openLoopback(owner, listOf("http://127.0.0.1:1455/callback")) { scope, url, receive ->
                         FakeLoopbackEngine(scope, url, receive).also { engine = it }
                     }
-                    listener.armState("old")
-                    listener.armState("new value")
+                    listener.armStateWithAdmission("old")
+                    listener.armStateWithAdmission("new value")
                     assertFalse(engine.request("state=old&$result"))
                     val raw = "state=new+value&$result"
                     assertTrue(engine.request(raw))
@@ -117,7 +117,7 @@ public val oauthLoopbackTest by testSuite {
                     FakeLoopbackEngine(scope, url, receive).also { engine = it }
                 }
                 try {
-                    listener.armState("expected", OAuthCallbackValuePolicy.RequireNonBlank)
+                    listener.armStateWithAdmission("expected")
                     assertFalse(engine.request("state=expected&code="))
                     assertFalse(engine.request("state=expected&code=%20%20"))
                     assertFalse(engine.request("state=expected&error="))
@@ -138,14 +138,14 @@ public val oauthLoopbackTest by testSuite {
                 val raw = "state=expected&code=fixture"
                 try {
                     listener.setRedirect("http://localhost:1455/callback")
-                    listener.armState("expected", OAuthCallbackValuePolicy.RequireNonBlank)
+                    listener.armStateWithAdmission("expected")
                     val completion = assertNotNull(listener.claim(Url("http://localhost/callback?$raw").parameters, raw))
                     val waiting = async { listener.awaitCallback() }
                     runCurrent()
                     assertTrue(waiting.isCompleted)
                     assertEquals("http://localhost:1455/callback?$raw", waiting.await())
                     assertNull(listener.claim(Url("http://localhost/callback?$raw").parameters, raw))
-                    assertFailsWith<IllegalStateException> { listener.armState("new") }
+                    assertFailsWith<IllegalStateException> { listener.armStateWithAdmission("new") }
                     val closing = async { listener.closeAndJoin() }
                     runCurrent()
                     assertFalse(closing.isCompleted)
@@ -166,7 +166,7 @@ public val oauthLoopbackTest by testSuite {
                 var attempts = 0
                 try {
                     listener.setRedirect("http://localhost:1455/callback")
-                    listener.armStateWithAdmission("expected", OAuthCallbackValuePolicy.RequireNonBlank) {
+                    listener.armStateWithAdmission("expected") {
                         attempts++
                         permitted
                     }
@@ -189,7 +189,7 @@ public val oauthLoopbackTest by testSuite {
                 val listener = openLoopback(owner, listOf("http://localhost:1455/callback")) { scope, url, receive ->
                     FakeLoopbackEngine(scope, url, receive).also { engine = it }
                 }
-                listener.armState("expected")
+                listener.armStateWithAdmission("expected")
                 val first = async { engine.request("state=expected&code=first") }
                 val second = async { engine.request("state=expected&error=second") }
                 val firstWon = first.await()
@@ -210,7 +210,7 @@ public val oauthLoopbackTest by testSuite {
                 val listener = openLoopback(owner, listOf("http://localhost:1455/callback")) { scope, url, receive ->
                     FakeLoopbackEngine(scope, url, receive).also { engine = it }
                 }
-                listener.armState("expected")
+                listener.armStateWithAdmission("expected")
                 val waiting = async { listener.awaitCallback() }
                 runCurrent()
                 waiting.cancelAndJoin()
@@ -449,7 +449,7 @@ public val oauthLoopbackTest by testSuite {
                 owner.coroutineContext[Job]!!.cancelAndJoin()
                 assertEquals(1, engine.stops)
                 assertFailsWith<CancellationException> { listener.awaitCallback() }
-                assertFailsWith<IllegalStateException> { listener.armState("late") }
+                assertFailsWith<IllegalStateException> { listener.armStateWithAdmission("late") }
                 assertFalse(engine.request("state=late&code=private-code"))
                 listener.closeAndJoin()
                 assertEquals(1, engine.stops)

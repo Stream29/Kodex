@@ -11,7 +11,7 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(libs.kotlinx.coroutines.core)
-                api(project(":utils-kotlinx-io-coroutines-system"))
+                api(project(":utils-kotlinx-io-coroutines"))
             }
         }
         commonMain.dependencies {

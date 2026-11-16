@@ -36,24 +36,21 @@ class AdmissionTests(unittest.TestCase):
 
     def test_workflow_requires_review_and_has_no_runner_job_env(self):
         root = Path(__file__).resolve().parents[2]
-        for fork in ("mosaic", "mcp", "lucene"):
+        for fork in ("mosaic", "mcp", "ktor"):
             text = (root / ".github/workflows" / f"fork-packages-{fork}.yml").read_text()
             self.assertIn("github.event_name == 'push' && github.ref_protected", text)
             self.assertIn("FORK_PUBLICATION_REVIEWED:", text)
-            # The actual actionlint check runs separately on Xiaoxin; this prevents regression
-            # to the exact invalid indentation in the first handoff.
             self.assertNotRegex(text, r"(?m)^      GRADLE_USER_HOME:")
             self.assertNotRegex(text, r"(?m)^      KONAN_DATA_DIR:")
 
-    def test_cklib_binding_and_lucene_property_are_explicit(self):
+    def test_cklib_binding_and_ktor_property_are_explicit(self):
         # Static recipe guards, not a replacement for the three-host producer.
         root = Path(__file__).resolve().parent
         init = (root / "publish.init.gradle").read_text()
         self.assertIn("config.konanHome = home.canonicalPath", init)
         self.assertIn("System.getenv('KONAN_DATA_DIR')", init)
         self.assertIn("dependsOn(p.tasks.named('downloadKotlinNativeDistribution'))", init)
-        self.assertIn('if args.fork not in ("lucene", "ktor") else []',
-                      (root / "pipeline.py").read_text())
+        self.assertIn('if args.fork != "ktor" else []', (root / "pipeline.py").read_text())
 
     def test_windows_resize_receipt_requires_both_actual_passes(self):
         with tempfile.TemporaryDirectory() as temp:

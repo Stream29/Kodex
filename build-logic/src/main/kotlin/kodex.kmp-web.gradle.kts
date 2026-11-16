@@ -1,8 +1,9 @@
+@file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
+
 import org.gradle.api.artifacts.VersionCatalogsExtension
 
 plugins {
     kotlin("multiplatform")
-    `maven-publish`
 }
 
 configureCoordinates()

@@ -108,24 +108,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - id: java21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "25"
-      - if: matrix.host == 'mac'
-        name: Freeze JNI task Apple SDK
-        run: |
-          test -d /Library/Developer/CommandLineTools
-          echo "FORK_DEVELOPER_DIR=/Library/Developer/CommandLineTools" >> "$GITHUB_ENV"
-          DEVELOPER_DIR=/Library/Developer/CommandLineTools xcrun --sdk macosx --show-sdk-version
       - name: Publish real components to isolated file repository
         env:
-          FORK_JDK21: ${{ steps.java21.outputs.path }}
           GRADLE_USER_HOME: ${{ runner.temp }}/fork-gradle
           KONAN_DATA_DIR: ${{ runner.temp }}/fork-konan
         run: python dependency-fix/scripts/pipeline.py build --fork mosaic --host "${{ matrix.host }}" --output "$RUNNER_TEMP/sealed"
@@ -192,11 +180,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - id: smoke-java21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -213,7 +196,6 @@ jobs:
         env:
           GRADLE_USER_HOME: ${{ runner.temp }}/smoke-gradle
           KONAN_DATA_DIR: ${{ runner.temp }}/smoke-konan
-          FORK_JDK21: ${{ steps.smoke-java21.outputs.path }}
       - uses: actions/upload-artifact@v4
         with:
           name: mosaic-smoke-${{ matrix.host }}

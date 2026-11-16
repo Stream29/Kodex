@@ -9,7 +9,7 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
-                api(project(":utils-kotlinx-io-coroutines-system"))
+                api(project(":utils-kotlinx-io-coroutines"))
             }
         }
     }

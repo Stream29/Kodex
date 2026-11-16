@@ -11,8 +11,7 @@ kotlin {
             api(project(":tool-read-media-contract"))
             api(project(":tool-core"))
             api(project(":utils-images"))
-            api(project(":utils-kotlinx-io-coroutines-system"))
-            api(project(":utils-images-codec"))
+            api(project(":utils-kotlinx-io-coroutines"))
         }
     }
 }

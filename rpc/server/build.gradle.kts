@@ -27,7 +27,7 @@ kotlin {
             api(project(":tool-image-generation"))
             api(project(":tool-web-run"))
             api(libs.kotlinx.rpc.core)
-            api(project(":utils-kotlinx-io-coroutines-system"))
+            api(project(":utils-kotlinx-io-coroutines"))
             api(libs.kotlinx.coroutines.core)
         }
         commonMain.dependencies {
@@ -58,7 +58,7 @@ kotlin {
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-core"))
             implementation(project(":openai-client-test"))
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(libs.kotlinx.coroutines.test)
             implementation(project(":rpc-in-memory"))
             implementation(project(":rpc-client"))

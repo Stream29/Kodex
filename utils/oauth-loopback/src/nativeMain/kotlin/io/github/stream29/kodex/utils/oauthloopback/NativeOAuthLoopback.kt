@@ -142,7 +142,6 @@ internal class NativeLoopbackListener(
     private val waitClaimed = CompletableDeferred<Unit>()
     private val gate = Mutex()
     private var expectedState: String? = null
-    private var valuePolicy = OAuthCallbackValuePolicy.AllowEmpty
     private var admit: suspend () -> Boolean = { true }
     private var claimed = false
     private var closing = false
@@ -155,19 +154,14 @@ internal class NativeLoopbackListener(
         gate.withLock { redirect = value }
     }
 
-    override suspend fun armState(state: String, valuePolicy: OAuthCallbackValuePolicy) =
-        armStateWithAdmission(state, valuePolicy) { true }
-
     override suspend fun armStateWithAdmission(
         state: String,
-        valuePolicy: OAuthCallbackValuePolicy,
         admit: suspend () -> Boolean,
     ) {
         gate.withLock {
             currentCoroutineContext().ensureActive()
             check(owner.isActive && !closing && !callback.isCompleted && !claimed) { "Local callback listener is no longer available." }
             expectedState = state
-            this.valuePolicy = valuePolicy
             this.admit = admit
         }
     }
@@ -184,7 +178,7 @@ internal class NativeLoopbackListener(
             expected != null && query.getAll("state") == listOf(expected) &&
             listOf("code", "error").all { query.getAll(it).orEmpty().size <= 1 } &&
             ((query["code"] != null) xor (query["error"] != null)) &&
-            (valuePolicy == OAuthCallbackValuePolicy.AllowEmpty || !(query["code"] ?: query["error"]).isNullOrBlank())
+            !(query["code"] ?: query["error"]).isNullOrBlank()
         if (!valid) return@withLock null
         if (!admit()) return@withLock null
         claimed = true

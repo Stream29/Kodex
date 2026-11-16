@@ -16,7 +16,7 @@ val callbackSocketTest by testSuite(compartment = { TestCompartment.RealTime }) 
                 assertEquals("127.0.0.1", bound.host)
                 assertEquals("/callback", bound.encodedPath)
                 assertTrue(bound.specifiedPort in 1..65535)
-                listener.armState("task-only-ephemeral-state")
+                listener.armStateWithAdmission("task-only-ephemeral-state")
             } finally {
                 listener.closeAndJoin()
             }

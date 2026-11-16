@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.utils.filesystemlease
 
+import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -35,7 +36,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 
 /** Real isolated filesystem, precise syscall gates, and virtual time only for renewal. */
 @OptIn(ExperimentalCoroutinesApi::class)
-public val fileSystemLeaseLifecycleTest by testSuite {
+public val fileSystemLeaseLifecycleTest by testSuite(compartment = { TestCompartment.RealTime }) {
     testFixture { lifecycleDirectory() } closeWith {
         val directory = this
         withContext(NonCancellable) { deleteLifecycleDirectory(directory) }
@@ -269,7 +270,7 @@ public val fileSystemLeaseLifecycleTest by testSuite {
             }
             try {
                 withLeaseOwner { owner ->
-                    val lease = owner.FileSystemLease(path, fs, 30.seconds)
+                    val lease = owner.acquireRenewableFileSystemLease(path, fs, 30.seconds)
                     coroutineScope {
                         val waiter = launch { lease.closeAndJoin() }
                         cleanupStarted.await()
@@ -342,7 +343,11 @@ public val fileSystemLeaseLifecycleTest by testSuite {
         test("explicit lease close leaves parent and sibling active") { directory ->
             withLeaseOwner { owner ->
                 val sibling = owner.launch { awaitCancellation() }
-                val lease = owner.FileSystemLease(LeaseKind.EXCLUSIVE.path(directory), duration = 30.seconds)
+                val lease = owner.acquireRenewableFileSystemLease(
+                    LeaseKind.EXCLUSIVE.path(directory),
+                    SystemCoroutineFileSystem,
+                    30.seconds,
+                )
                 lease.closeAndJoin()
                 assertTrue(owner.isActive)
                 assertTrue(sibling.isActive)
@@ -364,7 +369,7 @@ public val fileSystemLeaseLifecycleTest by testSuite {
             }
             withLeaseOwner { owner ->
                 assertSame(failure, assertFailsWith<IOException> {
-                    owner.FileSystemLease(LeaseKind.EXCLUSIVE.path(directory), fs, 30.seconds)
+                    owner.acquireRenewableFileSystemLease(LeaseKind.EXCLUSIVE.path(directory), fs, 30.seconds)
                 })
                 assertTrue(failure.suppressedExceptions.isEmpty())
             }
@@ -387,7 +392,7 @@ public val fileSystemLeaseLifecycleTest by testSuite {
                 }
             }
             withLeaseOwner { owner ->
-                assertSame(primary, assertFailsWith<IOException> { owner.FileSystemLease(path, fs, 30.seconds) })
+                assertSame(primary, assertFailsWith<IOException> { owner.acquireRenewableFileSystemLease(path, fs, 30.seconds) })
                 assertEquals(1, primary.suppressedExceptions.size)
                 assertEquals(0, deletions)
                 assertEquals("not-an-owner", SystemCoroutineFileSystem.readString(path))
@@ -473,7 +478,7 @@ public val fileSystemLeaseLifecycleTest by testSuite {
                 }
             }
             withLeaseOwner(dispatcher + scheduler) { owner ->
-                val lease = owner.FileSystemLease(path, fs, 30.seconds)
+                val lease = owner.acquireRenewableFileSystemLease(path, fs, 30.seconds)
                 delivered = true
                 scheduler.advanceTimeBy(30.seconds.inWholeMilliseconds / 3)
                 scheduler.runCurrent()
@@ -502,7 +507,7 @@ private enum class LeaseKind {
 
     suspend fun acquire(scope: CoroutineScope, directory: Path, fs: CoroutineFileSystem): FileSystemLease? =
         when (this) {
-            EXCLUSIVE -> scope.FileSystemLease(path(directory), fs, 30.seconds)
+            EXCLUSIVE -> scope.acquireRenewableFileSystemLease(path(directory), fs, 30.seconds)
             READ -> scope.FileSystemReadLease(directory, fs)
             WRITE -> scope.FileSystemWriteLease(directory, fs)
             GUARD -> withAcquisitionGuard(directory, fs) { null }

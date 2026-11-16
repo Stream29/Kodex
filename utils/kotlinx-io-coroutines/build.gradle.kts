@@ -1,17 +1,33 @@
+@file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
+
+import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
+
 plugins {
     id("kodex.spec-api-module")
     id("kodex.kmp-spec-impl")
-    id("kodex.kmp-shared")
+    id("kodex.kmp-host")
+    id("kodex.kmp-tests")
 }
 
 kotlin {
-    sourceSets {
-        named("specMain") {
-            dependencies {
-                api(project(":utils-coroutines"))
-                api(libs.kotlinx.coroutines.core)
-                api(libs.kotlinx.io.core)
+    applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
+        common {
+            group("posix") {
+                withLinuxX64()
+                withLinuxArm64()
+                withMacosArm64()
             }
+        }
+    }
+
+    sourceSets {
+        named("specMain").dependencies {
+            api(project(":utils-coroutines"))
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.io.core)
+        }
+        commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }

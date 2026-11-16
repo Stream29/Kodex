@@ -13,7 +13,7 @@ kotlin {
                 api(project(":openai-models"))
                 api(libs.kotlinx.serialization.json)
                 api(libs.tomlkt)
-                api(project(":utils-kotlinx-io-coroutines-system"))
+                api(project(":utils-kotlinx-io-coroutines"))
                 api(libs.kotlinx.io.core)
             }
         }

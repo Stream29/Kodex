@@ -2,36 +2,22 @@
 
 plugins {
     kotlin("multiplatform")
-    `maven-publish`
 }
 
-group = "io.github.stream29"
-version = "0.7.2"
+configureCoordinates()
+configureWasmNodeCommand()
 
 kotlin {
-    explicitApi()
-    jvmToolchain(25)
-
-    compilerOptions {
-        allWarningsAsErrors.set(true)
-    }
-
-    js {
-        browser()
-        nodejs()
-        binaries.library()
-    }
-
+    configureCompiler()
+    configureFrontendTargets()
     wasmJs {
-        browser()
-        nodejs()
-        binaries.library()
+        browser {
+            testTask {
+                useKarma {
+                    useChromeHeadless()
+                    useConfigDirectory(layout.settingsDirectory.dir("gradle/wasm-karma.config.d").asFile)
+                }
+            }
+        }
     }
-
-    linuxX64()
-    linuxArm64()
-    macosArm64()
-    mingwX64()
-
-    iosArm64()
 }

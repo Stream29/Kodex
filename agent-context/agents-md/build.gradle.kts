@@ -11,14 +11,14 @@ kotlin {
             dependencies {
                 api(libs.kotlinx.io.core)
                 api(project(":agent-context-settings"))
-                api(project(":utils-kotlinx-io-coroutines-system"))
+                api(project(":utils-kotlinx-io-coroutines"))
             }
         }
         commonMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
         }
     }
 }

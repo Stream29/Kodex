@@ -152,7 +152,7 @@ class Page {
   async importRecord() {
     this.chooser = null;
     await this.send("Page.setInterceptFileChooserDialog", { enabled: true });
-    await this.click("Choose private connection record");
+    await this.click("Choose scoped pairing record");
     await wait(async () => this.chooser, Boolean, "explicit file chooser");
     await this.send("DOM.setFileInputFiles", { backendNodeId: this.chooser.backendNodeId, files: [recordPath] });
     await this.has("Backend: Connected");
@@ -173,7 +173,7 @@ class Page {
   async disconnectIfMounted() {
     const nodes = await this.tree();
     if (nodes.some(n => n.role?.value === "button" && n.name?.value === "Disconnect")) await this.click("Disconnect");
-    try { await this.has("Choose private connection record"); }
+    try { await this.has("Choose scoped pairing record"); }
     catch (failure) {
       // Diagnostic only: physical success must not turn a failed AX action into a pass.
       const nodes = await this.tree();
@@ -186,7 +186,7 @@ class Page {
           await this.send("Input.dispatchMouseEvent", { ...point, type, button: "left", clickCount: 1 });
         await delay(1_000);
         await writeFile(join(output, "disconnect-diagnostic.json"), JSON.stringify({
-          physicalChooserVisible: names(await this.tree()).includes("Choose private connection record"),
+          physicalChooserVisible: names(await this.tree()).includes("Choose scoped pairing record"),
           editors: await this.editor(),
         }, null, 2));
       }

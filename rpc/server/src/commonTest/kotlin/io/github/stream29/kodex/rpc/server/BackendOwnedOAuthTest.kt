@@ -7,7 +7,6 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
-import io.github.stream29.kodex.utils.oauthloopback.OAuthCallbackValuePolicy
 import io.github.stream29.kodex.utils.oauthloopback.OAuthLoopbackListener
 import io.ktor.http.URLBuilder
 import kotlinx.coroutines.CompletableDeferred
@@ -84,7 +83,6 @@ val backendOwnedOAuthTest by testSuite(testConfig = TestConfig.testScope(isEnabl
         val fixture = OwnedOAuthFixture(backgroundScope)
         try {
             val authorization = fixture.oauth.start(OAuthTarget.Mcp("fake"))
-            assertEquals(OAuthCallbackValuePolicy.RequireNonBlank, fixture.listener.policy)
             assertEquals("fixture-state", fixture.listener.state)
             val abandonedObserver = async { fixture.oauth.await(authorization.attemptId) }
             runCurrent()
@@ -247,7 +245,6 @@ private class FakeOwnedListener : OAuthLoopbackListener {
     override val redirectUri: String = "http://localhost:1455/auth/callback"
     val callback = CompletableDeferred<String>()
     var state: String? = null
-    var policy: OAuthCallbackValuePolicy? = null
     var closes = 0
     private var admit: suspend () -> Boolean = { true }
 
@@ -258,14 +255,11 @@ private class FakeOwnedListener : OAuthLoopbackListener {
 
     suspend fun claim(value: String) { claimBeforeResponse(value)() }
 
-    override suspend fun armState(state: String, valuePolicy: OAuthCallbackValuePolicy) =
-        armStateWithAdmission(state, valuePolicy) { true }
-
     override suspend fun armStateWithAdmission(
-        state: String, valuePolicy: OAuthCallbackValuePolicy, admit: suspend () -> Boolean,
+        state: String,
+        admit: suspend () -> Boolean,
     ) {
         this.state = state
-        policy = valuePolicy
         this.admit = admit
     }
 

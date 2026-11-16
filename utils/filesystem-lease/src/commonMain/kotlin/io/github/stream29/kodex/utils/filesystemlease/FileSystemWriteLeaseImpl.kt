@@ -1,22 +1,18 @@
 package io.github.stream29.kodex.utils.filesystemlease
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
+import kotlin.time.Duration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.io.files.Path
-import kotlin.time.Clock
-import kotlin.time.Duration
 
 public actual suspend fun CoroutineScope.FileSystemWriteLease(
     directory: Path,
     fileSystem: CoroutineFileSystem,
     duration: Duration,
-    waitForReaders: Duration,
 ): FileSystemLease {
     require(duration.isPositive()) { "Lease duration must be positive." }
-    require(!waitForReaders.isNegative()) { "Reader wait duration must not be negative." }
     requireOwnerJob().ensureActive()
     fileSystem.createDirectories(directory)
 
@@ -24,23 +20,13 @@ public actual suspend fun CoroutineScope.FileSystemWriteLease(
     var acquired: FileSystemLease? = null
     try {
         val lease = withAcquisitionGuard(directory, fileSystem) {
-            val writers = activeOwnerPaths(directory, fileSystem).filter(Path::isWriteOwner)
-            if (writers.isNotEmpty()) throw ownersInUse(writers)
+            val existing = activeOwnerPaths(directory, fileSystem)
+            if (existing.isNotEmpty()) throw ownersInUse(existing)
             acquireRenewableFileSystemLease(ownerPath, fileSystem, duration).also { acquired = it }
         }
-        val deadline = Clock.System.now() + waitForReaders
-        while (true) {
-            val readers = withAcquisitionGuard(directory, fileSystem) {
-                activeOwnerPaths(directory, fileSystem).filter(Path::isReadOwner)
-            }
-            if (readers.isEmpty()) {
-                currentCoroutineContext().ensureActive()
-                requireOwnerJob().ensureActive()
-                return lease
-            }
-            if (Clock.System.now() >= deadline) throw ownersInUse(readers)
-            delay(ReaderPollInterval)
-        }
+        currentCoroutineContext().ensureActive()
+        requireOwnerJob().ensureActive()
+        return lease
     } catch (failure: Throwable) {
         leaseCleanup(failure) { acquired?.closeAndJoin() }
         throw failure

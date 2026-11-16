@@ -8,10 +8,10 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path, PurePosixPath
 
-TARGETS = ("jvm", "linuxX64", "linuxArm64", "macosArm64", "mingwX64")
+TARGETS = ("linuxX64", "linuxArm64", "macosArm64", "mingwX64")
 HOSTS = {
     "linux": ("linuxX64", "linuxArm64"),
-    "mac": ("root", "jvm", "macosArm64"),
+    "mac": ("root", "macosArm64"),
     "windows": ("mingwX64",),
 }
 FORKS = {
@@ -24,26 +24,19 @@ FORKS = {
     "mcp": {
         "path": "dependency-fix/kotlin-mcp-sdk", "repository": "Stream29/kotlin-mcp-sdk",
         "group": "io.modelcontextprotocol",
-        "modules": {f"kotlin-sdk-{m}": f":kotlin-sdk-{m}" for m in ("core", "client", "server")},
-        # The SDK's stdio/HTTP consumers really use JS on Node. No other fork exception.
-        "targets": TARGETS + ("js",),
-        "hosts": {**HOSTS, "mac": HOSTS["mac"] + ("js",)},
-    },
-    "lucene": {
-        "path": "dependency-fix/lucene-kmp", "repository": "Stream29/lucene-kmp",
-        "group": "org.gnit.lucene-kmp", "modules": {"lucene-kmp-core": ":core"},
+        "modules": {f"kotlin-sdk-{m}": f":kotlin-sdk-{m}" for m in ("core", "client")},
     },
     "ktor": {
         "path": "dependency-fix/ktor", "repository": "Stream29/ktor", "group": "io.ktor",
         "modules": {"ktor-network": ":ktor-network"},
         "versionFile": "VERSION",
-        "targets": ("linuxX64", "linuxArm64", "macosArm64", "mingwX64"),
+        "targets": TARGETS,
         "hosts": {"linux": ("linuxX64", "linuxArm64"),
                   "mac": ("macosArm64",), "windows": ("mingwX64",)},
         "publishRoot": False,
         "externalModules": {"ktor-utils": "3.5.0"},
         "cinterops": {"linuxX64": ("network",), "linuxArm64": ("network",),
-                     "macosArm64": ("network", "un"), "mingwX64": ("afunix",)},
+                      "macosArm64": ("network", "un"), "mingwX64": ("afunix",)},
     },
 }
 NS = {"m": "http://maven.apache.org/POM/4.0.0"}
@@ -56,13 +49,7 @@ PROJECT_EDGES = {
     "mosaic-testing": (("mosaic-runtime",), ()),
     "mosaic-tty-terminal": (("mosaic-terminal", "mosaic-tty"), ()),
     "kotlin-sdk-client": (("kotlin-sdk-core",), ()),
-    "kotlin-sdk-server": (("kotlin-sdk-core",), ()),
 }
-TTY_PACKAGE = "com/jakewharton/mosaic/tty/"
-TTY_JNI = {TTY_PACKAGE + f"jni/{arch}/{lib}" for arch, lib in (
-    ("aarch64", "libmosaic.so"), ("riscv64", "libmosaic.so"), ("amd64", "libmosaic.so"),
-    ("aarch64", "libmosaic.dylib"), ("x86_64", "libmosaic.dylib"),
-    ("aarch64", "mosaic.dll"), ("amd64", "mosaic.dll"))}
 
 
 def target_set(spec):
@@ -81,17 +68,17 @@ def target_closure(spec):
 
 def smoke_gates(fork, host):
     native = {"linux": "LinuxX64", "mac": "MacosArm64", "windows": "MingwX64"}[host]
-    tasks = ["verifyForkJvm", f"runDebugExecutable{native}"]
-    runtime = ["jvm", native[0].lower() + native[1:]]
-    if fork == "mosaic":
-        tasks.append("verifyForkJvmJni")
-        runtime.append("jvm-jni-java21")
+    native_id = native[0].lower() + native[1:]
+    tasks = []
+    runtime = []
+    if fork == "ktor":
+        tasks.append("verifyForkJvm")
+        runtime.append("jvm")
+    tasks.append(f"runDebugExecutable{native}")
+    runtime.append(native_id)
     compile_only = ["linuxArm64"] if host == "linux" else []
     if host == "linux":
         tasks.append("compileKotlinLinuxArm64")
-    if fork == "mcp" and host == "linux":
-        tasks += ["compileKotlinJs", "jsNodeDevelopmentRun"]
-        runtime.append("js")
     if fork == "ktor":
         tasks.append("verifyNativeNetworkRepair")
     return {"tasks": tasks, "runtime": runtime, "compileOnly": compile_only}
@@ -200,38 +187,31 @@ def variant_role(attributes, target):
     require(attributes.get("org.jetbrains.kotlin.platform.type") == platform and
             (attributes.get("org.jetbrains.kotlin.native.target") == NATIVE_NAMES[target]
              if target in NATIVE_NAMES else "org.jetbrains.kotlin.native.target" not in attributes) and
-            (attributes.get("org.jetbrains.kotlin.js.compiler") == "ir" if target == "js"
-             else "org.jetbrains.kotlin.js.compiler" not in attributes),
+            "org.jetbrains.kotlin.js.compiler" not in attributes,
             f"Wrong {'Native' if target in NATIVE_NAMES else target.upper()} variant attributes")
-    require(attributes.get("org.gradle.jvm.environment") ==
-            ("standard-jvm" if target == "jvm" else "non-jvm"), "Wrong variant JVM environment")
+    require(attributes.get("org.gradle.jvm.environment") == "non-jvm",
+            "Wrong variant JVM environment")
     usage = attributes.get("org.gradle.usage")
     if attributes.get("org.gradle.category") == "documentation":
         require(attributes.get("org.gradle.docstype") == "sources" and
                 attributes.get("org.gradle.dependency.bundling") == "external" and
-                usage == ("java-runtime" if target == "jvm" else "kotlin-runtime"),
+                usage == "kotlin-runtime",
                 "Wrong source variant role")
         role = "sources"
     else:
         require(attributes.get("org.gradle.category") == "library" and
                 "org.gradle.docstype" not in attributes, "Wrong library variant role")
         usages = ({"kotlin-metadata": "api"} if target == "root" else
-                  {"java-api": "api", "java-runtime": "runtime"} if target == "jvm" else
-                  {"kotlin-api": "api", "kotlin-runtime": "runtime"} if target == "js" else
                   {"kotlin-api": "api", "kotlin-metadata": "metadata"})
         require(usage in usages, "Wrong library variant usage")
         role = usages[usage]
-    if target == "jvm":
-        require(attributes.get("org.gradle.libraryelements") == "jar",
-                "Wrong JVM library elements")
     return role
 
 
-def required_edges(base, target, role):
+def required_edges(base):
     api, implementation = PROJECT_EDGES.get(base, ((), ()))
-    # Native/metadata API exports implementation dependencies too; JVM/JS API does not.
-    return set(api) | (set(implementation) if target not in ("jvm", "js") or role == "runtime"
-                       else set())
+    # Native/metadata API exports implementation dependencies too.
+    return set(api) | set(implementation)
 
 
 def validate_root_metadata(archive, spec, base):
@@ -256,7 +236,7 @@ def validate_root_metadata(archive, spec, base):
             {v["name"] for v in structure["variants"] if "commonMain" in v["sourceSet"]},
             "Missing KMP platform source set mapping")
     common = next(s for s in source_sets if s["name"] == "commonMain")
-    require({spec["group"] + ":" + d for d in required_edges(base, "root", "api")} <=
+    require({spec["group"] + ":" + d for d in required_edges(base)} <=
             set(common["moduleDependency"]), "Missing KMP metadata fork dependency")
     names = archive.namelist()
     require("commonMain/default/manifest" in names and
@@ -265,7 +245,7 @@ def validate_root_metadata(archive, spec, base):
             "Missing common Kotlin metadata payload")
 
 
-def validate(repo, spec, version, targets=None, compiler_version=None, js_compiler_version=None):
+def validate(repo, spec, version, targets=None, compiler_version=None):
     """Check local structure/essential fork edges; real consumers test compatibility."""
     inventory = files(repo)
     artifacts = expected_artifacts(spec, targets)
@@ -280,7 +260,7 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
         target = artifacts[artifact]
         base = artifact if target == "root" else artifact.removesuffix("-" + target.lower())
         stem = f"{artifact}-{version}"
-        extension = ".jar" if artifacts[artifact] in ("root", "jvm") else ".klib"
+        extension = ".jar" if target == "root" else ".klib"
         cinterops = {stem + f"-cinterop-{name}.klib"
                      for name in spec.get("cinterops", {}).get(target, ())}
         require(filename.startswith(stem + ".") or filename.startswith(stem + "-"),
@@ -321,7 +301,6 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
         for tag, wanted in (("groupId", spec["group"]), ("artifactId", artifact), ("version", version)):
             require(pom.findtext(f"m:{tag}", namespaces=NS) == wanted, "POM identity mismatch")
         pom_fork_deps = {}
-        js_dependencies = set(spec["modules"]) | {base + "-js" for base in spec["modules"]}
         for dep in pom.findall("m:dependencies/m:dependency", NS):
             if dep.findtext("m:groupId", namespaces=NS) == spec["group"]:
                 module = dep.findtext("m:artifactId", namespaces=NS)
@@ -330,22 +309,16 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
                 require(module in artifacts and
                         dep.findtext("m:version", namespaces=NS) == version,
                         "POM fork dependency outside closure")
-                if target == "js":
-                    require(module in js_dependencies, "JS POM fork dependency selects non-JS target")
                 require(module in {d if target == "root" else f"{d}-{target.lower()}"
                                    for d in spec["modules"]}, "POM fork dependency selects wrong platform")
                 if dep.findtext("m:optional", default="false", namespaces=NS) != "true":
                     pom_fork_deps[module] = dep.findtext("m:scope", default="compile", namespaces=NS)
-        needed = required_edges(base, target, "runtime")
+        needed = required_edges(base)
         pom_needed = {d if target == "root" else f"{d}-{target.lower()}" for d in needed}
-        message = ("Missing SDK JS core dependency in POM/module" if target == "js" and needed else
-                   "Missing essential POM fork dependency")
-        # Real inspected roots declare common edges, not a mandatory JVM forwarding edge.
-        require(pom_needed <= pom_fork_deps.keys(), message)
-        api = set(PROJECT_EDGES.get(base, ((), ()))[0])
+        require(pom_needed <= pom_fork_deps.keys(), "Missing essential POM fork dependency")
         require(all(pom_fork_deps[d if target == "root" else f"{d}-{target.lower()}"] ==
-                    ("runtime" if target == "root" or (target in ("jvm", "js") and d not in api)
-                     else "compile") for d in needed), "Wrong essential POM dependency scope")
+                    ("runtime" if target == "root" else "compile") for d in needed),
+                "Wrong essential POM dependency scope")
         doc = json.loads(inventory[stem + ".module"])
         require(doc.get("formatVersion") == "1.1", "Unexpected module format")
         require(next(iter(doc), None) == "formatVersion",
@@ -378,22 +351,14 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
                         "Unexpected variant redirect")
                 variant_target = next(t for t in target_set(spec)
                                       if link["module"] == f"{base}-{t.lower()}")
-            try:
-                role = variant_role(attributes, variant_target)
-            except ValueError as error:
-                if link and variant_target == "js":
-                    raise ValueError("Wrong root JS redirect attributes") from error
-                raise
+            role = variant_role(attributes, variant_target)
             roles.setdefault(variant_target, set()).add(role)
             if not link and role != "sources":
                 deps = {dep.get("module") for dep in variant.get("dependencies", [])
                         if dep.get("group") == spec["group"]}
                 # Genuine target GMM uses root-module dependencies with platform selection.
-                needed = required_edges(base, target, role)
                 require(all(d in deps or (target != "root" and f"{d}-{target.lower()}" in deps)
-                            for d in needed),
-                        "Missing SDK JS core dependency in POM/module" if target == "js" and needed
-                        else "Missing essential module fork dependency")
+                            for d in needed), "Missing essential module fork dependency")
             for dep in variant.get("dependencies", []) + variant.get("dependencyConstraints", []):
                 if dep.get("group") == spec["group"]:
                     if external_dependency(spec, dep.get("module"),
@@ -402,9 +367,6 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
                     require(dep.get("module") in artifacts and
                             dep.get("version", {}).get("requires") == version,
                             "Module fork dependency outside closure")
-                    if target == "js":
-                        require(dep["module"] in js_dependencies,
-                                "JS module fork dependency selects non-JS target")
                     require(dep["module"] in set(spec["modules"]) |
                             ({f"{d}-{target.lower()}" for d in spec["modules"]}
                              if target != "root" else set()),
@@ -423,7 +385,7 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
                 require(any(variant_role(v.get("attributes", {}), variant_target) == role
                             for v in destination["variants"]), "Redirect role missing at destination")
             else:
-                extension = (".jar" if target in ("root", "jvm") else ".klib")
+                extension = (".jar" if target == "root" else ".klib")
                 attachment = ("-sources.jar" if role == "sources" else
                               "-metadata.jar" if role == "metadata" else extension)
                 require(any(local_reference(parent, e["url"]) == stem + attachment
@@ -452,14 +414,13 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
                         require(entry[algorithm] == hashlib.new(algorithm, payload).hexdigest(),
                                 "Module checksum mismatch")
                 payloads.add(ref)
-        extension = ".jar" if target in ("root", "jvm") else ".klib"
+        extension = ".jar" if target == "root" else ".klib"
         require(stem + extension in payloads, "Missing real component payload")
         require(stem + "-sources.jar" in payloads, "Missing published sources")
         for variant_target in (("root",) + target_set(spec) if target == "root" else (target,)):
-            required = {"api", "sources"} | ({"runtime"} if variant_target in ("jvm", "js") else set())
-            require(required <= roles.get(variant_target, set()),
+            require({"api", "sources"} <= roles.get(variant_target, set()),
                     "Root metadata target closure mismatch" if target == "root" else
-                    "Missing API/runtime/source variant roles")
+                    "Missing API/source variant roles")
         if target == "root":
             require(available == {f"{artifact}-{t.lower()}" for t in target_set(spec)},
                     "Root metadata target closure mismatch")
@@ -476,33 +437,21 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
                             all(not stat.S_ISLNK(info.external_attr >> 16)
                                 for info in archive.infolist()),
                             "Unsafe payload ZIP")
-                    if ref.endswith(".klib") and target not in ("root", "jvm"):
+                    if ref.endswith(".klib") and target != "root":
                         # KLIB manifests are Java properties; Windows writers may use CRLF.
                         manifest = archive.read("default/manifest").decode().replace("\r\n", "\n").replace("\r", "\n")
-                        if target == "js":
-                            require(re.search(r"(?m)^builtins_platform=JS$", manifest) and
-                                    not re.search(r"(?m)^native_targets=", manifest),
-                                    "Klib JS platform mismatch")
-                            require(all(any(n.startswith(prefix) and archive.getinfo(n).file_size > 0
-                                            for n in names)
-                                        for prefix in ("default/ir/", "default/linkdata/")),
-                                    "Missing real JS IR/metadata payload")
-                            wanted_compiler = js_compiler_version
-                        else:
-                            require(re.search(rf"(?m)^native_targets={NATIVE_NAMES[target]}$", manifest),
-                                    "Klib Native target mismatch")
-                            if spec == FORKS["mcp"]:
-                                require(re.search(r"(?m)^builtins_platform=NATIVE$", manifest),
-                                        "SDK Klib Native platform mismatch")
-                            wanted_compiler = compiler_version
-                        if wanted_compiler:
-                            require(re.search(rf"(?m)^compiler_version={re.escape(wanted_compiler)}$", manifest),
+                        require(re.search(rf"(?m)^native_targets={NATIVE_NAMES[target]}$", manifest),
+                                "Klib Native target mismatch")
+                        if spec == FORKS["mcp"]:
+                            require(re.search(r"(?m)^builtins_platform=NATIVE$", manifest),
+                                    "SDK Klib Native platform mismatch")
+                        if compiler_version:
+                            require(re.search(rf"(?m)^compiler_version={re.escape(compiler_version)}$", manifest),
                                     "Klib compiler differs from recorded platform compiler")
                     if ref.endswith("-sources.jar"):
                         require(any(n.endswith(".kt") and archive.getinfo(n).file_size > 0 and
                                     re.search(rb"(?m)^\s*package\s+[A-Za-z_]", archive.read(n))
-                                    for n in names),
-                                "Missing JS Kotlin sources" if target == "js" else "Missing Kotlin sources")
+                                    for n in names), "Missing Kotlin sources")
                     if target == "root" and ref == stem + ".jar":
                         validate_root_metadata(archive, spec, base)
         # KGP publishes its diagnostic tooling JSON as a Maven classifier,
@@ -511,19 +460,6 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
                               n not in (stem + ".module", stem + ".pom",
                                         stem + "-kotlin-tooling-metadata.json")}
         require(payloads == directory_payloads, "Unexpected/unreferenced component attachment")
-        if artifact == "mosaic-tty-jvm":
-            with zipfile.ZipFile(Path(repo) / (stem + ".jar")) as archive:
-                names = archive.namelist()
-                classes = {TTY_PACKAGE + n + ".class" for n in ("Jni", "NativeLibrary")} | {
-                    "META-INF/versions/22/" + TTY_PACKAGE + n + ".class"
-                    for n in ("Libmosaic", "Tty", "TestTerminal", "StandardStreams")}
-                require(TTY_JNI | classes <= set(names) and
-                        all(archive.getinfo(n).file_size > 0 for n in TTY_JNI | classes) and
-                        all(archive.read(n).startswith(b"\xca\xfe\xba\xbe") for n in classes) and
-                        "META-INF/MANIFEST.MF" in names and
-                        re.search(r"(?im)^Multi-Release: true\s*$",
-                                  archive.read("META-INF/MANIFEST.MF").decode()),
-                        "Missing Mosaic FFM/JNI payload")
         if base == "mosaic-tty" and target in NATIVE_NAMES:
             require(stem + "-cinterop-mosaic.klib" in payloads,
                     "Missing Mosaic Native cinterop")

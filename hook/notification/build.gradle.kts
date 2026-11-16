@@ -21,7 +21,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":rpc-in-memory"))
             implementation(project(":rpc-client"))
             implementation(project(":rpc-server"))

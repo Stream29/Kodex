@@ -1,15 +1,12 @@
 package io.github.stream29.kodex.utils.images
 
 import de.infix.testBalloon.framework.core.testSuite
-
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 import kotlin.test.assertSame
-
-
+import kotlin.test.assertTrue
 
 val promptImageProcessingTest by testSuite {
     test("plan prompt image preserves supported source bytes when no resize is needed") {
@@ -50,33 +47,6 @@ val promptImageProcessingTest by testSuite {
         assertTrue(plan.requiresTransformation)
     }
 
-    test("to prompt image returns encoded image when bytes can be preserved") {
-        val bytes = pngBytes(64, 32)
-        val image = bytes.toPromptImage(PromptImageMode.Original)
-
-        assertEquals(ImageMimeType.Png, image.mimeType)
-        assertEquals(ImageDimensions(64, 32), image.dimensions)
-        assertContentEquals(bytes, image.bytes)
-        assertTrue(image.toDataUrl().startsWith("data:image/png;base64,"))
-    }
-
-    test("to prompt image requires transformer for resize or transcode") {
-        assertFailsWith<ImageTransformRequiredException> {
-            pngBytes(4096, 2048).toPromptImage(PromptImageMode.ResizeToFit)
-        }
-        assertFailsWith<ImageTransformRequiredException> {
-            gifBytes(64, 32).toPromptImage(PromptImageMode.ResizeToFit)
-        }
-    }
-
-    test("to prompt image processes data urls") {
-        val bytes = pngBytes(64, 32)
-        val image = bytes.toDataUrl(ImageMimeType.Png).toPromptImage(PromptImageMode.Original)
-
-        assertEquals(ImageMimeType.Png, image.mimeType)
-        assertEquals(ImageDimensions(64, 32), image.dimensions)
-        assertContentEquals(bytes, image.bytes)
-    }
     test("encoded images and transform requests copy input and getter arrays") {
         val input = pngBytes(64, 32)
         val expected = input.copyOf()
@@ -88,7 +58,9 @@ val promptImageProcessingTest by testSuite {
         request.sourceBytes.fill(2)
         assertContentEquals(expected, image.bytes)
         assertContentEquals(expected, request.sourceBytes)
+        assertTrue(image.toDataUrl().startsWith("data:image/png;base64,"))
     }
+
     test("unneeded transformer is skipped and transformed metadata must match the plan") {
         val small = pngBytes(64, 32)
         val unused = PromptImageTransformer { error("No transformation is needed") }
@@ -103,15 +75,13 @@ val promptImageProcessingTest by testSuite {
         assertFailsWith<IllegalArgumentException> { large.toPromptImage(PromptImageMode.ResizeToFit, wrongMime) }
         assertFailsWith<IllegalArgumentException> { large.toPromptImage(PromptImageMode.ResizeToFit, wrongDimensions) }
     }
-    test("transformer failures propagate unchanged from bytes and data URLs") {
+
+    test("transformer failures propagate unchanged from bytes") {
         val bytes = pngBytes(4096, 2048)
         val failure = IllegalStateException("codec failure")
         val failing = PromptImageTransformer { throw failure }
         assertSame(failure, assertFailsWith<IllegalStateException> {
             bytes.toPromptImage(PromptImageMode.ResizeToFit, failing)
-        })
-        assertSame(failure, assertFailsWith<IllegalStateException> {
-            bytes.toDataUrl(ImageMimeType.Png).toPromptImage(PromptImageMode.ResizeToFit, failing)
         })
     }
 }

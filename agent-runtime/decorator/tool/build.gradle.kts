@@ -29,7 +29,7 @@ kotlin {
             implementation(project(":tool-read-media"))
             implementation(project(":tool-unified-exec"))
             implementation(project(":utils-coroutines"))
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":utils-shell-client-system"))
             implementation(libs.kotlinx.io.core)
         }

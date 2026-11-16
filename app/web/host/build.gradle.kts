@@ -17,7 +17,6 @@ kotlin {
             implementation(project(":utils-kauri"))
             implementation(project(":utils-external-url"))
             implementation(project(":utils-process-client"))
-            implementation(project(":utils-process-client-system"))
             implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":utils-os-environment"))
             implementation(project(":rpc-backend-control-client"))
@@ -33,7 +32,7 @@ kotlin {
             implementation(project(":app-rpc"))
             implementation(project(":rpc-client"))
             implementation(project(":openai-client-test"))
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":utils-os-environment"))
             implementation(project(":utils-shell-client-system"))
         }

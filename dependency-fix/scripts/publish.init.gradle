@@ -61,16 +61,6 @@ gradle.beforeProject { p ->
         preserveFileTimestamps = false
         reproducibleFileOrder = true
     }
-    p.tasks.withType(Exec).configureEach {
-        if (name.endsWith('JniZigBuild')) {
-            doFirst { args('-j2') }
-            environment('ZIG_GLOBAL_CACHE_DIR', new File(staging.parentFile, 'zig-cache'))
-            // An explicit CI task environment, not an xcode-select/system mutation.
-            if (System.getenv('FORK_DEVELOPER_DIR')) {
-                environment('DEVELOPER_DIR', System.getenv('FORK_DEVELOPER_DIR'))
-            }
-        }
-    }
 }
 gradle.projectsEvaluated {
     // Init scripts can also run in buildSrc/included builds. Only the fork root

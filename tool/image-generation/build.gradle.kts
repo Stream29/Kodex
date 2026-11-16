@@ -13,8 +13,7 @@ kotlin {
                 api(project(":tool-image-generation-contract"))
                 api(project(":openai-client"))
                 api(project(":utils-images"))
-                api(project(":utils-kotlinx-io-coroutines-system"))
-                api(project(":utils-images-codec"))
+                api(project(":utils-kotlinx-io-coroutines"))
             }
         }
         commonTest.dependencies {
