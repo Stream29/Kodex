@@ -2,8 +2,6 @@ package io.github.stream29.kodex.mcp.stdio
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpSecret
@@ -63,17 +61,8 @@ val mcpStdioTransportIoTest by testSuite(
                 client.state.first { state -> state == McpClientState.Healthy }
                 client.listTools().single()
             }
-            val completed = assertIs<StableMcpToolEvent>(
-                tool.handle(
-                    PendingMcpToolEvent(
-                        callId = "stdio-call",
-                        name = "environment",
-                        namespace = "mcp__stdio_fixture",
-                        arguments = JsonObject(emptyMap()),
-                    ),
-                ),
-            )
-            val text = completed.result.content.single().jsonObject.getValue("text").jsonPrimitive.content
+            val completed = tool.call(JsonObject(emptyMap()))
+            val text = completed.content.single().jsonObject.getValue("text").jsonPrimitive.content
             assertEquals(
                 "env=$TestEnvironmentValue;cwd=${workingDirectory.toRealPath().absolutePathString()}",
                 text,

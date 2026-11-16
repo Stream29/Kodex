@@ -2,8 +2,6 @@ package io.github.stream29.kodex.mcp.impl
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
 import io.github.stream29.kodex.mcp.contract.McpClientState
@@ -15,8 +13,6 @@ import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpSecret
 import io.github.stream29.kodex.mcp.contract.McpSettings
 import io.github.stream29.kodex.mcp.contract.McpTool
-import io.github.stream29.kodex.openai.ResponsesApiNamespace
-import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -86,8 +82,8 @@ val mcpServiceImplIoTest by testSuite(
                 }
             }
             assertEquals(
-                setOf("mcp__alpha", "mcp__beta"),
-                initialClients.allTools().namespaceNames(),
+                setOf("alpha", "beta"),
+                initialClients.allTools().serverNames(),
             )
             assertEquals(1, fixture.initializeCount("alpha"))
             assertEquals(1, fixture.initializeCount("beta"))
@@ -134,30 +130,17 @@ val mcpServiceImplIoTest by testSuite(
                 reconfiguredClients.getValue("beta"),
                 refreshedClients.getValue("beta"),
             )
-            assertEquals(4, refreshedClients.allTools().sumOf { tool ->
-                assertIs<ResponsesApiNamespace>(tool.spec).tools.size
-            })
+            assertEquals(4, refreshedClients.allTools().size)
 
             val alphaTool = refreshedClients.allTools().single { tool ->
-                val namespace = assertIs<ResponsesApiNamespace>(tool.spec)
-                namespace.name == "mcp__alpha" &&
-                    assertIs<ResponsesApiTool>(namespace.tools.single()).name == "echo"
+                tool.serverName == "alpha" && tool.toolName == "echo"
             }
             assertEquals("alpha", alphaTool.serverName)
             assertEquals("alpha tools", alphaTool.serverInstructions)
-            val completed = assertIs<StableMcpToolEvent>(
-                alphaTool.handle(
-                    PendingMcpToolEvent(
-                        callId = "alpha-call",
-                        name = "echo",
-                        namespace = "mcp__alpha",
-                        arguments = buildJsonObject { put("name", "Ada") },
-                    ),
-                ),
-            )
+            val completed = alphaTool.call(buildJsonObject { put("name", "Ada") })
             assertEquals(
                 "alpha:second:Ada",
-                completed.result.content.single().jsonObject.getValue("text").jsonPrimitive.content,
+                completed.content.single().jsonObject.getValue("text").jsonPrimitive.content,
             )
 
             settings.value = TestMcpSettings(
@@ -169,7 +152,7 @@ val mcpServiceImplIoTest by testSuite(
             val remaining = withTimeout(10.seconds) {
                 service.clients.first { clients -> clients.keys == setOf("alpha") }
             }
-            assertEquals(setOf("mcp__alpha"), remaining.allTools().namespaceNames())
+            assertEquals(setOf("alpha"), remaining.allTools().serverNames())
         } finally {
             service.close()
             service.coroutineContext[Job]?.join()
@@ -202,16 +185,7 @@ val mcpServiceImplIoTest by testSuite(
             val originalTool = originalClient.listTools().single()
 
             fixture.available.set(false)
-            val unavailable = assertIs<StableMcpToolEvent>(
-                originalTool.handle(
-                    PendingMcpToolEvent(
-                        callId = "unavailable-call",
-                        name = "echo",
-                        namespace = "mcp__alpha",
-                        arguments = buildJsonObject { put("name", "Ada") },
-                    ),
-                ),
-            )
+            val unavailable = originalTool.call(buildJsonObject { put("name", "Ada") })
 
             assertEquals(
                 McpClientState.Failed(McpClientFailureReason.ConnectionLost),
@@ -219,9 +193,9 @@ val mcpServiceImplIoTest by testSuite(
             )
             assertSame(originalClient, service.clients.value.getValue("alpha"))
             assertSame(originalTool, originalClient.listTools().single())
-            assertEquals(true, unavailable.result.isError)
+            assertEquals(true, unavailable.isError)
             assertTrue(
-                unavailable.result.content.single()
+                unavailable.content.single()
                     .jsonObject
                     .getValue("text")
                     .jsonPrimitive
@@ -343,7 +317,8 @@ val mcpServiceImplIoTest by testSuite(
             assertNotSame(authorizedClient, blocked)
             assertEquals(McpClientState.Closed, authorizedClient.state.value)
             val blockedTool = blocked.listTools().single()
-            assertSame(originalTool.spec, blockedTool.spec)
+            assertEquals(originalTool.toolName, blockedTool.toolName)
+            assertEquals(originalTool.inputSchema, blockedTool.inputSchema)
             assertEquals(originalTool.serverInstructions, blockedTool.serverInstructions)
             assertSame(blockedTool, blocked.listTools().single())
         } finally {
@@ -385,18 +360,9 @@ val mcpServiceImplIoTest by testSuite(
             val originalTool = originalClient.listTools().single()
             fixture.expectedAuthorization.set("Bearer new-access-token")
 
-            val completed = assertIs<StableMcpToolEvent>(
-                originalTool.handle(
-                    PendingMcpToolEvent(
-                        callId = "refresh-call",
-                        name = "echo",
-                        namespace = "mcp__oauth",
-                        arguments = buildJsonObject { put("name", "Ada") },
-                    ),
-                ),
-            )
+            val completed = originalTool.call(buildJsonObject { put("name", "Ada") })
 
-            assertTrue(completed.result.isError != true)
+            assertTrue(completed.isError != true)
             assertEquals(1, refreshCount.get())
             val persisted = assertIs<McpOAuthConfiguration.Initialized>(
                 assertIs<McpServerConfiguration.StreamableHttp>(
@@ -620,8 +586,8 @@ private fun jsonRpcResult(id: JsonElement, result: JsonElement): JsonObject = bu
 private fun ConcurrentHashMap<String, AtomicInteger>.count(name: String): AtomicInteger =
     computeIfAbsent(name) { AtomicInteger() }
 
-private fun List<io.github.stream29.kodex.tool.contract.Tool>.namespaceNames(): Set<String> =
-    mapTo(mutableSetOf()) { tool -> assertIs<ResponsesApiNamespace>(tool.spec).name }
+private fun List<McpTool>.serverNames(): Set<String> =
+    mapTo(mutableSetOf(), McpTool::serverName)
 
 private fun Map<String, McpClient>.allTools(): List<McpTool> =
     values.flatMap(McpClient::listTools)

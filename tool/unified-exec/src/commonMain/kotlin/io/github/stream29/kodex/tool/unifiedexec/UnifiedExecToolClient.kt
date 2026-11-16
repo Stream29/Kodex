@@ -36,6 +36,7 @@ internal const val UnifiedExecWindowsMinimumYieldTimeMillis: Long = 10_000L
 public actual class UnifiedExecToolClient internal constructor(
     private val workingDirectoryProvider: suspend () -> Path,
     private val settingsProvider: suspend () -> ShellSettings,
+    private val environmentProvider: suspend () -> Map<String, String> = { emptyMap() },
     private val shellClient: ShellClient,
 ) : UnifiedExecClient {
     private val registryMutex: Mutex = Mutex()
@@ -52,6 +53,7 @@ public actual class UnifiedExecToolClient internal constructor(
             arguments.toShellProcessCommand(
                 defaultWorkingDirectory = workingDirectoryProvider(),
                 defaultShell = settingsProvider().shell,
+                environment = environmentProvider(),
             )
         }
         val session = runUnifiedExecProcessOperation {
@@ -174,10 +176,12 @@ public actual class UnifiedExecToolClient internal constructor(
 public actual fun CoroutineScope.UnifiedExecToolClient(
     settingsProvider: suspend () -> ShellSettings,
     workingDirectoryProvider: suspend () -> Path,
+    environmentProvider: suspend () -> Map<String, String>,
 ): UnifiedExecToolClient =
     UnifiedExecToolClient(
         workingDirectoryProvider = workingDirectoryProvider,
         settingsProvider = settingsProvider,
+        environmentProvider = environmentProvider,
         shellClient = ShellClient(),
     )
 
@@ -255,6 +259,7 @@ private fun ExecCommandArguments.validate() {
 private fun ExecCommandArguments.toShellProcessCommand(
     defaultWorkingDirectory: Path,
     defaultShell: Shell,
+    environment: Map<String, String>,
 ): ShellProcessCommand =
     ShellProcessCommand(
         command = command,
@@ -268,6 +273,7 @@ private fun ExecCommandArguments.toShellProcessCommand(
         shell = shell ?: defaultShell,
         login = true,
         tty = true,
+        environment = environment,
     )
 
 private fun Long.normalizedExecYieldTime(): Duration =

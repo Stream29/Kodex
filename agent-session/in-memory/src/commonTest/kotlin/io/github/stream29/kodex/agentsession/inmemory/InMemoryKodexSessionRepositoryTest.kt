@@ -149,6 +149,8 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             val index = repository.create()
             val session = repository.open(index)
 
+            assertEquals(index, session.storage.agentId)
+            assertEquals(index, session.runtime.agentId)
             assertEquals(-1, session.storage.latestIndex())
             session.runtime.modify { storage -> storage.initialize(settings("root")) }
             assertEquals(0, session.storage.latestIndex())
@@ -310,20 +312,33 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             assertNull(root.runtime.runningTurn.value)
         }
 
-        test("runtime leaves host-owned pending calls in state") {
+        test("runtime fails unsupported pending calls and continues turn") {
+            var calls = 0
             val client = mockOpenAiClient {
                 createResponse { _ ->
-                    flowOf(
-                        ResponsesStreamEvent.OutputItemDone(
-                            outputIndex = 0,
-                            item = ResponseItem.FunctionCall(
-                                name = "host_only",
-                                arguments = "{}",
-                                callId = "call_host_only",
+                    when (++calls) {
+                        1 -> flowOf(
+                            ResponsesStreamEvent.OutputItemDone(
+                                outputIndex = 0,
+                                item = ResponseItem.FunctionCall(
+                                    name = "host_only",
+                                    arguments = "{}",
+                                    callId = "call_host_only",
+                                ),
                             ),
-                        ),
-                        ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
-                    )
+                            ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                        )
+                        else -> flowOf(
+                            ResponsesStreamEvent.OutputItemDone(
+                                outputIndex = 0,
+                                item = ResponseItem.Message(
+                                    role = MessageRole.Assistant,
+                                    content = listOf(ContentItem.OutputText("Recovered")),
+                                ),
+                            ),
+                            ResponsesStreamEvent.Completed(Response(id = "response_2", endTurn = true)),
+                        )
+                    }
                 }
             }
             val repository = InMemoryKodexSessionRepository(
@@ -334,8 +349,14 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
 
             root.runtime.resume()
 
-            val pending = assertIs<KodexAgentStateValue.ToolPending>(root.runtime.state.value)
-            assertEquals(listOf("call_host_only"), pending.events.map { event -> event.callId })
+            assertEquals(2, calls)
+            assertEquals(KodexAgentStateValue.AssistantMessage, root.runtime.state.value)
+            val failed = assertIs<StableTextToolEvent>(
+                root.storage.getCommitAtOrBefore(root.storage.latestIndex(), AgentCommitType.WorkTypes)?.commit,
+            )
+            assertEquals("call_host_only", failed.callId)
+            assertEquals(false, failed.success)
+            assertTrue("unsupported tool call" in failed.result)
         }
 
         test("cancelling a turn fails its persisted pending tool calls") {

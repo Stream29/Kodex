@@ -83,6 +83,7 @@ internal class CachedSqliteAgentStorage(
     private val nonce = MutableStateFlow(Random.nextLong())
     private val tail = MutableStateFlow(initialLatestIndex)
 
+    override val agentId: Int? get() = source.agentId
     override val uri: String get() = source.uri
     override val cacheNonce: StateFlow<Long> = nonce.asStateFlow()
     override val latestIndexFlow: StateFlow<Int> = tail.asStateFlow()
@@ -207,6 +208,7 @@ internal val MirrorTimelineDirectories: List<String> = listOf(
     "llm-request-meta",
     "unstable",
     "steer",
+    "ask-user",
 )
 
 internal fun mirrorTimelineDirectory(type: String): String =

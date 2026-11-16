@@ -42,12 +42,6 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
         }
         named("cliHostTest").dependencies {
-            implementation(project(":agent-runtime-decorator-tool"))
-            implementation(project(":agent-state-core"))
-            implementation(project(":agent-state-test"))
-            implementation(project(":tool-plan"))
-            implementation(project(":agent-storage-core"))
-            implementation(project(":openai-client-test"))
             implementation(project(":openai-json-codec"))
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.ktor.client.mock)

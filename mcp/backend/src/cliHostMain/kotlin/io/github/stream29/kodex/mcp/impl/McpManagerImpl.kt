@@ -2,9 +2,9 @@
 
 package io.github.stream29.kodex.mcp.impl
 
+import io.github.stream29.kodex.mcp.contract.ReservedMcpServerNames
 import io.github.stream29.kodex.mcp.contract.toConfiguration
 import io.github.stream29.kodex.mcp.contract.validatedName
-import io.github.stream29.kodex.mcp.contract.requireUniqueMcpModelNames
 
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpClient
@@ -122,7 +122,7 @@ public actual class McpManagerImpl internal constructor(
             val configuration = draft.toConfiguration(existing = null, preserveOAuth = false)
             store.update { current ->
                 require(name !in current) { "An MCP server named '$name' already exists." }
-                (current + (name to configuration)).also { requireUniqueMcpModelNames(it.keys, "server") }
+                current + (name to configuration)
             }
         }
     }
@@ -153,8 +153,7 @@ public actual class McpManagerImpl internal constructor(
                     existing = latest,
                     preserveOAuth = !renamed,
                 )
-                ((current - existingServerName) + (nextName to resolved))
-                    .also { requireUniqueMcpModelNames(it.keys, "server") }
+                (current - existingServerName) + (nextName to resolved)
             }
             authenticationOverrides.value -= existingServerName
         }
@@ -386,17 +385,29 @@ public actual class McpManagerImpl internal constructor(
 
                     else -> {
                         val supported = candidate as McpCodexImportCandidate.Supported
-                        McpImportItem(
-                            serverName = supported.serverName,
-                            transport = supported.transport,
-                            kind = if (supported.serverName in existingNames) {
-                                McpImportItemKind.Conflict
-                            } else {
-                                McpImportItemKind.New
-                            },
-                            enabled = supported.configuration.enabled,
-                            selectable = true,
-                        )
+                        val trimmedName = supported.serverName.trim()
+                        if (trimmedName in ReservedMcpServerNames && supported.serverName !in existingNames) {
+                            McpImportItem(
+                                serverName = supported.serverName,
+                                transport = supported.transport,
+                                kind = McpImportItemKind.Unsupported,
+                                enabled = supported.configuration.enabled,
+                                selectable = false,
+                                detail = "MCP server name '$trimmedName' is reserved by a built-in kodex CLI command.",
+                            )
+                        } else {
+                            McpImportItem(
+                                serverName = supported.serverName,
+                                transport = supported.transport,
+                                kind = if (supported.serverName in existingNames) {
+                                    McpImportItemKind.Conflict
+                                } else {
+                                    McpImportItemKind.New
+                                },
+                                enabled = supported.configuration.enabled,
+                                selectable = true,
+                            )
+                        }
                     }
                 }
             }
@@ -435,6 +446,9 @@ public actual class McpManagerImpl internal constructor(
                     when (decisions[name] ?: McpImportDecision.Skip) {
                         McpImportDecision.Skip -> Unit
                         McpImportDecision.Import -> {
+                            require(name.trim() !in ReservedMcpServerNames) {
+                                "MCP server name '${name.trim()}' is reserved by a built-in kodex CLI command."
+                            }
                             require(name !in updated) {
                                 "MCP server '$name' now conflicts with existing settings."
                             }
@@ -449,7 +463,7 @@ public actual class McpManagerImpl internal constructor(
                         }
                     }
                 }
-                updated.toMap().also { requireUniqueMcpModelNames(it.keys, "server") }
+                updated.toMap()
             }
             authenticationOverrides.value -= decisions
                 .filterValues { decision -> decision != McpImportDecision.Skip }

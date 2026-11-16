@@ -608,4 +608,35 @@ val unifiedExecSessionControlIoTest by testSuite(
             client.close()
         }
     }
+
+    test("execCommand forwards environmentProvider variables to spawned shell process") {
+        val printEnvCommand = if (unifiedExecTestShell.type == ShellType.PowerShell) {
+            "Write-Output \"\$env:KODEX_AGENT_ID|\$env:KODEX_HOME\""
+        } else {
+            "printf '%s|%s\\n' \"\$KODEX_AGENT_ID\" \"\$KODEX_HOME\""
+        }
+        val client = CoroutineScope(currentCoroutineContext()).UnifiedExecToolClient(
+            settingsProvider = { TestShellSettings() },
+            workingDirectoryProvider = { Path(".") },
+            environmentProvider = {
+                mapOf(
+                    KodexAgentIdEnvironmentVariable to "42",
+                    KodexHomeEnvironmentVariable to "/tmp/kodex-home-test",
+                )
+            },
+        )
+        try {
+            val output = client.execCommand(
+                ExecCommandArguments(
+                    command = printEnvCommand,
+                    shell = unifiedExecTestShell,
+                    yieldTimeMillis = 5_000L,
+                ),
+            )
+            assertEquals(0, output.exitCode)
+            assertTrue("42|/tmp/kodex-home-test" in output.output, "Actual output: ${output.output}")
+        } finally {
+            client.close()
+        }
+    }
 }

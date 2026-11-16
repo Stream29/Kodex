@@ -4,6 +4,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import kotlinx.io.files.Path
 import kotlinx.serialization.json.Json
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 val mcpServerConfigurationTest by testSuite {
@@ -62,5 +63,30 @@ val mcpServerConfigurationTest by testSuite {
         assertTrue("access-private" !in diagnostic, diagnostic)
         assertTrue("refresh-private" !in diagnostic, diagnostic)
         assertTrue("<redacted>" in diagnostic, diagnostic)
+    }
+
+    test("validatedName rejects blank and reserved CLI domain names while allowing punctuation") {
+        ReservedMcpServerNames.forEach { reserved ->
+            assertFailsWith<IllegalArgumentException> {
+                McpServerDraft.Stdio(
+                    serverName = " $reserved ",
+                    configuration = McpStdioDraft(command = "example-mcp"),
+                ).validatedName()
+            }
+        }
+        assertEquals(
+            "a-b",
+            McpServerDraft.Stdio(
+                serverName = " a-b ",
+                configuration = McpStdioDraft(command = "example-mcp"),
+            ).validatedName(),
+        )
+        assertEquals(
+            "a_b",
+            McpServerDraft.Stdio(
+                serverName = "a_b",
+                configuration = McpStdioDraft(command = "example-mcp"),
+            ).validatedName(),
+        )
     }
 }

@@ -152,7 +152,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
     actual override suspend fun create(): Int = entriesMutex.withLock {
         requireOpen()
         val index = nextSessionIndex()
-        check(sessions.put(index, SessionNode(InMemoryKodexAgentStorage.empty())) == null)
+        check(sessions.put(index, SessionNode(InMemoryKodexAgentStorage.empty(index))) == null)
         mutableEntries.value = (entries.value + index).sorted()
         index
     }
@@ -161,7 +161,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         requireOpen()
         val source = requireSession(sourceEntryIndex).storage
         val index = nextSessionIndex()
-        val storage = InMemoryKodexAgentStorage.empty()
+        val storage = InMemoryKodexAgentStorage.empty(index)
         cloneStorage(source, storage)
         sessions[index] = SessionNode(storage)
         mutableEntries.value = (entries.value + index).sorted()
@@ -407,7 +407,6 @@ private class InMemoryKodexAgentSession(
                     client = dependencies.client,
                     storage = storage,
                     contextSettings = dependencies.contextSettings,
-                    mcpService = dependencies.mcpService,
                 ).buildMasterAgentRuntime(dependencies)
                 sessionScope.launch(start = CoroutineStart.UNDISPATCHED) {
                     runtime.stopEvents.collect { event ->
@@ -517,6 +516,7 @@ private class SessionAgentStorage(
     private val nonce = MutableStateFlow(Random.nextLong())
     private val tail = MutableStateFlow(initialLatestIndex)
 
+    override val agentId: Int? get() = delegate.agentId
     override val uri: String = delegate.uri
     override val cacheNonce: StateFlow<Long> = nonce.asStateFlow()
     override val latestIndexFlow: StateFlow<Int> = tail.asStateFlow()

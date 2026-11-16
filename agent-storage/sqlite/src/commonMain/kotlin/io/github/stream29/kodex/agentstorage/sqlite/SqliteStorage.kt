@@ -25,12 +25,12 @@ import kotlin.time.Instant
 
 public actual class SqliteAgentStorage actual constructor(
     internal val connection: SqliteConnection,
-    agentId: Int,
+    public actual override val agentId: Int,
     public actual override val uri: String,
     private val mutex: Mutex,
     private val requireAccess: () -> Unit,
 ) : MutableKodexAgentStorage {
-    internal val agentId: Long = agentId.also { require(it >= 0) { "Invalid agent id: $it" } }.toLong()
+    internal val sqlAgentId: Long = agentId.also { require(it >= 0) { "Invalid agent id: $it" } }.toLong()
 
     internal suspend fun <T> read(block: () -> T): T {
         currentCoroutineContext().ensureActive()
@@ -54,7 +54,7 @@ public actual class SqliteAgentStorage actual constructor(
     private fun tailUnsafe(): Int =
         connection.query(
             """SELECT coalesce(max("index"), -1) FROM agent_commits WHERE agent_id = ?""",
-            listOf(agentId),
+            listOf(sqlAgentId),
         ).firstOrNull()?.let { (it[0] as Long).toInt() } ?: -1
 
     public actual override suspend fun latestIndex(): Int = read { tailUnsafe() }
@@ -68,7 +68,7 @@ public actual class SqliteAgentStorage actual constructor(
         val (clause, params) = typeFilterClause(types)
         val rows = connection.query(
             """SELECT count(*) FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause""",
-            listOf(agentId, range.first.toLong(), range.last.toLong()) + params,
+            listOf(sqlAgentId, range.first.toLong(), range.last.toLong()) + params,
         )
         rows.firstOrNull()?.let { (it[0] as Long).toInt() } ?: 0
     }
@@ -85,7 +85,7 @@ public actual class SqliteAgentStorage actual constructor(
         val sqlLimit = boundedIndexScanLimit(limit, types)
         val rows = connection.query(
             """SELECT "index", type, payload_json, created_at FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" ASC, type ASC LIMIT ?""",
-            listOf(agentId, range.first.toLong(), range.last.toLong()) + params + listOf(sqlLimit),
+            listOf(sqlAgentId, range.first.toLong(), range.last.toLong()) + params + listOf(sqlLimit),
         )
         decodeIndexedRows(rows).take(limit)
     }
@@ -102,7 +102,7 @@ public actual class SqliteAgentStorage actual constructor(
         val sqlLimit = boundedIndexScanLimit(limit, types)
         val rows = connection.query(
             """SELECT "index", type, payload_json, created_at FROM agent_commits WHERE agent_id = ? AND "index" BETWEEN ? AND ?$clause ORDER BY "index" DESC, type DESC LIMIT ?""",
-            listOf(agentId, range.first.toLong(), range.last.toLong()) + params + listOf(sqlLimit),
+            listOf(sqlAgentId, range.first.toLong(), range.last.toLong()) + params + listOf(sqlLimit),
         )
         decodeIndexedRows(rows).takeLast(limit)
     }
@@ -125,7 +125,7 @@ public actual class SqliteAgentStorage actual constructor(
             for ((wireType, payloadJson) in encoded) {
                 connection.execute(
                     """INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at) VALUES (?, ?, ?, ?, ?)""",
-                    listOf(agentId, wireType, nextIndex.toLong(), payloadJson, timestampStr),
+                    listOf(sqlAgentId, wireType, nextIndex.toLong(), payloadJson, timestampStr),
                 )
             }
             nextIndex
@@ -138,11 +138,11 @@ public actual class SqliteAgentStorage actual constructor(
         write {
             connection.execute(
                 """DELETE FROM agent_commits WHERE agent_id = ? AND "index" >= ?""",
-                listOf(agentId, untilExclusive.toLong()),
+                listOf(sqlAgentId, untilExclusive.toLong()),
             )
             connection.execute(
                 """UPDATE agent_commits SET payload_json = ? WHERE agent_id = ? AND type = ?""",
-                listOf(emptySteerJson, agentId, AgentCommitType.Steer.wireName),
+                listOf(emptySteerJson, sqlAgentId, AgentCommitType.Steer.wireName),
             )
         }
     }

@@ -2,50 +2,44 @@ package io.github.stream29.kodex.mcp.impl
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.oshai.kotlinlogging.KotlinLogging
-import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
-import io.github.stream29.kodex.agentruntime.decorator.tool.toolRuntime
-import io.github.stream29.kodex.agentstate.contract.KodexAgentState
-import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.agentstate.contract.RequestFinish
-import io.github.stream29.kodex.agentstate.impl.KodexAgentState as createAgentState
-import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
-import io.github.stream29.kodex.agentstate.test.TestMcpService
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
-import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
-import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
-import io.github.stream29.kodex.mcp.contract.*
-import io.github.stream29.kodex.openai.*
-import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
-import io.github.stream29.kodex.tool.plan.updatePlanTool
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
+import io.github.stream29.kodex.mcp.contract.McpClient
+import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
+import io.github.stream29.kodex.mcp.contract.McpClientState
+import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
+import io.github.stream29.kodex.mcp.contract.McpSettings
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.modelcontextprotocol.kotlin.sdk.shared.Transport
 import io.modelcontextprotocol.kotlin.sdk.shared.TransportSendOptions
-import io.modelcontextprotocol.kotlin.sdk.types.*
+import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.InitializeResult
+import io.modelcontextprotocol.kotlin.sdk.types.JSONRPCMessage
+import io.modelcontextprotocol.kotlin.sdk.types.JSONRPCRequest
+import io.modelcontextprotocol.kotlin.sdk.types.JSONRPCResponse
+import io.modelcontextprotocol.kotlin.sdk.types.ListToolsResult
+import io.modelcontextprotocol.kotlin.sdk.types.RequestResult
+import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withTimeout
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlin.test.*
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotSame
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult as SdkCallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.Tool as SdkTool
 
 val mcpRouteAdmissionTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("an MCP transport execution failure becomes a matching error result") {
+    test("an MCP transport execution failure becomes an error CallToolResult") {
         withOfflineOwners(listOf("server" to listOf("echo"))) { owners, catalogs, transports ->
             owners.single().reconnect()
             val tool = catalogs.getValue("server").listTools().single()
@@ -54,121 +48,89 @@ val mcpRouteAdmissionTest by testSuite(compartment = { TestCompartment.RealTime 
                 attempts++
                 error("offline fixture failure")
             }
-            val pending = PendingMcpToolEvent(
-                callId = "failed-call",
-                name = "echo",
-                namespace = "mcp__server",
-                arguments = JsonObject(emptyMap()),
-            )
-            val event = assertIs<StableMcpToolEvent>(tool.handle(pending))
-            assertEquals(pending.callId, event.callId)
-            assertEquals(true, event.result.isError)
-            assertFalse(event.result.content.toString().contains("offline fixture failure"))
+            val result = tool.call(JsonObject(emptyMap()))
+            assertEquals(true, result.isError)
+            assertFalse(result.content.toString().contains("offline fixture failure"))
             assertEquals(1, attempts)
         }
     }
 
-    test("direct MCP tools reject a mismatched call as a completion") {
-        withOfflineOwners(listOf("server" to listOf("echo"))) { owners, catalogs, _ ->
+    test("auth-blocked client returns authentication error without calling transport") {
+        withOfflineOwners(listOf("server" to listOf("echo"))) { owners, catalogs, transports ->
             owners.single().reconnect()
             val tool = catalogs.getValue("server").listTools().single()
-            val wrongCall = io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent(
-                callId = "mismatch",
-                name = "echo",
-                arguments = JsonObject(emptyMap()),
-            )
-            val event = assertIs<io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent>(
-                tool.handle(wrongCall),
-            )
-            assertEquals("mismatch", event.callId)
-            assertEquals(false, event.success)
             val blocked = McpAuthenticationBlockedClient("server", listOf(tool)).listTools().single()
-            val blockedEvent = assertIs<io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent>(
-                blocked.handle(wrongCall),
-            )
-            assertEquals("mismatch", blockedEvent.callId)
-            assertEquals(false, blockedEvent.success)
+            val result = blocked.call(JsonObject(emptyMap()))
+            assertEquals(true, result.isError)
+            assertTrue(result.content.toString().contains("requires authentication"))
+            assertTrue(transports.getValue("server").single().calledNames.isEmpty())
         }
     }
 
-    test("two SDK servers a-b and a_b expose the same real route but are rejected before service acquisition") {
+    test("servers a-b and a_b coexist while newly added reserved CLI domain names are rejected") {
         withOfflineOwners(listOf("a-b" to listOf("echo"), "a_b" to listOf("echo"))) { owners, catalogs, _ ->
             owners.forEach { it.reconnect() }
             val tools = catalogs.values.flatMap { it.listTools() }
-            assertEquals(2, tools.size)
-            assertEquals(listOf("mcp__a_b", "mcp__a_b"), tools.map { assertIs<ResponsesApiNamespace>(it.spec).name })
-            // The actual dispatcher still rejects unadmitted duplicate routes;
-            // admission must keep them out before even a healthy local pending call.
-            assertFailsWith<IllegalArgumentException> { routeOffline(tools, localPlanCall()) }
+            assertEquals(listOf("a-b", "a_b"), tools.map { it.serverName }.sorted())
             val configurations = owners.associate { it.serverName to it.configuration }
+            validateMcpConfigurationUpdate(emptyMap(), configurations)
+
+            val reservedUpdate = configurations + ("terminal" to McpServerConfiguration.Stdio("offline"))
             assertFailsWith<IllegalArgumentException> {
-                validateMcpConfigurationUpdate(emptyMap(), configurations)
+                validateMcpConfigurationUpdate(configurations, reservedUpdate)
             }
-            val beforeChildren = coroutineContext.job.children.toList()
-            assertFailsWith<IllegalArgumentException> {
-                McpServiceImpl(MutableStateFlow(offlineSettings(configurations)))
-            }
-            assertEquals(beforeChildren, coroutineContext.job.children.toList())
-            assertIs<StablePlanUpdate>(routeOffline(emptyList(), localPlanCall()))
+            // Existing persisted reserved server remains editable (e.g. disable) and deletable.
+            validateMcpConfigurationUpdate(
+                reservedUpdate,
+                reservedUpdate + ("terminal" to McpServerConfiguration.Stdio("offline", enabled = false)),
+            )
+            validateMcpConfigurationUpdate(reservedUpdate, configurations)
         }
     }
 
-    test("one SDK catalog x-y and x_y fails ToolCatalog without publishing and local routes remain usable") {
-        withOfflineOwners(listOf("bad" to listOf("x-y", "x_y"), "healthy" to listOf("echo"))) { owners, catalogs, transports ->
+    test("blank server name fails service creation before spawning children") {
+        val beforeChildren = currentCoroutineContext().job.children.toList()
+        assertFailsWith<IllegalArgumentException> {
+            CoroutineScope(currentCoroutineContext()).McpServiceImpl(
+                MutableStateFlow(offlineSettings(mapOf(" " to McpServerConfiguration.Stdio("offline")))),
+            )
+        }
+        assertEquals(beforeChildren, currentCoroutineContext().job.children.toList())
+    }
+
+    test("duplicate or blank tool names in SDK catalog fail ToolCatalog without publishing") {
+        withOfflineOwners(listOf("bad" to listOf("dup", "dup"), "healthy" to listOf("x.y"))) { owners, catalogs, transports ->
             owners.forEach { it.reconnect() }
             val bad = owners.first()
             assertEquals(McpClientState.Failed(McpClientFailureReason.ToolCatalog), bad.state.value)
             assertFalse("bad" in catalogs)
             assertTrue(transports.getValue("bad").single().closed)
-            val healthyTools = catalogs.getValue("healthy").listTools()
-            assertIs<StablePlanUpdate>(routeOffline(healthyTools, localPlanCall()))
-            val completed = assertIs<StableMcpToolEvent>(routeOffline(
-                healthyTools, ResponseItem.FunctionCall(
-                    callId = "echo-call", namespace = "mcp__healthy", name = "echo", arguments = "{}",
-                ),
-            ))
-            assertFalse(completed.result.isError == true)
-            assertEquals(listOf("echo"), transports.getValue("healthy").single().calledNames)
+
+            val healthyTool = catalogs.getValue("healthy").listTools().single()
+            assertEquals("healthy", healthyTool.serverName)
+            assertEquals("x.y", healthyTool.toolName)
+            val result = healthyTool.call(JsonObject(emptyMap()))
+            assertFalse(result.isError == true)
+            assertEquals(listOf("x.y"), transports.getValue("healthy").single().calledNames)
         }
     }
 
-    test("normal projection and routing keep raw SDK call names and normal model routes unchanged") {
-        withOfflineOwners(listOf("alpha-beta" to listOf("x.y"))) { owners, catalogs, transports ->
-            owners.single().reconnect()
-            val tools = catalogs.getValue("alpha-beta").listTools()
-            val namespace = assertIs<ResponsesApiNamespace>(tools.single().spec)
-            assertEquals("mcp__alpha_beta", namespace.name)
-            assertEquals("x_y", assertIs<ResponsesApiTool>(namespace.tools.single()).name)
-            assertEquals("alpha-beta", tools.single().serverName)
-            val completed = assertIs<StableMcpToolEvent>(routeOffline(
-                tools, ResponseItem.FunctionCall(
-                    callId = "raw-call", namespace = namespace.name, name = "x_y", arguments = "{}",
-                ),
-            ))
-            assertFalse(completed.result.isError == true)
-            assertEquals(listOf("x.y"), transports.getValue("alpha-beta").single().calledNames)
-        }
-    }
-
-    test("ambiguous refresh and reconnect retain the previous catalog but report ToolCatalog") {
+    test("invalid catalog on refresh and reconnect retains previous catalog and reports ToolCatalog") {
         withOfflineOwners(listOf("server" to listOf("echo"))) { owners, catalogs, transports ->
             val owner = owners.single()
             owner.reconnect()
             val previous = catalogs.getValue("server")
-            transports.getValue("server").single().toolNames = listOf("x-y", "x_y")
+            transports.getValue("server").single().toolNames = listOf("dup", "dup")
             owner.refresh()
             assertSame(previous, catalogs.getValue("server"))
             assertEquals(McpClientState.Failed(McpClientFailureReason.ToolCatalog), owner.state.value)
-            val unavailable = assertIs<StableMcpToolEvent>(previous.listTools().single().handle(
-                PendingMcpToolEvent(callId = "blocked-call", name = "echo", namespace = "mcp__server", arguments = JsonObject(emptyMap())),
-            ))
-            assertTrue(unavailable.result.isError == true)
+            val unavailable = previous.listTools().single().call(JsonObject(emptyMap()))
+            assertTrue(unavailable.isError == true)
             assertTrue(transports.getValue("server").single().calledNames.isEmpty())
             owner.reconnect()
             assertSame(previous, catalogs.getValue("server"))
             assertEquals(McpClientState.Failed(McpClientFailureReason.ToolCatalog), owner.state.value)
             assertTrue(transports.getValue("server").last().closed)
-            // A new connection with a valid catalog can recover normally.
             transports.getValue("server").last().toolNames = listOf("echo")
             owner.reconnect()
             assertEquals(McpClientState.Healthy, owner.state.value)
@@ -251,57 +213,4 @@ internal class OfflineSdkTransport(var toolNames: List<String>) : Transport {
     override fun onClose(block: () -> Unit) { closedCallback = block }
     override fun onError(block: (Throwable) -> Unit): Unit = Unit
     override fun onMessage(block: suspend (JSONRPCMessage) -> Unit) { receive = block }
-}
-
-private fun localPlanCall(): ResponseItem.FunctionCall =
-    ResponseItem.FunctionCall(name = "update_plan", callId = "local-plan", arguments = """{"plan":[]}""")
-
-/** Runs the production routing/dispatch layer over actual State and SDK-projected tools. */
-private suspend fun CoroutineScope.routeOffline(
-    tools: List<McpTool>,
-    call: ResponseItem.FunctionCall,
-): StableCleanEvent.CompletedTool {
-    var requested = false
-    val client = mockOpenAiClient {
-        createResponse {
-            if (!requested) {
-                requested = true
-                flowOf(
-                    ResponsesStreamEvent.OutputItemDone(0, call),
-                    ResponsesStreamEvent.Completed(Response(id = "call", endTurn = false)),
-                )
-            } else flowOf(
-                ResponsesStreamEvent.OutputItemDone(0, ResponseItem.Message(
-                    role = MessageRole.Assistant, content = listOf(ContentItem.OutputText("Done")),
-                )),
-                ResponsesStreamEvent.Completed(Response(id = "done", endTurn = true)),
-            )
-        }
-    }
-    val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
-    val state = createAgentState(client, storage, TestAgentContextSettings, TestMcpService(tools))
-    try {
-        state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
-        val layer = object : ResumableAgentLayer, KodexAgentState by state {
-            override suspend fun resume() {
-                while (this.state.value !is KodexAgentStateValue.ToolPending) {
-                    if (requestResponseApi() == RequestFinish.Finish) return
-                }
-            }
-        }
-        val runtime = layer.toolRuntime(
-            fixedTools = listOf(state.updatePlanTool()),
-            dynamicTools = MutableStateFlow(tools),
-            toolSearch = MutableStateFlow(ToolSearchEngine(emptyList())),
-            logger = KotlinLogging.logger("offline-mcp-routing"),
-        )
-        runtime.resume()
-        return storage.getCommitsIn(0..state.latestIndex.value, AgentCommitType.CleanEventTypes)
-            .map { it.commit }
-            .filterIsInstance<StableCleanEvent.CompletedTool>()
-            .single()
-    } finally {
-        state.cancelAndJoin()
-        client.close()
-    }
 }

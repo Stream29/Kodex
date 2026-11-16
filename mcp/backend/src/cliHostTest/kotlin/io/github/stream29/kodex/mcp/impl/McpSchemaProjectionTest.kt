@@ -1,9 +1,10 @@
 package io.github.stream29.kodex.mcp.impl
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.mcp.contract.McpCatalogTool
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
-import io.modelcontextprotocol.kotlin.sdk.types.McpJson
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsResult
+import io.modelcontextprotocol.kotlin.sdk.types.McpJson
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -13,6 +14,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 val mcpSchemaProjectionTest by testSuite {
     test("SDK tools list preserves typed object schema keywords") {
@@ -38,31 +40,32 @@ val mcpSchemaProjectionTest by testSuite {
         assertEquals(raw["unevaluatedProperties"], encoded["unevaluatedProperties"])
     }
 
-    test("MCP output schema is wrapped as a CallToolResult") {
-        val structured = Json.parseToJsonElement(ComplexOutputSchema).jsonObject
-        val definition = McpJson.decodeFromJsonElement<ObjectPropertyDefinition>(structured)
-        val encoded = OpenAiJsonCodec.encodeToJsonElement(
-            mcpCallToolResultOutputSchema(definition),
-        ).jsonObject
-
-        assertEquals(false, encoded["additionalProperties"]?.jsonPrimitive?.content?.toBoolean())
-        assertEquals(listOf("content"), encoded.getValue("required").jsonArray.map { it.jsonPrimitive.content })
-        val properties = encoded.getValue("properties").jsonObject
-        assertEquals("array", properties.getValue("content").jsonObject.getValue("type").jsonPrimitive.content)
-        assertEquals(structured, properties.getValue("structuredContent"))
-    }
-
-    test("missing MCP output schema accepts arbitrary structured content") {
-        val encoded = OpenAiJsonCodec.encodeToJsonElement(
-            mcpCallToolResultOutputSchema(null),
-        ).jsonObject
-
-        assertEquals(
-            emptyMap(),
-            encoded.getValue("properties").jsonObject
-                .getValue("structuredContent")
-                .jsonObject,
+    test("McpCatalogTool round trips input and optional output schemas") {
+        val inputDefinition = McpJson.decodeFromJsonElement<ObjectPropertyDefinition>(
+            Json.parseToJsonElement(ComplexInputSchema).jsonObject,
         )
+        val outputDefinition = McpJson.decodeFromJsonElement<ObjectPropertyDefinition>(
+            Json.parseToJsonElement(ComplexOutputSchema).jsonObject,
+        )
+        val withOutput = McpCatalogTool(
+            serverName = "alpha-beta",
+            serverInstructions = "docs",
+            toolName = "x.y",
+            description = "structured tool",
+            inputSchema = inputDefinition,
+            outputSchema = outputDefinition,
+        )
+        val roundTripped = OpenAiJsonCodec.decodeFromString<McpCatalogTool>(
+            OpenAiJsonCodec.encodeToString(withOutput),
+        )
+        assertEquals(withOutput, roundTripped)
+
+        val withoutOutput = withOutput.copy(outputSchema = null)
+        val decodedWithoutOutput = OpenAiJsonCodec.decodeFromString<McpCatalogTool>(
+            OpenAiJsonCodec.encodeToString(withoutOutput),
+        )
+        assertNull(decodedWithoutOutput.outputSchema)
+        assertEquals(withoutOutput, decodedWithoutOutput)
     }
 }
 

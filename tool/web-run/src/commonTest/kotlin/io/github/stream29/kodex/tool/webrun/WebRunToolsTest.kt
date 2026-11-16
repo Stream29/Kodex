@@ -2,24 +2,14 @@ package io.github.stream29.kodex.tool.webrun
 
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertEquals
 
 private val json = OpenAiJsonCodec
 
 val webRunToolsTest by testSuite {
-    test("spec declares the web.run namespace function") {
-        val namespace = WebRunTools.spec as ResponsesApiNamespace
-        val encoded = json.parseToJsonElement(json.encodeToString(namespace)).jsonObject
-        val tool = encoded.getValue("tools").jsonArray.single().jsonObject
-
-        assertEquals(WebRunNamespace, encoded["name"]?.toString()?.trim('"'))
-        assertEquals(WebRunToolName, tool["name"]?.toString()?.trim('"'))
-        assertEquals(JsonPrimitive(false), tool["strict"])
+    test("default max output tokens constant is 10_000") {
+        assertEquals(10_000L, WebRunDefaultMaxOutputTokens)
     }
 
     test("schema matches the reserved web.run definition") {

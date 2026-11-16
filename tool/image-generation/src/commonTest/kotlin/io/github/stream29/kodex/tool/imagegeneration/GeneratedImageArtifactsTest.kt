@@ -15,10 +15,10 @@ val generatedImageArtifactsTest by testSuite {
         val bytes = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47)
         try {
             val result = GeneratedImageOutput(Base64.encode(bytes)).persistGeneratedImage(
-                outputDirectory = ImageGenerationTools.outputDirectory(root, "thread:/one"),
+                outputDirectory = imageArtifactDirectory(root, "thread:/one"),
                 callId = "call two",
             )
-            val outputPath = Path(root, "generated_images", "thread__one", "call_two.png")
+            val outputPath = Path(root, "media", "generated", "thread__one", "call_two.png")
 
             assertContentEquals(bytes, SystemCoroutineFileSystem.readBytes(outputPath))
             assertEquals(

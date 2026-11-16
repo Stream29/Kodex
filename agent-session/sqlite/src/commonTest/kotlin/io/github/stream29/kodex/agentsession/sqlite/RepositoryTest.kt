@@ -45,6 +45,8 @@ val sqliteRepositoryTest by testSuite {
                     assertEquals(0, first)
                     assertNull(repository.getEntry(first).threadName)
                     val session = repository.open(first)
+                    assertEquals(first, session.storage.agentId)
+                    assertEquals(first, session.runtime.agentId)
                     assertSame(session, repository.open(first))
                     session.runtime.modify { it.initialize(settings("original")) }
                     val created = repository.getEntry(first).createdAt

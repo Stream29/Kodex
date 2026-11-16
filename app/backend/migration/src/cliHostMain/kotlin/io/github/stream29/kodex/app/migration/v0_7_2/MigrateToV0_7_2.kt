@@ -6,13 +6,11 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetain
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.decodePayloadJson
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
+import io.github.stream29.kodex.agentstorage.filesystemlayout.latestIndexPath
 import io.github.stream29.kodex.agentstorage.filesystemlayout.recordPath
 import io.github.stream29.kodex.agentstorage.filesystemlayout.timelineDirectory
 import io.github.stream29.kodex.openai.ContentItem
@@ -39,8 +37,11 @@ internal suspend fun migrateToV0_7_2(home: Path, fileSystem: CoroutineFileSystem
     val target = Path(home, "kodex.db")
     CoroutineCloseable { cleanStaging(home, fileSystem) }.use {
         cleanStaging(home, fileSystem)
+        if (fileSystem.exists(home)) {
+            migrateSettingsHooksToV0_7_2(home, fileSystem)
+        }
         if (fileSystem.exists(target) && matchesPublishedV0_7_2(target)) {
-            syncPublishedCompactionMirrors(home, target, fileSystem)
+            syncPublishedSessionMirrors(home, target, fileSystem)
             return@use
         }
         fileSystem.createDirectories(home)
@@ -62,15 +63,7 @@ internal suspend fun migrateToV0_7_2(home: Path, fileSystem: CoroutineFileSystem
         for (suffix in listOf("-wal", "-shm")) {
             fileSystem.delete(Path(home, "kodex.db$suffix"), mustExist = false)
         }
-        for (mirrorUpdate in sourceSnapshot.mirrorCompactionUpdates) {
-            currentCoroutineContext().ensureActive()
-            val sessionRoot = Path(home, "sessions", mirrorUpdate.agentId.toString())
-            val indexTimeline = timelineDirectory(sessionRoot, "index")
-            val recordFile = recordPath(indexTimeline, mirrorUpdate.index)
-            if (fileSystem.exists(recordFile)) {
-                fileSystem.writeString(recordFile, mirrorUpdate.indexMirrorJson)
-            }
-        }
+        syncPublishedSessionMirrors(home, target, fileSystem)
     }
 }
 
@@ -79,7 +72,7 @@ private const val FallbackTimestamp = "1970-01-01T00:00:00Z"
 private const val MaxCompactionRetainedHistoryTokens: Int = 64_000
 private const val ApproximateBytesPerToken: Int = 4
 
-private data class CommitRecord(
+internal data class CommitRecord(
     val agentId: Long,
     val type: String,
     val index: Long,
@@ -151,20 +144,13 @@ CREATE TABLE agent_commits (
             'assistant_message_final',
             'developer_message',
             'agent_message',
-            'request_user_input_tool_event',
-            'suggest_subagent_task_tool_event',
             'await_event_tool_event',
             'plan_update',
-            'compaction_point',
             'reasoning',
             'context_compaction',
             'command_execution_tool_event',
             'patch_tool_event',
-            'mcp_tool_event',
-            'web_search_tool_event',
-            'image_generation_tool_event',
-            'image_view_tool_event',
-            'tool_search_event',
+            'read_media_tool_event',
             'invalid_tool_call',
             'server_tool_search',
             'hosted_web_search',
@@ -311,7 +297,11 @@ private suspend fun readSourceDatabase(path: Path): SourceDatabaseSnapshot {
             } else {
                 emptyList()
             }
-            val (upgradedCommits, mirrorUpdates) = upgradeCompactionCommits(rawCommits, path)
+            val migratedLegacyCommits = rawCommits
+                .groupBy { it.agentId }
+                .entries
+                .flatMap { (agentId, agentCommits) -> rewriteLegacyCommitsForAgent(agentId, agentCommits, path) }
+            val (upgradedCommits, mirrorUpdates) = upgradeCompactionCommits(migratedLegacyCommits, path)
             SourceDatabaseSnapshot(
                 sessions = sessions,
                 agents = agents,
@@ -440,10 +430,6 @@ private fun CompactionRetainedItem.approximateTokenCount(): Int =
             encodePayloadJson(OpenAiJsonCodec).approximateTokenCount()
         is StablePlanUpdate ->
             encodePayloadJson(OpenAiJsonCodec).approximateTokenCount()
-        is StableRequestUserInputToolEvent ->
-            encodePayloadJson(OpenAiJsonCodec).approximateTokenCount()
-        is StableSuggestSubagentTaskToolEvent ->
-            encodePayloadJson(OpenAiJsonCodec).approximateTokenCount()
     }
     .coerceAtLeast(1)
 
@@ -524,33 +510,66 @@ private suspend fun importSnapshot(db: SqliteConnection, snapshot: SourceDatabas
     }
 }
 
-private suspend fun syncPublishedCompactionMirrors(
+private val SyncedMirrorTimelines: List<String> = listOf("index", "work", "unstable", "ask-user")
+
+private suspend fun syncPublishedSessionMirrors(
     home: Path,
     target: Path,
     fileSystem: CoroutineFileSystem,
 ) {
-    val updates = openSqliteConnection(target, readOnly = true).use { db ->
-        db.query(
-            """SELECT agent_id, "index", payload_json FROM agent_commits WHERE type = 'context_compaction' ORDER BY agent_id, "index"""",
-        ).map { row ->
-            val agentId = row[0] as Long
-            val index = (row[1] as Long).toInt()
-            val payloadJson = row[2] as String
-            val parsed = OpenAiJsonCodec.decodeFromString(StableContextCompaction.serializer(), payloadJson)
-            MirrorCompactionUpdate(
-                agentId = agentId,
-                index = index,
-                indexMirrorJson = OpenAiJsonCodec.encodeToString(CleanIndexEntry.serializer(), parsed),
-            )
+    val sessionsRoot = Path(home, "sessions")
+    if (!fileSystem.exists(sessionsRoot)) return
+    val agentCommitsByAgent = openSqliteConnection(target, readOnly = true).use { db ->
+        val agentIds = db.query("SELECT agent_id FROM agents ORDER BY agent_id").map { it[0] as Long }
+        agentIds.associateWith { agentId ->
+            db.query(
+                """SELECT type, "index", payload_json FROM agent_commits WHERE agent_id = ? ORDER BY "index", type""",
+                listOf(agentId),
+            ).map { row ->
+                Triple(row[0] as String, (row[1] as Long).toInt(), row[2] as String)
+            }
         }
     }
-    for (mirrorUpdate in updates) {
+    for ((agentId, rows) in agentCommitsByAgent) {
         currentCoroutineContext().ensureActive()
-        val sessionRoot = Path(home, "sessions", mirrorUpdate.agentId.toString())
-        val indexTimeline = timelineDirectory(sessionRoot, "index")
-        val recordFile = recordPath(indexTimeline, mirrorUpdate.index)
-        if (fileSystem.exists(recordFile)) {
-            fileSystem.writeString(recordFile, mirrorUpdate.indexMirrorJson)
+        val sessionRoot = Path(sessionsRoot, agentId.toString())
+        if (!fileSystem.exists(sessionRoot)) continue
+        val expectedByTimeline = SyncedMirrorTimelines.associateWith { linkedMapOf<Int, String>() }
+        for ((wireType, index, payloadJson) in rows) {
+            val commitType = runCatching { AgentCommitType.fromWireName(wireType) }.getOrNull() ?: continue
+            val timeline = commitType.legacyTimelineName
+            val map = expectedByTimeline[timeline] ?: continue
+            val mirrorPayload = when (commitType) {
+                in AgentCommitType.IndexTypes -> {
+                    val decoded = commitType.decodePayloadJson(payloadJson, OpenAiJsonCodec) as CleanIndexEntry
+                    OpenAiJsonCodec.encodeToString(CleanIndexEntry.serializer(), decoded)
+                }
+                in AgentCommitType.WorkTypes -> {
+                    val decoded = commitType.decodePayloadJson(payloadJson, OpenAiJsonCodec) as StableWorkEvent
+                    OpenAiJsonCodec.encodeToString(StableWorkEvent.serializer(), decoded)
+                }
+                else -> payloadJson
+            }
+            map[index] = mirrorPayload
+        }
+        for (timeline in SyncedMirrorTimelines) {
+            val dir = timelineDirectory(sessionRoot, timeline)
+            val expected = expectedByTimeline.getValue(timeline)
+            if (!fileSystem.exists(dir) && expected.isEmpty()) continue
+            fileSystem.createDirectories(dir)
+            for (child in fileSystem.list(dir)) {
+                val name = child.name
+                if (name == "latest.json" || !name.endsWith(".json")) continue
+                val recordIdx = name.removeSuffix(".json").toIntOrNull() ?: continue
+                if (recordIdx !in expected) {
+                    fileSystem.delete(child, mustExist = false)
+                }
+            }
+            for ((index, jsonText) in expected) {
+                fileSystem.writeString(recordPath(dir, index), jsonText)
+            }
+            val latestIdx = expected.keys.maxOrNull() ?: -1
+            fileSystem.writeString(latestIndexPath(dir), latestIdx.toString())
         }
     }
 }
@@ -603,7 +622,12 @@ private suspend fun verifyV0_7_2Structure(db: SqliteConnection) {
             "'event_ask_user'" in tableSql &&
             "'event_schedule'" in tableSql &&
             "'event_terminal_exited'" in tableSql &&
-            "'await_event_tool_event'" in tableSql,
+            "'await_event_tool_event'" in tableSql &&
+            "'read_media_tool_event'" in tableSql &&
+            "'image_view_tool_event'" !in tableSql &&
+            "'request_user_input_tool_event'" !in tableSql &&
+            "'mcp_tool_event'" !in tableSql &&
+            "'compaction_point'" !in tableSql,
     )
     verify(
         db.query(

@@ -16,6 +16,9 @@ import io.github.stream29.kodex.utils.images.PromptImageTransformer
 import io.github.stream29.kodex.utils.images.codec.readPromptImage
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import kotlinx.io.files.Path
+import kotlin.io.encoding.Base64
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 public actual class ImageGenerationToolClient actual constructor(
     private val client: OpenAiClient,
@@ -38,6 +41,21 @@ public actual class ImageGenerationToolClient actual constructor(
         }.data.firstOrNull()?.b64Json
             ?: throw ImageGenerationToolException("image generation returned no image data")
         return GeneratedImageOutput(result = result)
+    }
+
+    @OptIn(ExperimentalUuidApi::class)
+    public actual suspend fun generateToFile(
+        arguments: ImageGenToolArguments,
+        outputDirectory: Path,
+    ): GeneratedImageArtifact {
+        val output = run(arguments)
+        val outputPath = Path(outputDirectory, "${Uuid.generateV7()}.png")
+        fileSystem.createDirectories(outputDirectory)
+        fileSystem.writeBytes(outputPath, Base64.decode(output.result.trim()))
+        return GeneratedImageArtifact(
+            path = outputPath.toString(),
+            mimeType = "image/png",
+        )
     }
 
     private suspend fun requestFor(

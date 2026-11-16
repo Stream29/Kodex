@@ -1,33 +1,22 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.openai.FunctionCallOutputBody
+import io.github.stream29.kodex.openai.FunctionCallOutputContentItem
+import io.github.stream29.kodex.openai.ImageDetail
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
-import io.github.stream29.kodex.openai.ResponsesApiNamespace
-import io.github.stream29.kodex.openai.ResponsesApiTool
-import io.github.stream29.kodex.openai.SearchCommands
-import io.github.stream29.kodex.openai.SearchQuery
-import io.github.stream29.kodex.openai.SearchResponse
-import io.github.stream29.kodex.openai.SearchResponseLength
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.UpdatePlanArgs
-import io.github.stream29.kodex.tool.imagegeneration.GeneratedImageOutput
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
-import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventOutput
+import io.github.stream29.kodex.tool.readmedia.MediaDetail
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolOutput
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecOutput
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
-import io.github.stream29.kodex.tool.viewimage.ViewImageDetail
-import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
-import io.github.stream29.kodex.tool.viewimage.ViewImageToolOutput
-import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -37,71 +26,53 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 private val specializedToolJson = Json
 
 val stableSpecializedToolEventSerializationTest by testSuite {
-    test("round trips tool-search and image events") {
-        val events: List<StableCleanEvent.CompletedTool> = listOf(
-            StableToolSearchEvent(
-                callId = "call_tool_search",
-                itemId = ResponseItemId("item_tool_search"),
-                arguments = SearchToolCallParams("connected drive tools", limit = 4),
-                result = ToolSearchResult.Success(
-                    tools = listOf(
-                        ResponsesApiNamespace(
-                            name = "google_drive",
-                            description = "Connected Google Drive tools.",
-                            tools = listOf(
-                                ResponsesApiTool(
-                                    name = "search",
-                                    description = "Search Drive.",
-                                    parameters = ObjectPropertyDefinition(),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
+    test("round trips read_media and await_event tool events") {
+        val readMedia = StableReadMediaToolEvent(
+            callId = "call_read_media",
+            itemId = ResponseItemId("item_read_media"),
+            arguments = ReadMediaToolArguments(
+                path = "/tmp/chart.png",
+                detail = MediaDetail.Original,
             ),
-            StableImageViewToolEvent(
-                callId = "call_view_image",
-                itemId = ResponseItemId("item_view_image"),
-                arguments = ViewImageToolArguments(
-                    path = "/tmp/chart.png",
-                    detail = ViewImageDetail.Original,
-                ),
-                result = StableImageViewResult.Success(
-                    ViewImageToolOutput(
-                        imageUrl = "data:image/png;base64,aW1hZ2U=",
-                        detail = ViewImageDetail.Original,
-                    ),
-                ),
-            ),
-            StableImageGenerationToolEvent(
-                callId = "call_imagegen",
-                itemId = ResponseItemId("item_imagegen"),
-                arguments = ImageGenToolArguments(
-                    prompt = "Draw a compact architecture diagram.",
-                    referencedImagePaths = listOf("reference.png"),
-                ),
-                result = StableImageGenerationResult.Success(
-                    output = GeneratedImageOutput(
-                        result = "Z2VuZXJhdGVk",
-                        outputHint = "Saved generated image.",
-                    ),
-                    savedPath = "generated_images/diagram.png",
+            result = StableReadMediaResult.Success(
+                ReadMediaToolOutput(
+                    imageUrl = "data:image/png;base64,aW1hZ2U=",
+                    detail = MediaDetail.Original,
                 ),
             ),
         )
+        val awaitEvent = StableAwaitEventToolEvent(
+            callId = "call_await_event",
+            itemId = ResponseItemId("item_await_event"),
+            arguments = AwaitEventArguments(terminals = listOf(1, 3)),
+            result = StableAwaitEventResult.Output(
+                AwaitEventOutput(Instant.parse("2026-11-16T00:00:00Z")),
+            ),
+        )
+        val events: List<StableCleanEvent.CompletedTool> = listOf(readMedia, awaitEvent)
 
         events.forEach(::assertStableToolEventRoundTrip)
         events.forEach { event -> assertIs<StableWorkEvent>(event) }
-        assertIs<ResponseItem.ClientToolSearchCall>(
-            events[0].toResponseHistoryItems().first(),
-        )
         assertEquals(
-            listOf("view_image", "imagegen"),
-            events.drop(1).map { event -> event.projectedFunctionName() },
+            listOf("read_media", "await_event"),
+            events.map { event -> event.projectedFunctionName() },
+        )
+        val mediaOutput = assertIs<ResponseItem.FunctionCallOutput>(readMedia.toResponseHistoryItems().last())
+        assertEquals(
+            FunctionCallOutputBody.ContentItems(
+                listOf(
+                    FunctionCallOutputContentItem.InputImage(
+                        imageUrl = "data:image/png;base64,aW1hZ2U=",
+                        detail = ImageDetail.Original,
+                    ),
+                ),
+            ),
+            mediaOutput.output.body,
         )
     }
 
@@ -165,74 +136,21 @@ val stableSpecializedToolEventSerializationTest by testSuite {
         }
     }
 
-    test("round trips request-user-input, plan, and web-search events") {
-        val requestArguments = RequestUserInputArgs(
-            questions = listOf(
-                RequestUserInputQuestion(
-                    id = "scope",
-                    header = "Scope",
-                    question = "Which scope should be used?",
-                    isOther = true,
-                    options = listOf(
-                        RequestUserInputQuestionOption(
-                            label = "Current module",
-                            description = "Only update clean-models.",
-                        ),
-                    ),
-                ),
-            ),
-            autoResolutionMs = 60_000,
-        )
-        val commands = SearchCommands(
-            searchQuery = listOf(
-                SearchQuery(
-                    q = "Kotlin serialization",
-                    domains = listOf("kotlinlang.org"),
-                ),
-            ),
-            responseLength = SearchResponseLength.Short,
-        )
-        val events = listOf(
-            StableRequestUserInputToolEvent(
-                callId = "call_request_user_input",
-                itemId = ResponseItemId("item_request_user_input"),
-                arguments = requestArguments,
-                result = StableRequestUserInputResult.Answered(
-                    RequestUserInputResponse(
-                        answers = mapOf(
-                            "scope" to RequestUserInputAnswer(listOf("Current module")),
-                        ),
-                    ),
-                ),
-            ),
-            StablePlanUpdate(
-                callId = "call_update_plan",
-                itemId = ResponseItemId("item_update_plan"),
-                arguments = UpdatePlanArgs(
-                    explanation = "Current plan",
-                    plan = listOf(
-                        PlanItemArg("Migrate clean tools", StepStatus.InProgress),
-                    ),
-                ),
-            ),
-            StableWebSearchToolEvent(
-                callId = "call_run",
-                itemId = ResponseItemId("item_run"),
-                commands = commands,
-                result = StableWebSearchResult.Success(
-                    SearchResponse(output = "Search result text."),
+    test("round trips plan update event") {
+        val event = StablePlanUpdate(
+            callId = "call_update_plan",
+            itemId = ResponseItemId("item_update_plan"),
+            arguments = UpdatePlanArgs(
+                explanation = "Current plan",
+                plan = listOf(
+                    PlanItemArg("Migrate clean tools", StepStatus.InProgress),
                 ),
             ),
         )
 
-        events.forEach(::assertStableToolEventRoundTrip)
-        assertIs<StableIndexEvent>(events[0])
-        assertIs<StableIndexEvent>(events[1])
-        assertIs<StableWorkEvent>(events[2])
-        assertEquals(
-            listOf("request_user_input", "update_plan", "run"),
-            events.map { event -> event.projectedFunctionName() },
-        )
+        assertStableToolEventRoundTrip(event)
+        assertIs<StableIndexEvent>(event)
+        assertEquals("update_plan", event.projectedFunctionName())
     }
 }
 
@@ -243,7 +161,6 @@ private fun assertStableToolEventRoundTrip(event: StableCleanEvent.CompletedTool
 
         is StableWorkEvent.CompletedTool ->
             specializedToolJson.encodeToString<StableWorkEvent>(event)
-
     }
     val element = specializedToolJson.parseToJsonElement(encoded).jsonObject
     val items = event.toResponseHistoryItems()
@@ -256,7 +173,6 @@ private fun assertStableToolEventRoundTrip(event: StableCleanEvent.CompletedTool
 
         is StableWorkEvent.CompletedTool ->
             specializedToolJson.decodeFromString<StableWorkEvent>(encoded)
-
     }
     assertEquals(event, decoded)
     assertEquals(2, items.size)

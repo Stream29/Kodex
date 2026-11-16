@@ -39,7 +39,7 @@ import kotlin.test.assertIs
 
 @OptIn(ExperimentalCoroutinesApi::class)
 val mcpManagerImplTest by testSuite {
-    test("add rename and import reject normalized server collisions before store publication") {
+    test("add rename and import reject reserved CLI domain names while allowing punctuation variants") {
         val configuration = McpServerConfiguration.Stdio("never-run", enabled = false)
         val initial = mapOf("a-b" to configuration, "gamma" to configuration)
         val store = TestMcpConfigurationStore(initial)
@@ -47,24 +47,34 @@ val mcpManagerImplTest by testSuite {
             store = store,
             service = TestMcpService(),
             codexImportSource = {
-                listOf(McpCodexImportCandidate.Supported(serverName = "a_b", configuration = configuration))
+                listOf(
+                    McpCodexImportCandidate.Supported(serverName = "terminal", configuration = configuration),
+                    McpCodexImportCandidate.Supported(serverName = "a_b", configuration = configuration),
+                )
             },
             loginAttemptFactory = { error("Login is not expected.") },
         )
         try {
-            val draft = McpServerDraft.Stdio(
-                serverName = "a_b", enabled = false,
+            val reservedDraft = McpServerDraft.Stdio(
+                serverName = "terminal", enabled = false,
                 configuration = McpStdioDraft(command = "never-run"),
             )
-            assertFailsWith<IllegalArgumentException> { manager.add(draft) }
+            assertFailsWith<IllegalArgumentException> { manager.add(reservedDraft) }
             assertEquals(initial, store.configurations.value)
-            assertFailsWith<IllegalArgumentException> { manager.edit("gamma", draft) }
+            assertFailsWith<IllegalArgumentException> { manager.edit("gamma", reservedDraft) }
             assertEquals(initial, store.configurations.value)
             val preview = manager.previewCodexImport("")
+            assertEquals(
+                McpImportItemKind.Unsupported,
+                preview.items.single { it.serverName == "terminal" }.kind,
+            )
+            assertFalse(preview.items.single { it.serverName == "terminal" }.selectable)
             assertFailsWith<IllegalArgumentException> {
-                manager.applyCodexImport(preview.id, mapOf("a_b" to McpImportDecision.Import))
+                manager.applyCodexImport(preview.id, mapOf("terminal" to McpImportDecision.Import))
             }
             assertEquals(initial, store.configurations.value)
+            manager.applyCodexImport(preview.id, mapOf("a_b" to McpImportDecision.Import))
+            assertEquals(setOf("a-b", "a_b", "gamma"), store.configurations.value.keys)
         } finally {
             manager.close()
         }

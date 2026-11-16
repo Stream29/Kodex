@@ -2,13 +2,9 @@ package io.github.stream29.kodex.mcp.impl
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
-import io.github.stream29.kodex.openai.ResponsesApiNamespace
-import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
@@ -97,13 +93,8 @@ val mcpOwnerPublicationGateTest by testSuite(compartment = { TestCompartment.Rea
                     }
                     assertFalse(retiring.isCompleted)
                     assertEquals(McpClientState.AuthenticationBlocked, blocked.state.value)
-                    val result = assertIs<StableMcpToolEvent>(blocked.listTools().single().handle(
-                        PendingMcpToolEvent(
-                            callId = "blocked", name = "echo", namespace = "mcp__server",
-                            arguments = JsonObject(emptyMap()),
-                        ),
-                    ))
-                    assertTrue(result.result.isError == true, "blocked retained tool must not call its still-healthy SDK owner")
+                    val result = blocked.listTools().single().call(JsonObject(emptyMap()))
+                    assertTrue(result.isError == true, "blocked retained tool must not call its still-healthy SDK owner")
                     assertTrue(transport.calledNames.isEmpty())
                     releaseRetirement.complete(Unit)
                     releaseReader.complete(Unit)
@@ -122,4 +113,4 @@ val mcpOwnerPublicationGateTest by testSuite(compartment = { TestCompartment.Rea
 }
 
 private fun McpClient.routeName(): String =
-    assertIs<ResponsesApiTool>(assertIs<ResponsesApiNamespace>(listTools().single().spec).tools.single()).name
+    listTools().single().toolName

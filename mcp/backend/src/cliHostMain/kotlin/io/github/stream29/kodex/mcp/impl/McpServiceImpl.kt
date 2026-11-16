@@ -10,7 +10,6 @@ import io.github.stream29.kodex.mcp.contract.McpOAuthTokenRefresher
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpSettings
-import io.github.stream29.kodex.mcp.contract.requireUniqueMcpModelNames
 import io.github.stream29.kodex.mcp.stdio.openMcpStdioTransport
 import io.github.stream29.kodex.mcp.streamablehttp.McpStreamableHttpClient
 import io.github.stream29.kodex.mcp.streamablehttp.openMcpStreamableHttpTransport
@@ -325,18 +324,17 @@ public actual class McpServiceImpl internal constructor(
 
 /**
  * Creates an independently cancellable MCP service under this scope.
- * @throws IllegalArgumentException if the initial settings contain ambiguous
- * server model routes, before creating any resource or lifecycle child.
+ * @throws IllegalArgumentException if the initial settings contain blank or duplicate
+ * trimmed server names, before creating any resource or lifecycle child.
  */
 public actual fun CoroutineScope.McpServiceImpl(
     settings: StateFlow<McpSettings>,
     configurationStore: McpConfigurationStore?,
     tokenRefresher: McpOAuthTokenRefresher?,
 ): McpServiceImpl {
-    // Reject a persisted ambiguous snapshot synchronously, before creating any
-    // resource/lifecycle child. Never rewrite its raw names or leave a failed
-    // initialization coroutine behind an apparently usable service.
-    requireUniqueMcpModelNames(settings.value.mcpServers.keys, "server")
+    val trimmedNames = settings.value.mcpServers.keys.map(String::trim)
+    require(trimmedNames.none(String::isEmpty)) { "An MCP server name must not be blank." }
+    require(trimmedNames.distinct().size == trimmedNames.size) { "MCP server names must be unique." }
     val serviceScope = supervisorChildScope()
     return AutoCloseable { serviceScope.cancel() }.closeOnFailure {
         McpServiceImpl(

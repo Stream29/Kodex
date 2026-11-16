@@ -6,15 +6,11 @@ import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpTool
-import io.github.stream29.kodex.mcp.contract.requireUniqueMcpModelNames
+import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.utils.ReadWriteMutex
 import io.github.stream29.kodex.utils.coroutines.runCatchingCancellable
 import io.github.stream29.kodex.utils.logging.global
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
-import io.github.stream29.kodex.tool.contract.toolCompletionOrFailure
+import kotlinx.serialization.json.JsonObject
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpError
 import io.modelcontextprotocol.kotlin.sdk.shared.Transport
@@ -86,15 +82,8 @@ internal class McpAuthenticationBlockedClient(
 
     private val blockedTools: List<McpTool> = tools.map { tool ->
         object : McpTool by tool {
-            override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
-                toolCompletionOrFailure(pending) {
-                    val captured = requireNotNull(pending as? PendingMcpToolEvent)
-                    StableMcpToolEvent(
-                        callId = captured.callId, itemId = captured.itemId, name = captured.name,
-                        namespace = captured.namespace, arguments = captured.arguments,
-                        result = failureResult("MCP server $serverName requires authentication."),
-                    )
-                }
+            override suspend fun call(arguments: JsonObject): CallToolResult =
+                failureResult("MCP server $serverName requires authentication.")
         }
     }
     override fun listTools(): List<McpTool> = blockedTools
@@ -267,7 +256,7 @@ internal class McpClientOwner(
             .getOrElse { failure ->
                 return ConnectionAttempt.Failed(McpClientFailureReason.Transport, failure)
             }
-        val client = Client(Implementation(name = "kodex", version = "0.7.1"))
+        val client = Client(Implementation(name = "kodex", version = "0.7.2"))
         val transportClosed = MutableStateFlow(false)
         transport.onClose {
             transportClosed.value = true
@@ -323,7 +312,9 @@ internal class McpClientOwner(
 }
 
 private fun validateCatalog(catalog: McpClientCatalog) {
-    requireUniqueMcpModelNames(catalog.tools.map(SdkTool::name), "tool")
+    val names = catalog.tools.map { tool -> tool.name.trim() }
+    require(names.none(String::isEmpty)) { "An MCP tool name must not be blank." }
+    require(names.distinct().size == names.size) { "MCP tool names must be unique." }
 }
 
 private sealed interface ConnectionAttempt {

@@ -2,6 +2,9 @@ package io.github.stream29.kodex.mcp.contract
 
 public actual fun McpServerDraft.validatedName(): String = serverName.trim().also {
     require(it.isNotEmpty()) { "An MCP server name must not be blank." }
+    require(it !in ReservedMcpServerNames) {
+        "MCP server name '$it' is reserved by a built-in kodex CLI command."
+    }
 }
 
 public actual fun McpServerDraft.toConfiguration(

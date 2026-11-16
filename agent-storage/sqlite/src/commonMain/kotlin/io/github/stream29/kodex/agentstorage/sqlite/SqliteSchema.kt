@@ -26,7 +26,9 @@ public actual fun ensureSqlitePhaseOneSchema(connection: SqliteConnection) {
                 "'event_ask_user'" in tableSql &&
                 "'event_schedule'" in tableSql &&
                 "'event_terminal_exited'" in tableSql &&
-                "'await_event_tool_event'" in tableSql
+                "'await_event_tool_event'" in tableSql &&
+                "'read_media_tool_event'" in tableSql &&
+                "'image_view_tool_event'" !in tableSql
             if (!hasCreatedAt || !hasSteerType || !hasAskUserAndEventTypes) {
                 connection.transaction {
                     connection.execute("CREATE INDEX IF NOT EXISTS idx_sessions_archived ON sessions(archived, session_id)")

@@ -1,8 +1,6 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.ResponseItem
@@ -94,11 +92,6 @@ val stableToolEventSerializationTest by testSuite {
     test("invalid tool calls preserve each protocol call kind") {
         val functionMessage = "failed to parse function arguments"
         val customMessage = "invalid patch"
-        val searchMessage = "failed to parse tool_search arguments"
-        val searchArguments = buildJsonObject {
-            put("query", "connected tools")
-            put("limit", "invalid")
-        }
         val events: List<StableInvalidToolCall> = listOf(
             StableInvalidToolCall(
                 callId = "call_function",
@@ -118,12 +111,6 @@ val stableToolEventSerializationTest by testSuite {
                     input = "not a patch",
                 ),
                 message = customMessage,
-            ),
-            StableInvalidToolCall(
-                callId = "call_tool_search",
-                itemId = ResponseItemId("item_tool_search"),
-                invocation = InvalidToolInvocation.ToolSearch(searchArguments),
-                message = searchMessage,
             ),
         )
 
@@ -159,68 +146,8 @@ val stableToolEventSerializationTest by testSuite {
                     output = FunctionCallOutputPayload.fromText(customMessage)
                         .copy(success = false),
                 ),
-                ResponseItem.ClientToolSearchCall(
-                    id = ResponseItemId("item_tool_search"),
-                    callId = "call_tool_search",
-                    arguments = searchArguments,
-                ),
-                ResponseItem.ClientToolSearchOutput(
-                    callId = "call_tool_search",
-                    status = "completed",
-                    tools = emptyList(),
-                ),
             ),
             events.flatMap(StableCleanEvent::toResponseHistoryItems),
-        )
-    }
-
-    test("MCP event reconstructs its concrete result envelope") {
-        val result = CallToolResult(
-            content = listOf(
-                buildJsonObject {
-                    put("type", "text")
-                    put("text", "Found one document.")
-                },
-            ),
-            structuredContent = buildJsonObject {
-                put("document_id", "doc-1")
-            },
-            isError = false,
-        )
-        val arguments = buildJsonObject {
-            put("query", "design context")
-        }
-        val event: StableWorkEvent = StableMcpToolEvent(
-            callId = "call_mcp",
-            itemId = ResponseItemId("item_mcp"),
-            name = "search",
-            namespace = "google_drive",
-            arguments = arguments,
-            result = result,
-        )
-
-        val encoded = toolEventJson.encodeToString(event)
-        val element = toolEventJson.parseToJsonElement(encoded).jsonObject
-
-        assertEquals(JsonPrimitive("mcp_tool_event"), element["type"])
-        assertTrue("call" !in element)
-        assertTrue("output" !in element)
-        assertEquals(event, toolEventJson.decodeFromString<StableWorkEvent>(encoded))
-        assertEquals(
-            listOf(
-                ResponseItem.FunctionCall(
-                    id = ResponseItemId("item_mcp"),
-                    callId = "call_mcp",
-                    name = "search",
-                    namespace = "google_drive",
-                    arguments = """{"query":"design context"}""",
-                ),
-                ResponseItem.McpToolCallOutput(
-                    callId = "call_mcp",
-                    output = result,
-                ),
-            ),
-            event.toResponseHistoryItems(),
         )
     }
 }

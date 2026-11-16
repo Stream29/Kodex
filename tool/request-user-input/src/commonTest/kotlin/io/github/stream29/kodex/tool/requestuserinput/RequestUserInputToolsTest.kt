@@ -10,9 +10,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 val requestUserInputToolsTest by testSuite {
-    test("spec declares the Rust-aligned question schema") {
+    test("schema declares the Rust-aligned question schema") {
         val parameters = OpenAiJsonCodec.parseToJsonElement(
-            OpenAiJsonCodec.encodeToString(RequestUserInputTools.spec.parameters),
+            OpenAiJsonCodec.encodeToString(RequestUserInputParametersSchema),
         ).jsonObject
         val properties = parameters.getValue("properties").jsonObject
         val questions = properties.getValue("questions").jsonObject
@@ -21,14 +21,6 @@ val requestUserInputToolsTest by testSuite {
             .jsonObject
         val options = questionProperties.getValue("options").jsonObject
 
-        assertEquals(RequestUserInputTools.Name, RequestUserInputTools.spec.name)
-        assertEquals(
-            "Request user input for one to three short questions and wait for the response. " +
-                "This host always waits for explicit user input and does not generate timeout answers. " +
-                "Omit autoResolutionMs; it is retained as wire-compatible metadata, not an implemented auto-resolution timer.",
-            RequestUserInputTools.spec.description,
-        )
-        assertFalse(RequestUserInputTools.spec.strict)
         assertEquals(JsonPrimitive(false), parameters["additionalProperties"])
         assertEquals(
             JsonPrimitive("Questions to show the user. Prefer 1 and do not exceed 3"),

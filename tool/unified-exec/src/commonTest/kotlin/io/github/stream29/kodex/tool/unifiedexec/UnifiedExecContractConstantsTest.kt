@@ -14,5 +14,7 @@ val unifiedExecContractConstantsTest by testSuite {
             ExecCommandDescription,
         )
         assertEquals(600_000L, UnifiedExecCompletedSessionRetentionMillis)
+        assertEquals("KODEX_AGENT_ID", KodexAgentIdEnvironmentVariable)
+        assertEquals("KODEX_HOME", KodexHomeEnvironmentVariable)
     }
 }

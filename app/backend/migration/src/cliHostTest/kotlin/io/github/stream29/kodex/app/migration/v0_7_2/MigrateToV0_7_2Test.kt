@@ -5,12 +5,21 @@ import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
+import io.github.stream29.kodex.agentstorage.contract.getAskUsersAt
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
+import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
 import io.github.stream29.kodex.app.migration.KodexHomeMigrations
 import io.github.stream29.kodex.app.migration.MigrationVersion
 import io.github.stream29.kodex.app.migration.prepareKodexHome
@@ -52,6 +61,10 @@ public val migrateToV0_7_2Test by testSuite {
                 assertTrue("'event_schedule'" in sql)
                 assertTrue("'event_terminal_exited'" in sql)
                 assertTrue("'await_event_tool_event'" in sql)
+                assertTrue("'read_media_tool_event'" in sql)
+                assertFalse("'image_view_tool_event'" in sql)
+                assertFalse("'request_user_input_tool_event'" in sql)
+                assertFalse("'mcp_tool_event'" in sql)
                 for (table in listOf("sessions", "agents", "agent_commits", "schedules", "session_catalog")) {
                     assertEquals(listOf(listOf(0L)), db.query("SELECT count(*) FROM $table"))
                 }
@@ -151,6 +164,159 @@ public val migrateToV0_7_2Test by testSuite {
                     listOf(StableUserMessage(listOf(ContentItem.InputText("first user")))),
                     mirrorTwo.retainedItems,
                 )
+            }
+        }
+
+        test("migrates all 7 retired tool events, tool_search invalid calls, unstable pending ask, fork/revert, and settings.yml hooks") { home ->
+            emptySession(home, 0)
+            record(home, 0, "settings", 0, Settings)
+            record(home, 0, "timestamp", 0, Created)
+            migrateToV0_7_0(home, fs)
+            migrateToV0_7_1(home, fs)
+            val ts = "2026-10-25T12:00:01Z"
+            database(home) { db ->
+                fun put(index: Int, type: String, payload: String) {
+                    db.execute("INSERT INTO agent_commits VALUES (0, ?, ?, ?, ?)", listOf(type, index.toLong(), payload, ts))
+                }
+                put(1, "user_message", UserOne)
+                put(
+                    2,
+                    "request_user_input_tool_event",
+                    """{"type":"request_user_input_tool_event","call_id":"ask-ok","item_id":"it-1","arguments":{"questions":[{"id":"q1","header":"H","question":"Q?"}]},"result":{"type":"answered","response":{"answers":{"q1":{"answers":["yes"]}}}}}""",
+                )
+                put(
+                    3,
+                    "request_user_input_tool_event",
+                    """{"type":"request_user_input_tool_event","call_id":"ask-fail","arguments":{"questions":[]},"result":{"type":"failure","message":"cancelled"}}""",
+                )
+                put(
+                    4,
+                    "image_view_tool_event",
+                    """{"type":"image_view_tool_event","call_id":"img-1","arguments":{"path":"a.png","detail":"original","environment_id":"local"},"result":{"type":"success","output":{"image_url":"data:image/png;base64,AA==","detail":"original"}}}""",
+                )
+                put(
+                    5,
+                    "suggest_subagent_task_tool_event",
+                    """{"type":"suggest_subagent_task_tool_event","call_id":"sub-1","item_id":"it-2","arguments":{"tasks":[{"title":"T","prompt":"P"}]},"result":{"type":"completed","response":{"status":"accepted","created_session_indices":[1]}}}""",
+                )
+                put(
+                    6,
+                    "mcp_tool_event",
+                    """{"type":"mcp_tool_event","call_id":"mcp-1","item_id":"it-3","name":"echo","namespace":"mcp__demo","arguments":{"x":1},"result":{"content":[{"type":"text","text":"ok"}]}}""",
+                )
+                put(
+                    7,
+                    "web_search_tool_event",
+                    """{"type":"web_search_tool_event","call_id":"web-1","item_id":"it-4","commands":{"search_query":[{"q":"kotlin"}]},"result":{"type":"success","response":{"output":"found"}}}""",
+                )
+                put(
+                    8,
+                    "image_generation_tool_event",
+                    """{"type":"image_generation_tool_event","call_id":"gen-1","item_id":"it-5","arguments":{"prompt":"cat"},"result":{"type":"failure","message":"quota"}}""",
+                )
+                put(
+                    9,
+                    "tool_search_event",
+                    """{"type":"tool_search_event","call_id":"ts-1","item_id":"it-6","arguments":{"query":"mcp"},"result":{"type":"success","tools":[]}}""",
+                )
+                put(
+                    10,
+                    "invalid_tool_call",
+                    """{"type":"invalid_tool_call","call_id":"inv-1","invocation":{"type":"tool_search","arguments":{"bad":true}},"message":"bad search"}""",
+                )
+                put(11, "context_compaction", LegacyCompactionOne)
+                put(
+                    12,
+                    "unstable",
+                    """[{"type":"request_user_input","call_id":"ask-pending","arguments":{"questions":[{"id":"q2","header":"H2","question":"Pending?"}]}}]""",
+                )
+            }
+            fs.writeString(
+                Path(home, "settings.yml"),
+                """
+                backend:
+                  hooks:
+                    - command: notify-send
+                      types:
+                        - stop_request_user_input
+                        - stop_suggest_subagent
+                    - command: drop-me
+                      types:
+                        - stop_suggest_subagent
+                frontend:
+                  hooks: []
+                """.trimIndent(),
+            )
+            fs.writeString(Path(home, "version.json"), "\"0.7.1\"")
+
+            upgrade(home)
+
+            val settingsYaml = fs.readString(Path(home, "settings.yml"))
+            assertTrue("ask_user_created" in settingsYaml)
+            assertFalse("stop_request_user_input" in settingsYaml)
+            assertFalse("stop_suggest_subagent" in settingsYaml)
+            assertFalse("drop-me" in settingsYaml)
+
+            testKodexAgentDependencies().use { dependencies ->
+                SqliteKodexSessionRepository(home, dependencies).use { repository ->
+                    val storage = repository.open(0).storage
+                    val latest = storage.latestIndex()
+                    val allCommits = storage.getCommitsIn(0..latest, AgentCommitType.All)
+                    assertTrue(allCommits.isNotEmpty())
+
+                    val askEvent = assertIs<StableAskUserEvent>(
+                        storage.getCommitExact(2, AgentCommitType.IndexTypes)?.commit,
+                    )
+                    assertEquals(1, askEvent.askId)
+
+                    val askFail = assertIs<StableTextToolEvent>(
+                        storage.getCommitExact(3, AgentCommitType.WorkTypes)?.commit,
+                    )
+                    assertEquals("request_user_input", askFail.name)
+                    assertEquals(false, askFail.success)
+
+                    val readMedia = assertIs<StableReadMediaToolEvent>(
+                        storage.getCommitExact(4, AgentCommitType.WorkTypes)?.commit,
+                    )
+                    assertEquals("a.png", readMedia.arguments.path)
+
+                    for (idx in listOf(5, 6, 7, 9)) {
+                        val jsonEvent = assertIs<StableJsonToolEvent>(
+                            storage.getCommitExact(idx, AgentCommitType.WorkTypes)?.commit,
+                        )
+                        kotlin.test.assertNull(jsonEvent.itemId)
+                    }
+
+                    val genFail = assertIs<StableTextToolEvent>(
+                        storage.getCommitExact(8, AgentCommitType.WorkTypes)?.commit,
+                    )
+                    assertEquals("imagegen", genFail.name)
+                    kotlin.test.assertNull(genFail.itemId)
+
+                    val invalidCall = assertIs<StableInvalidToolCall>(
+                        storage.getCommitExact(10, AgentCommitType.WorkTypes)?.commit,
+                    )
+                    val fnInv = assertIs<InvalidToolInvocation.Function>(invalidCall.invocation)
+                    assertEquals("tool_search", fnInv.name)
+
+                    val compaction = assertIs<StableContextCompaction>(
+                        storage.getCommitExact(11, AgentCommitType.IndexTypes)?.commit,
+                    )
+                    assertEquals(2, compaction.retainedItems.size)
+                    assertIs<StableAskUserEvent>(compaction.retainedItems[1])
+
+                    val askEntries = storage.getAskUsersAt(latest)
+                    assertEquals(2, askEntries.size)
+                    kotlin.test.assertNotNull(askEntries[0].answer)
+                    kotlin.test.assertNull(askEntries[1].answer)
+                    assertEquals(emptyList(), storage.getUnstableAtOrNull(latest))
+
+                    val forkId = repository.createFork(0)
+                    val forkStorage = repository.open(forkId).storage
+                    assertEquals(2, forkStorage.getAskUsersAt(forkStorage.latestIndex()).size)
+                    forkStorage.revert(11)
+                    assertEquals(1, forkStorage.getAskUsersAt(forkStorage.latestIndex()).size)
+                }
             }
         }
     }

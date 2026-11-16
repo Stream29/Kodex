@@ -7,6 +7,9 @@ import kotlin.io.encoding.Base64
 
 private const val MaximumOutputHintByteCount: Int = 1024
 
+public actual fun imageArtifactDirectory(kodexHome: Path, sessionId: String): Path =
+    Path(kodexHome, "media", "generated", sessionId.toImageArtifactPathSegment())
+
 internal suspend fun GeneratedImageOutput.persistGeneratedImage(
     outputDirectory: Path,
     callId: String,
@@ -16,11 +19,11 @@ internal suspend fun GeneratedImageOutput.persistGeneratedImage(
         outputDirectory,
         "${callId.toImageArtifactPathSegment()}.png",
     )
-    val outputDirectory = requireNotNull(outputPath.parent)
-    fileSystem.createDirectories(outputDirectory)
+    val parentDirectory = requireNotNull(outputPath.parent)
+    fileSystem.createDirectories(parentDirectory)
     fileSystem.writeBytes(outputPath, Base64.decode(result.trim()))
 
-    val hint = "Generated images are saved to $outputDirectory as $outputPath by default.\n" +
+    val hint = "Generated images are saved to $parentDirectory as $outputPath by default.\n" +
         "If you need to use a generated image at another path, copy it and leave the original " +
         "in place unless the user explicitly asks you to delete it."
     return copy(
@@ -29,3 +32,14 @@ internal suspend fun GeneratedImageOutput.persistGeneratedImage(
         },
     )
 }
+
+internal fun String.toImageArtifactPathSegment(): String =
+    map { character ->
+        if (character.isLetterOrDigit() && character.code < 128 || character == '-' || character == '_') {
+            character
+        } else {
+            '_'
+        }
+    }
+        .joinToString(separator = "")
+        .ifEmpty { "generated_image" }

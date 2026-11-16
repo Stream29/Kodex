@@ -262,7 +262,6 @@ public actual class SqliteKodexSessionRepository internal constructor(
                 client = dependencies.client,
                 storage = cache,
                 contextSettings = dependencies.contextSettings,
-                mcpService = dependencies.mcpService,
             )
             val runtime = state.buildMasterAgentRuntime(dependencies)
             sessionScope.launch(start = CoroutineStart.UNDISPATCHED) {

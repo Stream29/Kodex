@@ -4,7 +4,6 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
-import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
@@ -60,7 +59,6 @@ val updatePlanToolTest by testSuite {
                     KodexAgentSettings(model = OpenAiModelId("test-model")),
                 ),
                 contextSettings = TestAgentContextSettings,
-                mcpService = TestMcpService(),
             )
             state.appendUserMessage(listOf(ContentItem.InputText("Update the plan.")))
             state.requestResponseApi()

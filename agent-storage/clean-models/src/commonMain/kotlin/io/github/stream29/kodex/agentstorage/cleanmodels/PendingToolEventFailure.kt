@@ -1,54 +1,33 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolJson
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolJson
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageViewToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
-import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.UpdatePlanArgs
-import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.encodeToJsonElement
 
 /** Converts one pending local call into its matching durable failed tool event. */
 public actual fun PendingToolEvent.toFailedToolEvent(message: String): StableCleanEvent.CompletedTool =
@@ -75,16 +54,6 @@ public actual fun PendingToolEvent.toFailedToolEvent(message: String): StableCle
                 success = false,
             )
 
-        is PendingMcpToolEvent ->
-            StableMcpToolEvent(
-                callId = callId,
-                itemId = itemId,
-                name = name,
-                namespace = namespace,
-                arguments = arguments,
-                result = mcpFailureResult(message),
-            )
-
         is PendingPatchToolEvent ->
             StablePatchToolEvent(
                 callId = callId,
@@ -109,44 +78,12 @@ public actual fun PendingToolEvent.toFailedToolEvent(message: String): StableCle
                 result = StableAwaitEventResult.Failure(message),
             )
 
-        is PendingWebSearchToolEvent ->
-            StableWebSearchToolEvent(
-                callId = callId,
-                itemId = itemId,
-                commands = commands,
-                result = StableWebSearchResult.Failure(message),
-            )
-
-        is PendingImageGenerationToolEvent ->
-            StableImageGenerationToolEvent(
+        is PendingReadMediaToolEvent ->
+            StableReadMediaToolEvent(
                 callId = callId,
                 itemId = itemId,
                 arguments = arguments,
-                result = StableImageGenerationResult.Failure(message),
-            )
-
-        is PendingImageViewToolEvent ->
-            StableImageViewToolEvent(
-                callId = callId,
-                itemId = itemId,
-                arguments = arguments,
-                result = StableImageViewResult.Failure(message),
-            )
-
-        is PendingRequestUserInputToolEvent ->
-            StableRequestUserInputToolEvent(
-                callId = callId,
-                itemId = itemId,
-                arguments = arguments,
-                result = StableRequestUserInputResult.Failure(message),
-            )
-
-        is PendingSuggestSubagentTaskToolEvent ->
-            StableSuggestSubagentTaskToolEvent(
-                callId = callId,
-                itemId = itemId,
-                arguments = arguments,
-                result = StableSuggestSubagentTaskResult.Failure(message),
+                result = StableReadMediaResult.Failure(message),
             )
 
         is PendingPlanUpdate ->
@@ -168,14 +105,6 @@ public actual fun PendingToolEvent.toFailedToolEvent(message: String): StableCle
                 itemId = itemId,
                 invocation = invocation.toStableInvocation(),
                 message = message,
-            )
-
-        is PendingToolSearchEvent ->
-            StableToolSearchEvent(
-                callId = callId,
-                itemId = itemId,
-                arguments = arguments,
-                result = ToolSearchResult.ExecutionFailure(message),
             )
     }
 
@@ -203,18 +132,4 @@ private fun PendingInvalidToolInvocation.toStableInvocation(): InvalidToolInvoca
                 namespace = namespace,
                 input = input,
             )
-
-        is PendingInvalidToolInvocation.ToolSearch ->
-            InvalidToolInvocation.ToolSearch(arguments)
     }
-
-private fun mcpFailureResult(message: String): CallToolResult =
-    CallToolResult(
-        content = listOf(
-            buildJsonObject {
-                put("type", JsonPrimitive("text"))
-                put("text", JsonPrimitive(message))
-            },
-        ),
-        isError = true,
-    )

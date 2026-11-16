@@ -2,7 +2,6 @@ package io.github.stream29.kodex.agentsession.test
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
-import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
@@ -25,7 +24,6 @@ public actual fun testKodexAgentDependencies(
         modelCatalog = TestModelCatalogStore(model),
         contextSettings = TestAgentContextSettings,
         shellSettings = TestAgentContextSettings,
-        mcpService = TestMcpService(),
     )
 }
 

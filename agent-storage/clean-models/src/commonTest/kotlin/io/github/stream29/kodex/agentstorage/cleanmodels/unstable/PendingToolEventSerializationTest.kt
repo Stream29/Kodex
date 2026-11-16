@@ -4,15 +4,12 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
-import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.UpdatePlanArgs
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
-import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
 import io.github.stream29.kodex.utils.applypatch.parsePatch
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
@@ -56,10 +53,10 @@ val pendingToolEventSerializationTest by testSuite {
                 itemId = ResponseItemId("item_apply_patch"),
                 diff = patchText.parsePatch(),
             ),
-            PendingToolSearchEvent(
-                callId = "call_tool_search",
-                itemId = ResponseItemId("item_tool_search"),
-                arguments = SearchToolCallParams(query = "connected tools"),
+            PendingReadMediaToolEvent(
+                callId = "call_read_media",
+                itemId = ResponseItemId("item_read_media"),
+                arguments = ReadMediaToolArguments(path = "diagram.png"),
             ),
         )
 
@@ -95,12 +92,11 @@ val pendingToolEventSerializationTest by testSuite {
                     name = "apply_patch",
                     input = patchText,
                 ),
-                ResponseItem.ClientToolSearchCall(
-                    id = ResponseItemId("item_tool_search"),
-                    callId = "call_tool_search",
-                    arguments = buildJsonObject {
-                        put("query", "connected tools")
-                    },
+                ResponseItem.FunctionCall(
+                    id = ResponseItemId("item_read_media"),
+                    callId = "call_read_media",
+                    name = "read_media",
+                    arguments = """{"path":"diagram.png"}""",
                 ),
             ),
             events.flatMap(PendingToolEvent::toResponseHistoryItems),
@@ -108,10 +104,6 @@ val pendingToolEventSerializationTest by testSuite {
     }
 
     test("pending invalid calls preserve each protocol call kind") {
-        val searchArguments = buildJsonObject {
-            put("query", "connected tools")
-            put("limit", "invalid")
-        }
         val calls = listOf(
             PendingInvalidToolCall(
                 callId = "call_function",
@@ -131,12 +123,6 @@ val pendingToolEventSerializationTest by testSuite {
                     input = "not a patch",
                 ),
                 message = "invalid patch",
-            ),
-            PendingInvalidToolCall(
-                callId = "call_tool_search",
-                itemId = ResponseItemId("item_tool_search"),
-                invocation = PendingInvalidToolInvocation.ToolSearch(searchArguments),
-                message = "failed to parse tool_search arguments",
             ),
         )
 
@@ -162,11 +148,6 @@ val pendingToolEventSerializationTest by testSuite {
                     name = "apply_patch",
                     input = "not a patch",
                 ),
-                ResponseItem.ClientToolSearchCall(
-                    id = ResponseItemId("item_tool_search"),
-                    callId = "call_tool_search",
-                    arguments = searchArguments,
-                ),
             ),
             calls.flatMap(PendingToolEvent::toResponseHistoryItems),
         )
@@ -174,20 +155,14 @@ val pendingToolEventSerializationTest by testSuite {
 
     test("projects every specialized function identity") {
         val cases: List<Pair<PendingToolEvent, Pair<String, String?>>> = listOf(
-            PendingMcpToolEvent(
-                callId = "call_mcp",
-                name = "search",
-                namespace = "google_drive",
-                arguments = buildJsonObject { put("query", "context") },
-            ) to ("search" to "google_drive"),
-            PendingImageViewToolEvent(
-                callId = "call_image_view",
-                arguments = ViewImageToolArguments("image.png"),
-            ) to ("view_image" to null),
-            PendingImageGenerationToolEvent(
-                callId = "call_image_generation",
-                arguments = ImageGenToolArguments("Draw an image."),
-            ) to ("imagegen" to "image_gen"),
+            PendingReadMediaToolEvent(
+                callId = "call_read_media",
+                arguments = ReadMediaToolArguments("image.png"),
+            ) to ("read_media" to null),
+            PendingAwaitEventToolEvent(
+                callId = "call_await",
+                arguments = AwaitEventArguments(listOf(7)),
+            ) to ("await_event" to null),
             PendingCommandExecutionToolEvent(
                 callId = "call_exec",
                 action = PendingCommandExecutionAction.ExecCommand(
@@ -200,10 +175,6 @@ val pendingToolEventSerializationTest by testSuite {
                     WriteStdinArguments(7, yieldTimeMillis = 250),
                 ),
             ) to ("write_stdin" to null),
-            PendingRequestUserInputToolEvent(
-                callId = "call_request_user_input",
-                arguments = RequestUserInputArgs(emptyList()),
-            ) to ("request_user_input" to null),
             PendingPlanUpdate(
                 callId = "call_update_plan",
                 arguments = UpdatePlanArgs(
@@ -211,10 +182,6 @@ val pendingToolEventSerializationTest by testSuite {
                     plan = listOf(PlanItemArg("Review", StepStatus.InProgress)),
                 ),
             ) to ("update_plan" to null),
-            PendingWebSearchToolEvent(
-                callId = "call_web",
-                commands = SearchCommands(),
-            ) to ("run" to "web"),
         )
 
         cases.forEach { (event, identity) ->
@@ -228,10 +195,10 @@ val pendingToolEventSerializationTest by testSuite {
         }
 
         val execCall = assertIs<ResponseItem.FunctionCall>(
-            cases[3].first.toResponseHistoryItems().single(),
+            cases[2].first.toResponseHistoryItems().single(),
         )
         val writeCall = assertIs<ResponseItem.FunctionCall>(
-            cases[4].first.toResponseHistoryItems().single(),
+            cases[3].first.toResponseHistoryItems().single(),
         )
         assertTrue(""""yield_time_ms":10000""" in execCall.arguments)
         assertTrue(""""yield_time_ms":250""" in writeCall.arguments)

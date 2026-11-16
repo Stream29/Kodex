@@ -17,10 +17,10 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
@@ -36,11 +36,7 @@ import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.TokenUsage
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
-import io.github.stream29.kodex.mcp.contract.McpService
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
 import kotlinx.serialization.json.Json
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
@@ -72,16 +68,14 @@ val agentRuntimeRunningTurnTest by testSuite {
         cancelAndJoin()
     } asContextForEach {
         test("root resume preserves cancellation when durable pending completion fails") {
-            val arguments = RequestUserInputArgs(
-                questions = listOf(RequestUserInputQuestion("scope", "Scope", "Which scope?")),
-            )
+            val arguments = AwaitEventArguments()
             val client = mockOpenAiClient {
                 createResponse {
                     flowOf(
                         ResponsesStreamEvent.OutputItemDone(
                             0,
                             ResponseItem.FunctionCall(
-                                name = "request_user_input", callId = "pending",
+                                name = "await_event", callId = "pending",
                                 arguments = Json.encodeToString(arguments),
                             ),
                         ),
@@ -153,54 +147,60 @@ val agentRuntimeRunningTurnTest by testSuite {
             assertNull(runtime.runningTurn.value)
         }
 
-        test("composed mixed host interactions remain pending with all original calls and no automatic completion") {
-            val questions = RequestUserInputArgs(questions = listOf(
-                RequestUserInputQuestion("scope", "Scope", "Which scope?"),
-                RequestUserInputQuestion("target", "Target", "Which target?"),
-            ))
-            val suggestions = SuggestSubagentTaskArgs(tasks = listOf(
-                SuggestedSubagentTask("Inspect", "Inspect fixture"),
-            ))
-            val calls = listOf(
-                ResponseItem.FunctionCall(
-                    name = "request_user_input", callId = "input-1", arguments = Json.encodeToString(questions),
-                ),
-                ResponseItem.FunctionCall(
-                    name = "suggest_subagent_task", callId = "suggestion", arguments = Json.encodeToString(suggestions),
-                ),
-                ResponseItem.FunctionCall(
-                    name = "request_user_input", callId = "input-2", arguments = Json.encodeToString(questions),
-                ),
-            )
+        test("composed await_event interactions remain parked while unsupported calls auto-fail and continue") {
+            val awaitArgs = AwaitEventArguments()
             var requests = 0
             val root = openTurnTestSession(mockOpenAiClient {
                 createResponse {
-                    requests++
-                    flow {
-                        calls.forEachIndexed { i, call -> emit(ResponsesStreamEvent.OutputItemDone(i.toLong(), call)) }
-                        emit(ResponsesStreamEvent.Completed(Response(id = "response", endTurn = false)))
+                    when (++requests) {
+                        1 -> flowOf(
+                            ResponsesStreamEvent.OutputItemDone(
+                                0,
+                                ResponseItem.FunctionCall(
+                                    name = "request_user_input",
+                                    callId = "retired-call",
+                                    arguments = """{"questions":[]}""",
+                                ),
+                            ),
+                            ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                        )
+                        else -> flowOf(
+                            ResponsesStreamEvent.OutputItemDone(
+                                0,
+                                ResponseItem.FunctionCall(
+                                    name = "await_event",
+                                    callId = "await-1",
+                                    arguments = Json.encodeToString(awaitArgs),
+                                ),
+                            ),
+                            ResponsesStreamEvent.Completed(Response(id = "response_$requests", endTurn = false)),
+                        )
                     }
                 }
             })
             val runtime = root.runtime
-            runtime.appendUserMessage(listOf(ContentItem.InputText("Ask the host")))
+            runtime.appendUserMessage(listOf(ContentItem.InputText("Wait after retired call")))
             runtime.resume()
+            assertEquals(2, requests)
+            val workEvents = root.storage.getCommitsIn(0..runtime.latestIndex.value, AgentCommitType.WorkTypes)
+                .map { it.commit }
+            val failedRetired = workEvents.filterIsInstance<StableTextToolEvent>().single { it.callId == "retired-call" }
+            assertFalse(failedRetired.success ?: true)
+            assertTrue("unsupported tool call" in failedRetired.result)
             val beforeIndex = runtime.latestIndex.value
             val pending = runtime.state.value as KodexAgentStateValue.ToolPending
-            assertEquals(listOf("input-1", "suggestion", "input-2"), pending.events.map { it.callId })
-            assertEquals(listOf(questions, questions), pending.events.filterIsInstance<PendingRequestUserInputToolEvent>().map { it.arguments })
-            assertEquals(suggestions, pending.events.filterIsInstance<PendingSuggestSubagentTaskToolEvent>().single().arguments)
+            assertEquals(listOf("await-1"), pending.events.map { it.callId })
+            assertEquals(listOf(awaitArgs), pending.events.filterIsInstance<PendingAwaitEventToolEvent>().map { it.arguments })
             runtime.resume()
-            assertEquals(1, requests)
+            assertEquals(2, requests)
             assertEquals(beforeIndex, runtime.latestIndex.value)
             assertEquals(pending, runtime.state.value)
             assertNull(runtime.runningTurn.value)
         }
 
-        test("five-field shared dependencies still close every service in order and preserve suppressed failures") {
+        test("four-field shared dependencies close every service in order and preserve suppressed failures") {
             val base = testKodexAgentDependencies()
             val order = mutableListOf<String>()
-            val mcpFailure = IllegalStateException("MCP close")
             val catalogFailure = IllegalStateException("catalog close")
             val clientFailure = IllegalStateException("client close")
             val dependencies = KodexAgentDependencies(
@@ -212,15 +212,12 @@ val agentRuntimeRunningTurnTest by testSuite {
                 },
                 contextSettings = base.contextSettings,
                 shellSettings = base.shellSettings,
-                mcpService = object : McpService by base.mcpService {
-                    override fun close() { order += "mcp"; throw mcpFailure }
-                },
             )
             try {
                 val failure = assertFailsWith<IllegalStateException> { dependencies.close() }
-                assertSame(mcpFailure, failure)
-                assertEquals(listOf("mcp", "catalog", "client"), order)
-                assertEquals(listOf(catalogFailure, clientFailure), failure.suppressedExceptions)
+                assertSame(catalogFailure, failure)
+                assertEquals(listOf("catalog", "client"), order)
+                assertEquals(listOf(clientFailure), failure.suppressedExceptions)
             } finally {
                 base.close()
             }

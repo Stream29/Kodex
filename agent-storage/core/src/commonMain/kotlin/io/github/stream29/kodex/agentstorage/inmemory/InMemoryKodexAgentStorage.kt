@@ -28,13 +28,18 @@ private data class InMemoryRow(
 @OptIn(ExperimentalUuidApi::class)
 public actual class InMemoryKodexAgentStorage private constructor(
     initialRows: MutableList<InMemoryRow>,
+    public actual override val agentId: Int?,
 ) : MutableKodexAgentStorage {
     private val identity: Any = Any()
     private val mutex = ReadWriteMutex()
     private val rowsByIndex: MutableList<InMemoryRow> = initialRows
 
-    public actual constructor(initialSettings: KodexAgentSettings) : this(
+    public actual constructor(
+        initialSettings: KodexAgentSettings,
+        agentId: Int?,
+    ) : this(
         initialRows(initialSettings),
+        agentId,
     )
 
     public actual override val uri: String = "memory:${identity.hashCode().toUInt().toString(16)}"
@@ -153,8 +158,8 @@ public actual class InMemoryKodexAgentStorage private constructor(
 
     public actual companion object {
         /** Creates the uninitialized storage backing a freshly spawned AgentSession. */
-        public actual fun empty(): InMemoryKodexAgentStorage =
-            InMemoryKodexAgentStorage(mutableListOf())
+        public actual fun empty(agentId: Int?): InMemoryKodexAgentStorage =
+            InMemoryKodexAgentStorage(mutableListOf(), agentId)
     }
 }
 
