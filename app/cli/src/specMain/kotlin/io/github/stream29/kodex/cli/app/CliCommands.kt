@@ -104,15 +104,19 @@ public expect val CliToolJson: Json
 public expect fun parseLocalBackendUrlPort(value: String): Int
 
 /**
- * Parses [arguments] against [KodexCommand] (querying [resolveMcpDomains] only when [arguments]
- * targets a non-built-in top-level domain) and invokes [execute] on the resolved [KodexLeafCommand],
+ * Parses [arguments] against [KodexCommand] (entering [withMcpDomains] only when [arguments]
+ * targets a non-built-in top-level domain so callers can hold a single lexical RPC connection
+ * across discovery and [execute]) and invokes [execute] on the resolved [KodexLeafCommand],
  * writing help or usage diagnostics via [output].
  */
-public expect fun dispatchCli(
+public expect suspend fun dispatchCli(
     arguments: List<String>,
     output: (message: String, error: Boolean) -> Unit,
-    resolveMcpDomains: (CliBackendTarget?) -> List<McpServerDomainCommand> = { emptyList() },
-    execute: (KodexLeafCommand) -> Int,
+    withMcpDomains: suspend (
+        target: CliBackendTarget?,
+        block: suspend (List<McpServerDomainCommand>) -> Int,
+    ) -> Int = { _, block -> block(emptyList()) },
+    execute: suspend (KodexLeafCommand) -> Int,
 ): Int
 
 /** Base node in the `kodex` Clikt command tree. */

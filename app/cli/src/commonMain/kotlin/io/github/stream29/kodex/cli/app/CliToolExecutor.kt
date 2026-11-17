@@ -39,16 +39,7 @@ import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -136,94 +127,84 @@ internal suspend fun resolveToolBackend(
 }
 
 /**
- * Holds at most one open RPC connection across dynamic MCP domain discovery and subsequent leaf
- * command execution within a single CLI invocation, closing it deterministically on exit.
+ * Dispatches [arguments] with at most one lexical RPC connection across dynamic MCP domain
+ * discovery and leaf tool command execution, without background jobs or deferred handles.
  */
-internal class ReusableToolRpcSession(
-    private val scope: CoroutineScope,
-    private val defaultHome: Path,
-    private val env: (String) -> String? = ::environmentVariable,
-    private val discover: suspend (Path) -> BackendEndpoint? = BackendInstance::discover,
-    private val connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
-    private val openServices: suspend (Path, BackendEndpoint, suspend (RpcServices) -> Unit) -> Unit =
+internal suspend fun dispatchCliWithToolRpc(
+    arguments: List<String>,
+    defaultHome: Path,
+    output: (message: String, error: Boolean) -> Unit,
+    env: (String) -> String? = ::environmentVariable,
+    discover: suspend (Path) -> BackendEndpoint? = BackendInstance::discover,
+    connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
+    openServices: suspend (Path, BackendEndpoint, suspend (RpcServices) -> Int) -> Int =
         { home, endpoint, use ->
             withLocalRpcClient(home, endpoint) { connection ->
                 use(RpcServices(RestoringRpcClient(connection)))
             }
         },
-) {
-    private class ActiveConnection(
-        val target: CliBackendTarget?,
-        val services: Deferred<RpcServices>,
-        val release: CompletableDeferred<Unit>,
-        val job: Job,
-    )
-
-    private var active: ActiveConnection? = null
-
-    suspend fun discoverMcpDomains(target: CliBackendTarget?): List<McpServerDomainCommand> = try {
-        val services = servicesOrNull(target) ?: return emptyList()
-        loadDynamicMcpDomains(services)
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (_: Exception) {
-        emptyList()
-    }
-
-    suspend fun servicesOrNull(target: CliBackendTarget?): RpcServices? {
-        existingServices(target)?.let { return it }
-        val (resolvedHome, endpoint) = resolveToolBackendOrNull(target, defaultHome, env, discover, connect)
-        return if (endpoint == null) null else attach(target, resolvedHome, endpoint)
-    }
-
-    suspend fun requireServices(target: CliBackendTarget?): RpcServices {
-        existingServices(target)?.let { return it }
-        val (resolvedHome, endpoint) = resolveToolBackend(target, defaultHome, env, discover, connect)
-        return attach(target, resolvedHome, endpoint)
-    }
-
-    private suspend fun existingServices(target: CliBackendTarget?): RpcServices? {
-        val current = active ?: return null
-        if (current.target == target && current.job.isActive) return current.services.await()
-        close()
-        return null
-    }
-
-    private suspend fun attach(
-        target: CliBackendTarget?,
-        resolvedHome: Path,
-        endpoint: BackendEndpoint,
-    ): RpcServices {
-        val ready = CompletableDeferred<RpcServices>()
-        val release = CompletableDeferred<Unit>()
-        val job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+    executeTool: suspend (KodexToolLeafCommand, RpcServices) -> Int = { command, services ->
+        executeCliToolCommand(command, services, env = env)
+    },
+    executeLeaf: suspend (
+        command: KodexLeafCommand,
+        invokeTool: suspend (KodexToolLeafCommand) -> Int,
+    ) -> Int,
+): Int {
+    var preopened: Pair<CliBackendTarget?, RpcServices>? = null
+    return dispatchCli(
+        arguments = arguments,
+        output = output,
+        withMcpDomains = { target, block ->
+            val resolved = try {
+                resolveToolBackendOrNull(target, defaultHome, env, discover, connect)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            val (resolvedHome, endpoint) = resolved ?: return@dispatchCli block(emptyList())
+            if (endpoint == null) return@dispatchCli block(emptyList())
+            var enteredBlock = false
             try {
                 openServices(resolvedHome, endpoint) { services ->
-                    ready.complete(services)
-                    release.await()
+                    val domains = try {
+                        loadDynamicMcpDomains(services)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    enteredBlock = true
+                    preopened = target to services
+                    try {
+                        block(domains)
+                    } finally {
+                        preopened = null
+                    }
                 }
-            } catch (failure: Throwable) {
-                val delivered = !ready.completeExceptionally(failure)
-                if (delivered && failure !is CancellationException) throw failure
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                if (enteredBlock) throw failure
+                block(emptyList())
             }
-        }
-        active = ActiveConnection(target, ready, release, job)
-        return try {
-            ready.await()
-        } catch (failure: Throwable) {
-            active = null
-            release.complete(Unit)
-            withContext(NonCancellable) { job.cancelAndJoin() }
-            throw failure
-        }
-    }
-
-    suspend fun close() {
-        val current = active ?: return
-        active = null
-        current.release.complete(Unit)
-        withContext(NonCancellable) { current.job.join() }
-    }
+        },
+        execute = { leaf ->
+            executeLeaf(leaf) { toolLeaf ->
+                val target = toolLeaf.backend.resolve()
+                val current = preopened
+                if (current != null && current.first == target) {
+                    executeTool(toolLeaf, current.second)
+                } else {
+                    val (resolvedHome, endpoint) = resolveToolBackend(target, defaultHome, env, discover, connect)
+                    openServices(resolvedHome, endpoint) { services ->
+                        executeTool(toolLeaf, services)
+                    }
+                }
+            }
+        },
+    )
 }
 
 internal fun resolveTargetAgentId(

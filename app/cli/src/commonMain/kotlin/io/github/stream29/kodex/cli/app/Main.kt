@@ -23,11 +23,7 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.writeBytes
 import io.github.stream29.kodex.utils.osenvironment.processId
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -37,35 +33,22 @@ public actual fun main(args: Array<String>) {
     KotlinLoggingConfiguration.logStartupMessage = false
     KotlinLoggingConfiguration.direct.logLevel = Level.OFF
     val home = KodexHome
-    val sessionJob = SupervisorJob()
-    val session = ReusableToolRpcSession(
-        CoroutineScope(Dispatchers.Default + sessionJob + CliCoroutineExceptionLogger),
-        home,
-    )
-    val result = try {
-        dispatchCli(
+    val result = runBlocking(CliCoroutineExceptionLogger) {
+        dispatchCliWithToolRpc(
             arguments = args.asList(),
+            defaultHome = home,
             output = ::printCliMessage,
-            resolveMcpDomains = { target ->
-                runBlocking(CliCoroutineExceptionLogger) {
-                    session.discoverMcpDomains(target)
-                }
-            },
-            execute = { command -> runLeafCommand(command, home, session) },
-        )
-    } finally {
-        runBlocking(NonCancellable) {
-            session.close()
-            sessionJob.cancelAndJoin()
+        ) { command, invokeTool ->
+            runLeafCommand(command, home, invokeTool)
         }
     }
     if (result != 0) exitKodexProcess(result)
 }
 
-private fun runLeafCommand(
+private suspend fun runLeafCommand(
     command: KodexLeafCommand,
     home: Path,
-    toolSession: ReusableToolRpcSession,
+    invokeTool: suspend (KodexToolLeafCommand) -> Int,
 ): Int {
     var result = 0
     val outputHandler: (String) -> Unit = if (command.isToolCommand) {
@@ -79,84 +62,81 @@ private fun runLeafCommand(
         reportFailure = { logCliFailure(it, home) },
         output = outputHandler,
     ) {
-        runBlocking(CliCoroutineExceptionLogger) {
-            when (command) {
-                is WebCommand -> {
-                    val cwd = SystemCoroutineFileSystem.resolve(Path("."))
-                    val (_, endpoint) = resolveFrontendBackend(home, command.backend.resolve())
-                    val origin = command.origin
-                    if (origin == null) {
-                        withLocalFrontendHost(
-                            endpoint, cwd.toString(), ::openEmbeddedResource, ::randomBackendPassword,
-                        ) { url ->
-                            installBackendSignals()
-                            result = runLocalWebFrontend(
-                                url, window = false,
-                                stopRequested = ::backendStopSignalReceived, engine = LocalAppEngine.Default,
-                            )
-                        }
-                    } else {
-                        result = runWebPairingFrontend(home, endpoint, cwd.toString(), origin)
-                    }
-                }
-                is FrontendHostCommand -> {
-                    val cwd = SystemCoroutineFileSystem.resolve(Path("."))
-                    val (_, endpoint) = resolveFrontendBackend(home, command.backend.resolve())
-                    result = runWebPairingFrontend(home, endpoint, cwd.toString(), command.origin)
-                }
-                is AppCommand -> {
-                    val engine = resolveLocalAppEngine(
-                        when (command.engine ?: CliAppEngine.Default) {
-                            CliAppEngine.Default -> LocalAppEngine.Default
-                            CliAppEngine.Chrome -> LocalAppEngine.Chrome
-                            CliAppEngine.System -> LocalAppEngine.System
-                        },
-                    )
-                    val cwd = SystemCoroutineFileSystem.resolve(Path("."))
+        when (command) {
+            is WebCommand -> {
+                val cwd = SystemCoroutineFileSystem.resolve(Path("."))
+                val (_, endpoint) = resolveFrontendBackend(home, command.backend.resolve())
+                val origin = command.origin
+                if (origin == null) {
                     withLocalFrontendHost(
-                        ensureBackend(home), cwd.toString(),
-                        ::openEmbeddedResource, ::randomBackendPassword,
+                        endpoint, cwd.toString(), ::openEmbeddedResource, ::randomBackendPassword,
                     ) { url ->
                         installBackendSignals()
                         result = runLocalWebFrontend(
-                            url, window = true,
-                            stopRequested = ::backendStopSignalReceived, engine = engine,
+                            url, window = false,
+                            stopRequested = ::backendStopSignalReceived, engine = LocalAppEngine.Default,
                         )
                     }
+                } else {
+                    result = runWebPairingFrontend(home, endpoint, cwd.toString(), origin)
                 }
-                is BackendStartCommand -> runBackendHost(
-                    home, browserOrigins = command.browserOrigins.toSet(),
+            }
+            is FrontendHostCommand -> {
+                val cwd = SystemCoroutineFileSystem.resolve(Path("."))
+                val (_, endpoint) = resolveFrontendBackend(home, command.backend.resolve())
+                result = runWebPairingFrontend(home, endpoint, cwd.toString(), command.origin)
+            }
+            is AppCommand -> {
+                val engine = resolveLocalAppEngine(
+                    when (command.engine ?: CliAppEngine.Default) {
+                        CliAppEngine.Default -> LocalAppEngine.Default
+                        CliAppEngine.Chrome -> LocalAppEngine.Chrome
+                        CliAppEngine.System -> LocalAppEngine.System
+                    },
                 )
-                is BackendControlCliCommand -> {
-                    try {
-                        val endpoint = BackendInstance.discover(home)
-                        if (endpoint == null) {
-                            println("""{"phase":"not_running"}""")
-                            if (command.control != BackendControlCommand.Status) result = 1
-                        } else {
-                            println(backendControlRequest(endpoint, command.control.commandName))
-                        }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        println("""{"phase":"unavailable","error":"backend_cannot_serve_command"}""")
-                        result = 1
+                val cwd = SystemCoroutineFileSystem.resolve(Path("."))
+                withLocalFrontendHost(
+                    ensureBackend(home), cwd.toString(),
+                    ::openEmbeddedResource, ::randomBackendPassword,
+                ) { url ->
+                    installBackendSignals()
+                    result = runLocalWebFrontend(
+                        url, window = true,
+                        stopRequested = ::backendStopSignalReceived, engine = engine,
+                    )
+                }
+            }
+            is BackendStartCommand -> runBackendHost(
+                home, browserOrigins = command.browserOrigins.toSet(),
+            )
+            is BackendControlCliCommand -> {
+                try {
+                    val endpoint = BackendInstance.discover(home)
+                    if (endpoint == null) {
+                        println("""{"phase":"not_running"}""")
+                        if (command.control != BackendControlCommand.Status) result = 1
+                    } else {
+                        println(backendControlRequest(endpoint, command.control.commandName))
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    println("""{"phase":"unavailable","error":"backend_cannot_serve_command"}""")
+                    result = 1
+                }
+            }
+            is TuiCommand -> {
+                val cwd = SystemCoroutineFileSystem.resolve(Path("."))
+                val (backendHome, endpoint) = resolveFrontendBackend(home, command.backend.resolve())
+                initializeTuiLogging(home, ::backendProcessAlive)
+                withLocalRpcClient(backendHome, endpoint) { connection ->
+                    withFrontendApplication(connection, cwd) { application ->
+                        runTuiApplication(application)
                     }
                 }
-                is TuiCommand -> {
-                    val cwd = SystemCoroutineFileSystem.resolve(Path("."))
-                    val (backendHome, endpoint) = resolveFrontendBackend(home, command.backend.resolve())
-                    initializeTuiLogging(home, ::backendProcessAlive)
-                    withLocalRpcClient(backendHome, endpoint) { connection ->
-                        withFrontendApplication(connection, cwd) { application ->
-                            runTuiApplication(application)
-                        }
-                    }
-                }
-                is KodexToolLeafCommand -> {
-                    val services = toolSession.requireServices(command.backend.resolve())
-                    result = executeCliToolCommand(command, services)
-                }
+            }
+            is KodexToolLeafCommand -> {
+                result = invokeTool(command)
             }
         }
         result

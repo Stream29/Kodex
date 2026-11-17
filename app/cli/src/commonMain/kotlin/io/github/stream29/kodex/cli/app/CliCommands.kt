@@ -25,30 +25,32 @@ public actual fun parseLocalBackendUrlPort(value: String): Int {
     return port
 }
 
-public actual fun dispatchCli(
+public actual suspend fun dispatchCli(
     arguments: List<String>,
     output: (message: String, error: Boolean) -> Unit,
-    resolveMcpDomains: (CliBackendTarget?) -> List<McpServerDomainCommand>,
-    execute: (KodexLeafCommand) -> Int,
+    withMcpDomains: suspend (
+        target: CliBackendTarget?,
+        block: suspend (List<McpServerDomainCommand>) -> Int,
+    ) -> Int,
+    execute: suspend (KodexLeafCommand) -> Int,
 ): Int {
     val baseCommand = KodexCommand()
-    val mcpDomains = try {
-        val firstToken = arguments.firstOrNull()
-        if (
-            firstToken != null &&
+    val firstToken = arguments.firstOrNull()
+    val needsDynamicMcp =
+        firstToken != null &&
             !firstToken.startsWith("-") &&
             !firstToken.startsWith("@") &&
             firstToken !in ReservedMcpServerNames
-        ) {
-            val helpRequested = "-h" in arguments || "--help" in arguments
-            val target = try {
-                extractDynamicBackendTarget(arguments.drop(1))
-            } catch (error: UsageError) {
-                if (helpRequested) null else throw error
-            }
-            resolveMcpDomains(target)
-        } else {
-            emptyList()
+    if (!needsDynamicMcp) {
+        return parseAndExecuteCli(baseCommand, emptyList(), arguments, output, execute)
+    }
+
+    val target = try {
+        val helpRequested = "-h" in arguments || "--help" in arguments
+        try {
+            extractDynamicBackendTarget(arguments.drop(1))
+        } catch (error: UsageError) {
+            if (helpRequested) null else throw error
         }
     } catch (failure: CliktError) {
         baseCommand.getFormattedHelp(failure)?.let { message ->
@@ -57,6 +59,18 @@ public actual fun dispatchCli(
         return failure.statusCode
     }
 
+    return withMcpDomains(target) { mcpDomains ->
+        parseAndExecuteCli(baseCommand, mcpDomains, arguments, output, execute)
+    }
+}
+
+private suspend fun parseAndExecuteCli(
+    baseCommand: KodexCommand,
+    mcpDomains: List<McpServerDomainCommand>,
+    arguments: List<String>,
+    output: (message: String, error: Boolean) -> Unit,
+    execute: suspend (KodexLeafCommand) -> Int,
+): Int {
     val command = if (mcpDomains.isEmpty()) baseCommand else KodexCommand(mcpDomains)
     var selected: KodexLeafCommand? = null
     try {

@@ -133,7 +133,7 @@ val cliCommandsTest by testSuite {
                     assertFalse(error)
                     messages += message
                 },
-                resolveMcpDomains = { fail("Built-in help/group must not query MCP domains: $arguments") },
+                withMcpDomains = { _, _ -> fail("Built-in help/group must not query MCP domains: $arguments") },
                 execute = { fail("Help must not enter runtime: $arguments") },
             )
             assertEquals(0, code, arguments.toString())
@@ -223,10 +223,12 @@ val cliCommandsTest by testSuite {
                 inputSchema = ObjectPropertyDefinition(),
             ),
         )
-        val resolveMcp = { _: CliBackendTarget? ->
-            listOf(
-                McpServerDomainCommand("github", "GitHub repository tools.", githubTools),
-                McpServerDomainCommand("search", "", conflictingTools),
+        val withMcp: suspend (CliBackendTarget?, suspend (List<McpServerDomainCommand>) -> Int) -> Int = { _, block ->
+            block(
+                listOf(
+                    McpServerDomainCommand("github", "GitHub repository tools.", githubTools),
+                    McpServerDomainCommand("search", "", conflictingTools),
+                ),
             )
         }
 
@@ -235,7 +237,7 @@ val cliCommandsTest by testSuite {
         assertEquals(0, dispatchCli(listOf("github", "--help"), { msg, err ->
             assertFalse(err)
             domainHelp += msg
-        }, resolveMcpDomains = resolveMcp) { fail("Help must not execute") })
+        }, withMcpDomains = withMcp) { fail("Help must not execute") })
         assertContains(domainHelp.single(), "GitHub repository tools.")
         assertContains(domainHelp.single(), "create_issue")
 
@@ -244,7 +246,7 @@ val cliCommandsTest by testSuite {
         assertEquals(0, dispatchCli(listOf("github", "create_issue", "--help"), { msg, err ->
             assertFalse(err)
             toolHelp += msg
-        }, resolveMcpDomains = resolveMcp) { fail("Help must not execute") })
+        }, withMcpDomains = withMcp) { fail("Help must not execute") })
         assertContains(toolHelp.single(), "Input JSON Schema:")
         assertContains(toolHelp.single(), "\"title\"")
 
@@ -253,7 +255,7 @@ val cliCommandsTest by testSuite {
         assertEquals(0, dispatchCli(
             listOf("github", "create_issue", "--json", """{"title":"Bug"}"""),
             { _, _ -> fail("Unexpected output") },
-            resolveMcpDomains = resolveMcp,
+            withMcpDomains = withMcp,
         ) { leaf ->
             invokedTool = assertIs<McpServerToolCommand>(leaf)
             0
@@ -266,7 +268,7 @@ val cliCommandsTest by testSuite {
         assertEquals(0, dispatchCli(
             listOf("search", "-q", "kotlin"),
             { _, _ -> fail("Unexpected output") },
-            resolveMcpDomains = { fail("Built-in search must not even query MCP domains") },
+            withMcpDomains = { _, _ -> fail("Built-in search must not even query MCP domains") },
         ) { leaf ->
             invokedSearch = assertIs<SearchCommand>(leaf)
             0

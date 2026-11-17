@@ -34,13 +34,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Instant
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.rpc.registerService
@@ -116,10 +110,11 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                         registerService<io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc> { baseServices.runtime }
                     }) { mcpRaw ->
                         val mcpServices = RpcServices(RestoringRpcClient(mcpRaw))
-                        val sessionJob = SupervisorJob()
-                        val session = ReusableToolRpcSession(
-                            scope = CoroutineScope(Dispatchers.Default + sessionJob),
+                        val stdout = mutableListOf<String>()
+                        val code = dispatchCliWithToolRpc(
+                            arguments = listOf("github", "echo_title", "--json", """{"title":"one-connection"}"""),
                             defaultHome = root,
+                            output = { msg, _ -> error("Unexpected parser output: $msg") },
                             discover = { endpoint },
                             openServices = { _, _, use ->
                                 opened++
@@ -129,33 +124,15 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                                     closed++
                                 }
                             },
-                        )
-                        val stdout = mutableListOf<String>()
-                        try {
-                            val code = dispatchCli(
-                                arguments = listOf("github", "echo_title", "--json", """{"title":"one-connection"}"""),
-                                output = { msg, _ -> error("Unexpected parser output: $msg") },
-                                resolveMcpDomains = { target -> runBlocking { session.discoverMcpDomains(target) } },
-                                execute = { leaf ->
-                                    runBlocking {
-                                        val toolLeaf = assertIs<KodexToolLeafCommand>(leaf)
-                                        executeCliToolCommand(
-                                            toolLeaf,
-                                            session.requireServices(toolLeaf.backend.resolve()),
-                                            writeStdout = stdout::add,
-                                        )
-                                    }
-                                },
-                            )
-                            assertEquals(0, code)
-                            assertEquals(1, opened)
-                            assertEquals(0, closed)
-                        } finally {
-                            runBlocking(NonCancellable) {
-                                session.close()
-                                sessionJob.cancelAndJoin()
-                            }
+                            executeTool = { toolLeaf, services ->
+                                assertEquals(1, opened)
+                                assertEquals(0, closed)
+                                executeCliToolCommand(toolLeaf, services, writeStdout = stdout::add)
+                            },
+                        ) { leaf, invokeTool ->
+                            invokeTool(assertIs<KodexToolLeafCommand>(leaf))
                         }
+                        assertEquals(0, code)
                         assertEquals(1, opened)
                         assertEquals(1, closed)
                         val result = CliToolJson.decodeFromString(CallToolResult.serializer(), stdout.single())
@@ -164,34 +141,23 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                         // Help also closes its single discovery connection deterministically.
                         var helpOpened = 0
                         var helpClosed = 0
-                        val helpJob = SupervisorJob()
-                        val helpSession = ReusableToolRpcSession(
-                            scope = CoroutineScope(Dispatchers.Default + helpJob),
+                        val helpMessages = mutableListOf<String>()
+                        val helpCode = dispatchCliWithToolRpc(
+                            arguments = listOf("github", "--help"),
                             defaultHome = root,
+                            output = { msg, err ->
+                                assertFalse(err)
+                                helpMessages += msg
+                            },
                             discover = { endpoint },
                             openServices = { _, _, use ->
                                 helpOpened++
                                 try { use(mcpServices) } finally { helpClosed++ }
                             },
-                        )
-                        val helpMessages = mutableListOf<String>()
-                        try {
-                            val helpCode = dispatchCli(
-                                arguments = listOf("github", "--help"),
-                                output = { msg, err ->
-                                    assertFalse(err)
-                                    helpMessages += msg
-                                },
-                                resolveMcpDomains = { target -> runBlocking { helpSession.discoverMcpDomains(target) } },
-                                execute = { error("Help must not execute") },
-                            )
-                            assertEquals(0, helpCode)
-                        } finally {
-                            runBlocking(NonCancellable) {
-                                helpSession.close()
-                                helpJob.cancelAndJoin()
-                            }
+                        ) { _, _ ->
+                            error("Help must not execute")
                         }
+                        assertEquals(0, helpCode)
                         assertEquals(1, helpOpened)
                         assertEquals(1, helpClosed)
                         assertContains(helpMessages.single(), "echo_title")
@@ -257,22 +223,20 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                     )
                     val fixedNow = Instant.parse("2099-01-01T00:00:00Z")
 
-                    fun runCli(args: List<String>, stdinText: String = ""): List<String> {
+                    suspend fun runCli(args: List<String>, stdinText: String = ""): List<String> {
                         val stdout = mutableListOf<String>()
                         val exitCode = dispatchCli(
                             arguments = args,
                             output = { msg, _ -> error("Unexpected parser output: $msg") },
                         ) { leaf ->
-                            runBlocking {
-                                executeCliToolCommand(
-                                    command = assertIs<KodexToolLeafCommand>(leaf),
-                                    services = services,
-                                    env = envMap::get,
-                                    readStdin = { stdinText },
-                                    writeStdout = stdout::add,
-                                    now = { fixedNow },
-                                )
-                            }
+                            executeCliToolCommand(
+                                command = assertIs<KodexToolLeafCommand>(leaf),
+                                services = services,
+                                env = envMap::get,
+                                readStdin = { stdinText },
+                                writeStdout = stdout::add,
+                                now = { fixedNow },
+                            )
                         }
                         assertEquals(0, exitCode)
                         return stdout

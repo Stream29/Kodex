@@ -2,7 +2,7 @@ package io.github.stream29.kodex.cli.app
 
 import kotlinx.coroutines.CancellationException
 
-internal fun runCliSafely(
+internal inline fun runCliSafely(
     backendStart: Boolean,
     processId: () -> Long,
     reportFailure: (Throwable) -> Unit,
