@@ -212,14 +212,22 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
             assertEquals("x", SystemCoroutineFileSystem.readString(marker))
         }
     }
-    test("manual stop drains an active turn with a connected client and flushes its log") {
+    test("manual stop holds the Home instance lock until the active turn drains") {
         val started = CompletableDeferred<Unit>()
         val cleaned = CompletableDeferred<Unit>()
+        val cleaning = CompletableDeferred<Unit>()
+        val finishCleanup = CompletableDeferred<Unit>()
         withHost(stream = {
             flow {
                 started.complete(Unit)
                 try { awaitCancellation() }
-                finally { withContext(NonCancellable) { delay(50); cleaned.complete(Unit) } }
+                finally {
+                    withContext(NonCancellable) {
+                        cleaning.complete(Unit)
+                        withTimeout(10.seconds) { finishCleanup.await() }
+                        cleaned.complete(Unit)
+                    }
+                }
             }
         }) { home, endpoint, stopped ->
             withLocalRpcClient(home, endpoint) { connection ->
@@ -233,7 +241,24 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 rpc.global.keepSessionAlive(index)
                 rpc.runtime.submit(index, listOf(ContentItem.InputText("shutdown fixture")))
                 withTimeout(10.seconds) { started.await() }
-                backendControlRequest(endpoint, "stop")
+                try {
+                    backendControlRequest(endpoint, "stop")
+                    withTimeout(10.seconds) { cleaning.await() }
+                    val recordPath = Path(home, ".locks", "backend", "connection.json")
+                    val record = SystemCoroutineFileSystem.readString(recordPath)
+                    val rejected = assertFailsWith<IllegalStateException> {
+                        withTimeout(5.seconds) {
+                            runBackendHost(home, Path(home, "codex"), Path(home, "agents"),
+                                createClient = { error("Contender must not start business services") },
+                                createLoginClient = { error("Contender must not start login services") })
+                        }
+                    }
+                    assertTrue(rejected.message.orEmpty().contains("instance lock"))
+                    assertEquals(endpoint.instanceId, BackendInstance.discover(home)?.instanceId)
+                    assertEquals(record, SystemCoroutineFileSystem.readString(recordPath))
+                } finally {
+                    finishCleanup.complete(Unit)
+                }
                 withTimeout(10.seconds) { stopped.join() }
                 assertTrue(cleaned.isCompleted)
                 assertNull(BackendInstance.discover(home))
