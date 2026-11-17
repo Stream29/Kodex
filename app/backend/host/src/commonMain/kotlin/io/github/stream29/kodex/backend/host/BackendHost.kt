@@ -18,6 +18,7 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import io.github.stream29.kodex.utils.logging.ApplicationLoggingSession
 import io.github.stream29.kodex.utils.logging.initializeLogging
 import io.github.stream29.kodex.utils.osenvironment.processId
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import kotlinx.io.files.Path
@@ -28,6 +29,8 @@ import kotlinx.serialization.json.put
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+
+private val logger = KotlinLogging.logger {}
 
 public actual suspend fun runBackendHost(
     home: Path,
@@ -121,6 +124,9 @@ public actual suspend fun runBackendHost(
                 try {
                     rejectLiveLegacyOwner(home)
                     handle = prepareKodexHome(home)
+                    if (!ensureBundledHomeGuide(handle.home)) {
+                        logger.warn { "Preserved custom or non-regular skills/kodex-home/SKILL.md; review it before following its Home instructions." }
+                    }
                     withBackendServices(
                         home, codexHome, agentsHome,
                         createClient = createClient, createLoginClient = createLoginClient,
