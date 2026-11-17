@@ -49,6 +49,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
     onTurnActiveRenewal: suspend () -> Unit,
     turnRenewalInterval: () -> Duration,
     reportMirrorFailure: (Throwable) -> Unit,
+    private val onDeleteInTransaction: (sessionId: Int) -> Unit = {},
 ) : KodexSessionRepository, CoroutineCloseable, CoroutineScope by scope {
     private val lifecycleMutex = Mutex()
     private val residency = SessionResidencyTable(
@@ -295,12 +296,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
             withDbLock {
                 requireOpen()
                 connection.transaction {
-                    if (connection.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schedules'").isNotEmpty()) {
-                        connection.execute(
-                            "DELETE FROM schedules WHERE agent_id = ? OR agent_id IN (SELECT agent_id FROM agents WHERE session_id = ?)",
-                            listOf(entryIndex.toLong(), entryIndex.toLong()),
-                        )
-                    }
+                    onDeleteInTransaction(entryIndex)
                     connection.execute("DELETE FROM sessions WHERE session_id = ?", listOf(entryIndex.toLong()))
                 }
                 mutableEntries.value = inventory()
@@ -404,6 +400,7 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     onTurnActiveRenewal: suspend () -> Unit,
     turnRenewalInterval: () -> Duration,
     reportMirrorFailure: (Throwable) -> Unit,
+    onDeleteInTransaction: (sessionId: Int) -> Unit,
 ): SqliteKodexSessionRepository {
     require(sessionTtl.isPositive()) { "sessionTtl must be positive: $sessionTtl" }
     fileSystem.createDirectories(root)
@@ -431,6 +428,7 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
             onTurnActiveRenewal = onTurnActiveRenewal,
             turnRenewalInterval = turnRenewalInterval,
             reportMirrorFailure = reportMirrorFailure,
+            onDeleteInTransaction = onDeleteInTransaction,
         )
     }
 }

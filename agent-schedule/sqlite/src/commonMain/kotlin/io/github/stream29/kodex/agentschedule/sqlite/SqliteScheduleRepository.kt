@@ -178,8 +178,12 @@ public actual class SqliteScheduleRepository internal constructor(
         true
     }
 
-    public actual suspend fun refresh(): Unit = withContext(NonCancellable) {
-        read {
+    public actual fun deleteForSessionInTransaction(sessionId: Int) {
+        connection.execute(
+            "DELETE FROM schedules WHERE agent_id = ? OR agent_id IN (SELECT agent_id FROM agents WHERE session_id = ?)",
+            listOf(sessionId.toLong(), sessionId.toLong()),
+        )
+        if (connection.changes() > 0) {
             mutableNextTriggerAt.value = queryEarliestTriggerUnsafe(connection)
         }
     }

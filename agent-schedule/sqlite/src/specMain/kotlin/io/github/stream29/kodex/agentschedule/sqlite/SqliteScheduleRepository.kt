@@ -27,7 +27,13 @@ public expect class SqliteScheduleRepository : ScheduleRepository {
     override suspend fun listDue(now: Instant): List<ScheduleRecord>
     override suspend fun advance(scheduleId: Long, nextTriggerAt: Instant): Boolean
     override suspend fun delete(scheduleId: Long): Boolean
-    public suspend fun refresh()
+
+    /**
+     * Deletes schedules targeting [sessionId] or any child `agents` row belonging to [sessionId]
+     * inside an already-open transaction on the shared `kodex.db` connection while holding the
+     * shared database [Mutex] (must run before `DELETE FROM sessions` cascades `agents`).
+     */
+    public fun deleteForSessionInTransaction(sessionId: Int)
 }
 
 /**

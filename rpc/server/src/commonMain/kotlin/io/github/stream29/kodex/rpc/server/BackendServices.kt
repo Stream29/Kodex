@@ -351,7 +351,6 @@ internal class LazySqliteBackendPersistence(
             withContext(NonCancellable) {
                 lazyEntries.value = sessions.entries.value
                 lazyOpenSessions.value = sessions.openSessions.value
-                schedules.refresh()
                 lazyNextTriggerAt.value = schedules.nextTriggerAt.value
             }
         }
@@ -416,6 +415,7 @@ internal class LazySqliteBackendPersistence(
             }
             val (resolvedHome, connection) = openVerifiedKodexDatabase(home, SystemCoroutineFileSystem)
             try {
+                lateinit var schedules: SqliteScheduleRepository
                 val sessions = persistenceScope.SqliteKodexSessionRepository(
                     root = resolvedHome,
                     connection = connection,
@@ -426,9 +426,12 @@ internal class LazySqliteBackendPersistence(
                     reportMirrorFailure = { mirrorError ->
                         BackendLogger.warn(mirrorError) { "Session file mirror write failed." }
                     },
+                    onDeleteInTransaction = { sessionId ->
+                        schedules.deleteForSessionInTransaction(sessionId)
+                    },
                 )
                 try {
-                    val schedules = SqliteScheduleRepository(
+                    schedules = SqliteScheduleRepository(
                         connection = connection,
                         mutex = dbMutex,
                         requireAccess = { persistenceScope.ensureActive() },
@@ -446,6 +449,9 @@ internal class LazySqliteBackendPersistence(
                     }
                     persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
                         sessions.openSessions.collect { lazyOpenSessions.value = it }
+                    }
+                    persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                        schedules.nextTriggerAt.collect { lazyNextTriggerAt.value = it }
                     }
                     persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
                         sessions.stopEvents.toNotifications().collect { notification ->

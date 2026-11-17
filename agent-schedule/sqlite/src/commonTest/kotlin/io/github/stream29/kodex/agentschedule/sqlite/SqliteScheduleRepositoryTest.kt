@@ -57,4 +57,36 @@ val sqliteScheduleRepositoryTest by testSuite {
             }
         }
     }
+
+    test("deleteForSessionInTransaction removes root and child agent schedules and refreshes nextTriggerAt") {
+        openInMemorySqliteConnection().use { connection ->
+            connection.execute("CREATE TABLE sessions (session_id INTEGER PRIMARY KEY)")
+            connection.execute("CREATE TABLE agents (agent_id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL)")
+            connection.execute("INSERT INTO sessions (session_id) VALUES (10), (20)")
+            connection.execute("INSERT INTO agents (agent_id, session_id) VALUES (10, 10), (11, 10), (20, 20)")
+
+            val mutex = Mutex()
+            val repo = SqliteScheduleRepository(connection, mutex)
+            val created = Instant.parse("2026-11-15T10:00:00Z")
+            val t1 = Instant.parse("2026-11-15T10:01:00Z")
+            val t2 = Instant.parse("2026-11-15T10:02:00Z")
+            val t3 = Instant.parse("2026-11-15T10:03:00Z")
+
+            repo.create(agentId = 10, triggerAt = t1, cron = null, description = "root", createdAt = created)
+            repo.create(agentId = 11, triggerAt = t2, cron = null, description = "child", createdAt = created)
+            val survivor = repo.create(agentId = 20, triggerAt = t3, cron = null, description = "other-session", createdAt = created)
+            assertEquals(t1, repo.nextTriggerAt.value)
+
+            connection.transaction {
+                repo.deleteForSessionInTransaction(10)
+                connection.execute("DELETE FROM agents WHERE session_id = 10")
+                connection.execute("DELETE FROM sessions WHERE session_id = 10")
+            }
+
+            assertTrue(repo.list(10).isEmpty())
+            assertTrue(repo.list(11).isEmpty())
+            assertEquals(listOf(survivor), repo.list(20))
+            assertEquals(t3, repo.nextTriggerAt.value)
+        }
+    }
 }

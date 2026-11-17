@@ -70,4 +70,5 @@ public expect suspend fun CoroutineScope.SqliteKodexSessionRepository(
     onTurnActiveRenewal: suspend () -> Unit = {},
     turnRenewalInterval: () -> Duration = { DefaultKodexSessionRenewalInterval },
     reportMirrorFailure: (Throwable) -> Unit = {},
+    onDeleteInTransaction: (sessionId: Int) -> Unit = {},
 ): SqliteKodexSessionRepository
