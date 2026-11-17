@@ -14,7 +14,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessag
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.toResponseHistoryItems
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
@@ -923,7 +924,7 @@ val kodexAgentStateImplTest by testSuite {
                 retainedItems = listOf(firstUser, planUpdate, askUserEvent),
             )
             assertEquals(
-                listOf<StableCleanEvent>(expectedCompaction),
+                listOf<AgentCommit>(expectedCompaction),
                 storage.activeMessageWindowAt(compactIndex),
             )
             assertEquals(

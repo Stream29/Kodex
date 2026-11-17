@@ -86,7 +86,7 @@ public data class StableContextCompaction(
 ) : StableIndexEvent {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         buildList {
-            for (item in retainedItems) {
+            for (item: AgentCommit in retainedItems) {
                 addAll(item.toResponseHistoryItems())
             }
             add(

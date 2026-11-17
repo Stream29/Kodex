@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 
@@ -15,11 +15,11 @@ import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
  */
 public actual suspend fun KodexAgentStorage.activeMessageWindowAt(
     index: Int,
-): List<StableCleanEvent> {
+): List<AgentCommit> {
     require(index >= 0) { "Index $index must be non-negative." }
     val contextStart = getLastCommitsIn(0..index, setOf(AgentCommitType.ContextCompaction), limit = 1)
         .lastOrNull()
         ?.index ?: 0
     return getCommitsIn(contextStart..index, AgentCommitType.CleanEventTypes)
-        .map { it.commit as StableCleanEvent }
+        .map { it.commit }
 }

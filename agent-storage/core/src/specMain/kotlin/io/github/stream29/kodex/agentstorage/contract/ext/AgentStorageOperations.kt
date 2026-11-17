@@ -1,9 +1,9 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
@@ -22,8 +22,9 @@ public expect suspend fun MutableKodexAgentStorage.initialize(initialSettings: K
  * at that self-contained [StableContextCompaction] commit (which already carries its
  * bounded `retainedItems` and encrypted compaction summary) and appends commits after
  * the checkpoint through [index], without scanning commits before the checkpoint.
+ * Settings, request metadata and runtime state snapshots are not part of the window.
  */
-public expect suspend fun KodexAgentStorage.activeMessageWindowAt(index: Int): List<StableCleanEvent>
+public expect suspend fun KodexAgentStorage.activeMessageWindowAt(index: Int): List<AgentCommit>
 
 /** Appends one self-contained compaction output and its updated settings at a single index. */
 public expect suspend fun MutableKodexAgentStorage.appendCompaction(

@@ -11,6 +11,7 @@ import io.github.stream29.kodex.agentstate.contract.canCompact
 import io.github.stream29.kodex.agentstate.contract.canRequestResponseApi
 import io.github.stream29.kodex.agentstate.tool.toPendingToolEvent
 import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -33,6 +34,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountDiagno
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.callId
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.codexRequestWindowId
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.toResponseHistoryItems
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
@@ -198,7 +200,7 @@ private class KodexAgentStateImpl(
 
             val settings = storage.getSettingsAt(snapshotIndex)
             val messageWindow = storage.activeMessageWindowAt(snapshotIndex)
-            val durableInput = messageWindow.flatMap(StableCleanEvent::toResponseHistoryItems)
+            val durableInput = messageWindow.flatMap(AgentCommit::toResponseHistoryItems)
             val contextPrefix = contextPrefixResolver.resolve(settings, storage.uri).render()
             val threadId = storage.uri.toCodexThreadId()
             val windowId = settings.codexRequestWindowId(threadId)
@@ -371,7 +373,7 @@ private class KodexAgentStateImpl(
         val snapshot = startCompaction()
         return try {
             val messageWindow = storage.activeMessageWindowAt(snapshot.index)
-            val input = messageWindow.flatMap(StableCleanEvent::toResponseHistoryItems)
+            val input = messageWindow.flatMap(AgentCommit::toResponseHistoryItems)
             val threadId = storage.uri.toCodexThreadId()
             val windowId = snapshot.settings.codexRequestWindowId(threadId)
             val metadata = CodexResponsesMetadata(
