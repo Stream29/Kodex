@@ -44,13 +44,46 @@ private fun model(
         effectiveContextWindowPercent = effectiveContextWindowPercent,
     )
 
+val gpt62ModelCatalogTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("GPT 6.2 fallback preserves distinct windows and single-agent reasoning") {
+        val catalog = testCatalog(client = mockOpenAiClient { listModels { awaitCancellation() } })
+        try {
+            assertEquals(
+                listOf("gpt-6.2-sol", "gpt-6.2-astra"),
+                catalog.models.value.take(2).map { it.slug.value },
+            )
+            for ((slug, window) in listOf("gpt-6.2-sol" to 500_000L, "gpt-6.2-astra" to 272_000L)) {
+                val requested = OpenAiModelId("provider/$slug-preview")
+                val resolved = catalog.resolve(requested)
+                assertEquals(requested, resolved.slug)
+                assertEquals(window, resolved.contextWindow)
+                assertEquals(872_000L, resolved.maxContextWindow)
+                assertEquals(ReasoningEffort.Low, resolved.defaultReasoningLevel)
+                assertEquals(
+                    listOf(
+                        ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High,
+                        ReasoningEffort.XHigh, ReasoningEffort.Max,
+                    ),
+                    resolved.supportedReasoningLevels.map { it.effort },
+                )
+                assertEquals(
+                    listOf(ServiceTier.Default, ServiceTier.Fast, ServiceTier.Ultrafast),
+                    resolved.availableServiceTiers(),
+                )
+            }
+        } finally {
+            catalog.close()
+        }
+    }
+}
+
 val ultrafastModelCatalogTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("Ultrafast fallback is explicit for two models and never merged into remote metadata") {
+    test("Ultrafast fallback is explicit and never merged into remote metadata") {
         assertEquals(
-            listOf("gpt-6-astra", "gpt-6.1-sol"),
+            listOf("gpt-6.2-sol", "gpt-6.2-astra", "gpt-6-astra", "gpt-6.1-sol"),
             BuiltInModelCatalog.filter { ServiceTier.Ultrafast in it.availableServiceTiers() }.map { it.slug.value },
         )
-        val remote = model("gpt-6-astra")
+        val remote = model("gpt-6.2-astra")
         val catalog = testCatalog(
             client = mockOpenAiClient { listModels { OpenAiResult.Success(ModelsResponse(listOf(remote))) } },
         )
@@ -73,6 +106,8 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
         try {
             assertEquals(
                 listOf(
+                    "gpt-6.2-sol",
+                    "gpt-6.2-astra",
                     "gpt-6-astra",
                     "gpt-6.1-sol",
                     "gpt-6-sol",

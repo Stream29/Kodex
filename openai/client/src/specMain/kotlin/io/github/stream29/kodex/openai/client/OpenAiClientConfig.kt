@@ -30,7 +30,7 @@ public data class OpenAiClientConfig(
 }
 
 /** Codex API compatibility version maintained by Kodex rather than external cache files. */
-public const val KodexCompatibleApiClientVersion: String = "0.159.2"
+public const val KodexCompatibleApiClientVersion: String = "0.169.0"
 
 /**
  * Retry policy for transient OpenAI HTTP failures.

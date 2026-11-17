@@ -49,11 +49,32 @@ private val ultrafastServiceTier: ModelServiceTier = ModelServiceTier(
 
 /**
  * Relevant metadata mirrored from Codex's bundled `models.json`, supplemented
- * with the documented Ultrafast capability of Astra and Sol 6.1.
+ * with GPT 6.2 metadata from the Codex `/models` endpoint (client 0.169.0,
+ * 2026-11-17) and documented Ultrafast capabilities.
+ * Ultra is a delegation mode, not a Responses reasoning effort; retain Max
+ * as the highest single-agent effort.
  * This fallback describes model capability, not account entitlement. A remote
  * catalog replaces it in full; the supplement is never merged into remote data.
  */
 internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
+    ModelInfo(
+        slug = OpenAiModelId("gpt-6.2-sol"),
+        displayName = "GPT-6.2-Sol",
+        defaultReasoningLevel = ReasoningEffort.Low,
+        supportedReasoningLevels = maxReasoningLevels,
+        serviceTiers = fastTwoXServiceTier + ultrafastServiceTier,
+        contextWindow = 500_000L,
+        maxContextWindow = 872_000L,
+    ),
+    ModelInfo(
+        slug = OpenAiModelId("gpt-6.2-astra"),
+        displayName = "GPT-6.2-Astra",
+        defaultReasoningLevel = ReasoningEffort.Low,
+        supportedReasoningLevels = maxReasoningLevels,
+        serviceTiers = fastTwoXServiceTier + ultrafastServiceTier,
+        contextWindow = 272_000L,
+        maxContextWindow = 872_000L,
+    ),
     ModelInfo(
         slug = OpenAiModelId("gpt-6-astra"),
         displayName = "GPT-6-Astra",

@@ -8,6 +8,7 @@ val openAiClientConfigTest by testSuite {
     test("uses the Kodex-maintained compatible API client version") {
         val config = OpenAiClientConfig()
 
+        assertEquals("0.169.0", KodexCompatibleApiClientVersion)
         assertEquals(KodexCompatibleApiClientVersion, config.clientVersion)
         assertEquals(
             "codex_cli_rs/$KodexCompatibleApiClientVersion (Kodex)",
