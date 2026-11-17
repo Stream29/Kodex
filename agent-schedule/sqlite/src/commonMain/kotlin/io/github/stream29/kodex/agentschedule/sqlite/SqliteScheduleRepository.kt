@@ -177,6 +177,12 @@ public actual class SqliteScheduleRepository internal constructor(
         mutableNextTriggerAt.value = queryEarliestTriggerUnsafe(connection)
         true
     }
+
+    public actual suspend fun refresh(): Unit = withContext(NonCancellable) {
+        read {
+            mutableNextTriggerAt.value = queryEarliestTriggerUnsafe(connection)
+        }
+    }
 }
 
 public actual suspend fun SqliteScheduleRepository(

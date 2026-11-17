@@ -27,6 +27,7 @@ public expect class SqliteScheduleRepository : ScheduleRepository {
     override suspend fun listDue(now: Instant): List<ScheduleRecord>
     override suspend fun advance(scheduleId: Long, nextTriggerAt: Instant): Boolean
     override suspend fun delete(scheduleId: Long): Boolean
+    public suspend fun refresh()
 }
 
 /**

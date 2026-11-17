@@ -291,15 +291,23 @@ public actual class SqliteKodexSessionRepository internal constructor(
                 residency.drainDetached(handle)
             }
         }
-        withDbLock {
-            requireOpen()
-            connection.transaction {
-                connection.execute("DELETE FROM sessions WHERE session_id = ?", listOf(entryIndex.toLong()))
+        withContext(NonCancellable) {
+            withDbLock {
+                requireOpen()
+                connection.transaction {
+                    if (connection.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schedules'").isNotEmpty()) {
+                        connection.execute(
+                            "DELETE FROM schedules WHERE agent_id = ? OR agent_id IN (SELECT agent_id FROM agents WHERE session_id = ?)",
+                            listOf(entryIndex.toLong(), entryIndex.toLong()),
+                        )
+                    }
+                    connection.execute("DELETE FROM sessions WHERE session_id = ?", listOf(entryIndex.toLong()))
+                }
+                mutableEntries.value = inventory()
+                val fs = fileSystem
+                val target = directory(entryIndex)
+                mirror.enqueue { deleteRecursively(fs, target) }
             }
-            mutableEntries.value = inventory()
-            val fs = fileSystem
-            val target = directory(entryIndex)
-            mirror.enqueue { deleteRecursively(fs, target) }
         }
     }
 

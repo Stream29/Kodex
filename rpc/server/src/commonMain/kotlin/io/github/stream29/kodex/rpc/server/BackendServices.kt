@@ -348,12 +348,12 @@ internal class LazySqliteBackendPersistence(
         override suspend fun delete(entryIndex: Int) {
             val (sessions, schedules) = acquire()
             sessions.delete(entryIndex)
-            lazyEntries.value = sessions.entries.value
-            lazyOpenSessions.value = sessions.openSessions.value
-            schedules.list(entryIndex).forEach { schedule ->
-                schedules.delete(schedule.scheduleId)
+            withContext(NonCancellable) {
+                lazyEntries.value = sessions.entries.value
+                lazyOpenSessions.value = sessions.openSessions.value
+                schedules.refresh()
+                lazyNextTriggerAt.value = schedules.nextTriggerAt.value
             }
-            lazyNextTriggerAt.value = schedules.nextTriggerAt.value
         }
     }
 

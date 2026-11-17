@@ -439,7 +439,7 @@ val minimalAgentConversationTest by testSuite {
 val openAiStoryContinuationProbeTest by testSuite {
     testFixture {
         RecordingOpenAiClient(realOpenAiClient())
-    } asParameterForEach {
+    } closeWith { close() } asParameterForEach {
         test(
             "real client continues story from storage",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
@@ -450,31 +450,35 @@ val openAiStoryContinuationProbeTest by testSuite {
                 storage = storage,
                 contextSettings = TestAgentContextSettings,
             )
-            agent.appendUserMessage("请用中文讲一个两句以内的微型故事，只讲故事本身。")
-            agent.requestResponseApi()
-            val firstStory = storage.lastAssistantMessage()
-                ?: fail("Expected the first response to contain an assistant story.")
-            agent.appendUserMessage("请基于上一段故事继续写两句以内，不要重讲开头。")
-            agent.requestResponseApi()
-            val continuation = storage.lastAssistantMessage()
-                ?: fail("Expected the second response to contain a continuation.")
+            try {
+                agent.appendUserMessage("请用中文讲一个两句以内的微型故事，只讲故事本身。")
+                agent.requestResponseApi()
+                val firstStory = storage.lastAssistantMessage()
+                    ?: fail("Expected the first response to contain an assistant story.")
+                agent.appendUserMessage("请基于上一段故事继续写两句以内，不要重讲开头。")
+                agent.requestResponseApi()
+                val continuation = storage.lastAssistantMessage()
+                    ?: fail("Expected the second response to contain a continuation.")
 
-            println("story probe first response: $firstStory")
-            println("story probe continuation: $continuation")
+                println("story probe first response: $firstStory")
+                println("story probe continuation: $continuation")
 
-            assertEquals(2, client.requests.size)
-            assertTrue(firstStory.isNotBlank(), "Expected a non-empty first story.")
-            assertTrue(continuation.isNotBlank(), "Expected a non-empty continuation.")
-            assertNotEquals(firstStory, continuation, "Expected the continuation to add new text.")
-            assertTrue(storage.latestIndex() >= 3, "Expected both turns to be persisted.")
-            assertTrue(
-                client.requests[1].request.input.any { item ->
-                    item is ResponseItem.Message &&
-                        item.role == MessageRole.Assistant &&
-                        item.text() == firstStory
-                },
-                "Expected the second request to include the first assistant story from storage.",
-            )
+                assertEquals(2, client.requests.size)
+                assertTrue(firstStory.isNotBlank(), "Expected a non-empty first story.")
+                assertTrue(continuation.isNotBlank(), "Expected a non-empty continuation.")
+                assertNotEquals(firstStory, continuation, "Expected the continuation to add new text.")
+                assertTrue(storage.latestIndex() >= 3, "Expected both turns to be persisted.")
+                assertTrue(
+                    client.requests[1].request.input.any { item ->
+                        item is ResponseItem.Message &&
+                            item.role == MessageRole.Assistant &&
+                            item.text() == firstStory
+                    },
+                    "Expected the second request to include the first assistant story from storage.",
+                )
+            } finally {
+                agent.cancelAndJoin()
+            }
         }
     }
 }
@@ -565,7 +569,7 @@ val openAiReadMediaToolRuntimeProbeTest by testSuite {
 val openAiForcedCompactProbeTest by testSuite {
     testFixture {
         RecordingOpenAiClient(realOpenAiClient())
-    } asParameterForEach {
+    } closeWith { close() } asParameterForEach {
         test(
             "real client forced compact installs server compaction output",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
@@ -596,21 +600,24 @@ val openAiForcedCompactProbeTest by testSuite {
                 storage = storage,
                 contextSettings = TestAgentContextSettings,
             )
+            try {
+                val compactIndex = agent.forcedCompact()
 
-            val compactIndex = agent.forcedCompact()
-
-            assertEquals(1, client.remoteCompactionV2Requests.size)
-            val request = client.remoteCompactionV2Requests.single()
-            assertEquals(model, request.request.model)
-            assertEquals(
-                ResponseItem.CompactionTrigger,
-                request.request.input.last(),
-                "AgentState should project the remote-compaction trigger into the wire request.",
-            )
-            val contextCompaction =
-                assertIs<StableContextCompaction>(storage.getCommitExact(compactIndex, AgentCommitType.IndexTypes)?.commit)
-            assertTrue(contextCompaction.encryptedContent.isNotEmpty())
-            assertEquals(compactIndex, storage.latestIndex())
+                assertEquals(1, client.remoteCompactionV2Requests.size)
+                val request = client.remoteCompactionV2Requests.single()
+                assertEquals(model, request.request.model)
+                assertEquals(
+                    ResponseItem.CompactionTrigger,
+                    request.request.input.last(),
+                    "AgentState should project the remote-compaction trigger into the wire request.",
+                )
+                val contextCompaction =
+                    assertIs<StableContextCompaction>(storage.getCommitExact(compactIndex, AgentCommitType.IndexTypes)?.commit)
+                assertTrue(contextCompaction.encryptedContent.isNotEmpty())
+                assertEquals(compactIndex, storage.latestIndex())
+            } finally {
+                agent.cancelAndJoin()
+            }
         }
     }
 }

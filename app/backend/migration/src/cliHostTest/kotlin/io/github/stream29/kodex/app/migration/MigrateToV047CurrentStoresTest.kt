@@ -2,6 +2,7 @@ package io.github.stream29.kodex.app.migration
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.app.migration.v0_4_15.migrateToV0_4_15
 import io.github.stream29.kodex.app.migration.v0_4_7.LegacySettingsFixture
 import io.github.stream29.kodex.app.migration.v0_4_7.migrateToV0_4_7
 import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
@@ -13,6 +14,7 @@ import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.rpc.models.BackendSettings
+import io.github.stream29.kodex.rpc.models.CliFrontendSettings
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellType
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
@@ -37,8 +39,8 @@ val migrateToV047CurrentStoresTest by testSuite(compartment = { TestCompartment.
             val expected = retainedFixtureBackend()
             migrateToV0_4_7(home, fs)
             assertFalse(fs.exists(Path(home, "settings.yml")))
-            assertEquals(expected, openBackendSettings(home, backendDefaults()).settings.value)
-            val frontend = openCliFrontendSettings(home).settings.value
+            assertEquals(expected, readCurrentBackendSettings(home, backendDefaults()))
+            val frontend = readCurrentFrontendSettings(home)
             assertEquals(NewLineKey.Enter, frontend.newLineKey)
             assertEquals(SidebarContent.None, frontend.sidebars.left)
             assertEquals(SidebarContent.HistoryIndex, frontend.sidebars.right)
@@ -63,7 +65,7 @@ val migrateToV047CurrentStoresTest by testSuite(compartment = { TestCompartment.
             assertFalse("shell:" in encoded)
             assertTrue("gpt-5.6-sol" in encoded)
             val defaults = backendDefaults()
-            val backend = openBackendSettings(home, defaults).settings.value
+            val backend = readCurrentBackendSettings(home, defaults)
             assertEquals(KodexAuthSource.Codex, backend.authSource)
             assertEquals(defaults.shell, backend.shell)
             assertEquals("priority", backend.newSession.serviceTier.requestValue)
@@ -93,7 +95,7 @@ val migrateToV047CurrentStoresTest by testSuite(compartment = { TestCompartment.
                     ),
                 )),
             )
-            assertEquals(expected, openBackendSettings(home, backendDefaults()).settings.value)
+            assertEquals(expected, readCurrentBackendSettings(home, backendDefaults()))
         }
         test("new Home has no settings files and migration writes no defaults") { home ->
             migrateToV0_4_7(home, fs)
@@ -188,7 +190,7 @@ val migrateToV047CurrentStoresTest by testSuite(compartment = { TestCompartment.
                     command: echo retained
             """.trimIndent())
             migrateToV0_4_7(home, fs)
-            assertEquals(1, openCliFrontendSettings(home).settings.value.hooks.size)
+            assertEquals(1, readCurrentFrontendSettings(home).hooks.size)
         }
         test("conflicting existing target prevents both missing-side writes and source deletion") { home ->
             fs.writeString(Path(home, "settings.yml"), LegacySettingsFixture)
@@ -256,8 +258,8 @@ val migrateToV047CurrentStoresTest by testSuite(compartment = { TestCompartment.
                 onMigrationStarted = { _, next -> applied += next.toString() },
             ).closeAndJoin()
             assertEquals(listOf("0.3.3", "0.3.5", "0.4.3", "0.4.5", "0.4.7"), applied)
-            assertEquals(KodexAuthSource.Kodex, openBackendSettings(home, backendDefaults()).settings.value.authSource)
-            assertEquals(NewLineKey.Enter, openCliFrontendSettings(home).settings.value.newLineKey)
+            assertEquals(KodexAuthSource.Kodex, readCurrentBackendSettings(home, backendDefaults()).authSource)
+            assertEquals(NewLineKey.Enter, readCurrentFrontendSettings(home).newLineKey)
             assertTrue(fs.exists(Path(home, "skills", "kodex-home", "SKILL.md")))
             assertFalse(fs.exists(Path(home, "settings.yml")))
         }
@@ -315,6 +317,30 @@ private fun retainedFixtureBackend(): BackendSettings = backendDefaults().copy(
         ),
     ),
 )
+private suspend fun readCurrentUnifiedSettings(
+    home: Path,
+    defaults: BackendSettings = backendDefaults(),
+): UnifiedSettings {
+    val copy = Path(SystemTemporaryDirectory, "kodex-migration-0.4.7-unified-${Random.nextLong()}")
+    fs.createDirectories(copy)
+    return try {
+        for (name in listOf("settings.backend.yml", "settings.frontend.cli.yml")) {
+            val source = Path(home, name)
+            if (fs.exists(source)) fs.writeString(Path(copy, name), fs.readString(source))
+        }
+        migrateToV0_4_15(copy, fs)
+        UnifiedSettingsStore.open(copy, defaults, fs).current
+    } finally {
+        withContext(NonCancellable) { remove(copy) }
+    }
+}
+
+private suspend fun readCurrentBackendSettings(home: Path, defaults: BackendSettings): BackendSettings =
+    readCurrentUnifiedSettings(home, defaults).backend
+
+private suspend fun readCurrentFrontendSettings(home: Path): CliFrontendSettings =
+    readCurrentUnifiedSettings(home).frontend
+
 private suspend fun assertNoTemporary(home: Path) {
     assertTrue(fs.list(home).none { it.name.endsWith(".tmp") })
 }

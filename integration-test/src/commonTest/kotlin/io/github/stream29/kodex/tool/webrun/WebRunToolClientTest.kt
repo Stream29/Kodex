@@ -100,16 +100,12 @@ private fun String.firstPageReference(): String =
 
 private fun String.firstNumberedLinkId(): Long =
     lineSequence()
-        .firstNotNullOfOrNull { line ->
-            if (!line.startsWith("L") || "cite" !in line) {
-                null
-            } else {
-                Regex("""cite\D+(\d+)""").find(line)
-                    ?.groupValues
-                    ?.get(1)
-                    ?.toLongOrNull()
-            }
+        .mapNotNull { line ->
+            if (!line.startsWith("L")) return@mapNotNull null
+            Regex("""cite\D+(\d+)""").find(line)?.groupValues?.get(1)?.toLongOrNull()
+                ?: Regex("""【(\d+)†""").find(line)?.groupValues?.get(1)?.toLongOrNull()
         }
+        .firstOrNull { it > 0L }
         ?: fail("Expected a numbered link in web.run output: ${take(500)}")
 
 val webRunToolClientTest by testSuite {
