@@ -66,8 +66,12 @@ internal fun KotlinMultiplatformExtension.configureCommonTests(project: Project)
         implementation(libs.findLibrary("test-balloon-framework-core").get())
     }
     project.tasks.withType(KotlinNativeTest::class.java).configureEach {
-        if ((environment["TMPDIR"] as? String).isNullOrBlank()) {
-            environment("TMPDIR", System.getProperty("java.io.tmpdir"))
-        }
+        // Do not read the task environment: SwiftPM contributes task-backed providers.
+        environment(
+            "TMPDIR",
+            project.providers.environmentVariable("TMPDIR").orNull
+                ?.takeIf(String::isNotBlank)
+                ?: System.getProperty("java.io.tmpdir"),
+        )
     }
 }
