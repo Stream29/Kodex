@@ -21,22 +21,23 @@ public actual fun AgentPageContent(
         val settings = viewModel.settings.collectAsState().value
         val tokenCount = viewModel.tokenCount.collectAsState().value
         val composer = viewModel.composer.state.collectAsState().value
-        val notification = viewModel.notification.collectAsState().value
         val duration = viewModel.history.activeTurnDuration.collectAsState().value
         val followsLatest = viewModel.history.followsLatest.collectAsState().value
         val hostInteractionPending = pendingRequest != null
-        val notice = notification?.takeIf { it.level == AgentNotificationLevel.Information }?.let {
-            listOfNotNull(it.message, it.detail).joinToString(" ")
-        }
         val inputs = AgentPageMeasureInputs(
-            composer, pendingSteer, hostInteractionPending, notice, state, running, settings, tokenCount,
+            composer = composer,
+            pendingSteer = pendingSteer,
+            state = state,
+            running = running,
+            settings = settings,
+            tokenCount = tokenCount,
+            pendingToolPanelCount = if (hostInteractionPending) 1 else 0,
         )
         renderer.Frame(inputs) { slots ->
             slots.History(viewModel.history, viewModel.shellSessions, state.canEditHistory(running))
             pendingRequest?.let { slots.UserInput(viewModel.requestUserInput, it) }
             if (pendingSteer.isNotEmpty()) slots.PendingSteer()
             AgentHistorySeparatorContent(duration, !followsLatest, viewModel.history::requestScrollToLatest, renderer.separator)
-            notice?.let { slots.Notice(it) }
             slots.Composer(viewModel.composer, newLineKey, enabled = !hostInteractionPending)
             AgentRuntimeStatusContent(
                 viewModel, state, running, settings, tokenCount, renderer.status,

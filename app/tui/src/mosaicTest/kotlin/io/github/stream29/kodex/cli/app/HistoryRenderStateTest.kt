@@ -1,10 +1,12 @@
 package io.github.stream29.kodex.cli.app
 
+import androidx.compose.runtime.collectAsState
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.cli.history.AgentHistoryViewState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.assertEquals
@@ -27,13 +29,27 @@ val historyRenderStateTest by testSuite {
             var retained: MutableList<Pair<AgentHistoryViewModel, AgentHistoryViewState>>? = null
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    val states = rememberHistoryRenderStates(collectSessionTabRenderStates(listOf(selected, hiddenTab), 0))
-                    retained = states
-                    historyRenderStateFor(states, selectedHistory)
-                    if (hiddenAgent.value != null) historyRenderStateFor(states, hiddenHistory)
-                    Text("retained=${states.size}")
-                }
+                    WithMosaicComponentRenderers {
+                        val tabs = listOf(
+                            SessionTabRenderState(
+                                target = selected,
+                                selected = true,
+                                sessionName = selected.name.collectAsState().value,
+                                agent = selected.rootAgent.collectAsState().value,
+                            ),
+                            SessionTabRenderState(
+                                target = hiddenTab,
+                                selected = false,
+                                sessionName = hiddenTab.name.collectAsState().value,
+                                agent = hiddenTab.rootAgent.collectAsState().value,
+                            ),
+                        )
+                        val states = rememberHistoryRenderStates(tabs)
+                        retained = states
+                        historyRenderStateFor(states, selectedHistory)
+                        if (hiddenAgent.value != null) historyRenderStateFor(states, hiddenHistory)
+                        Text("retained=${states.size}")
+                    }
                 }
                 val states = requireNotNull(retained)
                 val selectedState = historyRenderStateFor(states, selectedHistory)

@@ -10,16 +10,18 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":app-component-application-viewmodel"))
-            api(project(":app-component-session-tab-bar-view"))
-            api(project(":app-component-session-sidebar-view"))
             api(project(":app-component-agent-view"))
+            api(project(":app-component-composer-view"))
+            api(project(":app-component-history-index-view"))
+            api(libs.kotlinx.datetime)
             api(compose.runtime)
         }
         commonMain.dependencies {
-            implementation(project(":app-component-formatting"))
-            implementation(project(":app-component-mcp-settings-view"))
-            implementation(libs.kotlinx.coroutines.core)
+            implementation(project(":app-component-settings-view"))
+            implementation(project(":app-component-widgets"))
         }
-        commonTest.dependencies { implementation(libs.kotlinx.coroutines.test) }
+        commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
+        }
     }
 }

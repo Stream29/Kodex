@@ -10,7 +10,6 @@ import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
-import kotlin.time.Instant
 
 /** Owns catalog presentation without knowing its RPC or persistence protocol. */
 public expect class DefaultSessionCatalogViewModel(
@@ -29,6 +28,5 @@ public expect class DefaultSessionCatalogViewModel(
     override suspend fun archive(sessionIndex: Int): Unit
     override suspend fun unarchive(sessionIndex: Int): Unit
     override suspend fun fork(sessionIndex: Int): Int
-    override suspend fun delete(sessionIndex: Int): Boolean
     override fun close(): Unit
 }

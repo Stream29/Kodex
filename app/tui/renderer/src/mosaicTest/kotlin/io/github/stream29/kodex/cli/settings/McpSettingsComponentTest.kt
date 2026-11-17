@@ -1,8 +1,10 @@
 package io.github.stream29.kodex.cli.settings
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
@@ -10,10 +12,14 @@ import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.BoxScope
+import com.jakewharton.mosaic.ui.Column
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.mcpsettings.*
 import io.github.stream29.kodex.app.settings.contract.McpServerSettingsState
 import io.github.stream29.kodex.app.settings.contract.McpServerSettingsStatus
+import io.github.stream29.kodex.app.settings.contract.SettingsWriteAdmission
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.mcp.contract.*
 import kotlinx.coroutines.*
@@ -39,12 +45,12 @@ val mcpSettingsComponentTest by testSuite {
             runMosaicTest {
                 try {
                     setContentAndSnapshot {
-                        io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                        val state by vm.state.collectAsState()
-                        assertIs<McpSettingsDialog.Editing>(state.dialog)
-                        SideEffect { compositions++ }
-                        TuiPopupHost(Modifier.width(100).height(36)) { McpSettingsComponent(observed) }
-                    }
+                        WithMosaicComponentRenderers {
+                            val state by vm.state.collectAsState()
+                            assertIs<McpSettingsDialog.Editing>(state.dialog)
+                            SideEffect { compositions++ }
+                            TuiPopupHost(Modifier.width(100).height(36)) { RenderMcpSettings(observed) }
+                        }
                     }
                     val initialComposition = compositions
                     sendKeyEvent(KeyboardEvent(codepoint = 'N'.code))
@@ -70,13 +76,21 @@ val mcpSettingsComponentTest by testSuite {
         withMcpVm(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(36)) { McpSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(36)) {
+                            val state by vm.state.collectAsState()
+                            val renderer = remember { MosaicSettingsRenderer() }
+                            Column {
+                                SettingsOperationFailureBanner(state.operationFailure, vm::dismissFailure)
+                                McpSettingsPage(vm, renderer)
+                            }
+                            McpSettingsDialogHost(vm, MosaicMcpDialogs(this))
+                        }
+                    }
                 }
                 assertTrue("MCP servers [Add] [Import from Codex]" in snapshot, snapshot)
                 assertTrue("None configured" in snapshot, snapshot)
-                assertTrue("A settings operation failed." in snapshot, snapshot)
+                assertTrue("Could not confirm a Settings operation" in snapshot, snapshot)
                 assertEquals(0, deps.reads)
             }
         }
@@ -95,9 +109,9 @@ val mcpSettingsComponentTest by testSuite {
             withMcpVm(deps) { vm ->
                 runMosaicTest {
                     val snapshot = setContentAndSnapshot {
-                        io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                        TuiPopupHost(Modifier.width(100).height(36)) { McpSettingsComponent(vm) }
-                    }
+                        WithMosaicComponentRenderers {
+                            TuiPopupHost(Modifier.width(100).height(36)) { RenderMcpSettings(vm) }
+                        }
                     }
                     assertTrue(label in snapshot, snapshot)
                     assertFalse("Headers:" in snapshot, snapshot)
@@ -117,17 +131,19 @@ val mcpSettingsComponentTest by testSuite {
     )) {
         test("full renderer details authentication $authentication offers bounded actions") {
             val deps = McpRenderPorts()
-            deps.servers.value = listOf(deps.servers.value.single().copy(
-                authentication = authentication,
-                status = McpServerSettingsStatus.Failed(McpClientFailureReason.ConnectionLost),
-            ))
+            deps.servers.value = listOf(
+                deps.servers.value.single().copy(
+                    authentication = authentication,
+                    status = McpServerSettingsStatus.Failed(McpClientFailureReason.ConnectionLost),
+                ),
+            )
             withMcpVm(deps) { vm ->
                 vm.details("server")
                 runMosaicTest {
                     val snapshot = setContentAndSnapshot {
-                        io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                        TuiPopupHost(Modifier.width(100).height(36)) { McpSettingsComponent(vm) }
-                    }
+                        WithMosaicComponentRenderers {
+                            TuiPopupHost(Modifier.width(100).height(36)) { RenderMcpSettings(vm) }
+                        }
                     }
                     assertTrue("Headers: Authorization (values hidden)" in snapshot, snapshot)
                     assertTrue("[Reconnect]" in snapshot, snapshot)
@@ -148,9 +164,9 @@ val mcpSettingsComponentTest by testSuite {
             vm.save(token)
             runMosaicTest {
                 val initial = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(36)) { McpSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(36)) { RenderMcpSettings(vm) }
+                    }
                 }
                 assertTrue("Server name is required." in initial, initial)
                 sendKeyEvent(KeyboardEvent(codepoint = 'N'.code))
@@ -165,8 +181,10 @@ val mcpSettingsComponentTest by testSuite {
                 val stdio = awaitMcpSnapshot("Transport [stdio]")
                 assertTrue("Arguments (space separated)" in stdio, stdio)
                 assertTrue("Working directory" in stdio, stdio)
-                assertEquals(McpTransportKind.Stdio,
-                    (vm.state.value.dialog as McpSettingsDialog.Editing).draft.transport)
+                assertEquals(
+                    McpTransportKind.Stdio,
+                    (vm.state.value.dialog as McpSettingsDialog.Editing).draft.transport,
+                )
                 sendKeyEvent(KeyboardEvent(codepoint = 27))
                 awaitMcpSnapshot("MCP servers [Add]")
                 assertTrue(deps.saved.isEmpty())
@@ -175,10 +193,13 @@ val mcpSettingsComponentTest by testSuite {
     }
     test("edit displays sanitized Keep draft OAuth fields and VM validation") {
         val deps = McpRenderPorts()
-        deps.initial = McpServerDraft.StreamableHttp("server", configuration = McpStreamableHttpDraft(
-            "https://server/mcp", mapOf("Authorization" to McpSecretDraft.Keep),
-            McpOAuthDraft(clientId = "client", clientSecret = McpSecretDraft.Keep),
-        ))
+        deps.initial = McpServerDraft.StreamableHttp(
+            "server",
+            configuration = McpStreamableHttpDraft(
+                "https://server/mcp", mapOf("Authorization" to McpSecretDraft.Keep),
+                McpOAuthDraft(clientId = "client", clientSecret = McpSecretDraft.Keep),
+            ),
+        )
         withMcpVm(deps) { vm ->
             vm.details("server")
             vm.edit((vm.state.value.dialog as McpSettingsDialog.Details).token)
@@ -187,9 +208,9 @@ val mcpSettingsComponentTest by testSuite {
             vm.save(editor.token)
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(45)) { McpSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(45)) { RenderMcpSettings(vm) }
+                    }
                 }
                 assertTrue("Edit MCP server" in snapshot, snapshot)
                 assertTrue("Authorization=<keep>" in snapshot, snapshot)
@@ -206,9 +227,9 @@ val mcpSettingsComponentTest by testSuite {
             vm.requestDelete((vm.state.value.dialog as McpSettingsDialog.Details).token)
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(36)) { McpSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(36)) { RenderMcpSettings(vm) }
+                    }
                 }
                 assertTrue("Delete 'server'?" in snapshot, snapshot)
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -226,9 +247,9 @@ val mcpSettingsComponentTest by testSuite {
             vm.importCodex()
             runMosaicTest {
                 val loading = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(36)) { McpSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(36)) { RenderMcpSettings(vm) }
+                    }
                 }
                 assertTrue("Loading Codex MCP servers" in loading, loading)
                 gate.complete(Unit)
@@ -244,8 +265,10 @@ val mcpSettingsComponentTest by testSuite {
                 val token = (vm.state.value.dialog as McpSettingsDialog.ImportPreview).token
                 vm.toggleImport(token, "new")
                 awaitMcpSnapshot("[Import selected (1)]")
-                assertEquals(McpImportDecision.Skip,
-                    (vm.state.value.dialog as McpSettingsDialog.ImportPreview).decisions["new"])
+                assertEquals(
+                    McpImportDecision.Skip,
+                    (vm.state.value.dialog as McpSettingsDialog.ImportPreview).decisions["new"],
+                )
                 vm.applyImport(token)
                 awaitMcpSnapshot("MCP servers [Add]")
                 assertEquals(McpImportDecision.Replace, deps.applied.single()["conflict"])
@@ -260,14 +283,14 @@ val mcpSettingsComponentTest by testSuite {
             vm.importCodex()
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(36)) { McpSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(36)) { RenderMcpSettings(vm) }
+                    }
                 }
                 assertTrue("No Codex MCP servers found." in snapshot, snapshot)
                 assertTrue("[Import selected (0)]" in snapshot, snapshot)
                 deps.items = supportedItems()
-                deps.admission = McpWriteAdmission.Rejected("The import target changed.")
+                deps.admission = SettingsWriteAdmission.Rejected("The import target changed.")
                 vm.importCodex()
                 awaitMcpSnapshot("[Import selected (2)]")
                 vm.applyImport((vm.state.value.dialog as McpSettingsDialog.ImportPreview).token)
@@ -285,17 +308,17 @@ val mcpSettingsComponentTest by testSuite {
             vm.details("server")
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(36)) { McpSettingsComponent(vm) }
-                    McpSettingsEffects(vm) {
-                        calls++
-                        if (calls == 1) {
-                            started.complete(Unit)
-                            opening.await()
-                            false
-                        } else true
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(36)) { RenderMcpSettings(vm) }
+                        McpSettingsEffects(vm) {
+                            calls++
+                            if (calls == 1) {
+                                started.complete(Unit)
+                                opening.await()
+                                false
+                            } else true
+                        }
                     }
-                }
                 }
                 val token = (vm.state.value.dialog as McpSettingsDialog.Details).token
                 vm.login(token)
@@ -314,6 +337,13 @@ val mcpSettingsComponentTest by testSuite {
             }
         }
     }
+}
+
+@Composable
+private fun BoxScope.RenderMcpSettings(vm: McpSettingsViewModel) {
+    val renderer = remember { MosaicSettingsRenderer() }
+    Column { McpSettingsPage(vm, renderer) }
+    McpSettingsDialogHost(vm, MosaicMcpDialogs(this))
 }
 
 private fun McpSettingsViewModel.editorToken(): McpDialogToken =
@@ -344,15 +374,21 @@ private fun supportedItems(): List<McpImportItem> = listOf(
 )
 
 private class McpRenderPorts : McpSettingsDependencies {
-    override val servers = MutableStateFlow(listOf(McpServerSettingsState(
-        "server", McpTransportKind.StreamableHttp, true, McpAuthenticationState.LoginRequired,
-        McpServerSettingsStatus.Connecting, headerNames = listOf("Authorization"),
-        streamableHttpUrl = "https://server/mcp",
-    )))
+    override val servers = MutableStateFlow(
+        listOf(
+            McpServerSettingsState(
+                "server", McpTransportKind.StreamableHttp, true, McpAuthenticationState.LoginRequired,
+                McpServerSettingsStatus.Connecting, headerNames = listOf("Authorization"),
+                streamableHttpUrl = "https://server/mcp",
+            ),
+        ),
+    )
     override val operationFailure = MutableStateFlow(false)
-    var initial: McpServerDraft = McpServerDraft.StreamableHttp("server",
-        configuration = McpStreamableHttpDraft("https://server/mcp"))
-    var admission: McpWriteAdmission = McpWriteAdmission.Accepted
+    var initial: McpServerDraft = McpServerDraft.StreamableHttp(
+        "server",
+        configuration = McpStreamableHttpDraft("https://server/mcp"),
+    )
+    var admission: SettingsWriteAdmission = SettingsWriteAdmission.Accepted
     var items = supportedItems()
     var readGate: CompletableDeferred<Unit>? = null
     var readFailure: Throwable? = null
@@ -364,16 +400,16 @@ private class McpRenderPorts : McpSettingsDependencies {
     override fun captureEditor(serverName: String?): McpEditHandle = object : McpEditHandle {
         override val originalName = serverName
         override val initialDraft = if (serverName == null) null else initial
-        override fun save(draft: McpServerDraft): McpWriteAdmission {
-            if (admission == McpWriteAdmission.Accepted) saved += draft
+        override fun save(draft: McpServerDraft): SettingsWriteAdmission {
+            if (admission == SettingsWriteAdmission.Accepted) saved += draft
             return admission
         }
         override fun release() = Unit
     }
     override fun captureServer(serverName: String): McpServerHandle = object : McpServerHandle {
         override val serverName = serverName
-        override fun delete(): McpWriteAdmission { deletions++; return admission }
-        override fun setEnabled(enabled: Boolean): McpWriteAdmission = admission
+        override fun delete(): SettingsWriteAdmission { deletions++; return admission }
+        override fun setEnabled(enabled: Boolean): SettingsWriteAdmission = admission
         override fun release() = Unit
     }
     override suspend fun readImport(): McpImportHandle {
@@ -386,8 +422,8 @@ private class McpRenderPorts : McpSettingsDependencies {
             override fun filter(filter: String): McpImportPreview = snapshot.copy(
                 filter = filter, items = snapshot.items.filter { it.serverName.contains(filter, true) },
             )
-            override fun apply(decisions: Map<String, McpImportDecision>): McpWriteAdmission {
-                if (admission == McpWriteAdmission.Accepted) applied += decisions.toMap()
+            override fun apply(decisions: Map<String, McpImportDecision>): SettingsWriteAdmission {
+                if (admission == SettingsWriteAdmission.Accepted) applied += decisions.toMap()
                 return admission
             }
             override fun release() = Unit

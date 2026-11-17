@@ -36,7 +36,7 @@ val sessionCatalogDependencyTest by testSuite {
                 assertTrue(catalog.state.value.sessions.single().archived)
                 catalog.unarchive(1)
                 assertEquals(2, catalog.fork(1))
-                assertTrue(catalog.delete(1))
+                assertTrue(catalog.requestDelete(catalog.state.value.sessions.single())!!.viewModel.delete())
                 assertEquals(
                     listOf("load:false", "archive:1", "load:false", "load:true",
                         "unarchive:1", "load:true", "fork:1", "load:true", "delete:1", "load:true"),

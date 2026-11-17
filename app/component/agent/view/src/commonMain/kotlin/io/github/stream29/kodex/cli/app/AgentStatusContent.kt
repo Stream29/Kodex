@@ -1,12 +1,12 @@
 package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.Composable
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.cli.agent.AgentRuntimeControl
 import io.github.stream29.kodex.cli.agent.canCompact
 import io.github.stream29.kodex.cli.agent.label
 import io.github.stream29.kodex.cli.agent.runtimeControl
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -58,7 +58,7 @@ public actual fun AgentHistorySeparatorContent(
 
 public actual fun liveTurnDurationLabel(duration: Duration): String = "Worked for ${duration.roundToSeconds()}"
 
-public actual fun Duration.roundToSeconds(): Duration {
+internal fun Duration.roundToSeconds(): Duration {
     if (!isFinite()) return this
     val truncatedSeconds = inWholeSeconds
     val remainder = this - truncatedSeconds.seconds

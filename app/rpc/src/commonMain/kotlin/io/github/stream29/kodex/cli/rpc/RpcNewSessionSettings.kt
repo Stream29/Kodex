@@ -41,9 +41,9 @@ private class RpcNewSessionDefaultsDependencies(
         expected: F,
         select: (KodexNewSessionSettings) -> F,
         replace: (KodexNewSessionSettings) -> KodexNewSessionSettings,
-    ): NewSessionDefaultsAdmission {
-        if (closed) return NewSessionDefaultsAdmission.Rejected
-        val accepted = updates.submit {
+    ): Boolean {
+        if (closed) return false
+        return updates.submit {
             try {
                 global.settings.editField(expected, { select(it.newSession) },
                     { it.copy(newSession = replace(it.newSession)) }, global::ensureActive)
@@ -51,7 +51,6 @@ private class RpcNewSessionDefaultsDependencies(
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Throwable) { global.reportOperationFailure(failure) }
         }
-        return if (accepted) NewSessionDefaultsAdmission.Accepted else NewSessionDefaultsAdmission.Rejected
     }
     override fun admitModel(expected: OpenAiModelId, requested: OpenAiModelId) =
         admit(expected, { it.model }, { it.copy(model = requested) })

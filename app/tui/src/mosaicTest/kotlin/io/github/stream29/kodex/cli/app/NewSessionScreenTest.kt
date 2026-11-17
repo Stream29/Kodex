@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.cli.app
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -7,28 +8,33 @@ import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.focus.focusRequester
 import com.jakewharton.mosaic.focus.onFocusChanged
+import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.onPlaced
+import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.PasteEvent
-import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.TestMosaic
-import com.jakewharton.mosaic.ui.unit.IntOffset
-import com.jakewharton.mosaic.ui.Text
+import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
+import com.jakewharton.mosaic.ui.Text
+import com.jakewharton.mosaic.ui.unit.IntOffset
+import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.files.Path
-import de.infix.testBalloon.framework.core.testSuite
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertContains
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
@@ -42,7 +48,7 @@ val newSessionScreenTest by testSuite {
                 mosaic.draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
             }) {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    WithMosaicComponentRenderers {
                         NewSessionScreen(fixture.newSession(), 40, 10, NewLineKey.ShiftEnter, { 1 }, {}, { Text("STATUS") })
                     }
                 }
@@ -64,7 +70,7 @@ val newSessionScreenTest by testSuite {
             var rows by mutableStateOf(8)
             runNewSessionMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    WithMosaicComponentRenderers {
                         NewSessionScreen(fixture.newSession(), 20, rows, NewLineKey.ShiftEnter, { 1 }, {}, { Text("STATUS") })
                     }
                 }
@@ -93,7 +99,7 @@ val newSessionScreenTest by testSuite {
             val focusChanges = mutableListOf<String>()
             runNewSessionMosaicTest {
                 val initial = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    WithMosaicComponentRenderers {
                         NewSessionScreen(
                             fixture.newSession(), 20, 2, NewLineKey.ShiftEnter,
                             { 3 }, {},
@@ -168,7 +174,7 @@ val newSessionScreenTest by testSuite {
             var lastPosition: IntOffset? = null
             runNewSessionMosaicTest {
                 val initial = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    WithMosaicComponentRenderers {
                         NewSessionScreen(
                             fixture.newSession(), 20, 2, NewLineKey.ShiftEnter, { 3 }, {},
                             {
@@ -209,7 +215,7 @@ val newSessionScreenTest by testSuite {
             var renderedWidth = 0
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    WithMosaicComponentRenderers {
                         NewSessionScreen(
                             fixture.newSession(), 100, 15, NewLineKey.ShiftEnter,
                             { width -> budgetWidth = width; 1 }, {},
@@ -230,6 +236,7 @@ val newSessionScreenTest by testSuite {
             fixture.close()
         }
     }
+
     test("unmounting and returning retains the singleton Composer cursor and cwd") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
@@ -241,27 +248,24 @@ val newSessionScreenTest by testSuite {
             var visible by mutableStateOf(true)
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    if (visible) {
-                        NewSessionScreen(
-                            viewModel = draft,
-                            columns = 40,
-                            rows = 8,
-                            newLineKey = NewLineKey.ShiftEnter,
-                            statusBarRows = { 0 },
-                            onSubmit = {},
-                            statusBar = {},
-                        )
+                    WithMosaicComponentRenderers {
+                        if (visible) {
+                            NewSessionScreen(
+                                viewModel = draft,
+                                columns = 40,
+                                rows = 8,
+                                newLineKey = NewLineKey.ShiftEnter,
+                                statusBarRows = { 0 },
+                                onSubmit = {},
+                                statusBar = {},
+                            )
+                        }
                     }
-                }
                 }
                 visible = false
                 awaitSnapshot()
                 assertEquals("not submitted", draft.composer.state.value.text)
-                assertEquals(
-                    io.github.stream29.kodex.app.agent.contract.ComposerLifecycle.Open,
-                    draft.composer.state.value.lifecycle,
-                )
+                assertEquals(ComposerLifecycle.Open, draft.composer.state.value.lifecycle)
                 visible = true
                 val snapshot = awaitSnapshot()
                 assertContains(snapshot, "not submitted")
@@ -277,6 +281,7 @@ val newSessionScreenTest by testSuite {
             fixture.close()
         }
     }
+
     test("emptySessionDoesNotRenderCreationInstructions") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
@@ -284,15 +289,15 @@ val newSessionScreenTest by testSuite {
 
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    NewSessionContent(
-                        composerViewModel = composer,
-                        columns = 40,
-                        rows = 8,
-                        newLineKey = NewLineKey.ShiftEnter,
-                        onSubmit = {},
-                    )
-                }
+                    WithMosaicComponentRenderers {
+                        RenderNewSessionDraft(
+                            composerViewModel = composer,
+                            columns = 40,
+                            rows = 8,
+                            newLineKey = NewLineKey.ShiftEnter,
+                            onSubmit = {},
+                        )
+                    }
                 }
 
                 assertFalse("Enter a prompt to create a session" in snapshot, snapshot)
@@ -311,19 +316,19 @@ val newSessionScreenTest by testSuite {
 
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    NewSessionContent(
-                        composerViewModel = composer,
-                        columns = 10,
-                        rows = 4,
-                        newLineKey = NewLineKey.ShiftEnter,
-                        onSubmit = {},
-                    )
-                }
+                    WithMosaicComponentRenderers {
+                        RenderNewSessionDraft(
+                            composerViewModel = composer,
+                            columns = 10,
+                            rows = 3,
+                            newLineKey = NewLineKey.ShiftEnter,
+                            onSubmit = {},
+                        )
+                    }
                 }
 
                 assertEquals(
-                    "----------\n  two\n  three\n  four",
+                    "  two\n  three\n  four",
                     snapshot,
                 )
             }
@@ -341,23 +346,23 @@ val newSessionScreenTest by testSuite {
 
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    var showNewSession by remember { mutableStateOf(true) }
-                    if (showNewSession) {
-                        NewSessionContent(
-                            composerViewModel = composer,
-                            columns = 80,
-                            rows = 23,
-                            newLineKey = NewLineKey.ShiftEnter,
-                            onSubmit = { revision ->
-                                submittedRevision = revision
-                                showNewSession = false
-                            },
-                        )
-                    } else {
-                        Text("Root session")
+                    WithMosaicComponentRenderers {
+                        var showNewSession by remember { mutableStateOf(true) }
+                        if (showNewSession) {
+                            RenderNewSessionDraft(
+                                composerViewModel = composer,
+                                columns = 80,
+                                rows = 23,
+                                newLineKey = NewLineKey.ShiftEnter,
+                                onSubmit = { revision ->
+                                    submittedRevision = revision
+                                    showNewSession = false
+                                },
+                            )
+                        } else {
+                            Text("Root session")
+                        }
                     }
-                }
                 }
 
                 sendPasteEvent(PasteEvent(prompt))
@@ -384,17 +389,19 @@ val newSessionScreenTest by testSuite {
             var submittedText: String? = null
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    NewSessionContent(
-                        composerViewModel = staleProjection,
-                        columns = 40, rows = 8, newLineKey = NewLineKey.ShiftEnter,
-                        onSubmit = { revision ->
-                            submittedRevision = revision
-                            submittedText = composer.state.value.text
-                            composer.update("later draft")
-                        },
-                    )
-                }
+                    WithMosaicComponentRenderers {
+                        RenderNewSessionDraft(
+                            composerViewModel = staleProjection,
+                            columns = 40,
+                            rows = 8,
+                            newLineKey = NewLineKey.ShiftEnter,
+                            onSubmit = { revision ->
+                                submittedRevision = revision
+                                submittedText = composer.state.value.text
+                                composer.update("later draft")
+                            },
+                        )
+                    }
                 }
                 sendPasteEvent(PasteEvent("  exact input \n "))
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -420,19 +427,19 @@ val newSessionScreenTest by testSuite {
                 var submissions by mutableStateOf(0)
                 runMosaicTest {
                     setContentAndSnapshot {
-                        io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                        Column {
-                            NewSessionContent(
-                                composer, 40, 8, NewLineKey.ShiftEnter,
-                                onSubmit = {
-                                    revision = it
-                                    captured = composer.state.value.text
-                                    submissions++
-                                },
-                            )
-                            Text("submissions=$submissions")
+                        WithMosaicComponentRenderers {
+                            Column {
+                                RenderNewSessionDraft(
+                                    composer, 40, 8, NewLineKey.ShiftEnter,
+                                    onSubmit = {
+                                        revision = it
+                                        captured = composer.state.value.text
+                                        submissions++
+                                    },
+                                )
+                                Text("submissions=$submissions")
+                            }
                         }
-                    }
                     }
                     sendKeyEvent(KeyboardEvent(codepoint = 13))
                     awaitSnapshot()
@@ -457,11 +464,11 @@ val newSessionScreenTest by testSuite {
             var visible by mutableStateOf(true)
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    if (visible) NewSessionScreen(
-                        draft, 40, 8, NewLineKey.ShiftEnter, { 0 }, {}, {},
-                    ) else Text("persisted Session")
-                }
+                    WithMosaicComponentRenderers {
+                        if (visible) NewSessionScreen(
+                            draft, 40, 8, NewLineKey.ShiftEnter, { 0 }, {}, {},
+                        ) else Text("persisted Session")
+                    }
                 }
                 visible = false
                 awaitSnapshot()
@@ -492,15 +499,15 @@ val newSessionScreenTest by testSuite {
 
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    NewSessionContent(
-                        composerViewModel = composer,
-                        columns = 20,
-                        rows = 8,
-                        newLineKey = NewLineKey.ShiftEnter,
-                        onSubmit = {},
-                    )
-                }
+                    WithMosaicComponentRenderers {
+                        RenderNewSessionDraft(
+                            composerViewModel = composer,
+                            columns = 20,
+                            rows = 8,
+                            newLineKey = NewLineKey.ShiftEnter,
+                            onSubmit = {},
+                        )
+                    }
                 }
 
                 sendPasteEvent(PasteEvent("abc"))
@@ -548,6 +555,19 @@ val newSessionScreenTest by testSuite {
         } finally {
             fixture.close()
         }
+    }
+}
+
+@Composable
+private fun RenderNewSessionDraft(
+    composerViewModel: ComposerViewModel,
+    columns: Int,
+    rows: Int,
+    newLineKey: NewLineKey,
+    onSubmit: (Long) -> Unit,
+) {
+    NewSessionDraft(composerViewModel, newLineKey, onSubmit, maximumEditorLines = rows) { content ->
+        Box(Modifier.width(columns).height(rows)) { content() }
     }
 }
 

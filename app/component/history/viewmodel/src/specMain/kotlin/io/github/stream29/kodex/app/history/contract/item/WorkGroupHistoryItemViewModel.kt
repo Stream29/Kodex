@@ -31,11 +31,6 @@ public interface WorkGroupHistoryItemViewModel : HistoryItemViewModel {
 
 /** Complete state machine for one folded work group. */
 public sealed interface WorkGroupHistoryItemState {
-    /** The group header is not ready yet. */
-    public data class Loading(
-        public val loadingJob: Job,
-    ) : WorkGroupHistoryItemState
-
     /**
      * Only [WorkGroupHistoryItemViewModel.indexRange], item count, and this state are retained.
      * @throws IllegalArgumentException if [elapsed] is negative or infinite.
@@ -84,6 +79,6 @@ public sealed interface WorkGroupHistoryItemState {
         }
     }
 
-    /** Group-header or nested-child loading failed; the View renders the red error fallback. */
+    /** Nested-child loading failed; the View renders the red error fallback. */
     public data object Failed : WorkGroupHistoryItemState
 }

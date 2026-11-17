@@ -105,12 +105,12 @@ public interface AgentSettingsViewModel {
  * History Index's per-consumer read handles still require their own release.
  *
  * Render the independent [state]/[running] facts without deriving another execution
- * aggregate. Show one pending-steer preview, the exact [requestUserInput] child, and one
- * [notification] outlet. [tokenCount] null omits the counter. History context menus
- * capture the real item, index and generation. Ordinary asynchronous command failures
- * use the Application error reporter, not [notification]. Backend-notified run failures
- * are not reported twice, and cancellation is not an ordinary failure. Session
- * inactivity restores observations, never replays accepted writes or creates.
+ * aggregate. Show one pending-steer preview and the exact [requestUserInput] child.
+ * [tokenCount] null omits the counter. History context menus capture the real item,
+ * index and generation. Ordinary asynchronous command failures use the Application
+ * error reporter. Backend-notified run failures are not reported twice, and
+ * cancellation is not an ordinary failure. Session inactivity restores observations,
+ * never replays accepted writes or creates.
  *
  * Primary control is Stop whenever running (including manual compaction), otherwise
  * Clear pending for ToolPending and Resume for all other states. Hide Compact while
@@ -139,7 +139,6 @@ public interface AgentViewModel :
     public val tokenCount: StateFlow<Long?>
     public val pendingSteer: StateFlow<List<StableIndexEvent.Steerable>>
     public val historyAction: StateFlow<AgentHistoryActionState>
-    public val notification: StateFlow<AgentNotification?>
     public val lifecycle: StateFlow<AgentLifecycleState>
 
     /**
@@ -226,9 +225,6 @@ public interface AgentViewModel :
      * use the Application error reporter. A closed owner does not start another operation.
      */
     public fun confirmHistoryRevert(requestId: Long): Unit
-
-    /** Dismisses only the matching notification, never a later result. */
-    public fun dismissNotification(notificationId: Long): Unit
 
     /**
      * Idempotently stops local observations/waits and closes owned children.

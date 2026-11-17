@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.Composable
-import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.cli.settings.NewLineKey
 
@@ -21,20 +20,4 @@ public expect fun NewSessionScreen(
     statusBarRows: (Int) -> Int,
     onSubmit: (expectedRevision: Long) -> Unit,
     statusBar: @Composable (Int) -> Unit,
-): Unit
-
-/**
- * Native draft frame with blank-history space, separator, bounded wrapping and cursor.
- *
- * The widget buffer belongs to the renderer; accepted edits are sent to the one Composer child.
- * Submit invokes the captured owner's [onSubmit], not Composer's persisted-Agent submission port.
- * A tab switch disposes only widget state, never the borrowed Composer or its owner.
- */
-@Composable
-public expect fun NewSessionContent(
-    composerViewModel: ComposerViewModel,
-    columns: Int,
-    rows: Int,
-    newLineKey: NewLineKey,
-    onSubmit: (expectedRevision: Long) -> Unit,
 ): Unit

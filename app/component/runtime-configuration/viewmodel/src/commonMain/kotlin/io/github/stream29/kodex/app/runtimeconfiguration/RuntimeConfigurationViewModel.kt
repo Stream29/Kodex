@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.app.runtimeconfiguration
 
 import io.github.stream29.kodex.openai.ModelInfo
@@ -20,18 +18,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 
-public actual object DefaultRuntimeConfigurationViewModelFactory : RuntimeConfigurationViewModelFactory {
-    actual override fun create(
-        dependencies: RuntimeConfigurationDependencies,
-        ownerScope: CoroutineScope,
-    ): RuntimeConfigurationViewModel = DefaultRuntimeConfigurationViewModel(dependencies, ownerScope)
-}
-
 public actual fun createRuntimeConfigurationViewModel(
     dependencies: RuntimeConfigurationDependencies,
     ownerScope: CoroutineScope,
-): RuntimeConfigurationViewModel =
-    DefaultRuntimeConfigurationViewModelFactory.create(dependencies, ownerScope)
+): RuntimeConfigurationViewModel = DefaultRuntimeConfigurationViewModel(dependencies, ownerScope)
 
 private class DefaultRuntimeConfigurationViewModel(
     private val dependencies: RuntimeConfigurationDependencies,

@@ -6,7 +6,6 @@ import androidx.compose.runtime.remember
 import io.github.stream29.kodex.openai.LoadableToolSpec
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.ResponsesApiTool
-import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.WebSearchAction
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -46,55 +45,6 @@ internal fun RecordedErrorField(label: String, value: String) {
     LocalHistoryRenderer.current.RecordedError("$label: $value", HistoryTextStyle.Normal)
 }
 
-/** Every actual operation is represented, in model order, without lossy previews. */
-internal fun SearchCommands.operationTitles(): List<String> = buildList {
-    searchQuery.orEmpty().forEach { query ->
-        add(compactToolLine(
-            "Search ${query.q}",
-            "domains" to query.domains?.takeIf { it.isNotEmpty() }?.joinToString(),
-            "recency" to query.recency,
-        ))
-    }
-    imageQuery.orEmpty().forEach { query ->
-        add(compactToolLine(
-            "Search images ${query.q}",
-            "domains" to query.domains?.takeIf { it.isNotEmpty() }?.joinToString(),
-            "recency" to query.recency,
-        ))
-    }
-    open.orEmpty().forEach { add("Open ${it.refId}" + (it.lineno?.let { n -> " at line $n" } ?: "")) }
-    click.orEmpty().forEach { add("Click link ${it.id} in ${it.refId}") }
-    find.orEmpty().forEach { add("Find \"${it.pattern}\" in ${it.refId}") }
-    screenshot.orEmpty().forEach { add("Screenshot ${it.refId} page ${it.pageno}") }
-    finance.orEmpty().forEach {
-        add(compactToolLine(
-            "Finance ${it.ticker}",
-            "type" to it.type.name.lowercase(),
-            "market" to it.market?.takeIf(String::isNotEmpty),
-        ))
-    }
-    weather.orEmpty().forEach {
-        add(compactToolLine(
-            "Weather ${it.location}",
-            "start" to it.start?.takeIf(String::isNotEmpty),
-            "duration" to it.duration,
-        ))
-    }
-    sports.orEmpty().forEach {
-        add(compactToolLine(
-            "Sports ${it.league.name.lowercase()} ${it.function.name.lowercase()}",
-            "tool" to it.tool?.name?.lowercase(),
-            "team" to it.team?.takeIf(String::isNotEmpty),
-            "opponent" to it.opponent?.takeIf(String::isNotEmpty),
-            "date_from" to it.dateFrom?.takeIf(String::isNotEmpty),
-            "date_to" to it.dateTo?.takeIf(String::isNotEmpty),
-            "num_games" to it.numGames,
-            "locale" to it.locale?.takeIf(String::isNotEmpty),
-        ))
-    }
-    time.orEmpty().forEach { add("Time ${it.utcOffset}") }
-}
-
 internal fun WebSearchAction?.operationTitles(): List<String> = when (this) {
     is WebSearchAction.Search -> buildList {
         query?.takeIf(String::isNotEmpty)?.let { add("Search $it") }
@@ -118,12 +68,6 @@ internal fun JsonElement.toolSearchContext(name: String): String =
         *entries.filter { (_, value) -> value != JsonNull }
             .map { (key, value) -> key to value.toString() }.toTypedArray(),
     ) else "$name; arguments=$this"
-
-internal fun recordedImageTitle(savedPath: String?): String =
-    savedPath?.takeIf(String::isNotBlank)
-        ?.substringAfterLast('/')?.substringAfterLast('\\')
-        ?.takeIf(String::isNotBlank)?.let { "Generate $it" }
-        ?: "Generate image"
 
 /**
  * Hosted strings have no format discriminator. Only explicit HTTP(S)/file URI

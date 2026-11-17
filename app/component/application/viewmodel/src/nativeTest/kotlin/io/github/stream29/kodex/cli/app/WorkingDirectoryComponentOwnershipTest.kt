@@ -21,7 +21,6 @@ val workingDirectoryComponentOwnershipTest by testSuite {
             Fs.createDirectories(chosen)
             popup.viewModel.select(chosen)
             agent.settings.first { it.cwd == chosen }
-            assertSame(agent, popup.viewModel.target)
             assertEquals(otherCwd, other.settings.value.cwd)
             assertFalse(popup.viewModel.isActive)
             assertSame(popup, application.popup.value)

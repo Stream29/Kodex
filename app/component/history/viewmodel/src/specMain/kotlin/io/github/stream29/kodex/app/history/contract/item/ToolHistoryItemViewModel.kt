@@ -13,7 +13,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaT
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
 
@@ -22,13 +21,10 @@ public interface ToolHistoryItemViewModel : WorkGroupChildHistoryItemViewModel {
     public override val index: Int
     public val state: StateFlow<ToolHistoryItemState>
 
-    /** Requests `Collapsed -> Expanding -> Expanded`; all other states are unchanged. */
+    /** Requests `Collapsed -> Expanded`; all other states are unchanged. */
     public fun expand()
 
-    /**
-     * Requests `Expanding|Expanded -> Collapsed` and releases the detail; other states are
-     * unchanged. Collapsing [ToolHistoryItemState.Expanding] also cancels its loading Job.
-     */
+    /** Requests `Expanded -> Collapsed` and releases the detail; other states are unchanged. */
     public fun collapse()
 }
 
@@ -39,20 +35,9 @@ public interface ToolHistoryItemViewModel : WorkGroupChildHistoryItemViewModel {
  * releases [Expanded.event].
  */
 public sealed interface ToolHistoryItemState {
-    /** The one-line header is not available yet. */
-    public data class Loading(
-        public val loadingJob: Job,
-    ) : ToolHistoryItemState
-
     /** The header is ready and no complete tool payload is retained by this item. */
     public data class Collapsed(
         public val header: ToolHistoryItemHeader,
-    ) : ToolHistoryItemState
-
-    /** Detail loading is active while the already-loaded header remains renderable. */
-    public data class Expanding(
-        public val header: ToolHistoryItemHeader,
-        public val loadingJob: Job,
     ) : ToolHistoryItemState
 
     /**
@@ -71,7 +56,7 @@ public sealed interface ToolHistoryItemState {
         }
     }
 
-    /** Initial or detail loading failed; the View renders the red error fallback. */
+    /** Header decoding failed; the View renders the red error fallback. */
     public data object Failed : ToolHistoryItemState
 }
 

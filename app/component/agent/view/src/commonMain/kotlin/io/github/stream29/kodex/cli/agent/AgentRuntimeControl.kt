@@ -18,6 +18,6 @@ public actual fun AgentStateValue.canEditHistory(running: Boolean): Boolean =
     !running && this !is AgentStateValue.RequestResponse &&
         this != AgentStateValue.ExternalWrite && this != AgentStateValue.Compacting
 
-public actual fun AgentStateValue.canCompact(running: Boolean): Boolean =
+internal fun AgentStateValue.canCompact(running: Boolean): Boolean =
     !running && (this == AgentStateValue.UserMessage ||
         this == AgentStateValue.AssistantMessage || this == AgentStateValue.ToolCompleted)

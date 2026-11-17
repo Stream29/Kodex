@@ -13,12 +13,13 @@ import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.utils.externalurl.OpenExternalUrlResult
+import io.github.stream29.kodex.utils.externalurl.openExternalUrl
 
 @Composable
-public actual fun BoxScope.OpenAiLoginPopup(
+internal fun BoxScope.OpenAiLoginPopup(
     viewModel: OpenAiLoginViewModel,
     onDismissRequest: () -> Unit,
-    openUrl: suspend (String) -> OpenExternalUrlResult,
+    openUrl: suspend (String) -> OpenExternalUrlResult = ::openExternalUrl,
 ) {
     val width = (LocalTerminalState.current.size.columns - 4).coerceIn(1, 72)
     OpenAiLoginContent(

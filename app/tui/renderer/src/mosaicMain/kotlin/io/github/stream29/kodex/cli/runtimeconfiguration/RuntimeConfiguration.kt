@@ -12,7 +12,6 @@ import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Color
-import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationState
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
@@ -46,32 +45,10 @@ public actual class RuntimeConfigurationDropdowns private constructor(
 }
 
 @Composable
-public actual fun RuntimeConfigurationTriggers(
+internal fun RuntimeConfigurationStatusItemsWithoutSpacing(
     viewModel: RuntimeConfigurationViewModel,
     dropdowns: RuntimeConfigurationDropdowns,
-    enabled: Boolean,
-) {
-    key(viewModel) {
-        val state by viewModel.state.collectAsState()
-        RuntimeConfigurationTriggers(state, dropdowns, enabled)
-    }
-}
-
-@Composable
-public actual fun RuntimeConfigurationTriggers(
-    state: RuntimeConfigurationState,
-    dropdowns: RuntimeConfigurationDropdowns,
-    enabled: Boolean,
-) {
-    if (state.closed) return
-    Row { RuntimeConfigurationStatusItems(state, dropdowns, enabled, spacing = true) }
-}
-
-@Composable
-public actual fun RuntimeConfigurationStatusItemsWithoutSpacing(
-    viewModel: RuntimeConfigurationViewModel,
-    dropdowns: RuntimeConfigurationDropdowns,
-    enabled: Boolean,
+    enabled: Boolean = true,
 ) {
     key(viewModel) {
         val state by viewModel.state.collectAsState()
@@ -80,20 +57,10 @@ public actual fun RuntimeConfigurationStatusItemsWithoutSpacing(
 }
 
 @Composable
-public actual fun RuntimeConfigurationStatusItemsWithoutSpacing(
+internal fun RuntimeConfigurationStatusItemsWithoutSpacing(
     state: RuntimeConfigurationState,
     dropdowns: RuntimeConfigurationDropdowns,
-    enabled: Boolean,
-) {
-    RuntimeConfigurationStatusItems(state, dropdowns, enabled, spacing = false)
-}
-
-@Composable
-private fun RuntimeConfigurationStatusItems(
-    state: RuntimeConfigurationState,
-    dropdowns: RuntimeConfigurationDropdowns,
-    enabled: Boolean,
-    spacing: Boolean,
+    enabled: Boolean = true,
 ) {
     if (state.closed) return
     val configuration = state.configuration
@@ -104,7 +71,6 @@ private fun RuntimeConfigurationStatusItems(
         color = TuiTheme.colorScheme.onPrimaryContainer,
         enabled = enabled,
     )
-    if (spacing) Text(" ")
     TuiDropdownTrigger(
         dropdownState = dropdowns.requestUserInputMode,
         label = runtimeRequestUserInputModeLabel(configuration.requestUserInputMode),
@@ -125,7 +91,7 @@ public actual fun BoxScope.RuntimeConfigurationMenus(
 }
 
 @Composable
-public actual fun BoxScope.RuntimeConfigurationMenus(
+internal fun BoxScope.RuntimeConfigurationMenus(
     state: RuntimeConfigurationState,
     dropdowns: RuntimeConfigurationDropdowns,
     onConfigurationSelected: (OpenAiModelId, ReasoningEffort, ServiceTier) -> Unit,

@@ -136,7 +136,11 @@ private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (t
     }
 }
 
-private fun functionToolSummary(name: String, namespace: String?, failed: Boolean): String {
+public actual fun functionToolSummary(
+    name: String,
+    namespace: String?,
+    failed: Boolean,
+): String {
     val qualifiedName = qualifiedToolName(name, namespace)
     if (!failed) return when (qualifiedName) {
         "await_event" -> "Wait for events"
@@ -183,7 +187,7 @@ private fun functionToolSummary(name: String, namespace: String?, failed: Boolea
     }
 }
 
-private fun customToolSummary(
+public actual fun customToolSummary(
     name: String,
     namespace: String?,
     input: String,

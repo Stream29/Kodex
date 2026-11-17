@@ -10,12 +10,11 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":app-component-composer-viewmodel"))
-            api(project(":app-component-application-preferences-viewmodel"))
+            api(project(":app-rpc-protocol"))
             api(compose.runtime)
         }
         commonMain.dependencies {
             implementation(project(":app-component-widgets"))
-            implementation(libs.kotlinx.coroutines.core)
         }
     }
 }

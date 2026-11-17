@@ -142,7 +142,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                     }
                 }
                 val observed = RpcGlobalSettings.open(rpc, this, 80)
-                val page = if (defaults) null else RpcGlobalEditor(observed, rpc, this)
+                val page = if (defaults) null else RpcGlobalEditor(observed, rpc, this, home.toString())
                 val defaultPage = if (defaults) RpcNewSessionSettings(observed, this) else null
                 try {
                     if (defaults) defaultPage!!.updateModel(defaultPage.state.value.revision, OpenAiModelId("cancelled"))

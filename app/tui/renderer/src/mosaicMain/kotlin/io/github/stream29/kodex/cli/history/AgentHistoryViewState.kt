@@ -11,9 +11,9 @@ public actual class AgentHistoryViewState actual constructor() {
     // this state can be retained by a tab cache; no model/window remains reachable through it.
     private var inputListener: ((ScrollInteraction) -> Unit)? = null
 
-    public actual val listState: LazyListState = LazyListState()
+    internal val listState: LazyListState = LazyListState()
 
-    public actual val scrollInteractionSource: MutableScrollInteractionSource =
+    internal val scrollInteractionSource: MutableScrollInteractionSource =
         MutableScrollInteractionSource { interaction -> inputListener?.invoke(interaction) }
 
     /** Installs only for one exact renderer mount; returns exact-listener disposal. */

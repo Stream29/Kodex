@@ -11,16 +11,19 @@ import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
+import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.UsageResetOption
 import io.github.stream29.kodex.app.settings.contract.UsageResetRequest
 import io.github.stream29.kodex.app.settings.contract.UsageResetState
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.app.usagereset.contract.UsageResetDependencies
 import io.github.stream29.kodex.app.usagereset.contract.UsageResetViewModel
 import io.github.stream29.kodex.app.usagereset.createUsageResetViewModel
 import io.github.stream29.kodex.cli.components.TuiPopupHost
+import io.github.stream29.kodex.cli.settings.SettingsModalDialogFrame
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageSnapshot
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetCredit
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetCredits
@@ -40,14 +43,14 @@ val usageResetDialogTest by testSuite {
         var visible by mutableStateOf(true)
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box {
-                    TuiPopupHost(Modifier.width(100).height(30)) {
-                        Text("background")
-                        if (visible) UsageResetDialogHost(vm)
+                WithMosaicComponentRenderers {
+                    Box {
+                        TuiPopupHost(Modifier.width(100).height(30)) {
+                            Text("background")
+                            if (visible) RenderUsageResetDialog(vm)
+                        }
                     }
                 }
-            }
             }
             assertTrue("background" in snapshot, snapshot)
             assertFalse("Usage limit resets" in snapshot, snapshot)
@@ -63,7 +66,7 @@ val usageResetDialogTest by testSuite {
         val vm = RecordingReset(choices())
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                WithMosaicComponentRenderers { RenderRecording(vm) }
             }
             assertTrue("2 usage limit resets available." in snapshot, snapshot)
             assertTrue(snapshot.indexOf("[Full reset]") < snapshot.indexOf("[Dated reset]"), snapshot)
@@ -83,7 +86,7 @@ val usageResetDialogTest by testSuite {
         val vm = RecordingReset(choices())
         runMosaicTest {
             setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                WithMosaicComponentRenderers { RenderRecording(vm) }
             }
             // Cancel starts focused; Tab wraps to the first credit row.
             sendKeyEvent(KeyboardEvent(codepoint = 9))
@@ -95,31 +98,13 @@ val usageResetDialogTest by testSuite {
         }
     }
 
-    test("legacy nullable option is visible but disabled and cannot request autochoice") {
-        val vm = RecordingReset(UsageResetState.Choosing(UsageResetRequest(
-            1, listOf(unknown.copy(creditId = null)),
-        )))
-        runMosaicTest {
-            val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
-            }
-            assertTrue("[Full reset]" in snapshot, snapshot)
-            sendKeyEvent(KeyboardEvent(codepoint = 9))
-            sendKeyEvent(KeyboardEvent(codepoint = 13))
-            awaitSnapshot()
-            assertTrue(vm.selections.isEmpty())
-            assertTrue(vm.confirmations.isEmpty())
-            assertEquals(1, vm.dismissals)
-        }
-    }
-
     for (option in listOf(unknown, dated)) {
         test("confirmation ${option.creditId} displays expiry and Go back starts focused") {
             val expected = UsageResetState.Confirming(option)
             val vm = RecordingReset(expected)
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                    WithMosaicComponentRenderers { RenderRecording(vm) }
                 }
                 assertTrue("Use this reset?" in snapshot, snapshot)
                 assertTrue(option.title in snapshot, snapshot)
@@ -141,7 +126,7 @@ val usageResetDialogTest by testSuite {
             val vm = RecordingReset(expected)
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                    WithMosaicComponentRenderers { RenderRecording(vm) }
                 }
                 sendKeyEvent(KeyboardEvent(codepoint = 9))
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -159,7 +144,7 @@ val usageResetDialogTest by testSuite {
         val vm = RecordingReset(old)
         runMosaicTest {
             setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                WithMosaicComponentRenderers { RenderRecording(vm) }
             }
             vm.state.value = next
             awaitResetSnapshot("Dated reset")
@@ -175,7 +160,7 @@ val usageResetDialogTest by testSuite {
         val vm = RecordingReset(UsageResetState.Confirming(unknown))
         runMosaicTest {
             setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                WithMosaicComponentRenderers { RenderRecording(vm) }
             }
             sendKeyEvent(KeyboardEvent(codepoint = 27))
             awaitSnapshot()
@@ -190,10 +175,10 @@ val usageResetDialogTest by testSuite {
         var tick by mutableStateOf(0)
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Text("tick=$tick")
-                RenderRecording(vm)
-            }
+                WithMosaicComponentRenderers {
+                    Text("tick=$tick")
+                    RenderRecording(vm)
+                }
             }
             assertTrue("Resetting your usage…" in snapshot, snapshot)
             for (action in listOf("[Close]", "[Cancel]", "[Use reset]", "[Try again]", "[Refresh]")) {
@@ -211,7 +196,7 @@ val usageResetDialogTest by testSuite {
         val vm = RecordingReset(UsageResetState.ConsumeFailed(unknown))
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                WithMosaicComponentRenderers { RenderRecording(vm) }
             }
             assertTrue("The reset may have been used." in snapshot, snapshot)
             assertTrue("it may not be up to date" in snapshot, snapshot)
@@ -228,7 +213,7 @@ val usageResetDialogTest by testSuite {
         val vm = RecordingReset(UsageResetState.ConsumeFailed(unknown))
         runMosaicTest {
             setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                WithMosaicComponentRenderers { RenderRecording(vm) }
             }
             sendKeyEvent(KeyboardEvent(codepoint = 9))
             sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -243,7 +228,7 @@ val usageResetDialogTest by testSuite {
         val vm = RecordingReset(UsageResetState.PreparationFailed)
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                WithMosaicComponentRenderers { RenderRecording(vm) }
             }
             assertTrue("Reset details unavailable." in snapshot, snapshot)
             assertTrue("Select a specific reset" in snapshot, snapshot)
@@ -262,7 +247,7 @@ val usageResetDialogTest by testSuite {
         val vm = RecordingReset(UsageResetState.PreparationFailed)
         runMosaicTest {
             setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                WithMosaicComponentRenderers { RenderRecording(vm) }
             }
             sendKeyEvent(KeyboardEvent(codepoint = 9))
             sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -281,10 +266,10 @@ val usageResetDialogTest by testSuite {
     )
     for ((outcome, message) in outcomeMessages) {
         test("Completed $outcome preserves distinct result and Close starts focused") {
-            val vm = RecordingReset(UsageResetState.Completed(outcome, true))
+            val vm = RecordingReset(UsageResetState.Completed(outcome))
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                    WithMosaicComponentRenderers { RenderRecording(vm) }
                 }
                 assertTrue(message in snapshot, snapshot)
                 assertTrue("[Close]" in snapshot, snapshot)
@@ -297,28 +282,17 @@ val usageResetDialogTest by testSuite {
         }
     }
 
-    test("Completed retains legacy selectedCredit false rendering without new autochoice path") {
-        val vm = RecordingReset(UsageResetState.Completed(CodexRateLimitResetOutcome.NoCredit, false))
-        runMosaicTest {
-            val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
-            }
-            assertTrue("No usage limit resets are available." in snapshot, snapshot)
-            assertFalse("That reset is no longer available." in snapshot, snapshot)
-        }
-    }
-
     for (state in listOf(
         choices(),
         UsageResetState.PreparationFailed,
         UsageResetState.ConsumeFailed(unknown),
-        UsageResetState.Completed(CodexRateLimitResetOutcome.Reset, true),
+        UsageResetState.Completed(CodexRateLimitResetOutcome.Reset),
     )) {
         test("Escape dismisses ${state::class.simpleName} without other commands") {
             val vm = RecordingReset(state)
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RenderRecording(vm) }
+                    WithMosaicComponentRenderers { RenderRecording(vm) }
                 }
                 sendKeyEvent(KeyboardEvent(codepoint = 27))
                 awaitSnapshot()
@@ -336,13 +310,15 @@ val usageResetDialogTest by testSuite {
         var refreshes = 0
         val deps = object : UsageResetDependencies {
             override val usage = MutableStateFlow<SettingsAccountUsageState>(
-                SettingsAccountUsageState.Available(CodexAccountUsageSnapshot(
-                    rateLimits = emptyList(),
-                    resetCredits = CodexRateLimitResetCredits(
-                        1, listOf(CodexRateLimitResetCredit("credit", null, null)),
+                SettingsAccountUsageState.Available(
+                    CodexAccountUsageSnapshot(
+                        rateLimits = emptyList(),
+                        resetCredits = CodexRateLimitResetCredits(
+                            1, listOf(CodexRateLimitResetCredit("credit", null, null)),
+                        ),
+                        fetchedAt = Instant.parse("2026-10-02T00:00:00Z"),
                     ),
-                    fetchedAt = Instant.parse("2026-10-02T00:00:00Z"),
-                )),
+                ),
             )
             override suspend fun consume(creditId: String): CodexRateLimitResetOutcome {
                 consumed += creditId
@@ -359,11 +335,11 @@ val usageResetDialogTest by testSuite {
             vm.show()
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box {
-                        TuiPopupHost(Modifier.width(100).height(30)) { UsageResetDialogHost(vm) }
+                    WithMosaicComponentRenderers {
+                        Box {
+                            TuiPopupHost(Modifier.width(100).height(30)) { RenderUsageResetDialog(vm) }
+                        }
                     }
-                }
                 }
                 sendKeyEvent(KeyboardEvent(codepoint = 9))
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -382,7 +358,7 @@ val usageResetDialogTest by testSuite {
                 awaitResetSnapshot("This reset was already used successfully.")
                 assertEquals(0, refreshes)
                 assertEquals(
-                    UsageResetState.Completed(CodexRateLimitResetOutcome.AlreadyRedeemed, true),
+                    UsageResetState.Completed(CodexRateLimitResetOutcome.AlreadyRedeemed),
                     vm.state.value,
                 )
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -399,22 +375,24 @@ val usageResetDialogTest by testSuite {
         var marker by mutableStateOf("pending")
         runMosaicTest {
             setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box {
-                    TuiPopupHost(Modifier.width(100).height(30)) {
-                        Text(marker)
-                        UsageResetDialog(
-                            state = expected,
-                            onSelect = { error("not choosing") },
-                            onConfirm = { captured = it; marker = "confirmed" },
-                            onBack = {},
-                            onRetry = { error("not failed") },
-                            onRefresh = { error("not missing details") },
-                            onDismiss = {},
-                        )
+                WithMosaicComponentRenderers {
+                    Box {
+                        TuiPopupHost(Modifier.width(100).height(30)) {
+                            Text(marker)
+                            UsageResetContent(
+                                state = expected,
+                                onSelect = { error("not choosing") },
+                                onConfirm = { captured = it; marker = "confirmed" },
+                                onBack = {},
+                                onRetry = { error("not failed") },
+                                onRefresh = { error("not missing details") },
+                                onDismiss = {},
+                            ) { title, onDismiss, content ->
+                                SettingsModalDialogFrame(title, 72, onDismiss, content)
+                            }
+                        }
                     }
                 }
-            }
             }
             sendKeyEvent(KeyboardEvent(codepoint = 9))
             sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -429,13 +407,15 @@ val usageResetDialogTest by testSuite {
         var refreshes = 0
         val deps = object : UsageResetDependencies {
             override val usage = MutableStateFlow<SettingsAccountUsageState>(
-                SettingsAccountUsageState.Available(CodexAccountUsageSnapshot(
-                    rateLimits = emptyList(),
-                    resetCredits = CodexRateLimitResetCredits(
-                        1, listOf(CodexRateLimitResetCredit("credit", null, null)),
+                SettingsAccountUsageState.Available(
+                    CodexAccountUsageSnapshot(
+                        rateLimits = emptyList(),
+                        resetCredits = CodexRateLimitResetCredits(
+                            1, listOf(CodexRateLimitResetCredit("credit", null, null)),
+                        ),
+                        fetchedAt = Instant.parse("2026-10-02T00:00:00Z"),
                     ),
-                    fetchedAt = Instant.parse("2026-10-02T00:00:00Z"),
-                )),
+                ),
             )
             override suspend fun consume(creditId: String): CodexRateLimitResetOutcome {
                 consumed += creditId
@@ -444,11 +424,13 @@ val usageResetDialogTest by testSuite {
             override suspend fun refreshUsage() {
                 refreshes++
                 val before = (usage.value as SettingsAccountUsageState.Available).snapshot
-                usage.value = SettingsAccountUsageState.Available(before.copy(
-                    resetCredits = CodexRateLimitResetCredits(
-                        1, listOf(CodexRateLimitResetCredit("fresh", null, null, "Fresh reset")),
+                usage.value = SettingsAccountUsageState.Available(
+                    before.copy(
+                        resetCredits = CodexRateLimitResetCredits(
+                            1, listOf(CodexRateLimitResetCredit("fresh", null, null, "Fresh reset")),
+                        ),
                     ),
-                ))
+                )
                 error("refresh response lost")
             }
         }
@@ -457,11 +439,11 @@ val usageResetDialogTest by testSuite {
             vm.show(); vm.select("credit")
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box {
-                        TuiPopupHost(Modifier.width(100).height(30)) { UsageResetDialogHost(vm) }
+                    WithMosaicComponentRenderers {
+                        Box {
+                            TuiPopupHost(Modifier.width(100).height(30)) { RenderUsageResetDialog(vm) }
+                        }
                     }
-                }
                 }
                 sendKeyEvent(KeyboardEvent(codepoint = 9))
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -494,11 +476,18 @@ private fun choices(): UsageResetState.Choosing =
     UsageResetState.Choosing(UsageResetRequest(2, listOf(unknown, dated)))
 
 @Composable
+private fun BoxScope.RenderUsageResetDialog(vm: UsageResetViewModel) {
+    UsageResetContent(vm) { title, onDismiss, content ->
+        SettingsModalDialogFrame(title, 72, onDismiss, content)
+    }
+}
+
+@Composable
 private fun RenderRecording(vm: RecordingReset) {
     Box {
         TuiPopupHost(Modifier.width(100).height(30)) {
             Text("events=${vm.events}")
-            UsageResetDialogHost(vm)
+            RenderUsageResetDialog(vm)
         }
     }
 }

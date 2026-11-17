@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.app.history.contract.item
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
 
@@ -20,10 +19,6 @@ public interface RequestUserInputHistoryItemViewModel : HistoryItemViewModel {
  * Viewport removal and session switching preserve the current state.
  */
 public sealed interface RequestUserInputHistoryItemState {
-    public data class Loading(
-        public val loadingJob: Job,
-    ) : RequestUserInputHistoryItemState
-
     /** @throws IllegalArgumentException if [elapsed] is negative or infinite. */
     public data class Ready(
         public val event: StableAskUserEvent,

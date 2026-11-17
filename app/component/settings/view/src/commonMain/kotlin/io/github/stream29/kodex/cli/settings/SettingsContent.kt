@@ -35,33 +35,35 @@ public actual fun SettingsContent(
             banner = { if (failed) renderer.FailureBanner(viewModel.global::dismissOperationFailure) },
         ) {
             when (selectedPage) {
-                SettingsPage.General -> ApplicationPreferencesContent(viewModel.global.applicationPreferences, fields.preferences, false)
+                SettingsPage.General -> ApplicationPreferencesContent(viewModel.global.applicationPreferences, fields.preferences)
                 SettingsPage.ContextSources -> if (capabilities.contextPathEditing) {
-                    ContextSourceSettingsContent(viewModel.global.contextSourceSettings, fields.preferences, false)
+                    ContextSourceSettingsContent(viewModel.global.contextSourceSettings, fields.preferences)
                 } else UiText("Context source path editing is unavailable in this host.")
                 SettingsPage.OpenAi -> fields.authentication.Section("Account") {
-                    AuthenticationSettingsPage(viewModel.global.authenticationSettings, fields.authentication, false, capabilities.providerLogin)
-                    AccountUsageComponent(viewModel.global.accountUsage, false)
+                    AuthenticationSettingsPage(viewModel.global.authenticationSettings, fields.authentication, capabilities.providerLogin)
+                    AccountUsageComponent(viewModel.global.accountUsage)
                 }
-                SettingsPage.Mcp -> McpSettingsPage(viewModel.global.mcpSettings, false)
+                SettingsPage.Mcp -> McpSettingsPage(viewModel.global.mcpSettings, fields.preferences)
                 SettingsPage.Hooks -> {
                     UiText("Backend notifications")
-                    HookSettingsPage(viewModel.global.hookSettings, false)
+                    HookSettingsPage(viewModel.global.hookSettings, fields.preferences)
                     UiText(renderer.frontendErrorHooksLabel)
-                    if (capabilities.frontendErrorHooks) HookSettingsPage(viewModel.global.frontendErrorHooks, false)
+                    if (capabilities.frontendErrorHooks) HookSettingsPage(viewModel.global.frontendErrorHooks, fields.preferences)
                     else UiText("Frontend shell hooks are unavailable in this host.")
                 }
                 SettingsPage.CurrentSession -> SessionSettingsContent(viewModel.session, fields.session, capabilities.directoryBrowsing)
                 SettingsPage.NewSession -> {
-                    NewSessionDefaultsContent(viewModel.newSession, fields.defaults, false)
-                    SessionTitleSettingsContent(viewModel.global.sessionTitleSettings, fields.title, false)
+                    NewSessionDefaultsContent(viewModel.newSession, fields.defaults)
+                    SessionTitleSettingsContent(viewModel.global.sessionTitleSettings, fields.title)
                 }
             }
         }
         when (selectedPage) {
             SettingsPage.General -> renderer.Menus(SettingsFieldGroup.Preferences)
-            SettingsPage.ContextSources -> if (capabilities.contextPathEditing) ContextSourceSettingsDialogHost(viewModel.global.contextSourceSettings) { title, dismiss, content ->
-                renderer.Modal(SettingsModalFrame.ContextSource, title, dismiss, content)
+            SettingsPage.ContextSources -> if (capabilities.contextPathEditing) {
+                ContextSourceSettingsDialogHost(viewModel.global.contextSourceSettings, fields.preferences) { title, dismiss, content ->
+                    renderer.Modal(SettingsModalFrame.ContextSource, title, dismiss, content)
+                }
             }
             SettingsPage.OpenAi -> {
                 renderer.Menus(SettingsFieldGroup.Authentication)

@@ -15,6 +15,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
+
+/** Renderer-local replay accumulator result, not a ViewModel projection or RPC DTO. */
+internal data class StreamingResponseSnapshot(
+    val item: ResponseItem? = null,
+    val messageParts: List<StreamingTextPart> = emptyList(),
+    val reasoningSummaryParts: List<StreamingTextPart> = emptyList(),
+    val toolInputParts: List<StreamingTextPart> = emptyList(),
+    val webSearchStatus: String? = null,
+    val unknownPayload: JsonElement? = null,
+)
+
+internal data class StreamingTextPart(
+    val key: String,
+    val text: String,
+    val isText: Boolean = true,
+)
 
 @Composable
 public actual fun HistoryStreamingTextContent(
@@ -55,10 +72,11 @@ public actual fun HistoryStreamingTextContent(
     }
 }
 
+/** One replay collector per stream identity, with conflated 50ms visual updates and no event loss. */
 @Composable
-public actual fun rememberStreamingSnapshot(
+internal fun rememberStreamingSnapshot(
     events: SharedFlow<ResponsesStreamEvent>,
-    onContentChange: () -> Unit,
+    onContentChange: () -> Unit = {},
 ): StreamingResponseSnapshot {
     var snapshot by remember(events) { mutableStateOf(StreamingResponseSnapshot()) }
     val latestOnContentChange = rememberUpdatedState(onContentChange)

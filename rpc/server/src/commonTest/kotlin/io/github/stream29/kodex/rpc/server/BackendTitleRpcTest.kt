@@ -41,7 +41,7 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
             val globalSettings = RpcGlobalSettings.open(
                 services.global, this, 80,
             )
-            val popup = RpcGlobalEditor(globalSettings, services.global, this)
+            val popup = RpcGlobalEditor(globalSettings, services.global, this, home.toString())
             try {
                 val index = services.global.createSession(home)
                 val origin = views.open(index)

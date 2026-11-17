@@ -249,40 +249,6 @@ internal fun LazyListLayoutInfo.historyPageFocusItem(
 }
 
 @Composable
-internal fun StoredHistoryWorkGroup(
-    group: WorkGroupHistoryItemViewModel,
-    generation: Long,
-    focusRequester: FocusRequester? = null,
-    shellSessions: AgentShellSessionRegistry,
-    onOpenContextMenu: ((
-        generation: Long,
-        storageIndex: Int,
-        item: HistoryItemViewModel,
-        anchor: TuiPopupAnchor,
-        clickPosition: IntOffset?,
-    ) -> Unit)?,
-) {
-    HistoryItemContent(group, MosaicHistoryItemRenderer(group, generation, focusRequester, onOpenContextMenu), shellSessions)
-}
-
-@Composable
-internal fun StoredHistoryEntry(
-    item: HistoryItemViewModel,
-    generation: Long,
-    focusRequester: FocusRequester? = null,
-    shellSessions: AgentShellSessionRegistry,
-    onOpenContextMenu: ((
-        generation: Long,
-        storageIndex: Int,
-        item: HistoryItemViewModel,
-        anchor: TuiPopupAnchor,
-        clickPosition: IntOffset?,
-    ) -> Unit)?,
-) {
-    HistoryItemContent(item, MosaicHistoryItemRenderer(item, generation, focusRequester, onOpenContextMenu), shellSessions)
-}
-
-@Composable
 internal fun CollapsedToolHistoryRow(
     summary: String,
     status: String,

@@ -77,21 +77,6 @@ public expect fun BoxScope.SessionSidebarContentMenu(
     onSelect: (SidebarContent) -> Unit,
 ): Unit
 
-@Composable
-public expect fun BoxScope.ShellSessionContextMenu(
-    request: ShellSessionMenuRequest?,
-    onDismissRequest: () -> Unit,
-): Unit
-
-@Composable
-public expect fun BoxScope.ShellSessionHoverPopup(
-    request: ShellSessionInteractionRequest?,
-    contentColumns: Int,
-    contentRows: Int,
-    onHoverChanged: (Boolean) -> Unit,
-    onDismissRequest: () -> Unit,
-): Unit
-
 public expect fun canExpandSessionSidebar(
     columns: Int,
     requestedColumns: Int,

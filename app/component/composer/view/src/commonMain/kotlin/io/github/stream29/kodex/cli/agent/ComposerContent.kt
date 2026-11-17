@@ -21,11 +21,9 @@ import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.ui.UiColumn
 import io.github.stream29.kodex.app.ui.UiEditor
-import io.github.stream29.kodex.app.ui.UiSubmitKey
 import io.github.stream29.kodex.app.ui.UiText
 import io.github.stream29.kodex.app.ui.UiTextRole
 import io.github.stream29.kodex.cli.settings.NewLineKey
-import io.github.stream29.kodex.cli.settings.SubmitKey
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
 import kotlinx.coroutines.launch
@@ -36,9 +34,6 @@ public actual fun ComposerContent(
     newLineKey: NewLineKey,
     autoFocus: Boolean,
     enabled: Boolean,
-    showPendingSteer: Boolean,
-    showFailure: Boolean,
-    maximumPreviewLines: Int,
     maximumEditorLines: Int,
     frame: @Composable (content: @Composable () -> Unit) -> Unit,
 ) {
@@ -46,19 +41,11 @@ public actual fun ComposerContent(
     val state by viewModel.state.collectAsState()
     if (state.mode == ComposerMode.Closed) return
 
-    val previewLines = if (showPendingSteer && state.mode == ComposerMode.Steer) {
-        pendingSteerPreviewContent(state.pendingSteer, maximumPreviewLines)
-    } else {
-        emptyList()
-    }
-    val statusLine = composerStatusLine(state, showFailure)
+    val statusLine = composerStatusLine(state)
     val scope = rememberCoroutineScope()
 
     frame {
         UiColumn {
-            previewLines.forEachIndexed { index, line ->
-                UiText(line, if (index == 0) UiTextRole.Title else UiTextRole.Supporting, maximumLines = 1)
-            }
             statusLine?.let { UiText(it, UiTextRole.Supporting, maximumLines = 1) }
             key(viewModel, state.ownerId) {
                 UiEditor(
@@ -66,7 +53,7 @@ public actual fun ComposerContent(
                     cursorOffset = state.cursorOffset,
                     revision = state.revision,
                     maximumLines = maximumEditorLines,
-                    submitKey = if (newLineKey.submitKey == SubmitKey.Enter) UiSubmitKey.Enter else UiSubmitKey.CtrlEnter,
+                    submitKey = newLineKey.submitKey,
                     autoFocus = autoFocus && state.mode != ComposerMode.RequestInput,
                     enabled = enabled && state.mode != ComposerMode.RequestInput,
                     readOnly = state.submission is ComposerSubmissionState.Submitting,
@@ -88,12 +75,8 @@ internal fun composerSubmissionRevision(
     current.ownerId == renderedOwner && current.text == text && current.cursorOffset == cursor
 }
 
-public actual fun composerStatusLine(state: ComposerState, showFailure: Boolean): String? = when {
-    state.mode == ComposerMode.Closed -> null
-    state.mode == ComposerMode.Error && showFailure -> {
-        val failure = (state.submission as? ComposerSubmissionState.Failed)?.failure
-        failure?.let { "Unable to submit: ${it.message}" }
-    }
+public actual fun composerStatusLine(state: ComposerState): String? = when {
+    state.mode == ComposerMode.Closed || state.mode == ComposerMode.Error -> null
 
     state.mode == ComposerMode.RequestInput -> {
         val pending = state.requestInput as ComposerRequestInputPresentation.Pending

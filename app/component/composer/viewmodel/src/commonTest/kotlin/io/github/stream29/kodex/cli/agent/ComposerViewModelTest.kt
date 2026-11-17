@@ -2,21 +2,20 @@ package io.github.stream29.kodex.cli.agent
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.app.agent.contract.ComposerDependencies
 import io.github.stream29.kodex.app.agent.contract.ComposerFailure
 import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
+import io.github.stream29.kodex.app.agent.contract.ComposerMode
+import io.github.stream29.kodex.app.agent.contract.ComposerOperation
 import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
 import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPort
 import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPresentation
 import io.github.stream29.kodex.app.agent.contract.ComposerRuntimePort
 import io.github.stream29.kodex.app.agent.contract.ComposerState
-import io.github.stream29.kodex.app.agent.contract.ComposerSubmitPort
-import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
+import io.github.stream29.kodex.app.agent.contract.ComposerSubmitPort
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.RequestUserInputMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -40,15 +39,17 @@ val composerViewModelTest by testSuite {
             assertEquals(0, model.state.value.revision)
             assertEquals(1, model.update("draft"))
             assertEquals(1, model.update("draft"))
-            assertEquals(ComposerState(ComposerOwnerId("agent-a"), "draft", revision = 1),
-                model.state.value.copy(running = false))
+            assertEquals(
+                ComposerState(ComposerOwnerId("agent-a"), "draft", revision = 1),
+                model.state.value.copy(running = false),
+            )
 
             ports.submitAction = { _, _ -> error("append failed") }
-            assertEquals(ComposerSubmissionResult.Failed("append failed"), model.submit(1))
+            model.submit(1)
             val failed = model.state.value
             assertEquals("draft", failed.text)
             assertEquals(2, failed.revision)
-            assertIs<ComposerSubmissionState.Failed>(failed.submission)
+            assertEquals("append failed", assertIs<ComposerSubmissionState.Failed>(failed.submission).failure.message)
             assertEquals(
                 "append failed",
                 ports.reportedFailures.single().second.message,
@@ -66,22 +67,24 @@ val composerViewModelTest by testSuite {
             val model = createComposerViewModel(ComposerOwnerId("agent-a"), ports, backgroundScope)
             val revision = model.update("draft")
 
-            assertEquals(ComposerSubmissionResult.Stale, model.submit(revision - 1))
+            model.submit(revision - 1)
             assertTrue(ports.order.isEmpty())
-            model.update("new draft")
-            assertEquals(ComposerSubmissionResult.Stale, model.submit(revision))
+            val nextRevision = model.update("new draft")
+            model.submit(revision)
+            assertTrue(ports.order.isEmpty())
             assertEquals("new draft", model.state.value.text)
+            assertEquals(nextRevision, model.state.value.revision)
             model.close()
         }
     }
 
-    test("idle submit persists before clear and returns Submitted for the exact owner") {
+    test("idle submit persists before clear for the exact owner") {
         runTest {
             val ports = ComposerPorts()
             val model = createComposerViewModel(ComposerOwnerId("agent-a"), ports, backgroundScope)
             val revision = model.update("  hello  ")
 
-            assertEquals(ComposerSubmissionResult.Submitted, model.submit(revision))
+            model.submit(revision)
             assertEquals(listOf("submit:agent-a:hello"), ports.order)
             assertEquals("", model.state.value.text)
             assertEquals(2, model.state.value.revision)
@@ -89,7 +92,7 @@ val composerViewModelTest by testSuite {
         }
     }
 
-    test("running submit uses the submit port and distinguishes accepted from persisted") {
+    test("running submit uses the submit port and projects pending steer") {
         runTest {
             val ports = ComposerPorts().apply { running.value = true }
             ports.submitAction = { _, content ->
@@ -99,10 +102,11 @@ val composerViewModelTest by testSuite {
             val model = createComposerViewModel(ComposerOwnerId("agent-a"), ports, backgroundScope)
             val revision = model.update("steer this")
 
-            assertEquals(ComposerSubmissionResult.QueuedAsSteer, model.submit(revision))
+            model.submit(revision)
             runCurrent()
             assertEquals(listOf("submit:agent-a:steer this"), ports.order)
             assertTrue(model.state.value.text.isEmpty())
+            assertEquals(ComposerMode.Steer, model.state.value.mode)
             assertTrue(model.state.value.pendingSteer.single() is StableUserMessage)
             model.close()
         }
@@ -110,18 +114,21 @@ val composerViewModelTest by testSuite {
 
     test("submit uses current runtime even before its renderer projection catches up") {
         runTest {
-            val ports = ComposerPorts()
+            val ports = ComposerPorts().apply {
+                submitAction = { _, _ -> error("steer failed") }
+            }
             val model = createComposerViewModel(ComposerOwnerId("agent-a"), ports, backgroundScope)
             val revision = model.update("steer now")
             ports.running.value = true
             assertFalse(model.state.value.running)
-            assertEquals(ComposerSubmissionResult.QueuedAsSteer, model.submit(revision))
+            model.submit(revision)
             assertEquals(listOf("submit:agent-a:steer now"), ports.order)
+            assertEquals(ComposerOperation.Steer, ports.reportedFailures.single().second.operation)
             model.close()
         }
     }
 
-    test("caller cancellation propagates, keeps the draft, and does not call explicit cancel") {
+    test("caller cancellation propagates and keeps the draft") {
         runTest {
             val gate = CompletableDeferred<Unit>()
             val ports = ComposerPorts().apply {
@@ -139,8 +146,6 @@ val composerViewModelTest by testSuite {
             assertFailsWith<CancellationException> { waiting.await() }
             assertEquals("keep me", model.state.value.text)
             assertIs<ComposerSubmissionState.Editing>(model.state.value.submission)
-            model.cancel()
-            assertEquals(listOf(ComposerOwnerId("agent-a")), ports.cancelOwners)
             model.close()
         }
     }
@@ -160,10 +165,9 @@ val composerViewModelTest by testSuite {
             model.close()
             gate.complete(Unit)
 
-            assertEquals(ComposerSubmissionResult.Submitted, waiting.await())
+            waiting.await()
             assertEquals(listOf("submit:agent-a:accepted"), ports.order)
-            assertEquals(io.github.stream29.kodex.app.agent.contract.ComposerMode.Closed,
-                model.state.value.mode)
+            assertEquals(ComposerMode.Closed, model.state.value.mode)
             assertEquals("accepted", model.state.value.text)
         }
     }
@@ -190,7 +194,7 @@ val composerViewModelTest by testSuite {
             val replacementRevision = replacement.update("new owner draft")
             gate.complete(Unit)
 
-            assertEquals(ComposerSubmissionResult.Submitted, waiting.await())
+            waiting.await()
             assertEquals(listOf("submit:agent-a:old"), ports.order)
             assertEquals(ComposerOwnerId("agent-b"), replacement.state.value.ownerId)
             assertEquals(replacementRevision, replacement.state.value.revision)
@@ -205,18 +209,16 @@ val composerViewModelTest by testSuite {
             val ports = ComposerPorts()
             val model = createComposerViewModel(ComposerOwnerId("agent-a"), ports, backgroundScope)
             ports.requestInputState.value = ComposerRequestInputPresentation.Pending(
-                callId = "call-1",
-                mode = RequestUserInputMode.AskUser,
                 title = "Answer the question",
                 questionCount = 2,
             )
             runCurrent()
 
             val state = model.state.value
-            assertIs<ComposerRequestInputPresentation.Pending>(state.requestInput)
-            assertEquals(io.github.stream29.kodex.app.agent.contract.ComposerMode.RequestInput,
-                state.mode)
-            assertEquals("call-1", state.requestInput.callId)
+            val pending = assertIs<ComposerRequestInputPresentation.Pending>(state.requestInput)
+            assertEquals(ComposerMode.RequestInput, state.mode)
+            assertEquals("Answer the question", pending.title)
+            assertEquals(2, pending.questionCount)
             model.close()
         }
     }
@@ -224,10 +226,7 @@ val composerViewModelTest by testSuite {
     test("invalid owner identities and blank failure summaries remain explicit") {
         assertFailsWith<IllegalArgumentException> { ComposerOwnerId("") }
         assertFailsWith<IllegalArgumentException> {
-            io.github.stream29.kodex.app.agent.contract.ComposerFailure(
-                io.github.stream29.kodex.app.agent.contract.ComposerOperation.Submit,
-                "",
-            )
+            ComposerFailure(ComposerOperation.Submit, "")
         }
     }
 }
@@ -251,7 +250,6 @@ private class ComposerPorts : ComposerDependencies {
         ComposerRequestInputPresentation.None,
     )
     val order = mutableListOf<String>()
-    val cancelOwners = mutableListOf<ComposerOwnerId>()
     val reportedFailures = mutableListOf<Pair<ComposerOwnerId, ComposerFailure>>()
     var submitAction: suspend (ComposerOwnerId, List<ContentItem>) -> Unit = { _, _ -> }
 
@@ -262,9 +260,6 @@ private class ComposerPorts : ComposerDependencies {
     override val submit: ComposerSubmitPort = ComposerSubmitPort { owner, content ->
         order += "submit:${owner.value}:${content.singleText()}"
         submitAction(owner, content)
-    }
-    override val cancellation: ComposerCancellationPort = ComposerCancellationPort { owner ->
-        cancelOwners += owner
     }
     override val requestInput: ComposerRequestInputPort = object : ComposerRequestInputPort {
         override val presentation = this@ComposerPorts.requestInputState

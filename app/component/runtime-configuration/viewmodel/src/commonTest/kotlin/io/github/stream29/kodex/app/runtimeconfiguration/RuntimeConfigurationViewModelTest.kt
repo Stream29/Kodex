@@ -57,7 +57,7 @@ val runtimeConfigurationViewModelTest by testSuite {
     test("empty catalog and absent capabilities retain effort and default tier without correction") {
         runTest {
             val deps = RuntimePorts()
-            val vm = DefaultRuntimeConfigurationViewModelFactory.create(deps, backgroundScope)
+            val vm = createRuntimeConfigurationViewModel(deps, backgroundScope)
             runCurrent()
             assertEquals(
                 RuntimeConfigurationModelOption(

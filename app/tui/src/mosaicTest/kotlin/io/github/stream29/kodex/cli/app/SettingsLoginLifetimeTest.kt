@@ -146,7 +146,7 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
                 val picker = assertIs<ApplicationPopupState.WorkingDirectory>(
                     app.viewModel.popup.first { it is ApplicationPopupState.WorkingDirectory },
                 )
-                assertSame(singleton, picker.viewModel.target)
+                assertTrue(picker.viewModel.isActive)
                 app.viewModel.dismissPopup(picker)
                 assertTrue(app.viewModel.selectTab(session))
                 clickText(awaitRootText("persisted settings target"), "[Settings]")
@@ -289,8 +289,7 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
                 var projection: ApplicationTabBarProjection? = null
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    val navigation = root.navigation.collectAsState().value
-                    val current = collectApplicationTabBar(navigation)
+                    val current = collectApplicationFrame(root).tabs
                     projection = current
                     Text(current.tabs.joinToString(prefix = "Tabs:[", postfix = "]") { it.target.sessionIndex.toString() })
                 }

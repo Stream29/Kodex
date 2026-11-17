@@ -69,7 +69,7 @@ val tuiPopupTest by testSuite {
     }
 
     test("end-top positioning prefers the end side and falls back to the start side") {
-        val positionProvider = TuiPopupPositionProvider.EndTop
+        val positionProvider = EndTopPopupPositionProvider
 
         assertEquals(
             IntSize(62, 24),
@@ -116,7 +116,7 @@ val tuiPopupTest by testSuite {
         )
         assertEquals(
             IntOffset(6, 0),
-            TuiPopupPositionProvider.EndTop.calculatePosition(
+            EndTopPopupPositionProvider.calculatePosition(
                 anchorBounds = staleAnchor,
                 surfaceSize = IntSize(10, 4),
                 popupContentSize = IntSize(4, 4),
@@ -310,7 +310,7 @@ private fun CascadingPopupHarness(
         }
         TuiPopup(
             anchor = parentItemAnchor,
-            positionProvider = TuiPopupPositionProvider.EndTop,
+            positionProvider = EndTopPopupPositionProvider,
         ) {
             TuiButton(label = "child", onClick = onChildSelect)
         }

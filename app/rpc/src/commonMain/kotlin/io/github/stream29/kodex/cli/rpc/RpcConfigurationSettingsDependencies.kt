@@ -3,13 +3,11 @@ package io.github.stream29.kodex.cli.rpc
 import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.app.applicationpreferences.ApplicationPreferencesDependencies
-import io.github.stream29.kodex.app.applicationpreferences.PreferencesWriteAdmission
 import io.github.stream29.kodex.app.contextsourcesettings.ContextSourcePathPolicy
 import io.github.stream29.kodex.app.contextsourcesettings.ContextSourceSettingsDependencies
-import io.github.stream29.kodex.app.contextsourcesettings.ContextSourceWriteAdmission
 import io.github.stream29.kodex.app.sessiontitlesettings.SessionTitleSettingsDependencies
-import io.github.stream29.kodex.app.sessiontitlesettings.SessionTitleWriteAdmission
 import io.github.stream29.kodex.app.settings.contract.BuiltInContextSource
+import io.github.stream29.kodex.app.settings.contract.SettingsWriteAdmission
 import io.github.stream29.kodex.cli.sessiontitle.DefaultSessionTitleModel
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
@@ -43,13 +41,13 @@ internal class RpcContextSourceSettingsDependencies(
 
     override fun setBuiltInEnabled(
         source: BuiltInContextSource, expected: Boolean, enabled: Boolean,
-    ): ContextSourceWriteAdmission = admission(writes.edit(expected, { it.contextSources.enabled(source) }) {
+    ): SettingsWriteAdmission = admission(writes.edit(expected, { it.contextSources.enabled(source) }) {
         it.copy(contextSources = it.contextSources.withEnabled(source, enabled))
     })
 
     override fun replaceCustomSources(
         expected: List<AgentContextCustomSource>, updated: List<AgentContextCustomSource>,
-    ): ContextSourceWriteAdmission {
+    ): SettingsWriteAdmission {
         val baseline = expected.toList()
         val payload = updated.toList()
         return admission(writes.edit(baseline, { it.contextSources.customSources }) {
@@ -59,7 +57,7 @@ internal class RpcContextSourceSettingsDependencies(
 
     override fun setCustomEnabled(
         original: AgentContextCustomSource, enabled: Boolean,
-    ): ContextSourceWriteAdmission = admission(writes.edit(original, {
+    ): SettingsWriteAdmission = admission(writes.edit(original, {
         it.contextSources.customSources.find { item -> item.path == original.path }
     }) { value ->
         value.copy(contextSources = value.contextSources.copy(customSources =
@@ -69,7 +67,7 @@ internal class RpcContextSourceSettingsDependencies(
         ))
     })
 
-    override fun removeCustom(original: AgentContextCustomSource): ContextSourceWriteAdmission =
+    override fun removeCustom(original: AgentContextCustomSource): SettingsWriteAdmission =
         admission(writes.edit(original, {
             it.contextSources.customSources.find { item -> item.path == original.path }
         }) { value ->
@@ -81,9 +79,9 @@ internal class RpcContextSourceSettingsDependencies(
     override fun reportFailure(failure: Throwable) { global.reportOperationFailure(failure) }
     override fun dismissFailure() { global.dismissOperationFailure() }
 
-    private fun admission(accepted: Boolean): ContextSourceWriteAdmission =
-        if (accepted) ContextSourceWriteAdmission.Accepted
-        else ContextSourceWriteAdmission.Rejected("Settings is no longer accepting edits.")
+    private fun admission(accepted: Boolean): SettingsWriteAdmission =
+        if (accepted) SettingsWriteAdmission.Accepted
+        else SettingsWriteAdmission.Rejected("Settings is no longer accepting edits.")
 }
 
 internal class RpcSessionTitleSettingsDependencies(
@@ -94,23 +92,21 @@ internal class RpcSessionTitleSettingsDependencies(
     override val models: StateFlow<List<ModelInfo>> = global.models
     override val defaultModel: OpenAiModelId = DefaultSessionTitleModel
     override val operationFailure: StateFlow<Boolean> = global.operationFailure
-    override fun setEnabled(expected: Boolean, enabled: Boolean): SessionTitleWriteAdmission =
-        admission(writes.edit(expected, { it.sessionTitle.enabled }) {
+    override fun setEnabled(expected: Boolean, enabled: Boolean): Boolean =
+        writes.edit(expected, { it.sessionTitle.enabled }) {
             it.copy(sessionTitle = it.sessionTitle.copy(enabled = enabled))
-        })
-    override fun setModel(expected: OpenAiModelId?, model: OpenAiModelId?): SessionTitleWriteAdmission =
-        admission(writes.edit(expected, { it.sessionTitle.model }) {
+        }
+    override fun setModel(expected: OpenAiModelId?, model: OpenAiModelId?): Boolean =
+        writes.edit(expected, { it.sessionTitle.model }) {
             it.copy(sessionTitle = it.sessionTitle.copy(model = model))
-        })
+        }
     override fun setReasoningEffort(
         expected: ReasoningEffort, reasoningEffort: ReasoningEffort,
-    ): SessionTitleWriteAdmission = admission(writes.edit(expected, { it.sessionTitle.reasoningEffort }) {
+    ): Boolean = writes.edit(expected, { it.sessionTitle.reasoningEffort }) {
         it.copy(sessionTitle = it.sessionTitle.copy(reasoningEffort = reasoningEffort))
-    })
+    }
     override fun reportFailure(failure: Throwable) { global.reportOperationFailure(failure) }
     override fun dismissFailure() { global.dismissOperationFailure() }
-    private fun admission(accepted: Boolean): SessionTitleWriteAdmission =
-        if (accepted) SessionTitleWriteAdmission.Accepted else SessionTitleWriteAdmission.Rejected
 }
 
 internal class RpcApplicationPreferencesDependencies(
@@ -122,9 +118,8 @@ internal class RpcApplicationPreferencesDependencies(
     override val operationFailure: StateFlow<Boolean> = global.operationFailure
     override fun setLeftWidth(columns: Int) { global.resizeSidebars(columns, widths.value.second) }
     override fun setRightWidth(columns: Int) { global.resizeSidebars(widths.value.first, columns) }
-    override fun setNewLineKey(newLineKey: NewLineKey): PreferencesWriteAdmission =
-        if (accept { global.frontend.update { it.copy(newLineKey = newLineKey) } })
-            PreferencesWriteAdmission.Accepted else PreferencesWriteAdmission.Rejected
+    override fun setNewLineKey(newLineKey: NewLineKey): Boolean =
+        accept { global.frontend.update { it.copy(newLineKey = newLineKey) } }
     override fun reportFailure(failure: Throwable) { global.reportOperationFailure(failure) }
     override fun dismissFailure() { global.dismissOperationFailure() }
 }

@@ -12,7 +12,8 @@ Use the running Gradle daemon's JVM and JVM arguments. Run Native and Wasm build
 | Task | Output |
 | --- | --- |
 | `:app-web-test-support-renderer:wasmJsBrowserDistribution` | `app/web/test-support/renderer/build/dist/wasmJs/productionExecutable/` |
-| `:app-web-test-support-renderer:wasmJsBrowserTest` | Connection unit tests and offscreen component, settings and History tests |
+| `:app-web-renderer:wasmJsBrowserTest` | Browser editor and offscreen component, settings and History tests |
+| `:app-web-test-support-renderer:wasmJsBrowserTest` | Connection unit tests |
 | `:app-web-test-support-backend:linkDebugExecutableLinuxX64` | `app/web/test-support/backend/build/bin/linuxX64/debugExecutable/kodex-web-fixture.kexe` |
 | `:app-web-test-support-renderer:checkSpecApiModule` | Exported API / source-set checks |
 
@@ -63,7 +64,7 @@ KODEX_FORM_ONLY=1 node app/web/test-support/renderer/scripts/check-browser.mjs \
   "$PWD/build/wasm/package.json" "$FIXTURE_OUTPUT/forms"
 ```
 
-- Descriptor mode checks all eight real proxies and runtime serializer lookup in the optimized executable, without opening RPC.
+- Descriptor mode checks both real proxies and runtime serializer lookup in the optimized executable, without opening RPC.
 - Input mode checks CDP composition/commit, Enter handling, bidirectional Tab and CtrlEnter/newline policy. It is not an OS input-method test.
 - Form mode mounts compiled value fields without RPC: literal multiline values, DOM undo/redo across controlled echoes, Enter actions, DOM/Canvas Tab traversal, disabled rejection/identical retry, overlay state and owner remount. It also mounts the production Hook dialog with an in-memory draft; it neither saves nor executes hooks. These checks do not establish OS clipboard/IME behavior or cover every dialog's scrolling geometry.
 - Its selection setup uses CDP's explicit [`selectAll` editing command](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Input.pdl#L129-L132), first checked on a plain HTML textarea. A synthetic Mac modifier event alone is not treated as an OS shortcut acceptance test.

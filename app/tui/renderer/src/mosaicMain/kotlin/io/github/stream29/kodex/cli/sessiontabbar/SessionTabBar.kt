@@ -12,24 +12,11 @@ import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.app.sessiontabbar.contract.*
 import io.github.stream29.kodex.cli.components.*
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
-import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabMenuRequest as SharedTabMenuRequest
 
-@Composable
-public actual fun SessionTabBar(
-    state: SessionTabBarState,
-    callbacks: SessionTabBarCallbacks,
-    runningIndicatorFrame: State<String>,
-    columns: Int,
-    onOpenTabMenu: (SessionTabContextMenuRequest) -> Unit,
-) {
-    SessionTabBarContent(
-        state, callbacks, rememberMosaicSessionTabBarRenderer(columns, runningIndicatorFrame),
-        onOpenTabMenu = { request: SharedTabMenuRequest ->
-            val placement = request.placement as MosaicSessionTabMenuPlacement
-            onOpenTabMenu(SessionTabContextMenuRequest(request.identity, request.label, placement.anchor, placement.clickPosition))
-        },
-    )
-}
+internal data class SessionTabBounds(
+    val start: Int,
+    val endExclusive: Int,
+)
 
 @Composable
 public actual fun rememberMosaicSessionTabBarRenderer(
@@ -106,14 +93,14 @@ private class MosaicSessionTabBarRenderer(
 private fun terminalTabLabel(tab: SessionTabPresentation, frame: String): String =
     runningIndicatorLabel(tab.label, tab.running, frame).ellipsizeToTerminalWidth(MaximumTabLabelColumns)
 
-public actual fun sessionTabBounds(labels: List<String>, index: Int): SessionTabBounds? {
+internal fun sessionTabBounds(labels: List<String>, index: Int): SessionTabBounds? {
     if (index !in labels.indices) return null
     var start = 0
     labels.take(index).forEach { label -> start += label.terminalCellWidth() + TabBracketsColumns + TabSpacingColumns }
     return SessionTabBounds(start, start + labels[index].terminalCellWidth() + TabBracketsColumns)
 }
 
-public actual fun ScrollState.ensureSessionTabRangeVisible(bounds: SessionTabBounds) {
+internal fun ScrollState.ensureSessionTabRangeVisible(bounds: SessionTabBounds) {
     val viewportEnd = value + viewportSize
     when {
         bounds.start < value -> scrollTo(bounds.start)

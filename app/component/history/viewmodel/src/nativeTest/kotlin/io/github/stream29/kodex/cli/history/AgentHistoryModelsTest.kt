@@ -86,9 +86,7 @@ val agentHistoryModelsTest by testSuite {
                     ),
                     context,
                 )
-                item.ensureLoaded()
-                val ready = awaitState(item.state) { it !is MessageHistoryItemState.Loading }
-                assertIs<MessageHistoryItemState.Ready>(ready)
+                val ready = assertIs<MessageHistoryItemState.Ready>(item.state.value)
                 assertNotEquals(time, item.readTimestamp())
                 assertEquals(time + 1.seconds, item.readTimestamp())
                 current = false
@@ -117,11 +115,7 @@ val agentHistoryModelsTest by testSuite {
                     this, { true },
                 )
                 val item = RequestUserInputHistoryItemViewModelImpl(99, descriptor, context)
-                item.ensureLoaded()
-                assertEquals(
-                    RequestUserInputHistoryItemState.Failed,
-                    awaitState(item.state) { it !is RequestUserInputHistoryItemState.Loading },
-                )
+                assertEquals(RequestUserInputHistoryItemState.Failed, item.state.value)
             } finally {
                 repository.cancelAndJoin()
             }
@@ -156,8 +150,8 @@ val agentHistoryModelsTest by testSuite {
                     val window = model.historyItems.value
                     assertEquals(4..4, assertIs<WorkGroupHistoryItemViewModel>(window[1]).indexRange)
                     val item = assertIs<RequestUserInputHistoryItemViewModel>(window[2])
-                    val ready = awaitState(item.state) { it !is RequestUserInputHistoryItemState.Loading }
-                    assertEquals(event, assertIs<RequestUserInputHistoryItemState.Ready>(ready).event)
+                    val ready = assertIs<RequestUserInputHistoryItemState.Ready>(item.state.value)
+                    assertEquals(event, ready.event)
                     assertEquals(3, item.index)
                     assertEquals(2..2, assertIs<WorkGroupHistoryItemViewModel>(window[3]).indexRange)
                 } finally {
@@ -648,15 +642,15 @@ val agentHistoryModelsTest by testSuite {
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
                 model.awaitReady(itemCount = HistoryPaging.InitialLoadSize, hasOlder = true)
-                val newest = model.historyItems.value.peek(0)
-                model.reportViewport(model.historyItems.value, listOf(newest))
-                model.historyItems.value.requestOlder()
+                val firstWindow = model.historyItems.value
+                val newest = firstWindow.peek(0)
+                model.reportViewport(firstWindow, listOf(newest, firstWindow.peek(firstWindow.size - 1)))
                 model.awaitReady(itemCount = HistoryPaging.InitialLoadSize + HistoryPaging.PageSize, hasOlder = true)
                 assertSame(newest, model.historyItems.value.peek(0))
 
-                val secondOldest = model.historyItems.value.peek(1)
-                model.reportViewport(model.historyItems.value, listOf(newest, secondOldest))
-                model.historyItems.value.requestOlder()
+                val secondWindow = model.historyItems.value
+                val secondOldest = secondWindow.peek(1)
+                model.reportViewport(secondWindow, listOf(newest, secondOldest, secondWindow.peek(secondWindow.size - 1)))
                 model.awaitReady(itemCount = itemCount, hasOlder = false)
                 assertSame(newest, model.historyItems.value.peek(0))
                 assertSame(secondOldest, model.historyItems.value.peek(1))
@@ -823,8 +817,7 @@ private suspend fun AgentHistoryViewModel.awaitReady(
                     "Expected $itemCount History items with hasOlder=$hasOlder, but observed " +
                         "${window.size} items with hasOlder=${window.hasOlder}."
                 }
-                reportViewport(window, listOf(window.peek(0)))
-                window.requestOlder()
+                reportViewport(window, listOf(window.peek(0), window.peek(window.size - 1)))
                 loadState.first { updated ->
                     updated is AgentHistoryLoadState.Failed ||
                         (

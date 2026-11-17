@@ -58,7 +58,7 @@ public interface SettingsViewModel : AutoCloseable {
      *
      * Before publishing the new page, call only the leaving page's original hide operation:
      * CurrentSession→session, Mcp→MCP, Hooks→Hook, ContextSources→context sources,
-     * General→preferences, NewSession→automatic title, OpenAi→authentication.
+     * OpenAi→authentication.
      * In particular NewSession does not close or re-create the defaults child. Hide clears that
      * child's unaccepted interactions, not its observations or already admitted application writes;
      * changing page does not cancel MCP OAuth. Leaving OpenAI clears unconfirmed logout.

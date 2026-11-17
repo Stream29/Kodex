@@ -214,14 +214,6 @@ private class TestHistoryItemWindow(
         }
         return items[index]
     }
-
-    override fun requestOlder() {
-        onRequestOlder()
-    }
-
-    override fun requestNewer() {
-        onRequestNewer()
-    }
 }
 
 private object EmptyInvalidationHistoryShellSessions : AgentShellSessionRegistry {

@@ -9,13 +9,18 @@ import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.settings.createNewSessionDefaultsViewModel
 import io.github.stream29.kodex.app.settings.contract.*
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
+import io.github.stream29.kodex.cli.settings.SettingsDropdownGroup
+import io.github.stream29.kodex.cli.settings.SettingsOperationFailureBanner
+import io.github.stream29.kodex.cli.settings.rememberFourChoiceDropdowns
 import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -27,20 +32,22 @@ val newSessionDefaultsComponentTest by testSuite {
         withDefaults(ports) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) {
-                        val menus = rememberNewSessionDefaultsDropdowns()
-                        Column {
-                            NewSessionDefaultsPanel(vm, menus)
-                            Text("Independent title child")
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) {
+                            val menus = rememberDefaultsDropdowns()
+                            Column {
+                                NewSessionDefaultsContent(vm, menus.renderer)
+                                Text("Independent title child")
+                            }
+                            with(menus.renderer) { Menus() }
                         }
-                        NewSessionDefaultsDropdownMenus(vm, menus)
                     }
                 }
-                }
                 var previous = -1
-                for (text in listOf("Model behavior", "Model [orphan]", "Reasoning [medium]",
-                    "Service tier [default]", "Questions [ask user]", "Independent title child")) {
+                for (text in listOf(
+                    "Model behavior", "Model [orphan]", "Reasoning [medium]",
+                    "Service tier [default]", "Questions [ask user]", "Independent title child",
+                )) {
                     val next = snapshot.indexOf(text)
                     assertTrue(next > previous, snapshot)
                     previous = next
@@ -58,9 +65,9 @@ val newSessionDefaultsComponentTest by testSuite {
         withDefaults(ports) { vm ->
             runMosaicTest {
                 var snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) { NewSessionDefaultsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) { RenderDefaults(vm) }
+                    }
                 }
                 clickDefaults(snapshot, "Model [orphan]", "Model [".length)
                 snapshot = defaultsSnapshot("[catalog-a")
@@ -88,8 +95,13 @@ val newSessionDefaultsComponentTest by testSuite {
                 clickDefaults(snapshot, "[no question")
                 defaultsSnapshot("Questions [no question]")
                 assertEquals(listOf("model", "effort", "tier", "questions"), ports.admissions)
-                assertEquals(KodexNewSessionSettings(OpenAiModelId("catalog-b"), ReasoningEffort.Max,
-                    ServiceTier.Ultrafast, RequestUserInputMode.NoQuestion), ports.defaults.value)
+                assertEquals(
+                    KodexNewSessionSettings(
+                        OpenAiModelId("catalog-b"), ReasoningEffort.Max,
+                        ServiceTier.Ultrafast, RequestUserInputMode.NoQuestion,
+                    ),
+                    ports.defaults.value,
+                )
                 assertEquals(4L, vm.state.value.revision)
             }
         }
@@ -99,9 +111,9 @@ val newSessionDefaultsComponentTest by testSuite {
         withDefaults(ports) { vm ->
             runMosaicTest {
                 var snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) { NewSessionDefaultsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) { RenderDefaults(vm) }
+                    }
                 }
                 clickDefaults(snapshot, "Service tier [default]", "Service tier [".length)
                 defaultsSnapshot("[flex")
@@ -125,9 +137,9 @@ val newSessionDefaultsComponentTest by testSuite {
         withDefaults(ports) { vm ->
             runMosaicTest {
                 var snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) { NewSessionDefaultsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) { RenderDefaults(vm) }
+                    }
                 }
                 assertTrue("Reasoning [provider-effort]" in snapshot, snapshot)
                 ports.models.value = emptyList()
@@ -142,20 +154,28 @@ val newSessionDefaultsComponentTest by testSuite {
             }
         }
     }
-    test("shared failure banner acknowledges once or can be suppressed by the enclosing host") {
+    test("shared failure banner acknowledges once in enclosing host while content stays banner-free") {
         val ports = DefaultsRenderPorts()
         ports.operationFailure.value = true
         withDefaults(ports) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) { NewSessionDefaultsComponent(vm) }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) {
+                            val failed by vm.operationFailure.collectAsState()
+                            val menus = rememberDefaultsDropdowns()
+                            Column {
+                                SettingsOperationFailureBanner(failed, vm::dismissOperationFailure)
+                                NewSessionDefaultsContent(vm, menus.renderer)
+                            }
+                            with(menus.renderer) { Menus() }
+                        }
+                    }
                 }
-                }
-                assertTrue("A settings operation failed." in snapshot, snapshot)
+                assertTrue("Could not confirm a Settings operation" in snapshot, snapshot)
                 clickDefaults(snapshot, "[Dismiss]")
                 val next = defaultsSnapshot("Model behavior")
-                assertFalse("A settings operation failed." in next, next)
+                assertFalse("Could not confirm a Settings operation" in next, next)
                 assertEquals(1, ports.dismissals)
             }
         }
@@ -163,13 +183,11 @@ val newSessionDefaultsComponentTest by testSuite {
         withDefaults(ports) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) {
-                        NewSessionDefaultsComponent(vm, showOperationFailure = false)
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) { RenderDefaults(vm) }
                     }
                 }
-                }
-                assertFalse("A settings operation failed." in snapshot, snapshot)
+                assertFalse("Could not confirm a Settings operation" in snapshot, snapshot)
                 assertTrue(vm.operationFailure.value)
             }
         }
@@ -178,25 +196,25 @@ val newSessionDefaultsComponentTest by testSuite {
         val ports = DefaultsRenderPorts()
         withDefaults(ports) { vm ->
             var visible by mutableStateOf(true)
-            lateinit var menus: NewSessionDefaultsDropdowns
+            lateinit var menus: SettingsDropdownGroup
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) {
-                        menus = rememberNewSessionDefaultsDropdowns()
-                        if (visible) {
-                            NewSessionDefaultsPanel(vm, menus)
-                            NewSessionDefaultsDropdownMenus(vm, menus)
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) {
+                            menus = rememberDefaultsDropdowns()
+                            if (visible) {
+                                Column { NewSessionDefaultsContent(vm, menus.renderer) }
+                                with(menus.renderer) { Menus() }
+                            }
                         }
                     }
                 }
-                }
                 clickDefaults(snapshot, "Model [orphan]", "Model [".length)
                 defaultsSnapshot("[catalog-a")
-                assertTrue(menus.model.expanded)
+                assertTrue(menus.dropdowns[0].expanded)
                 visible = false
                 defaultsSnapshot("")
-                assertFalse(menus.model.expanded)
+                assertFalse(menus.dropdowns[0].expanded)
                 assertTrue(vm.state.value.active)
                 ports.defaults.value = ports.defaults.value.copy(serviceTier = ServiceTier.Fast)
                 assertEquals(1L, vm.state.value.revision)
@@ -215,11 +233,27 @@ val newSessionDefaultsComponentTest by testSuite {
     }
 }
 
+@Composable
+private fun rememberDefaultsDropdowns(): SettingsDropdownGroup = rememberFourChoiceDropdowns(
+    DefaultsChoiceField.Model.name,
+    DefaultsChoiceField.Reasoning.name,
+    DefaultsChoiceField.ServiceTier.name,
+    DefaultsChoiceField.Questions.name,
+)
+
+@Composable
+private fun BoxScope.RenderDefaults(vm: NewSessionSettingsViewModel) {
+    val menus = rememberDefaultsDropdowns()
+    Column { NewSessionDefaultsContent(vm, menus.renderer) }
+    with(menus.renderer) { Menus() }
+}
+
 private suspend fun withDefaults(ports: DefaultsRenderPorts, action: suspend (NewSessionSettingsViewModel) -> Unit) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     val vm = createNewSessionDefaultsViewModel(ports, scope)
     try { action(vm) } finally { vm.close(); scope.cancel() }
 }
+
 private suspend fun TestMosaic<String>.defaultsSnapshot(expected: String): String {
     var snapshot = ""
     repeat(5) {
@@ -231,6 +265,7 @@ private suspend fun TestMosaic<String>.defaultsSnapshot(expected: String): Strin
     assertTrue(expected in snapshot, snapshot)
     return snapshot
 }
+
 private suspend fun TestMosaic<String>.clickDefaults(snapshot: String, text: String, offset: Int = 1) {
     val lines = snapshot.lines()
     val row = lines.indexOfFirst { text in it }
@@ -241,35 +276,36 @@ private suspend fun TestMosaic<String>.clickDefaults(snapshot: String, text: Str
     sendMouseEvent(MouseEvent(column, row, MouseEvent.Type.Release))
     defaultsSnapshot("")
 }
+
 private class DefaultsRenderPorts : NewSessionDefaultsDependencies {
     override val defaults = MutableStateFlow(KodexNewSessionSettings(model = OpenAiModelId("orphan")))
-    override val models = MutableStateFlow(listOf(
-        ModelInfo(OpenAiModelId("catalog-a"), "a"), ModelInfo(OpenAiModelId("catalog-b"), "b"),
-    ))
+    override val models = MutableStateFlow(
+        listOf(ModelInfo(OpenAiModelId("catalog-a"), "a"), ModelInfo(OpenAiModelId("catalog-b"), "b")),
+    )
     override val operationFailure = MutableStateFlow(false)
     val admissions = mutableListOf<String>()
     var dismissals = 0
-    override fun admitModel(expected: OpenAiModelId, requested: OpenAiModelId): NewSessionDefaultsAdmission {
+    override fun admitModel(expected: OpenAiModelId, requested: OpenAiModelId): Boolean {
         assertEquals(defaults.value.model, expected)
         admissions += "model"; defaults.value = defaults.value.copy(model = requested)
-        return NewSessionDefaultsAdmission.Accepted
+        return true
     }
-    override fun admitReasoningEffort(expected: ReasoningEffort, requested: ReasoningEffort): NewSessionDefaultsAdmission {
+    override fun admitReasoningEffort(expected: ReasoningEffort, requested: ReasoningEffort): Boolean {
         assertEquals(defaults.value.reasoningEffort, expected)
         admissions += "effort"; defaults.value = defaults.value.copy(reasoningEffort = requested)
-        return NewSessionDefaultsAdmission.Accepted
+        return true
     }
-    override fun admitServiceTier(expected: ServiceTier, requested: ServiceTier): NewSessionDefaultsAdmission {
+    override fun admitServiceTier(expected: ServiceTier, requested: ServiceTier): Boolean {
         assertEquals(defaults.value.serviceTier, expected)
         admissions += "tier"; defaults.value = defaults.value.copy(serviceTier = requested)
-        return NewSessionDefaultsAdmission.Accepted
+        return true
     }
     override fun admitRequestUserInputMode(
         expected: RequestUserInputMode, requested: RequestUserInputMode,
-    ): NewSessionDefaultsAdmission {
+    ): Boolean {
         assertEquals(defaults.value.requestUserInputMode, expected)
         admissions += "questions"; defaults.value = defaults.value.copy(requestUserInputMode = requested)
-        return NewSessionDefaultsAdmission.Accepted
+        return true
     }
     override fun reportFailure(failure: Throwable) { operationFailure.value = true }
     override fun dismissFailure() { dismissals++; operationFailure.value = false }

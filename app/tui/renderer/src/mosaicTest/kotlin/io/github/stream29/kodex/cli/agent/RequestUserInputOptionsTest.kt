@@ -15,7 +15,6 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDraftAnswer
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
-import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
@@ -353,9 +352,8 @@ private class MutableRequestUserInputViewModel(
     override suspend fun submit(
         askId: Int,
         expectedRevision: Long,
-    ): RequestUserInputSubmissionResult {
+    ) {
         submitted = true
-        return RequestUserInputSubmissionResult.Submitted
     }
 
     override fun close() = Unit
@@ -395,7 +393,7 @@ private class FakeRequestUserInputViewModel(
     override suspend fun submit(
         askId: Int,
         expectedRevision: Long,
-    ): RequestUserInputSubmissionResult = RequestUserInputSubmissionResult.Incomplete
+    ) = Unit
 
     override fun close() = Unit
 }

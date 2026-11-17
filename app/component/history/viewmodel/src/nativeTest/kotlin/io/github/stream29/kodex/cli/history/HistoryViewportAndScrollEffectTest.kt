@@ -532,8 +532,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                 model.requestScrollToLatest()
                 model.reportViewport(window, listOf(window.peek(0)))
                 model.setFollowsLatest(window, true)
-                window.requestOlder()
-                window.requestNewer()
+                window[0]
                 assertNull(model.pendingScrollEffect.value)
                 assertSame(window, model.historyItems.value)
                 assertFalse(model.contains(window.generation, 3))
@@ -681,7 +680,7 @@ private suspend fun AgentHistoryViewModel.awaitEffect(): HistoryScrollEffect =
 
 private suspend fun AgentHistoryViewModel.page(window: HistoryItemWindow, newer: Boolean) {
     awaitNavigationReady()
-    if (newer) window.requestNewer() else window.requestOlder()
+    window[if (newer) 0 else window.size - 1]
     withContext(Dispatchers.Default) {
         withTimeout(5.seconds) { historyItems.first { it !== window } }
     }

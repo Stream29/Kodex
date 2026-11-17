@@ -53,7 +53,6 @@ val unavailableSessionSettingsTest by testSuite {
                 first.updateRequestUserInputMode(0, RequestUserInputMode.NoQuestion)
                 first.requestWorkingDirectory(0)
                 first.requestRename(0)
-                first.renameSession(0, "ignored")
                 models.value = listOf(ModelInfo(OpenAiModelId("catalog"), "Catalog"))
                 runCurrent()
                 assertEquals(SessionSettingsState.Unavailable, first.state.value)
@@ -75,7 +74,7 @@ val unavailableSessionSettingsTest by testSuite {
         withRpcFrontend {
             val arguments = SettingsViewModelArguments(target = null, initialPage = SettingsPage.CurrentSession)
             val settings = RpcGlobalSettings.open(services.global, this, 120)
-            val editor = RpcGlobalEditor(settings, services.global, this)
+            val editor = RpcGlobalEditor(settings, services.global, this, root.toString())
             val session = createSessionSettingsViewModel(
                 SessionSettingsDependencies(UnavailableSessionSettingsDataSource, models), this,
             )
@@ -88,7 +87,6 @@ val unavailableSessionSettingsTest by testSuite {
                 val persisted = create("real target is unrelated")
                 val original = persisted.settings.value
                 val title = settings.settings.value.sessionTitle
-                vm.session.renameSession(0, "must not retarget")
                 vm.session.updateServiceTier(0, ServiceTier.Fast)
                 vm.session.requestRename(0)
                 vm.session.requestWorkingDirectory(0)
@@ -106,7 +104,7 @@ val unavailableSessionSettingsTest by testSuite {
                 vm.selectPage(SettingsPage.CurrentSession)
                 assertEquals(SessionSettingsState.Unavailable, vm.session.state.value)
                 assertNull(arguments.target)
-            } finally { vm.close(); settings.close(); settings.join() }
+            } finally { vm.close(); settings.close() }
         }
     }
 }

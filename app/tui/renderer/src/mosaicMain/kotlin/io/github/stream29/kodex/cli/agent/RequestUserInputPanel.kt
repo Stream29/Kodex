@@ -13,7 +13,7 @@ import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
 import io.github.stream29.kodex.cli.components.*
 
 @Composable
-public actual fun RequestUserInputPanel(
+internal fun RequestUserInputPanel(
     viewModel: RequestUserInputViewModel, state: RequestUserInputState.Pending, columns: Int, rows: Int,
 ) {
     if (rows <= 0) return

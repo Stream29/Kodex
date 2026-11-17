@@ -36,7 +36,6 @@ internal fun FixtureHistoryList(
     }
     UiActions {
         UiAction("Fixture Latest", onClick = model::requestScrollToLatest)
-        if (window.hasOlder) UiAction("Fixture older page", onClick = window::requestOlder)
         if (targetIndex != null) UiAction("Fixture seeded target", onClick = { model.requestScrollToStorageIndex(targetIndex) })
     }
 }

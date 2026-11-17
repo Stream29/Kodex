@@ -19,7 +19,6 @@ internal class MosaicHistoryItemRenderer(
     private val focusRequester: FocusRequester?,
     private val onOpenContextMenu: ((Long, Int, HistoryItemViewModel, TuiPopupAnchor, IntOffset?) -> Unit)?,
 ) : HistoryItemRenderer, HistoryContentRenderer by MosaicHistoryContentRenderer() {
-    @Composable override fun Loading() { Text("") }
     @Composable override fun Error() { Text("Error", color = TuiTheme.colorScheme.error) }
     @Composable override fun ItemHeading(value: String, elapsed: Duration, style: HistoryTextStyle) {
         HistoryItemHeader(value, elapsed, Modifier.fillMaxWidth(), textStyle = style.mosaicStyle())
@@ -49,7 +48,7 @@ internal class MosaicHistoryItemRenderer(
         }
     }
     @Composable override fun Collapsed(
-        summary: String, status: String, elapsed: Duration, disclosure: HistoryDisclosureState, onClick: () -> Unit,
+        summary: String, status: String, elapsed: Duration, onClick: () -> Unit,
     ) {
         CollapsedToolHistoryRow(summary, status, elapsed, onClick)
     }

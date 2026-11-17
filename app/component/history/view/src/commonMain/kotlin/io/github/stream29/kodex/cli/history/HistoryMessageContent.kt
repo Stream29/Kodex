@@ -12,17 +12,17 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
+import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
 import io.github.stream29.kodex.app.ui.UiColumn
 import io.github.stream29.kodex.app.ui.UiText
 import io.github.stream29.kodex.app.ui.UiTextRole
-import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
-import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
 import kotlin.time.Duration
 
 @Composable
-public actual fun HistoryMessageRow(
+internal fun HistoryMessageRow(
     model: MessageHistoryItemViewModel,
     heading: @Composable (String, elapsed: Duration) -> Unit,
     body: @Composable (String, supporting: Boolean) -> Unit,
@@ -31,22 +31,12 @@ public actual fun HistoryMessageRow(
 ) {
     val state by model.state.collectAsState()
     when (val current = state) {
-        is MessageHistoryItemState.Loading -> UiText("")
         MessageHistoryItemState.Failed -> UiText("Error", UiTextRole.Error)
         is MessageHistoryItemState.Ready -> UiColumn {
             HistoryMessageContent(current.event, { heading(it, current.elapsed) }, body, assistantBody)
             current.turnDuration?.let { turnMarker(it) }
         }
     }
-}
-
-@Composable
-public actual fun HistoryTurnMarker(duration: Duration) {
-    if (!duration.isFinite()) {
-        UiText("---Worked for $duration---", UiTextRole.Supporting)
-        return
-    }
-    UiText("---Worked for ${duration.roundToMilliseconds()}---", UiTextRole.Supporting)
 }
 
 @Composable
@@ -71,18 +61,7 @@ public actual fun HistoryMessageContent(
                     if (text.isNotBlank()) body(text, false)
                 }
             }
-            is StableAskUserEvent -> {
-                heading("User (ask #${event.askId})")
-                event.arguments.questions.forEach { question ->
-                    val answer = event.response.answers[question.id]
-                    val answerText = when {
-                        answer == null -> "[unanswered]"
-                        question.isSecret -> "[hidden]"
-                        else -> answer.answers.joinToString(", ").ifBlank { "[empty]" }
-                    }
-                    body("${question.question}: $answerText", false)
-                }
-            }
+            is StableAskUserEvent -> error("StableAskUserEvent is rendered by RequestUserInputHistoryItemViewModel.")
             is StableScheduleEvent -> {
                 heading("Schedule #${event.scheduleId}")
                 if (event.description.isNotBlank()) body(event.description, false)

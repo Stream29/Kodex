@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.app.history.contract.item
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
 
@@ -10,13 +9,10 @@ public interface PatchHistoryItemViewModel : WorkGroupChildHistoryItemViewModel 
     public override val index: Int
     public val state: StateFlow<PatchHistoryItemState>
 
-    /** Requests `Collapsed -> Expanding -> Expanded`; all other states are unchanged. */
+    /** Requests `Collapsed -> Expanded`; all other states are unchanged. */
     public fun expand()
 
-    /**
-     * Requests `Expanding|Expanded -> Collapsed` and releases the detail; other states are
-     * unchanged. Collapsing [PatchHistoryItemState.Expanding] also cancels its loading Job.
-     */
+    /** Requests `Expanded -> Collapsed` and releases the detail; other states are unchanged. */
     public fun collapse()
 }
 
@@ -27,17 +23,8 @@ public interface PatchHistoryItemViewModel : WorkGroupChildHistoryItemViewModel 
  * releases [Expanded.event].
  */
 public sealed interface PatchHistoryItemState {
-    public data class Loading(
-        public val loadingJob: Job,
-    ) : PatchHistoryItemState
-
     public data class Collapsed(
         public val header: PatchHistoryItemHeader,
-    ) : PatchHistoryItemState
-
-    public data class Expanding(
-        public val header: PatchHistoryItemHeader,
-        public val loadingJob: Job,
     ) : PatchHistoryItemState
 
     public data class Expanded(

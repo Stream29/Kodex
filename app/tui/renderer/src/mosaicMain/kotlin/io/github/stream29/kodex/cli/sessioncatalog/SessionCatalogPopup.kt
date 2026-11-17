@@ -37,9 +37,9 @@ import io.github.stream29.kodex.cli.sessiondelete.SessionDeletePopup
 import kotlinx.datetime.TimeZone
 
 @Composable
-public actual fun BoxScope.SessionCatalogPopup(
+internal fun BoxScope.SessionCatalogPopup(
     viewModel: SessionCatalogViewModel,
-    onFailure: (Throwable) -> Unit,
+    onFailure: (Throwable) -> Unit = { throw it },
 ) {
     SessionCatalogContent(viewModel, remember(this) { MosaicCatalogRenderer(this) }, onFailure)
 }

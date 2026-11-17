@@ -160,7 +160,12 @@ private suspend fun acceptedFrontendLifetime(source: KodexAuthSource, explicitCa
                 released.complete(Unit)
             }
         }
-        val vm = createOpenAiLoginViewModel(this) { startRpcOAuth(rpc, OAuthTarget.OpenAi(source), this) }
+        val vm = createOpenAiLoginViewModel(
+            dependencies = io.github.stream29.kodex.app.settings.contract.OpenAiLoginDependencies {
+                startRpcOAuth(rpc, OAuthTarget.OpenAi(source), this)
+            },
+            ownerScope = this,
+        )
         val path = if (source == KodexAuthSource.Codex) Path(home, "codex", "auth.json") else Path(home, "auth.yml")
         try {
             vm.start()

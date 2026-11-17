@@ -12,11 +12,11 @@ import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiTheme
 
 @Composable
-public actual fun BoxScope.SessionRenamePopup(
+internal fun BoxScope.SessionRenamePopup(
     viewModel: SessionRenameViewModel,
     onDismissRequest: () -> Unit,
     onSubmitted: () -> Unit,
-    presentation: SessionRenamePresentation,
+    presentation: SessionRenamePresentation = SessionRenamePresentation.Compact,
 ) {
     val width = if (presentation == SessionRenamePresentation.Labeled) {
         (LocalTerminalState.current.size.columns - 4).coerceIn(1, 72)

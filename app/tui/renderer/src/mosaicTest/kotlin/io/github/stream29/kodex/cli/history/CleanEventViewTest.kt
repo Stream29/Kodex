@@ -599,7 +599,7 @@ val cleanEventViewTest by testSuite {
         }
     }
 
-    test("reasoningUsesOnlyTheDisplaySummary") {
+    test("reasoningRendersCompactThinkHeaderWithoutPrivateContent") {
         val event = StableReasoning(
             ResponseItem.Reasoning(
                 summary = listOf(ReasoningItemReasoningSummary.SummaryText("short summary")),
@@ -608,14 +608,13 @@ val cleanEventViewTest by testSuite {
         )
 
         runMosaicTest {
-            setContentAndSnapshot {
+            val snapshot = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box(Modifier.width(60)) { event.render() }
+                    Box(Modifier.width(60)) { event.render() }
+                }
             }
-            }
-            val expanded = clickFirstRow()
-            assertTrue("short summary" in expanded)
-            assertFalse("private full reasoning" in expanded)
+            assertEquals("Think", snapshot)
+            assertFalse("private full reasoning" in snapshot)
         }
     }
 

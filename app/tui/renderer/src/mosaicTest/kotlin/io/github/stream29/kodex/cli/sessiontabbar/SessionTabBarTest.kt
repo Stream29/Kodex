@@ -1,13 +1,13 @@
 package io.github.stream29.kodex.cli.sessiontabbar
 
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
-import com.jakewharton.mosaic.terminal.MouseEvent
-import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.AnsiLevel
+import com.jakewharton.mosaic.terminal.KeyboardEvent
+import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
@@ -15,12 +15,15 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarCallbacks
+import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarContent
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarState
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabIdentity
+import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabMenuRequest
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabPresentation
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private val fixedRunningIndicatorFrame = mutableStateOf("⠋")
@@ -37,13 +40,14 @@ val sessionTabBarRendererTest by testSuite {
         runMosaicTest(snapshotStrategy = snapshots) {
             val newSession = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box(Modifier.width(40)) {
-                    SessionTabBar(
-                        SessionTabBarState(listOf(SessionTabPresentation(identity, "Persisted")), selected),
-                        callbacks, fixedRunningIndicatorFrame, 40,
-                    )
+                    Box(Modifier.width(40)) {
+                        SessionTabBarContent(
+                            SessionTabBarState(listOf(SessionTabPresentation(identity, "Persisted")), selected),
+                            callbacks,
+                            rememberMosaicSessionTabBarRenderer(40, fixedRunningIndicatorFrame),
+                        )
+                    }
                 }
-            }
             }
             assertTrue(inverted("+").containsMatchIn(newSession), newSession)
             assertFalse(inverted("Persisted").containsMatchIn(newSession), newSession)
@@ -64,14 +68,15 @@ val sessionTabBarRendererTest by testSuite {
         runMosaicTest {
             val initial = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(32)) {
-                    SessionTabBar(
-                        SessionTabBarState(emptyList(), null),
-                        callbacks, fixedRunningIndicatorFrame, 32,
-                    )
-                    Text("revision=$revision")
+                    Column(Modifier.width(32)) {
+                        SessionTabBarContent(
+                            SessionTabBarState(emptyList(), null),
+                            callbacks,
+                            rememberMosaicSessionTabBarRenderer(32, fixedRunningIndicatorFrame),
+                        )
+                        Text("revision=$revision")
+                    }
                 }
-            }
             }
             assertTrue("[Sessions]" in initial && "[+]" in initial, initial)
             sendMouseEvent(MouseEvent(30, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
@@ -86,7 +91,7 @@ val sessionTabBarRendererTest by testSuite {
             awaitSnapshot()
             assertEquals(1, recording.sessionsCount)
         }
-        assertTrue(recording.selected.isEmpty() && recording.closed.isEmpty() && recording.menus.isEmpty())
+        assertTrue(recording.selected.isEmpty())
     }
 
     for (width in listOf(1, 8, 14, 15, 16, 32)) {
@@ -95,13 +100,14 @@ val sessionTabBarRendererTest by testSuite {
             runMosaicTest {
                 val initial = setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box(Modifier.width(width)) {
-                        SessionTabBar(
-                            SessionTabBarState(emptyList(), null),
-                            callbacks, fixedRunningIndicatorFrame, width,
-                        )
+                        Box(Modifier.width(width)) {
+                            SessionTabBarContent(
+                                SessionTabBarState(emptyList(), null),
+                                callbacks,
+                                rememberMosaicSessionTabBarRenderer(width, fixedRunningIndicatorFrame),
+                            )
+                        }
                     }
-                }
                 }
                 assertTrue(initial.lines().all { it.length <= width }, initial)
                 // Empty tabs leave paging available to the outer controls viewport.
@@ -140,15 +146,14 @@ val sessionTabBarRendererTest by testSuite {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box(Modifier.width(32)) {
-                    SessionTabBar(
-                        state = state,
-                        callbacks = callbacks,
-                        runningIndicatorFrame = fixedRunningIndicatorFrame,
-                        columns = 32,
-                    )
+                    Box(Modifier.width(32)) {
+                        SessionTabBarContent(
+                            state = state,
+                            callbacks = callbacks,
+                            renderer = rememberMosaicSessionTabBarRenderer(32, fixedRunningIndicatorFrame),
+                        )
+                    }
                 }
-            }
             }
             assertTrue("[Sessions]" in snapshot && "[+]" in snapshot, snapshot)
             assertTrue("[First]" in snapshot, snapshot)
@@ -166,6 +171,7 @@ val sessionTabBarRendererTest by testSuite {
             SessionTabBounds(start = 6, endExclusive = 11),
             sessionTabBounds(listOf("one", "two"), 1),
         )
+        assertNull(sessionTabBounds(listOf("only"), 1))
         assertNotNull(sessionTabBounds(listOf("first", "second"), 1))
     }
 
@@ -180,43 +186,36 @@ val sessionTabBarRendererTest by testSuite {
             selected = first,
         )
         val callbacks = RecordingCallbacks()
-        var menu: SessionTabContextMenuRequest? = null
+        var menu: SessionTabMenuRequest? = null
 
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box(Modifier.width(80)) {
-                    SessionTabBar(
-                        state = state,
-                        callbacks = callbacks,
-                        runningIndicatorFrame = fixedRunningIndicatorFrame,
-                        columns = 80,
-                        onOpenTabMenu = { request ->
-                            menu = request
-                            // The Application menu adapter may close the exact
-                            // admitted identity from the menu action.
-                            callbacks.close(request.identity)
-                        },
-                    )
+                    Box(Modifier.width(80)) {
+                        SessionTabBarContent(
+                            state = state,
+                            callbacks = callbacks,
+                            renderer = rememberMosaicSessionTabBarRenderer(80, fixedRunningIndicatorFrame),
+                            onOpenTabMenu = { request -> menu = request },
+                        )
+                    }
                 }
-            }
             }
 
             sendMouseEvent(MouseEvent(12, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
             sendMouseEvent(MouseEvent(12, 0, MouseEvent.Type.Release))
             awaitSnapshot()
             assertEquals(listOf(first), callbacks.selected)
-            assertTrue(callbacks.menus.isEmpty())
+            assertNull(menu)
 
             sendMouseEvent(MouseEvent(20, 0, MouseEvent.Type.Press, MouseEvent.Button.Right))
             sendMouseEvent(MouseEvent(20, 0, MouseEvent.Type.Release))
             awaitSnapshot()
         }
 
-        assertEquals(listOf(second), callbacks.menus)
-        assertEquals(listOf(second), callbacks.closed)
         assertEquals(second, menu?.identity)
         assertEquals("Second", menu?.label)
+        assertTrue((menu?.placement as? MosaicSessionTabMenuPlacement)?.anchor?.isPlaced == true)
     }
 
     test("a removed identity is rejected before a delayed pointer callback") {
@@ -232,19 +231,20 @@ val sessionTabBarRendererTest by testSuite {
             ),
         )
         val callbacks = RecordingCallbacks()
+        var menus = 0
 
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box(Modifier.width(80)) {
-                    SessionTabBar(
-                        state = state,
-                        callbacks = callbacks,
-                        runningIndicatorFrame = fixedRunningIndicatorFrame,
-                        columns = 80,
-                    )
+                    Box(Modifier.width(80)) {
+                        SessionTabBarContent(
+                            state = state,
+                            callbacks = callbacks,
+                            renderer = rememberMosaicSessionTabBarRenderer(80, fixedRunningIndicatorFrame),
+                            onOpenTabMenu = { menus++ },
+                        )
+                    }
                 }
-            }
             }
             state = SessionTabBarState(
                 listOf(SessionTabPresentation(first, "First")),
@@ -258,28 +258,17 @@ val sessionTabBarRendererTest by testSuite {
         }
 
         assertTrue(callbacks.selected.isEmpty())
-        assertTrue(callbacks.menus.isEmpty())
-        assertTrue(callbacks.closed.isEmpty())
+        assertEquals(0, menus)
     }
 }
 
 private class RecordingCallbacks : SessionTabBarCallbacks {
     val selected = mutableListOf<SessionTabIdentity>()
-    val closed = mutableListOf<SessionTabIdentity>()
-    val menus = mutableListOf<SessionTabIdentity>()
     var newSessionCount = 0
     var sessionsCount = 0
 
     override fun select(identity: SessionTabIdentity) {
         selected += identity
-    }
-
-    override fun close(identity: SessionTabIdentity) {
-        closed += identity
-    }
-
-    override fun openContextMenu(identity: SessionTabIdentity) {
-        menus += identity
     }
 
     override fun selectNewSession() {

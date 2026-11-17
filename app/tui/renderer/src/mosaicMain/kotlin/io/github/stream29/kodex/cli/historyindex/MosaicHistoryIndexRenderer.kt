@@ -1,8 +1,8 @@
 package io.github.stream29.kodex.cli.historyindex
 
 import androidx.compose.runtime.*
-import com.jakewharton.mosaic.layout.*
 import com.jakewharton.mosaic.LocalTerminalState
+import com.jakewharton.mosaic.layout.*
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.ui.BoxScope
@@ -11,6 +11,8 @@ import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexWindow
+import io.github.stream29.kodex.cli.app.SessionSidebarSide
+import io.github.stream29.kodex.cli.app.SidebarHoverPopupSurface
 import io.github.stream29.kodex.cli.components.*
 import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRow
 import kotlinx.datetime.TimeZone
@@ -61,7 +63,7 @@ internal class MosaicHistoryIndexRenderer(
         LaunchedEffect(viewModel, list) {
             snapshotFlow { list.canScrollForward }.collect { forward -> if (!forward) followsLatest.value = true }
         }
-        LaunchedEffect(viewModel, window.generation, window.revision, window.indexes.lastOrNull(), followsLatest.value) {
+        LaunchedEffect(viewModel, window.generation, window.revision, window.entries.lastOrNull()?.index, followsLatest.value) {
             if (followsLatest.value) list.requestScrollToEnd()
         }
         LazyColumn(
@@ -100,12 +102,19 @@ internal class MosaicHistoryIndexRenderer(
         interaction: HistoryIndexInteraction, presentation: HistoryIndexDetailPresentation, onHoverChanged: (Boolean) -> Unit,
     ) {
         val request = (interaction as MosaicHistoryIndexOrigin).request
+        val sidebarSide = if (request.side == HistoryIndexSide.Left) SessionSidebarSide.Left else SessionSidebarSide.Right
         with(checkNotNull(popupScope)) {
-            HistoryIndexHoverSurface(
-                request.anchor, request.side, request.pointerPosition, presentation.title, presentation.content,
-                columns, rows, presentation.questionRows,
-                if (presentation.failed) TuiTheme.colorScheme.error else TuiTheme.colorScheme.onSurface,
-                onHoverChanged,
+            SidebarHoverPopupSurface(
+                anchor = request.anchor,
+                side = sidebarSide,
+                pointerPosition = request.pointerPosition,
+                title = presentation.title,
+                content = presentation.content,
+                contentColumns = columns,
+                contentRows = rows,
+                requestUserInputRows = presentation.questionRows,
+                titleColor = TuiTheme.colorScheme.onSurface,
+                onHoverChanged = onHoverChanged,
             )
         }
     }
@@ -152,7 +161,7 @@ private fun BoxScope.HistoryIndexDetailsDialog(detail: HistoryIndexDetailPresent
             Text(
                 detail?.title ?: "History entry",
                 Modifier.fillMaxWidth().background(TuiTheme.colorScheme.surfaceContainerHigh),
-                color = if (detail?.failed == true) TuiTheme.colorScheme.error else TuiTheme.colorScheme.onSurface,
+                color = TuiTheme.colorScheme.onSurface,
             )
             Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll)) {
                 val questions = detail?.questionRows
@@ -169,6 +178,9 @@ private fun BoxScope.HistoryIndexDetailsDialog(detail: HistoryIndexDetailPresent
 
 private class MosaicHistoryIndexListScope(private val original: LazyListScope) : HistoryIndexListScope {
     override fun Rows(window: HistoryIndexWindow, content: @Composable (Int) -> Unit) {
-        original.items(window.indexes, key = { HistoryIndexRowKey(window.generation, window.revision, it) }) { content(it) }
+        original.items(
+            window.entries,
+            key = { HistoryIndexRowKey(window.generation, window.revision, it.index) },
+        ) { entry -> content(entry.index) }
     }
 }

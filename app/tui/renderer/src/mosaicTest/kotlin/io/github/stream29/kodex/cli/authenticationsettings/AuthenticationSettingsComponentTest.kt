@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.cli.authenticationsettings
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
@@ -9,17 +11,25 @@ import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
+import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Column
+import com.jakewharton.mosaic.ui.Row
+import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.authenticationsettings.AuthenticationSettingsDependencies
 import io.github.stream29.kodex.app.authenticationsettings.AuthenticationSettingsState
+import io.github.stream29.kodex.app.authenticationsettings.AuthenticationSettingsViewModel
 import io.github.stream29.kodex.app.authenticationsettings.createAuthenticationSettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperation
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperationState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
+import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
+import io.github.stream29.kodex.cli.settings.AuthenticationLogoutFrame
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
+import io.github.stream29.kodex.cli.settings.MosaicSettingsRenderer
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionPlan
 import kotlinx.coroutines.CoroutineScope
@@ -42,14 +52,13 @@ val authenticationSettingsComponentTest by testSuite {
         test("safe unavailable renderer $reason") {
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column(Modifier.width(120)) {
-                        AuthenticationSettingsContent(
-                            AuthenticationSettingsState(KodexAuthSource.Codex, SettingsAuthenticationState.Unavailable(reason)),
-                            rememberTuiDropdownState(), {}, {}, {},
-                        )
+                    WithMosaicComponentRenderers {
+                        Column(Modifier.width(120)) {
+                            RenderAuthBody(
+                                AuthenticationSettingsState(KodexAuthSource.Codex, SettingsAuthenticationState.Unavailable(reason)),
+                            )
+                        }
                     }
-                }
                 }
                 assertTrue(text in snapshot, snapshot)
                 assertTrue("Codex credentials" in snapshot, snapshot)
@@ -72,14 +81,11 @@ val authenticationSettingsComponentTest by testSuite {
         test("authenticated identity fallback $identity and relogin logout entry") {
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column(Modifier.width(120)) {
-                        AuthenticationSettingsContent(
-                            AuthenticationSettingsState(KodexAuthSource.Kodex, auth),
-                            rememberTuiDropdownState(), {}, {}, {},
-                        )
+                    WithMosaicComponentRenderers {
+                        Column(Modifier.width(120)) {
+                            RenderAuthBody(AuthenticationSettingsState(KodexAuthSource.Kodex, auth))
+                        }
                     }
-                }
                 }
                 assertTrue(identity in snapshot, snapshot)
                 assertTrue("[Sign in again]" in snapshot, snapshot)
@@ -104,13 +110,13 @@ val authenticationSettingsComponentTest by testSuite {
         try {
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box {
-                        TuiPopupHost(Modifier.width(120).height(28)) {
-                            AuthenticationSettingsComponent(vm)
+                    WithMosaicComponentRenderers {
+                        Box {
+                            TuiPopupHost(Modifier.width(120).height(28)) {
+                                RenderAuthPage(vm)
+                            }
                         }
                     }
-                }
                 }
                 ports.selectedSource.value = KodexAuthSource.Codex
                 val switched = awaitSnapshot()
@@ -132,15 +138,20 @@ val authenticationSettingsComponentTest by testSuite {
         var calls = 0
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(120)) {
-                    AuthenticationSettingsContent(
-                        AuthenticationSettingsState(KodexAuthSource.Kodex, SettingsAuthenticationState.Authenticated(),
-                            operation = SettingsAuthenticationOperationState.SigningOut),
-                        rememberTuiDropdownState(), { calls++ }, { calls++ }, { calls++ },
-                    )
+                WithMosaicComponentRenderers {
+                    Column(Modifier.width(120)) {
+                        RenderAuthBody(
+                            AuthenticationSettingsState(
+                                KodexAuthSource.Kodex,
+                                SettingsAuthenticationState.Authenticated(),
+                                operation = SettingsAuthenticationOperationState.SigningOut,
+                            ),
+                            onOpenLogin = { calls++ },
+                            onRequestLogout = { calls++ },
+                            onDismissFailure = { calls++ },
+                        )
+                    }
                 }
-            }
             }
             assertTrue("Signing out…" in snapshot, snapshot)
             repeat(4) {
@@ -154,16 +165,19 @@ val authenticationSettingsComponentTest by testSuite {
         var dismissals = 0
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(120)) {
-                    AuthenticationSettingsContent(
-                        AuthenticationSettingsState(KodexAuthSource.Kodex, SettingsAuthenticationState.Authenticated(),
-                            operation = SettingsAuthenticationOperationState.Failed(SettingsAuthenticationOperation.Logout),
-                            operationFailure = true),
-                        rememberTuiDropdownState(), {}, {}, { dismissals++ },
-                    )
+                WithMosaicComponentRenderers {
+                    Column(Modifier.width(120)) {
+                        RenderAuthBody(
+                            AuthenticationSettingsState(
+                                KodexAuthSource.Kodex,
+                                SettingsAuthenticationState.Authenticated(),
+                                operation = SettingsAuthenticationOperationState.Failed(SettingsAuthenticationOperation.Logout),
+                                operationFailure = true,
+                            ),
+                            onDismissFailure = { dismissals++ },
+                        )
+                    }
                 }
-            }
             }
             assertTrue("Could not log out." in snapshot, snapshot)
             assertFalse("credentials were kept" in snapshot, snapshot)
@@ -186,13 +200,13 @@ val authenticationSettingsComponentTest by testSuite {
             try {
                 runMosaicTest {
                     val snapshot = setContentAndSnapshot {
-                        io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                        Box {
-                            TuiPopupHost(Modifier.width(120).height(28)) {
-                                AuthenticationSettingsComponent(vm)
+                        WithMosaicComponentRenderers {
+                            Box {
+                                TuiPopupHost(Modifier.width(120).height(28)) {
+                                    RenderAuthPage(vm)
+                                }
                             }
                         }
-                    }
                     }
                     if (source == KodexAuthSource.Codex) {
                         assertTrue("~/.codex/auth.json" in snapshot, snapshot)
@@ -217,13 +231,13 @@ val authenticationSettingsComponentTest by testSuite {
         try {
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box {
-                        TuiPopupHost(Modifier.width(120).height(30)) {
-                            AuthenticationSettingsComponent(vm)
+                    WithMosaicComponentRenderers {
+                        Box {
+                            TuiPopupHost(Modifier.width(120).height(30)) {
+                                RenderAuthPage(vm)
+                            }
                         }
                     }
-                }
                 }
                 sendKeyEvent(KeyboardEvent(codepoint = 13)) // Open source menu.
                 val menu = awaitSnapshot()
@@ -245,24 +259,61 @@ val authenticationSettingsComponentTest by testSuite {
             }
         } finally { vm.close(); owner.cancel() }
     }
-    test("closed component renders nothing and shared banner can be delegated to host") {
+    test("closed component renders nothing and shared banner is owned by the host") {
         for (closed in listOf(false, true)) {
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column(Modifier.width(120)) {
-                        AuthenticationSettingsContent(
-                            AuthenticationSettingsState(KodexAuthSource.Kodex,
-                                SettingsAuthenticationState.Authenticated(), operationFailure = true, closed = closed),
-                            rememberTuiDropdownState(), {}, {}, {}, showOperationFailure = false,
-                        )
+                    WithMosaicComponentRenderers {
+                        Column(Modifier.width(120)) {
+                            RenderAuthBody(
+                                AuthenticationSettingsState(
+                                    KodexAuthSource.Kodex,
+                                    SettingsAuthenticationState.Authenticated(),
+                                    operationFailure = true,
+                                    closed = closed,
+                                ),
+                            )
+                        }
                     }
-                }
                 }
                 assertFalse("A settings operation failed." in snapshot, snapshot)
                 assertEquals(!closed, "OpenAI account" in snapshot)
             }
         }
+    }
+}
+
+@Composable
+private fun RenderAuthBody(
+    state: AuthenticationSettingsState,
+    onOpenLogin: () -> Unit = {},
+    onRequestLogout: () -> Unit = {},
+    onDismissFailure: () -> Unit = {},
+) {
+    val dropdown = rememberTuiDropdownState()
+    AuthenticationSettingsBody(state, onOpenLogin, onRequestLogout, onDismissFailure) { enabled ->
+        Row {
+            Text("Authentication: ")
+            TuiDropdownTrigger(dropdown, state.selectedSource.name, enabled = enabled, autoFocus = true)
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.RenderAuthPage(vm: AuthenticationSettingsViewModel) {
+    val dropdown = rememberTuiDropdownState()
+    val renderer = remember(dropdown) {
+        MosaicSettingsRenderer(
+            choices = mapOf("AuthenticationSource" to dropdown),
+            inlineTriggerKeys = setOf("AuthenticationSource"),
+        )
+    }
+    Column {
+        AuthenticationSettingsPage(vm, renderer)
+    }
+    with(renderer) { Menus() }
+    AuthenticationLogoutHost(vm) { title, onDismiss, content ->
+        AuthenticationLogoutFrame(title, onDismiss, content)
     }
 }
 

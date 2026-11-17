@@ -24,6 +24,7 @@ import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem as Fs
 import kotlin.test.*
+import kotlin.time.Duration.Companion.seconds
 
 /** Gates Application admission; the child, registry, JSON transport and backend are real. */
 val exactTargetCommandTest by testSuite(compartment = { TestCompartment.RealTime }) {
@@ -443,23 +444,28 @@ private class CommandApplicationFixture(
     suspend fun openPersisted(): PersistedSessionViewModel =
         application.openSession(backend.services.global.createSession(backend.root))
 
-    suspend fun readFirstUserMessage(sessionIndex: Int): StableUserMessage {
+    suspend fun readFirstUserMessage(sessionIndex: Int): StableUserMessage = withTimeout(5.seconds) {
         while (true) {
             try {
                 val nonce = backend.services.runtime.getCacheNonce(sessionIndex)
                 val latest = backend.services.runtime.getLatestIndex(sessionIndex)
-                return assertIs<StableUserMessage>(
-                    backend.services.runtime.getFirstCommitsIn(
-                        sessionIndex,
-                        nonce,
-                        0,
-                        latest,
-                        setOf(AgentCommitType.UserMessage),
-                    ).single().commit,
-                )
+                val entry = backend.services.runtime.getFirstCommitsIn(
+                    sessionIndex,
+                    nonce,
+                    0,
+                    latest,
+                    setOf(AgentCommitType.UserMessage),
+                    limit = 1,
+                ).firstOrNull()
+                if (entry != null) {
+                    return@withTimeout assertIs<StableUserMessage>(entry.commit)
+                }
             } catch (_: CacheNonceMismatch) {
             }
+            delay(10)
         }
+        @Suppress("UNREACHABLE_CODE")
+        error("unreachable")
     }
 
     suspend fun blockCommands(): CommandBlocker {

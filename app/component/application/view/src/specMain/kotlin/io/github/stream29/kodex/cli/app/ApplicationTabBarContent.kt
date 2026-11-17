@@ -17,11 +17,6 @@ public data class SessionTabRenderState(
     public val agent: AgentViewModel? = null,
 )
 
-@Composable
-public expect fun collectSessionTabRenderStates(
-    tabs: List<PersistedSessionViewModel>, selectedIndex: Int?,
-): List<SessionTabRenderState>
-
 /** Prunes widget state only, by exact currently owned History child; never closes a child. */
 public expect fun <T : Any> retainApplicationHistoryWidgetStates(
     states: MutableList<Pair<AgentHistoryViewModel, T>>, histories: List<AgentHistoryViewModel>,

@@ -1,18 +1,20 @@
 package io.github.stream29.kodex.cli.settings
 
+import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
-import io.github.stream29.kodex.cli.components.TuiPopupHost
-import io.github.stream29.kodex.app.hooksettings.HookSettingsDialog
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.hooksettings.HookDialogToken
 import io.github.stream29.kodex.app.hooksettings.HookEditorDraft
+import io.github.stream29.kodex.app.hooksettings.HookSettingsDialog
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
+import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.rpc.models.NotificationHook
 import io.github.stream29.kodex.rpc.models.NotificationHookType
-import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -20,15 +22,17 @@ val hookSettingsContentTest by testSuite {
     test("rendersNativeHookNamesAndTypesUnderTheManagementHeader") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(96)) {
-                    HookSettingsContent(
-                        hooks = listOf(managedHook()),
-                        onAdd = {},
-                        onOpenDetails = {},
-                    )
+                WithMosaicComponentRenderers {
+                    val renderer = remember { MosaicSettingsRenderer() }
+                    Column(Modifier.width(96)) {
+                        HookSettingsContent(
+                            hooks = listOf(managedHook()),
+                            renderer = renderer,
+                            onAdd = {},
+                            onOpenDetails = {},
+                        )
+                    }
                 }
-            }
             }
 
             assertTrue("Hooks [Add]" in snapshot, snapshot)
@@ -44,18 +48,18 @@ val hookSettingsContentTest by testSuite {
     test("rendersHookDetailsAndActionsInsideDialog") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box {
-                    TuiPopupHost(modifier = Modifier.width(96).height(24)) {
-                        HookDetailsDialog(
-                            hook = managedHook(),
-                            onDismiss = {},
-                            onEdit = {},
-                            onDelete = {},
-                        )
+                WithMosaicComponentRenderers {
+                    Box {
+                        TuiPopupHost(modifier = Modifier.width(96).height(24)) {
+                            HookDetailsDialog(
+                                hook = managedHook(),
+                                onDismiss = {},
+                                onEdit = {},
+                                onDelete = {},
+                            )
+                        }
                     }
                 }
-            }
             }
 
             assertTrue("notify" in snapshot, snapshot)
@@ -68,26 +72,26 @@ val hookSettingsContentTest by testSuite {
     test("editorContainsOnlyNameTypeAndCommand") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box {
-                    TuiPopupHost(modifier = Modifier.width(96).height(24)) {
-                        HookEditorDialog(
-                            editor = HookSettingsDialog.Editing(
-                                token = HookDialogToken(),
-                                originalName = "guard tools",
-                                draft = HookEditorDraft(
-                                    name = "guard tools",
-                                    types = setOf(NotificationHookType.StopAssistantMessage),
-                                    command = "guard-command",
+                WithMosaicComponentRenderers {
+                    Box {
+                        TuiPopupHost(modifier = Modifier.width(96).height(24)) {
+                            HookEditorDialog(
+                                editor = HookSettingsDialog.Editing(
+                                    token = HookDialogToken(),
+                                    originalName = "guard tools",
+                                    draft = HookEditorDraft(
+                                        name = "guard tools",
+                                        types = setOf(NotificationHookType.StopAssistantMessage),
+                                        command = "guard-command",
+                                    ),
                                 ),
-                            ),
-                            onDraftChange = {},
-                            onDismiss = {},
-                            onSave = {},
-                        )
+                                onDraftChange = {},
+                                onDismiss = {},
+                                onSave = {},
+                            )
+                        }
                     }
                 }
-            }
             }
 
             assertTrue("Edit Hook" in snapshot, snapshot)
@@ -102,7 +106,6 @@ val hookSettingsContentTest by testSuite {
             assertFalse("Environment" in snapshot, snapshot)
         }
     }
-
 }
 
 private fun managedHook(): NotificationHook =

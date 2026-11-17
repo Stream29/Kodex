@@ -12,7 +12,7 @@ internal class MessageHistoryItemViewModelImpl(
     override val index: Int,
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
-) : MessageHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
+) : MessageHistoryItemViewModel, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<MessageHistoryItemState> = MutableStateFlow(
         try {
             val message = descriptor.event as? StableIndexEvent.Steerable
@@ -34,8 +34,6 @@ internal class MessageHistoryItemViewModelImpl(
         check(context.isCurrent()) { "History generation is no longer current." }
         return descriptor.createdAt.takeIf { it != Instant.DISTANT_PAST }
     }
-
-    override fun ensureLoaded() = Unit
 
     override fun release() = Unit
 }

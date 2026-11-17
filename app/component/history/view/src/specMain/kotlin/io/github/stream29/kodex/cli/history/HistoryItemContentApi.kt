@@ -11,7 +11,6 @@ public enum class HistoryDisclosureState { Collapsed, Loading, Expanded }
 
 /** Item geometry, focus, context-menu anchors and expansion mounting; never a second row state machine. */
 public interface HistoryItemRenderer : HistoryContentRenderer {
-    @Composable public fun Loading()
     @Composable public fun Error()
     @Composable public fun ItemHeading(value: String, elapsed: Duration, style: HistoryTextStyle)
     @Composable public fun TurnMarker(duration: Duration)
@@ -21,7 +20,7 @@ public interface HistoryItemRenderer : HistoryContentRenderer {
         disclosure: HistoryDisclosureState, onClick: () -> Unit,
     )
     @Composable public fun Collapsed(
-        summary: String, status: String, elapsed: Duration, disclosure: HistoryDisclosureState, onClick: () -> Unit,
+        summary: String, status: String, elapsed: Duration, onClick: () -> Unit,
     )
     /** A non-null collapse callback mounts the event with externally controlled expanded=true. */
     @Composable public fun Event(

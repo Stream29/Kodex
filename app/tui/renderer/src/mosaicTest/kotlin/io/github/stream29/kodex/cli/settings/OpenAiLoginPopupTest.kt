@@ -6,7 +6,9 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.app.settings.contract.OpenAiLoginDependencies
 import io.github.stream29.kodex.app.settings.createOpenAiLoginViewModel
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.cli.auth.KodexAuthLoginAttempt
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import kotlinx.coroutines.CoroutineScope
@@ -19,27 +21,29 @@ val openAiLoginPopupTest by testSuite {
     test("renders a browser sign-in popup") {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val viewModel = createOpenAiLoginViewModel(
+            dependencies = OpenAiLoginDependencies {
+                object : KodexAuthLoginAttempt {
+                    override val authorizationUrl: String = "https://login.example.invalid"
+                    override suspend fun awaitCompletion(): Unit = kotlinx.coroutines.awaitCancellation()
+                    override fun cancel(): Unit = Unit
+                    override fun release(): Unit = Unit
+                }
+            },
             ownerScope = scope,
-            startLogin = { object : KodexAuthLoginAttempt {
-                override val authorizationUrl: String = "https://login.example.invalid"
-                override suspend fun awaitCompletion(): Unit = kotlinx.coroutines.awaitCancellation()
-                override fun cancel(): Unit = Unit
-                override fun release(): Unit = Unit
-            } },
         )
         try {
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box {
-                        TuiPopupHost(modifier = Modifier.width(80).height(24)) {
-                            OpenAiLoginPopup(
-                                viewModel = viewModel,
-                                onDismissRequest = {},
-                            )
+                    WithMosaicComponentRenderers {
+                        Box {
+                            TuiPopupHost(modifier = Modifier.width(80).height(24)) {
+                                OpenAiLoginPopup(
+                                    viewModel = viewModel,
+                                    onDismissRequest = {},
+                                )
+                            }
                         }
                     }
-                }
                 }
 
                 val snapshot = awaitSnapshot()

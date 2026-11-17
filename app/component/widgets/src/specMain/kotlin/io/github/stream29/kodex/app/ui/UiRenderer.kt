@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.ui
 
 import androidx.compose.runtime.*
+import io.github.stream29.kodex.cli.settings.SubmitKey
 
 /** Renderer leaves take explicit arguments; defaults belong to the non-virtual widget functions. */
 public interface UiRenderer {
@@ -42,7 +43,7 @@ public interface UiRenderer {
         autoFocus: Boolean,
         multiline: Boolean,
         maximumLines: Int,
-        submitKey: UiSubmitKey,
+        submitKey: SubmitKey,
         revision: Long?,
     ): Unit
 

@@ -5,7 +5,6 @@ import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Text as MosaicText
 import io.github.stream29.kodex.rpc.models.AgentStateValue
-import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfiguration
 import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDropdowns
 import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationStatusItemsWithoutSpacing
@@ -25,25 +24,6 @@ import io.github.stream29.kodex.cli.components.statusBarWidth
 import io.github.stream29.kodex.cli.components.workingDirectoryStatusLabel
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
-
-@Composable
-internal fun AgentRuntimeStatusBar(
-    columns: Int,
-    viewModel: AgentViewModel,
-    state: AgentStateValue,
-    running: Boolean,
-    settings: KodexAgentSettings,
-    tokenCount: Long?,
-    dropdowns: RuntimeConfigurationDropdowns,
-    onBrowseWorkingDirectory: () -> Unit,
-    onOpenSettings: () -> Unit,
-) {
-    AgentRuntimeStatusContent(
-        viewModel, state, running, settings, tokenCount,
-        MosaicAgentStatusRenderer(columns, dropdowns),
-        onBrowseWorkingDirectory, onOpenSettings,
-    )
-}
 
 internal class MosaicAgentStatusRenderer(
     private val columns: Int,

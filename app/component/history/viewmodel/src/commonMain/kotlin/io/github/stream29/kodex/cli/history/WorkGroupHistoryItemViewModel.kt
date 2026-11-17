@@ -20,7 +20,7 @@ internal class WorkGroupHistoryItemViewModelImpl(
     groupElapsed: kotlin.time.Duration,
     private val context: HistoryItemLoadContext,
     private val childFactory: suspend () -> List<WorkGroupChildHistoryItemViewModel>,
-) : WorkGroupHistoryItemViewModel, LoadableHistoryItem {
+) : WorkGroupHistoryItemViewModel {
     init {
         require(!indexRange.isEmpty())
         require(itemCount > 0)
@@ -30,8 +30,6 @@ internal class WorkGroupHistoryItemViewModelImpl(
         MutableStateFlow(WorkGroupHistoryItemState.Collapsed(groupElapsed))
 
     override val state: StateFlow<WorkGroupHistoryItemState> = mutableState.asStateFlow()
-
-    override fun ensureLoaded() = Unit
 
     override fun expand() {
         val collapsed = mutableState.value as? WorkGroupHistoryItemState.Collapsed ?: return
@@ -70,10 +68,6 @@ internal class WorkGroupHistoryItemViewModelImpl(
 
     override fun collapse() {
         when (val current = mutableState.value) {
-            is WorkGroupHistoryItemState.Loading -> {
-                current.loadingJob.cancel()
-            }
-
             is WorkGroupHistoryItemState.Expanding -> {
                 current.loadingJob.cancel()
                 mutableState.value = WorkGroupHistoryItemState.Collapsed(current.elapsed)

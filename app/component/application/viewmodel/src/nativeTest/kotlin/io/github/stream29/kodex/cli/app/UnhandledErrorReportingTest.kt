@@ -68,7 +68,6 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
             // A business Stop is handled by the backend; local errors use the separate frontend owner.
             assertEquals(1, lines(1).size)
             agent.running.first { !it }
-            assertNull(agent.notification.value, "A successful response reporting default is not a tier warning.")
             app.reportUnhandledError(CancellationException("do not notify cancellation"))
             repeat(2) { app.reportUnhandledError(IOException("literal $(touch unwanted) \"failure\"")) }
             val observed = lines(3)
@@ -86,7 +85,6 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
             val agentError = Json.parseToJsonElement(lines(4).last()).jsonObject
             assertEquals("unhandled_error", agentError.getValue("type").jsonPrimitive.content)
             assertEquals("No history confirmation is pending.", agentError.getValue("message").jsonPrimitive.content)
-            assertNull(agent.notification.value)
             agent.submit(listOf(ContentItem.InputText("after local errors")))
             val resumed = lines(5)
             assertEquals(5, resumed.size, "Local errors and failed Hooks must not kill or recursively notify the host.")
@@ -150,7 +148,6 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
             // Also catch a delayed duplicate after the success notification.
             delay(200)
             assertEquals(4, Fs.readString(output).lineSequence().filter(String::isNotBlank).count())
-            assertNull(agent.notification.value)
         }
     }
 }

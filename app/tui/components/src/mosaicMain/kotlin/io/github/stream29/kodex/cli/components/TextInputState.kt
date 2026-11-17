@@ -2,12 +2,9 @@
 
 package io.github.stream29.kodex.cli.components
 
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 
 public actual fun TextInputEdit.applyTo(value: TextInputValue): TextInputValue = when (this) {
@@ -50,12 +47,6 @@ public actual class TextInputState actual constructor(initialValue: TextInputVal
     private var followCursor: Boolean = true
     private var lastViewportWidth: Int = -1
     private var lastViewportRows: Int = -1
-
-    public actual val canUndo: Boolean
-        get() = undoHistory.isNotEmpty()
-
-    public actual val canRedo: Boolean
-        get() = redoHistory.isNotEmpty()
 
     public actual fun edit(edit: TextInputEdit): Boolean {
         val before = value
@@ -240,10 +231,6 @@ public actual class TextInputState actual constructor(initialValue: TextInputVal
         activeHistoryGroup = null
     }
 }
-
-@Composable
-public actual fun rememberTextInputState(initialValue: TextInputValue): TextInputState =
-    remember { TextInputState(initialValue) }
 
 private data class HistoryEntry(
     val before: TextInputValue,

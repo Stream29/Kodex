@@ -79,12 +79,11 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 assertEquals("captured", snapshot.diagnostics?.requestedModel)
                 assertEquals("different", snapshot.diagnostics?.responseId)
                 assertEquals(ServiceTier.Default, binding.settings.value.serviceTier)
-                assertNull(agent.notification.value)
                 assertTrue(failures.value.isEmpty())
                 views.release(view)
                 val reopened = views.open(view.sessionIndex)
                 yield(); yield()
-                assertNull(requireNotNull(reopened.rootAgent.value).notification.value)
+                requireNotNull(reopened.rootAgent.value)
                 assertTrue(failures.value.isEmpty())
             } finally {
                 finish.complete(Unit)
@@ -117,12 +116,10 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 started.await()
                 agent.clearPending()
                 assertEquals("fixture operation failed", failures.first { it.size == 1 }.single().message)
-                assertNull(agent.notification.value)
                 finish.complete(Unit)
                 binding.tokenCount.first { it is LlmRequestMeta.Response }
                 binding.running.first { !it }
                 yield(); yield()
-                assertNull(agent.notification.value)
                 assertEquals(1, failures.value.size)
                 assertEquals("priority", (binding.tokenCount.value as? LlmRequestMeta.Response)?.diagnostics?.serviceTier)
                 assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
@@ -150,7 +147,6 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
                 assertEquals("ultrafast", snapshot.diagnostics?.requestedServiceTier)
                 assertEquals(actual, snapshot.diagnostics?.serviceTier)
-                assertNull(agent.notification.value)
                 assertTrue(failures.value.isEmpty())
             }
         }

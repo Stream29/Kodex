@@ -50,7 +50,6 @@ internal fun ComposerSmoke(onBack: () -> Unit) {
                     accepted = "Submit ${owner.value}: $content"
                 }
             }
-            override val cancellation = ComposerCancellationPort {}
             override val failures = ComposerFailureReporter { _, failure -> accepted = "Failure: ${failure.message}" }
         }, scope)
     }

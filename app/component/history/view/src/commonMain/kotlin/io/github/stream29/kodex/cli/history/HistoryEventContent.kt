@@ -92,7 +92,6 @@ public actual fun HistoryEventContent(
             is StableImageGenerationCall -> renderHostedImageGeneration()
             is StableContextCompaction -> ContextCompactionEvent()
             is StablePatchToolEvent -> renderer.StablePatch(this)
-
             is StableAwaitEventToolEvent -> renderAwaitEvent()
             is StableCommandExecutionToolEvent -> HistoryCommandContent(this, renderer)
             is StableJsonToolEvent -> renderJsonTool()
@@ -169,22 +168,6 @@ public actual fun HistoryEventContent(
 }
 
 @Composable
-private fun StableReasoning.renderReasoning() {
-    ExpandableHistoryEvent(
-        header = "Think",
-        expansionKey = item.id?.value ?: "reasoning",
-        headerStyle = TextStyle.Dim,
-    ) {
-        val summary = item.summary.joinToString(separator = "\n") { part ->
-            when (part) {
-                is io.github.stream29.kodex.openai.ReasoningItemReasoningSummary.SummaryText -> part.text
-            }
-        }
-        if (summary.isNotBlank()) DetailText(summary, TextStyle.Dim)
-    }
-}
-
-@Composable
 private fun StableInvalidToolCall.renderInvalidToolCall() {
     if (isRedesignedInternalCall(invocation.displayName())) {
         BuiltInToolEvent(
@@ -252,6 +235,11 @@ private fun StableImageGenerationCall.renderHostedImageGeneration() {
 }
 
 @Composable
+private fun StableReasoning.renderReasoning() {
+    Header("Think", TextStyle.Dim)
+}
+
+@Composable
 private fun ContextCompactionEvent() {
     Header("Context compacted", TextStyle.Dim)
 }
@@ -281,7 +269,7 @@ private fun PendingCommandExecutionToolEvent.renderCommandExecution(
 private fun StableJsonToolEvent.renderJsonTool() {
     val toolName = qualifiedName(name, namespace)
     if (isReadOnlyUtility(toolName)) {
-        BuiltInToolEvent(functionToolSummary(name, namespace), toolName, success.completedStatus(), callId) {
+        BuiltInToolEvent(functionToolSummary(name, namespace, failed = success == false), toolName, success.completedStatus(), callId) {
             val text = (result as? JsonPrimitive)?.contentOrNull ?: result.toString()
             WrappedHistoryText(text)
         }
@@ -289,7 +277,7 @@ private fun StableJsonToolEvent.renderJsonTool() {
     }
     ToolEvent(
         summary = functionToolSummary(name, namespace, failed = success == false),
-        rawName = qualifiedName(name, namespace),
+        rawName = toolName,
         status = success.completedStatus(),
         expansionKey = callId,
     ) {
@@ -302,14 +290,14 @@ private fun StableJsonToolEvent.renderJsonTool() {
 private fun StableTextToolEvent.renderTextTool() {
     val toolName = qualifiedName(name, namespace)
     if (isReadOnlyUtility(toolName)) {
-        BuiltInToolEvent(functionToolSummary(name, namespace), toolName, success.completedStatus(), callId) {
+        BuiltInToolEvent(functionToolSummary(name, namespace, failed = success == false), toolName, success.completedStatus(), callId) {
             WrappedHistoryText(result)
         }
         return
     }
     ToolEvent(
         summary = functionToolSummary(name, namespace, failed = success == false),
-        rawName = qualifiedName(name, namespace),
+        rawName = toolName,
         status = success.completedStatus(),
         expansionKey = callId,
     ) {
@@ -431,16 +419,6 @@ internal class HistoryContentDetailsScope(
     ) {
         details.Section(label, content)
     }
-}
-
-@Composable
-private fun ExpandableHistoryEvent(
-    header: String,
-    expansionKey: Any,
-    headerStyle: TextStyle,
-    content: @Composable () -> Unit,
-) {
-    LocalHistoryRenderer.current.Expandable(header, expansionKey, headerStyle, content)
 }
 
 @Composable
@@ -762,82 +740,6 @@ private fun SearchCommands.ongoingToolSummary(): String = when {
     !time.isNullOrEmpty() -> "Checking the time"
     else -> "Using web search"
 }
-
-internal fun functionToolSummary(
-    name: String,
-    namespace: String?,
-    failed: Boolean = false,
-): String = when (qualifiedName(name, namespace)) {
-    "await_event" -> if (failed) "Failed to wait for events" else "Wait for events"
-    "exec_command",
-    "shell.run",
-        -> if (failed) "Failed to run a command" else "Run a command"
-
-    "write_stdin" -> if (failed) "Failed to interact with a terminal session" else "Interact with a terminal session"
-    "read_media" -> if (failed) "Failed to read media" else "Read media"
-    "view_image" -> if (failed) "Failed to view an image" else "View an image"
-    "image_gen.imagegen" -> if (failed) "Failed to generate an image" else "Generate an image"
-    "request_user_input" -> if (failed) "Failed to collect user input" else "Ask the user for input"
-    "tool_search",
-    "server_tool_search",
-        -> if (failed) "Failed to search available tools" else "Search available tools"
-
-    "web.run",
-    "hosted_web_search",
-        -> if (failed) "Failed to search the web" else "Search the web"
-
-    "hosted_image_generation" -> if (failed) "Failed to generate an image" else "Generate an image"
-    "spawn_agent" -> if (failed) "Failed to start an agent" else "Start an agent"
-    "send_message" -> if (failed) "Failed to send a message to an agent" else "Message an agent"
-    "followup_task" -> if (failed) "Failed to resume an agent task" else "Resume an agent task"
-    "wait_agent" -> if (failed) "Failed to wait for an agent" else "Wait for an agent"
-    "interrupt_agent" -> if (failed) "Failed to interrupt an agent" else "Interrupt an agent"
-    "list_agents" -> if (failed) "Failed to list agents" else "List agents"
-    "update_plan" -> if (failed) "Failed to update the plan" else "Update the plan"
-    "get_context_remaining" -> if (failed) "Failed to check remaining context" else "Check remaining context"
-    "clock.curr_time" -> if (failed) "Failed to check the current time" else "Check the current time"
-    else -> qualifiedName(name, namespace).stableToolSummary(failed)
-}
-
-private fun customToolSummary(
-    name: String,
-    namespace: String?,
-    input: String,
-    failed: Boolean = false,
-): String {
-    if (qualifiedName(name, namespace) != "web.run") {
-        return functionToolSummary(name, namespace, failed)
-    }
-    val commands = runCatching {
-        HistoryViewJson.decodeFromString(SearchCommands.serializer(), input)
-    }.getOrNull()
-    return commands?.toolSummary(failed) ?: if (failed) "Failed to search the web" else "Search the web"
-}
-
-private fun SearchCommands.toolSummary(failed: Boolean = false): String = when {
-    !searchQuery.isNullOrEmpty() -> searchQuery.orEmpty().first().q.singleLineSummary()
-        .takeIf(String::isNotBlank)
-        ?.let { query -> if (failed) "Failed to search the web: $query" else "Search the web: $query" }
-        ?: if (failed) "Failed to search the web" else "Search the web"
-
-    !imageQuery.isNullOrEmpty() -> imageQuery.orEmpty().first().q.singleLineSummary()
-        .takeIf(String::isNotBlank)
-        ?.let { query -> if (failed) "Failed to search images: $query" else "Search images: $query" }
-        ?: if (failed) "Failed to search images" else "Search images"
-
-    !open.isNullOrEmpty() -> if (failed) "Failed to open a web page" else "Open a web page"
-    !click.isNullOrEmpty() -> if (failed) "Failed to follow a web link" else "Follow a web link"
-    !find.isNullOrEmpty() -> if (failed) "Failed to search a web page for text" else "Search a web page for text"
-    !screenshot.isNullOrEmpty() -> if (failed) "Failed to capture a web page" else "Capture a web page"
-    !finance.isNullOrEmpty() -> if (failed) "Failed to look up market data" else "Look up market data"
-    !weather.isNullOrEmpty() -> if (failed) "Failed to check the weather" else "Check the weather"
-    !sports.isNullOrEmpty() -> if (failed) "Failed to check sports information" else "Check sports information"
-    !time.isNullOrEmpty() -> if (failed) "Failed to check the time" else "Check the time"
-    else -> if (failed) "Failed to use web search" else "Use web search"
-}
-
-private fun String.stableToolSummary(failed: Boolean): String =
-    if (failed) "Failed to run $this" else this
 
 private fun String.singleLineSummary(): String =
     lineSequence()

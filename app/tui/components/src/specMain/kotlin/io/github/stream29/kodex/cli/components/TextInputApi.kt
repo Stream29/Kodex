@@ -78,10 +78,6 @@ public expect class TextInputState(initialValue: TextInputValue = TextInputValue
     public var scrollOffset: Int
         private set
 
-    public val canUndo: Boolean
-
-    public val canRedo: Boolean
-
     /** Applies [edit] and returns whether it changed the text or cursor. */
     public fun edit(edit: TextInputEdit): Boolean
 
@@ -108,10 +104,6 @@ public expect class TextInputState(initialValue: TextInputValue = TextInputValue
     public fun reset(value: TextInputValue = TextInputValue())
 }
 
-/** Remembers one [TextInputState] for this composition location. */
-@Composable
-public expect fun rememberTextInputState(initialValue: TextInputValue = TextInputValue()): TextInputState
-
 /** Rendered rows, source mappings, cursor position, and optional viewport for a [TextInput]. */
 @Immutable
 public expect class TextInputLayout {
@@ -122,9 +114,6 @@ public expect class TextInputLayout {
     public val cursorRow: Int
 
     public val cursorContentColumn: Int
-
-    /** Display text before applying a bounded vertical viewport. */
-    public val renderedText: String
 
     public val lines: List<String>
 

@@ -6,10 +6,8 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.contract.getAskUsersAt
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
-import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
-import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
 import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
@@ -358,7 +356,11 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 catalog.unarchive(index)
                 val fork = catalog.fork(index)
                 assertNotEquals(index, fork)
-                assertTrue(catalog.delete(fork))
+                assertTrue(
+                    requireNotNull(
+                        catalog.requestDelete(catalog.state.value.sessions.single { it.sessionIndex == fork }),
+                    ).viewModel.delete(),
+                )
                 assertEquals(index, catalog.state.value.sessions.single().sessionIndex)
             } finally { catalog.close() }
         }
@@ -410,12 +412,12 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val composer = requireNotNull(view.rootAgent.value).composer
             val original = composer.update("original")
             val current = composer.update("current")
-            assertEquals(ComposerSubmissionResult.Stale, composer.submit(original))
+            composer.submit(original)
             assertEquals("current", composer.state.value.text)
             assertEquals(current, composer.state.value.revision)
             views.release(view)
             assertEquals(ComposerLifecycle.Closed, composer.state.value.lifecycle)
-            assertEquals(ComposerSubmissionResult.Unavailable, composer.submit(current))
+            composer.submit(current)
             assertEquals(SessionViewStatus.Closed, view.status.value)
             assertEquals(0, submits)
         }
@@ -454,7 +456,6 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertEquals(4, agent.composer.state.value.cursorOffset)
             assertEquals(revision, agent.composer.state.value.revision)
             assertIs<ComposerSubmissionState.Editing>(agent.composer.state.value.submission)
-            assertNull(agent.notification.value)
             assertEquals(SessionViewStatus.Ready, view.status.value)
             assertSame(binding, view.current())
             assertEquals(1, submits)
@@ -480,12 +481,12 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val agent = requireNotNull(view.rootAgent.value)
             try {
                 val revision = agent.composer.update("  persisted but retained  ", 6)
+                agent.composer.submit(revision)
                 assertEquals(
-                    ComposerSubmissionResult.Failed("accepted submit reply lost"),
-                    agent.composer.submit(revision),
+                    "accepted submit reply lost",
+                    assertIs<ComposerSubmissionState.Failed>(agent.composer.state.value.submission).failure.message,
                 )
                 assertEquals("accepted submit reply lost", failures.first { it.size == 1 }.single().message)
-                assertNull(agent.notification.value)
                 assertEquals("  persisted but retained  ", agent.composer.state.value.text)
                 assertEquals(6, agent.composer.state.value.cursorOffset)
                 assertEquals(revision + 1, agent.composer.state.value.revision)
@@ -497,7 +498,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         }
     }
 
-    test("root Stop and Composer cancel share the existing caught ordinary-failure boundary") {
+    test("root Stop uses the caught ordinary-failure boundary") {
         val stopFailure = IllegalStateException("ordinary stop failure")
         var stops = 0
         frontend(decorate = { delegate ->
@@ -512,16 +513,9 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val binding = view.current()
             val agent = requireNotNull(view.rootAgent.value)
             try {
-                agent.cancel() // Actual root Stop command, not the Composer cancel port.
+                agent.cancel()
                 assertEquals("ordinary stop failure", failures.first { it.size == 1 }.single().message)
-                assertEquals(SessionViewStatus.Ready, view.status.value)
-                assertSame(binding, view.current())
-                assertNull(agent.notification.value)
-                // The bound Composer callback also uses the caught Agent command boundary.
-                agent.composer.cancel()
-                failures.first { it.size == 2 }
-                assertTrue(failures.value.all { it.message == "ordinary stop failure" })
-                assertEquals(2, stops)
+                assertEquals(1, stops)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
             } finally { agent.close() }
@@ -556,7 +550,8 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val agent = requireNotNull(view.rootAgent.value)
             agent.composer.state.first { it.running }
             val revision = agent.composer.update("steer")
-            assertEquals(ComposerSubmissionResult.QueuedAsSteer, agent.composer.submit(revision))
+            agent.composer.submit(revision)
+            assertEquals("", agent.composer.state.value.text)
             preempted.await()
             binding.pendingSteer.first { it.isNotEmpty() }
             views.release(view)
@@ -655,7 +650,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertSame(recovered.settings, recoveredAgent.settings)
             oldAgent.lifecycle.first { it == io.github.stream29.kodex.app.agent.contract.AgentLifecycleState.Closed }
             assertEquals(ComposerLifecycle.Closed, oldComposer.state.value.lifecycle)
-            assertEquals(ComposerSubmissionResult.Unavailable, oldComposer.submit(oldComposer.state.value.revision))
+            oldComposer.submit(oldComposer.state.value.revision)
             assertFailsWith<CancellationException> { oldAgent.renameThread("expired binding") }
             assertSame(recoveredAgent, view.rootAgent.value)
             assertEquals(2, keepalives)
@@ -864,7 +859,6 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             binding.state.first { it == AgentStateValue.Empty }
             agent.confirmHistoryRevert(request)
             failures.first { it.size == 1 }
-            assertNull(agent.notification.value)
             assertEquals(AgentStateValue.Empty, binding.state.value)
             assertEquals(request, assertIs<io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState.ConfirmRevert>(
                 agent.historyAction.value,
@@ -947,8 +941,9 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertTrue(observed.arguments.questions.single().isSecret)
             assertTrue(questions.updateFreeForm(observed.askId, "secret", "private answer"))
             val edited = assertIs<RequestUserInputState.Pending>(questions.state.value)
-            assertEquals(RequestUserInputSubmissionResult.StaleRevision, questions.submit(observed.askId, observed.revision))
-            assertEquals(RequestUserInputSubmissionResult.Submitted, questions.submit(edited.askId, edited.revision))
+            questions.submit(observed.askId, observed.revision)
+            assertEquals(edited, questions.state.value)
+            questions.submit(edited.askId, edited.revision)
             view.current().state.first { it == AgentStateValue.AssistantMessage }
             view.current().running.first { !it }
             questions.state.first { it == RequestUserInputState.Idle }

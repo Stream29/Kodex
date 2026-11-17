@@ -281,7 +281,7 @@ private class FakeTimeline<T> {
 
 private suspend fun withIndex(deps: IndexPorts, block: suspend (HistoryIndexViewModel) -> Unit) {
     val owner = SupervisorJob()
-    val vm = historyIndexViewModelFactory.create(deps, CoroutineScope(Dispatchers.Unconfined + owner))
+    val vm = createHistoryIndexViewModel(deps, CoroutineScope(Dispatchers.Unconfined + owner))
     try { block(vm) } finally { vm.close(); withTimeout(5_000) { owner.cancelAndJoin() } }
 }
 

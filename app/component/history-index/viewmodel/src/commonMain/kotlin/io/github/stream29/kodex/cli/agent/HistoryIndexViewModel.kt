@@ -18,7 +18,6 @@ import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryKind
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModelFactory
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexWindow
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
@@ -40,9 +39,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.time.Instant
-
-public actual val historyIndexViewModelFactory: HistoryIndexViewModelFactory =
-    HistoryIndexViewModelFactory(::createHistoryIndexViewModel)
 
 public actual fun createHistoryIndexViewModel(
     dependencies: HistoryIndexDependencies,

@@ -1,11 +1,10 @@
 package io.github.stream29.kodex.app.ui
 
 import androidx.compose.runtime.Composable
+import io.github.stream29.kodex.cli.settings.SubmitKey
 
 public enum class UiTextRole { Body, Title, Supporting, Error }
 public enum class UiActionRole { Normal, Primary, Secondary, Destructive }
-/** Multiline newline chord: Shift+Enter for [Enter], plain Enter for [CtrlEnter]. */
-public enum class UiSubmitKey { Enter, CtrlEnter }
 
 /** Installs renderer theme and packaged graphical fallback fonts before mounting its content. */
 @Composable
@@ -59,7 +58,7 @@ public expect fun UiEditor(
     autoFocus: Boolean = false,
     multiline: Boolean = true,
     maximumLines: Int = 6,
-    submitKey: UiSubmitKey = UiSubmitKey.Enter,
+    submitKey: SubmitKey = SubmitKey.Enter,
     revision: Long? = null,
 ): Unit
 

@@ -16,7 +16,7 @@ import io.github.stream29.kodex.app.ui.UiColumn
 import io.github.stream29.kodex.app.ui.UiEditor
 import io.github.stream29.kodex.app.ui.UiText
 import io.github.stream29.kodex.app.ui.UiTextRole
-import io.github.stream29.kodex.app.ui.UiSubmitKey
+import io.github.stream29.kodex.cli.settings.SubmitKey
 
 @Composable
 internal fun RendererSmoke(
@@ -41,7 +41,7 @@ internal fun RendererSmoke(
     var text by remember { mutableStateOf("Draft") }
     var cursor by remember { mutableStateOf(text.length) }
     var submissions by remember { mutableStateOf(0) }
-    var submitKey by remember { mutableStateOf(UiSubmitKey.Enter) }
+    var submitKey by remember { mutableStateOf(SubmitKey.Enter) }
     var deletions by remember { mutableStateOf(0) }
     var confirmation by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf("No fixture result") }
@@ -69,7 +69,7 @@ internal fun RendererSmoke(
         )
         UiText("Submitted $submissions: $text")
         UiAction("Toggle fixture submit key", onClick = {
-            submitKey = if (submitKey == UiSubmitKey.Enter) UiSubmitKey.CtrlEnter else UiSubmitKey.Enter
+            submitKey = if (submitKey == SubmitKey.Enter) SubmitKey.CtrlEnter else SubmitKey.Enter
         })
         UiText("Fixture submit key: $submitKey")
         UiAction("Open fixture delete confirmation", onClick = { confirmation = true }, enabled = !confirmation)

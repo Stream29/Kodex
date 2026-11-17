@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.app.application.contract
 
-import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
@@ -61,14 +60,8 @@ public sealed interface ApplicationPopupState {
 
     /** Render the directory picker child bound to the captured owner. */
     public class WorkingDirectory(
-        public val viewModel: WorkingDirectoryPopupViewModel,
+        public val viewModel: WorkingDirectoryViewModel,
     ) : Open
-}
-
-/** Application ownership adapter; behavior is defined by [WorkingDirectoryViewModel]. */
-public interface WorkingDirectoryPopupViewModel : WorkingDirectoryViewModel {
-    /** Captured owner used to dispose this exact popup when its Session/Agent closes. */
-    public val target: AgentSettingsViewModel
 }
 
 /** Application ownership adapter; interaction behavior is defined by [SessionRenameViewModel]. */

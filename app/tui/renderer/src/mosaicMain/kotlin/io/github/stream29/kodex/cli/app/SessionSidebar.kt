@@ -68,12 +68,11 @@ import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
 import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRow
 import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRowModel
+import io.github.stream29.kodex.cli.history.formatHistoryFormRowForTerminal
 import io.github.stream29.kodex.cli.settings.MinimumSidebarWidthColumns
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.utils.terminaltext.takeFirstFittingTerminalWidth
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
-import kotlinx.coroutines.delay
-import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 public actual fun SessionSidebar(
@@ -388,33 +387,6 @@ public actual fun BoxScope.SessionSidebarContentMenu(
     )
 }
 
-@Composable
-internal fun ShellSessionSidebarRow(
-    side: SessionSidebarSide,
-    session: AgentShellSession,
-    columns: Int,
-    onHoverChanged: (ShellSessionInteractionRequest, Boolean) -> Unit,
-    onOpenMenu: (TuiPopupAnchor, IntOffset?) -> Unit,
-) {
-    ShellSessionSidebarContent(
-        side, session, MosaicSessionSidebarRenderer(
-            columns, 1, onShellSessionHoverChanged = onHoverChanged,
-            onOpenShellSessionMenu = { onOpenMenu(it.anchor, it.clickPosition) },
-        ),
-    )
-}
-
-@Composable
-public actual fun BoxScope.ShellSessionContextMenu(
-    request: ShellSessionMenuRequest?,
-    onDismissRequest: () -> Unit,
-) {
-    val opening = remember(request) {
-        request?.let { SidebarShellMenuOpening(MosaicSidebarShellOrigin(it.session, it.anchor, clickPosition = it.clickPosition)) }
-    }
-    SidebarShellMenuContent(opening, MosaicSessionSidebarRenderer(0, 0, popupScope = this), onDismissRequest)
-}
-
 public actual fun mosaicShellHover(request: ShellSessionInteractionRequest): SidebarShellInteraction =
     MosaicSidebarShellOrigin(request.session, request.anchor, request.side, point = { request.pointerPosition })
 
@@ -426,26 +398,7 @@ public actual fun BoxScope.rememberMosaicSidebarOverlayRenderer(columns: Int, ro
     remember(this, columns, rows) { MosaicSessionSidebarRenderer(columns, rows, popupScope = this) }
 
 @Composable
-public actual fun BoxScope.ShellSessionHoverPopup(
-    request: ShellSessionInteractionRequest?,
-    contentColumns: Int,
-    contentRows: Int,
-    onHoverChanged: (Boolean) -> Unit,
-    onDismissRequest: () -> Unit,
-) {
-    val origin = remember(request) {
-        request?.let { current ->
-            MosaicSidebarShellOrigin(current.session, current.anchor, current.side, point = { current.pointerPosition })
-        }
-    }
-    SidebarShellHoverContent(
-        origin, MosaicSessionSidebarRenderer(contentColumns, contentRows, popupScope = this),
-        onHoverChanged, onDismissRequest,
-    )
-}
-
-@Composable
-private fun BoxScope.SidebarHoverPopupSurface(
+internal fun BoxScope.SidebarHoverPopupSurface(
     anchor: TuiPopupAnchor,
     side: SessionSidebarSide,
     pointerPosition: IntOffset?,
@@ -460,14 +413,14 @@ private fun BoxScope.SidebarHoverPopupSurface(
     val popupWidth = maxOf(
         title.terminalCellWidth(),
         requestUserInputRows
-            ?.flatMap { row -> row.value.lineSequence().toList() }
+            ?.flatMap { row -> formatHistoryFormRowForTerminal(row).lineSequence().toList() }
             ?.maxOfOrNull(String::terminalCellWidth)
             ?: content.lineSequence().maxOfOrNull(String::terminalCellWidth)
             ?: 0,
     ).coerceIn(1, contentColumns)
     val lines = content.wrapToTerminalWidth(popupWidth)
     val bodyHeight = requestUserInputRows?.sumOf { row ->
-        row.value.wrapToTerminalWidth(popupWidth).size.coerceAtLeast(1)
+        formatHistoryFormRowForTerminal(row).wrapToTerminalWidth(popupWidth).size.coerceAtLeast(1)
     } ?: lines.size
     val popupHeight = (bodyHeight + 1).coerceIn(1, contentRows)
     val listState = remember(anchor, content, requestUserInputRows) { LazyListState() }
@@ -550,7 +503,7 @@ public actual class ShellSessionInteractionRequest actual constructor(
     public actual var pointerPosition: IntOffset? by mutableStateOf(null)
 }
 
-private class SidebarHoverPopupPositionProvider(
+internal class SidebarHoverPopupPositionProvider(
     private val side: SessionSidebarSide,
     private val contentColumns: Int,
     private val contentRows: Int,

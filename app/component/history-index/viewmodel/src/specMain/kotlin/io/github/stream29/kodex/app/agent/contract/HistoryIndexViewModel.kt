@@ -3,7 +3,6 @@ package io.github.stream29.kodex.app.agent.contract
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Instant
@@ -98,17 +97,6 @@ public interface HistoryIndexDependencies {
      * @throws Exception if the host's scroll request fails.
      */
     public fun requestScrollToStorageIndex(index: Int): Unit
-}
-
-/** Typed construction port. The returned stable child owns only jobs under the supplied owner scope. */
-public fun interface HistoryIndexViewModelFactory {
-    /**
-     * Begins sparse observation/scanning; does not block on initial I/O. Ordinary scan failures
-     * propagate to the owner's coroutine exception handling, never masquerade as empty success.
-     * Cache-nonce races await subscribed metadata, without replaying a stale query.
-     * @throws Exception if construction cannot establish the child.
-     */
-    public fun create(dependencies: HistoryIndexDependencies, ownerScope: CoroutineScope): HistoryIndexViewModel
 }
 
 /**

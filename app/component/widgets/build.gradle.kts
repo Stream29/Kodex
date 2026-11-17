@@ -9,6 +9,7 @@ plugins {
 kotlin {
     sourceSets {
         named("specMain").dependencies {
+            api(project(":app-rpc-protocol"))
             api(compose.runtime)
         }
 

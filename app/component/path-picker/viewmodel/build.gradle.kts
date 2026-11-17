@@ -13,7 +13,6 @@ kotlin {
         }
         commonMain.dependencies {
             implementation(project(":utils-coroutines"))
-            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

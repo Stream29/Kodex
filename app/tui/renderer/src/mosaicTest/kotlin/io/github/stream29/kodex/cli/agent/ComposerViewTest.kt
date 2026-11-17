@@ -13,18 +13,18 @@ import com.jakewharton.mosaic.ui.Column
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.ComposerFailure
+import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.agent.contract.ComposerMode
 import io.github.stream29.kodex.app.agent.contract.ComposerOperation
 import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
 import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPresentation
 import io.github.stream29.kodex.app.agent.contract.ComposerState
-import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.RequestUserInputMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -36,9 +36,9 @@ val composerViewTest by testSuite {
         runMosaicTest {
             val empty = RenderComposerModel(ComposerState(ComposerOwnerId("agent-a")))
             val emptySnapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                ComposerView(empty, columns = 32, rows = 3, newLineKey = NewLineKey.ShiftEnter)
-            }
+                WithMosaicComponentRenderers {
+                    ComposerView(empty, columns = 32, rows = 3, newLineKey = NewLineKey.ShiftEnter)
+                }
             }
             assertTrue(">" in emptySnapshot, emptySnapshot)
             assertFalse("Submit to steer" in emptySnapshot, emptySnapshot)
@@ -52,9 +52,9 @@ val composerViewTest by testSuite {
                 ),
             )
             val runningSnapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                ComposerView(running, columns = 32, rows = 3, newLineKey = NewLineKey.ShiftEnter)
-            }
+                WithMosaicComponentRenderers {
+                    ComposerView(running, columns = 32, rows = 3, newLineKey = NewLineKey.ShiftEnter)
+                }
             }
             assertTrue("Submit to steer" in runningSnapshot, runningSnapshot)
             assertEquals(ComposerMode.Running, running.state.value.mode)
@@ -67,9 +67,9 @@ val composerViewTest by testSuite {
                 ),
             )
             val readySnapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                ComposerView(ready, columns = 32, rows = 3, newLineKey = NewLineKey.ShiftEnter)
-            }
+                WithMosaicComponentRenderers {
+                    ComposerView(ready, columns = 32, rows = 3, newLineKey = NewLineKey.ShiftEnter)
+                }
             }
             assertTrue("ready" in readySnapshot, readySnapshot)
             assertFalse("Submit to steer" in readySnapshot, readySnapshot)
@@ -77,7 +77,7 @@ val composerViewTest by testSuite {
         }
     }
 
-    test("error and request-input branches retain presentation without duplicating answers") {
+    test("error and request-input branches retain presentation without inline failure banner") {
         val error = RenderComposerModel(
             ComposerState(
                 ownerId = ComposerOwnerId("agent-a"),
@@ -94,8 +94,6 @@ val composerViewTest by testSuite {
                 text = "not sent",
                 revision = 9,
                 requestInput = ComposerRequestInputPresentation.Pending(
-                    callId = "call-1",
-                    mode = RequestUserInputMode.AskUser,
                     title = "Answer required",
                     questionCount = 3,
                 ),
@@ -104,36 +102,30 @@ val composerViewTest by testSuite {
 
         runMosaicTest {
             val errorSnapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                ComposerView(error, 48, 4, NewLineKey.ShiftEnter)
+                WithMosaicComponentRenderers {
+                    ComposerView(error, 48, 4, NewLineKey.ShiftEnter)
+                }
             }
-            }
-            assertTrue("Unable to submit: append failed" in errorSnapshot, errorSnapshot)
+            assertFalse("Unable to submit:" in errorSnapshot, errorSnapshot)
+            assertFalse("append failed" in errorSnapshot, errorSnapshot)
             assertTrue("retry explicitly" in errorSnapshot, errorSnapshot)
+            assertEquals(ComposerMode.Error, error.state.value.mode)
 
             val requestSnapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                ComposerView(request, 48, 4, NewLineKey.ShiftEnter)
-            }
+                WithMosaicComponentRenderers {
+                    ComposerView(request, 48, 4, NewLineKey.ShiftEnter)
+                }
             }
             assertTrue("Input requested: Answer required (3)" in requestSnapshot, requestSnapshot)
             assertEquals(ComposerMode.RequestInput, request.state.value.mode)
-            assertFalse("call-1" in requestSnapshot, requestSnapshot)
         }
     }
 
-    test("steer preview wraps to terminal width and preserves the exact message text") {
+    test("steer preview lines ellipsize to terminal width and preserve exact message text") {
         val pending = listOf(
             StableUserMessage(
                 listOf(ContentItem.InputText("a very long steer message that must fit")),
             ),
-        )
-        val state = ComposerState(
-            ownerId = ComposerOwnerId("agent-a"),
-            text = "next",
-            revision = 2,
-            running = true,
-            pendingSteer = pending,
         )
         assertEquals(
             listOf(
@@ -142,17 +134,6 @@ val composerViewTest by testSuite {
             ),
             pendingSteerPreviewLines(pending, columns = 14, maximumRows = 3),
         )
-
-        runMosaicTest {
-            val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                ComposerView(RenderComposerModel(state), 14, 5, NewLineKey.ShiftEnter)
-            }
-            }
-            assertTrue("Pending ste..." in snapshot, snapshot)
-            assertTrue("a very ..." in snapshot, snapshot)
-            assertEquals(5, snapshot.lines().size)
-        }
     }
 
     test("viewport sizing keeps at least one input row and never exceeds available rows") {
@@ -169,9 +150,9 @@ val composerViewTest by testSuite {
                 ),
             )
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                ComposerView(model, columns = 10, rows = 2, newLineKey = NewLineKey.ShiftEnter)
-            }
+                WithMosaicComponentRenderers {
+                    ComposerView(model, columns = 10, rows = 2, newLineKey = NewLineKey.ShiftEnter)
+                }
             }
             assertEquals(2, snapshot.lines().size)
         }
@@ -192,31 +173,25 @@ val composerViewTest by testSuite {
         }
     }
 
-    test("host-owned preview and failure suppression never hides remaining Composer status") {
-        val model = RenderComposerModel(ComposerState(
-            ownerId = ComposerOwnerId("agent-a"),
-            text = "retained steer",
-            running = true,
-            pendingSteer = listOf(StableUserMessage(listOf(ContentItem.InputText("queued")))),
-            submission = ComposerSubmissionState.Failed(ComposerFailure(ComposerOperation.Steer, "steer failed")),
-        ))
+    test("composer omits pending steer preview and inline failure while preserving editing steer hint") {
+        val model = RenderComposerModel(
+            ComposerState(
+                ownerId = ComposerOwnerId("agent-a"),
+                text = "retained steer",
+                running = true,
+                pendingSteer = listOf(StableUserMessage(listOf(ContentItem.InputText("queued")))),
+                submission = ComposerSubmissionState.Editing,
+            ),
+        )
         runMosaicTest {
-            val standaloneFailure = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                ComposerView(model, 48, 4, NewLineKey.ShiftEnter, showPendingSteer = false)
+            val editingSteer = setContentAndSnapshot {
+                WithMosaicComponentRenderers {
+                    ComposerView(model, 48, 4, NewLineKey.ShiftEnter)
+                }
             }
-            }
-            assertTrue("Unable to submit: steer failed" in standaloneFailure, standaloneFailure)
-            assertFalse("Pending steer (" in standaloneFailure, standaloneFailure)
-            val hostOwnedFailure = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                ComposerView(model, 48, 4, NewLineKey.ShiftEnter, showPendingSteer = false, showFailure = false)
-            }
-            }
-            assertTrue("Submit to steer" in hostOwnedFailure, hostOwnedFailure)
-            assertTrue("retained steer" in hostOwnedFailure, hostOwnedFailure)
-            assertFalse("Unable to submit:" in hostOwnedFailure, hostOwnedFailure)
-            assertFalse("Pending steer (" in hostOwnedFailure, hostOwnedFailure)
+            assertTrue("Submit to steer" in editingSteer, editingSteer)
+            assertTrue("retained steer" in editingSteer, editingSteer)
+            assertFalse("Pending steer (" in editingSteer, editingSteer)
         }
     }
 
@@ -231,16 +206,16 @@ val composerViewTest by testSuite {
         runMosaicTest {
             val focusRequester = FocusRequester()
             setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                ComposerView(
-                    viewModel = model,
-                    columns = 40,
-                    rows = 4,
-                    newLineKey = NewLineKey.ShiftEnter,
-                    autoFocus = false,
-                    focusRequester = focusRequester,
-                )
-            }
+                WithMosaicComponentRenderers {
+                    ComposerView(
+                        viewModel = model,
+                        columns = 40,
+                        rows = 4,
+                        newLineKey = NewLineKey.ShiftEnter,
+                        autoFocus = false,
+                        focusRequester = focusRequester,
+                    )
+                }
             }
             assertTrue(focusRequester.requestFocus())
 
@@ -259,29 +234,31 @@ val composerViewTest by testSuite {
 
     for (failed in listOf(false, true)) {
         test("submitting preserves focus and blocks edits until completion failed=$failed") {
-            val model = RenderComposerModel(ComposerState(
-                ownerId = ComposerOwnerId("agent-a"),
-                text = "draft",
-                cursorOffset = 5,
-                revision = 12,
-            ))
+            val model = RenderComposerModel(
+                ComposerState(
+                    ownerId = ComposerOwnerId("agent-a"),
+                    text = "draft",
+                    cursorOffset = 5,
+                    revision = 12,
+                ),
+            )
             var sessionsFocused = false
             runMosaicTest {
                 val requester = FocusRequester()
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column {
-                        TuiButton(
-                            label = "Sessions",
-                            modifier = Modifier.onFocusChanged { sessionsFocused = it.isFocused },
-                            onClick = {},
-                        )
-                        ComposerView(
-                            model, 40, 4, NewLineKey.ShiftEnter,
-                            autoFocus = false, focusRequester = requester,
-                        )
+                    WithMosaicComponentRenderers {
+                        Column {
+                            TuiButton(
+                                label = "Sessions",
+                                modifier = Modifier.onFocusChanged { sessionsFocused = it.isFocused },
+                                onClick = {},
+                            )
+                            ComposerView(
+                                model, 40, 4, NewLineKey.ShiftEnter,
+                                autoFocus = false, focusRequester = requester,
+                            )
+                        }
                     }
-                }
                 }
                 assertTrue(requester.requestFocus())
                 model.state.value = model.state.value.copy(submission = ComposerSubmissionState.Submitting)
@@ -310,20 +287,22 @@ val composerViewTest by testSuite {
     }
 
     test("submission completion does not steal focus after explicit navigation") {
-        val model = RenderComposerModel(ComposerState(
-            ownerId = ComposerOwnerId("agent-a"),
-            text = "draft",
-            submission = ComposerSubmissionState.Submitting,
-        ))
+        val model = RenderComposerModel(
+            ComposerState(
+                ownerId = ComposerOwnerId("agent-a"),
+                text = "draft",
+                submission = ComposerSubmissionState.Submitting,
+            ),
+        )
         var sessionsClicked by mutableStateOf(0)
         runMosaicTest {
             setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column {
-                    TuiButton(label = "Sessions $sessionsClicked", onClick = { sessionsClicked++ })
-                    ComposerView(model, 40, 4, NewLineKey.ShiftEnter)
+                WithMosaicComponentRenderers {
+                    Column {
+                        TuiButton(label = "Sessions $sessionsClicked", onClick = { sessionsClicked++ })
+                        ComposerView(model, 40, 4, NewLineKey.ShiftEnter)
+                    }
                 }
-            }
             }
             sendKeyEvent(KeyboardEvent(9))
             model.state.value = model.state.value.copy(submission = ComposerSubmissionState.Editing)
@@ -356,7 +335,7 @@ private class RenderComposerModel(initial: ComposerState) : ComposerViewModel {
 
     override fun clear(expectedRevision: Long): Boolean = false
 
-    override suspend fun submit(expectedRevision: Long): ComposerSubmissionResult {
+    override suspend fun submit(expectedRevision: Long) {
         submittedRevisions += expectedRevision
         val current = mutableState.value
         mutableState.value = current.copy(
@@ -365,14 +344,11 @@ private class RenderComposerModel(initial: ComposerState) : ComposerViewModel {
             revision = current.revision + 1,
             submission = ComposerSubmissionState.Editing,
         )
-        return ComposerSubmissionResult.Submitted
     }
-
-    override fun cancel() = Unit
 
     override fun close() {
         mutableState.value = mutableState.value.copy(
-            lifecycle = io.github.stream29.kodex.app.agent.contract.ComposerLifecycle.Closed,
+            lifecycle = ComposerLifecycle.Closed,
         )
     }
 }

@@ -1,17 +1,23 @@
 package io.github.stream29.kodex.cli.settings
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
-import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.AnsiLevel
+import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.BoxScope
+import com.jakewharton.mosaic.ui.Column
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.hooksettings.*
+import io.github.stream29.kodex.app.settings.contract.SettingsWriteAdmission
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.rpc.models.NotificationHook
 import io.github.stream29.kodex.rpc.models.NotificationHookType
@@ -38,13 +44,13 @@ val hookSettingsComponentTest by testSuite {
             runMosaicTest {
                 try {
                     setContentAndSnapshot {
-                        io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                        // Frame witness only; the genuine component still owns renderer callbacks.
-                        val state by vm.state.collectAsState()
-                        assertIs<HookSettingsDialog.Editing>(state.dialog)
-                        SideEffect { compositions++ }
-                        TuiPopupHost(Modifier.width(100).height(30)) { HookSettingsComponent(observed) }
-                    }
+                        WithMosaicComponentRenderers {
+                            // Frame witness only; the genuine component still owns renderer callbacks.
+                            val state by vm.state.collectAsState()
+                            assertIs<HookSettingsDialog.Editing>(state.dialog)
+                            SideEffect { compositions++ }
+                            TuiPopupHost(Modifier.width(100).height(30)) { RenderHookSettings(observed) }
+                        }
                     }
                     val initialComposition = compositions
                     sendKeyEvent(KeyboardEvent(codepoint = 'N'.code))
@@ -71,17 +77,25 @@ val hookSettingsComponentTest by testSuite {
         withHookVm(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { HookSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) {
+                            val state by vm.state.collectAsState()
+                            val renderer = remember { MosaicSettingsRenderer() }
+                            Column {
+                                SettingsOperationFailureBanner(state.operationFailure, vm::dismissFailure)
+                                HookSettingsPage(vm, renderer)
+                            }
+                            HookSettingsDialogHost(vm, MosaicHookDialogs(this))
+                        }
+                    }
                 }
                 assertTrue("None configured" in snapshot, snapshot)
-                assertTrue("A settings operation failed." in snapshot, snapshot)
+                assertTrue("Could not confirm a Settings operation" in snapshot, snapshot)
                 assertTrue("[Dismiss]" in snapshot, snapshot)
                 assertTrue("Hooks [Add]" in snapshot, snapshot)
                 vm.dismissFailure()
                 val acknowledged = awaitHookSnapshot("Hooks [Add]")
-                assertFalse("A settings operation failed." in acknowledged, acknowledged)
+                assertFalse("Could not confirm a Settings operation" in acknowledged, acknowledged)
             }
         }
     }
@@ -93,9 +107,9 @@ val hookSettingsComponentTest by testSuite {
             vm.save(editor.token)
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { HookSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderHookSettings(vm) }
+                    }
                 }
                 assertTrue("Add Hook" in snapshot, snapshot)
                 assertTrue("Hook name is required." in snapshot, snapshot)
@@ -114,9 +128,9 @@ val hookSettingsComponentTest by testSuite {
             vm.add()
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { HookSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderHookSettings(vm) }
+                    }
                 }
                 sendKeyEvent(KeyboardEvent(codepoint = 'N'.code))
                 awaitHookSnapshot("N")
@@ -140,9 +154,9 @@ val hookSettingsComponentTest by testSuite {
             vm.details("notify")
             runMosaicTest {
                 val details = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { HookSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderHookSettings(vm) }
+                    }
                 }
                 assertTrue("[Close] [Edit] [Delete]" in details, details)
                 val token = (vm.state.value.dialog as HookSettingsDialog.Details).token
@@ -163,9 +177,9 @@ val hookSettingsComponentTest by testSuite {
             vm.requestDelete((vm.state.value.dialog as HookSettingsDialog.Details).token)
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { HookSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderHookSettings(vm) }
+                    }
                 }
                 sendKeyEvent(KeyboardEvent(codepoint = 9))
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -184,9 +198,9 @@ val hookSettingsComponentTest by testSuite {
             vm.updateDraft(next) { HookEditorDraft("replacement", "command") }
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { HookSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderHookSettings(vm) }
+                    }
                 }
                 assertTrue("replacement" in snapshot, snapshot)
                 vm.save(old)
@@ -199,6 +213,13 @@ val hookSettingsComponentTest by testSuite {
             }
         }
     }
+}
+
+@Composable
+private fun BoxScope.RenderHookSettings(vm: HookSettingsViewModel) {
+    val renderer = remember { MosaicSettingsRenderer() }
+    Column { HookSettingsPage(vm, renderer) }
+    HookSettingsDialogHost(vm, MosaicHookDialogs(this))
 }
 
 private suspend fun withHookVm(deps: HookRenderPorts, action: suspend (HookSettingsViewModel) -> Unit) {
@@ -220,23 +241,23 @@ private suspend fun TestMosaic<String>.awaitHookSnapshot(expected: String): Stri
 }
 
 private class HookRenderPorts : HookSettingsDependencies {
-    override val hooks = MutableStateFlow(listOf(NotificationHook(
-        "notify", setOf(NotificationHookType.StopAssistantMessage), "notify-command",
-    )))
+    override val hooks = MutableStateFlow(
+        listOf(NotificationHook("notify", setOf(NotificationHookType.StopAssistantMessage), "notify-command")),
+    )
     override val operationFailure = MutableStateFlow(false)
     val saved = mutableListOf<NotificationHook>()
     val deleted = mutableListOf<NotificationHook>()
     override fun captureEditor(name: String?): HookEditHandle = object : HookEditHandle {
         override val original = hooks.value.find { it.name == name }
-        override fun save(updated: NotificationHook): HookWriteAdmission {
+        override fun save(updated: NotificationHook): SettingsWriteAdmission {
             saved += updated
-            return HookWriteAdmission.Accepted
+            return SettingsWriteAdmission.Accepted
         }
         override fun release() = Unit
     }
-    override fun delete(original: NotificationHook): HookWriteAdmission {
+    override fun delete(original: NotificationHook): SettingsWriteAdmission {
         deleted += original
-        return HookWriteAdmission.Accepted
+        return SettingsWriteAdmission.Accepted
     }
     override fun reportFailure(failure: Throwable) { operationFailure.value = true }
     override fun dismissFailure() { operationFailure.value = false }

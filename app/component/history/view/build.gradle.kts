@@ -9,7 +9,6 @@ plugins {
 kotlin {
     sourceSets {
         named("specMain").dependencies {
-            api(project(":app-component-history-presentation"))
             api(project(":app-component-agent-contract"))
             api(project(":app-component-history-viewmodel"))
             api(project(":agent-storage-clean-models"))

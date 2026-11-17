@@ -17,9 +17,9 @@ val workingDirectoryOwnershipTest by testSuite {
     test("replacement closes the old selection and stale handles cannot consume the new one") {
         runTest {
             val source = DirectorySettingsSource()
-            val browsers = mutableListOf<SettingsBrowser>()
+            val browsers = mutableListOf<OwnershipSettingsBrowser>()
             val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), {
-                SettingsBrowser(it).also(browsers::add)
+                OwnershipSettingsBrowser(it).also(browsers::add)
             }), this)
             try {
                 editor.requestWorkingDirectory(7)
@@ -31,7 +31,7 @@ val workingDirectoryOwnershipTest by testSuite {
                 assertEquals(7L, current.expectedRevision)
                 assertFalse(old.selection.isActive)
                 assertEquals(1, browsers[0].closes)
-                assertFalse(editor.selectWorkingDirectory(old, Path("/late")))
+                assertFailsWith<IllegalStateException> { old.selection.select(Path("/late")) }
                 assertFalse(editor.dismissWorkingDirectoryPicker(old))
                 assertSame(current, editor.directoryPicker.value)
                 assertTrue(current.selection.isActive)
@@ -42,7 +42,7 @@ val workingDirectoryOwnershipTest by testSuite {
     test("selection consumes its exact handle and browser before queued configuration write") {
         runTest {
             val source = DirectorySettingsSource()
-            val browser = SettingsBrowser(Path("/initial"))
+            val browser = OwnershipSettingsBrowser(Path("/initial"))
             val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), { browser }), this)
             try {
                 editor.requestWorkingDirectory(7)
@@ -63,7 +63,7 @@ val workingDirectoryOwnershipTest by testSuite {
     test("a revision changed after opening is consumed without a stale configuration write") {
         runTest {
             val source = DirectorySettingsSource()
-            val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), { SettingsBrowser(it) }), this)
+            val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), { OwnershipSettingsBrowser(it) }), this)
             try {
                 editor.requestWorkingDirectory(7)
                 val handle = assertNotNull(editor.directoryPicker.value)
@@ -80,14 +80,15 @@ val workingDirectoryOwnershipTest by testSuite {
     test("target loss after opening closes the selected child without retargeting") {
         runTest {
             val source = DirectorySettingsSource()
-            val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), { SettingsBrowser(it) }), this)
+            val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), { OwnershipSettingsBrowser(it) }), this)
             try {
                 editor.requestWorkingDirectory(7)
                 val handle = assertNotNull(editor.directoryPicker.value)
                 source.state.value = SessionSettingsDataState.Unavailable
                 runCurrent()
-                assertTrue(editor.selectWorkingDirectory(handle, Path("/lost")))
+                handle.selection.select(Path("/lost"))
                 runCurrent()
+                assertNull(editor.directoryPicker.value)
                 assertFalse(handle.selection.isActive)
                 assertTrue(source.writes.isEmpty())
             } finally { editor.close() }
@@ -99,7 +100,7 @@ val workingDirectoryOwnershipTest by testSuite {
             var creations = 0
             val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), {
                 creations++
-                SettingsBrowser(it)
+                OwnershipSettingsBrowser(it)
             }), this)
             try {
                 editor.requestWorkingDirectory(6)
@@ -117,9 +118,9 @@ val workingDirectoryOwnershipTest by testSuite {
     test("dismiss and owner close release children without configuration writes") {
         runTest {
             val source = DirectorySettingsSource()
-            val browsers = mutableListOf<SettingsBrowser>()
+            val browsers = mutableListOf<OwnershipSettingsBrowser>()
             val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), {
-                SettingsBrowser(it).also(browsers::add)
+                OwnershipSettingsBrowser(it).also(browsers::add)
             }), this)
             editor.requestWorkingDirectory(7)
             val first = assertNotNull(editor.directoryPicker.value)
@@ -159,7 +160,7 @@ private class DirectorySettingsSource : SessionSettingsDataSource {
     override fun close() { closed = true }
 }
 
-private class SettingsBrowser(directory: Path) : DirectoryPickerViewModel {
+private class OwnershipSettingsBrowser(directory: Path) : DirectoryPickerViewModel {
     override val state = MutableStateFlow(DirectoryPickerState(loadState = DirectoryPickerLoadState.Loading(1, directory)))
     override val effects = emptyFlow<DirectoryPickerEffect>()
     var closes = 0

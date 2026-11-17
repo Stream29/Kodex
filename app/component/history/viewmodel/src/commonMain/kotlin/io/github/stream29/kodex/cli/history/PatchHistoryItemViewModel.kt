@@ -12,7 +12,7 @@ internal class PatchHistoryItemViewModelImpl(
     override val index: Int,
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
-) : PatchHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
+) : PatchHistoryItemViewModel, ReleasableHistoryItem {
     private val patchEvent: StablePatchToolEvent?
     private val header: PatchHistoryItemHeader?
     private val mutableState: MutableStateFlow<PatchHistoryItemState>
@@ -38,8 +38,6 @@ internal class PatchHistoryItemViewModelImpl(
 
     override val state: StateFlow<PatchHistoryItemState> = mutableState.asStateFlow()
 
-    override fun ensureLoaded() = Unit
-
     override fun expand() {
         val collapsed = mutableState.value as? PatchHistoryItemState.Collapsed ?: return
         val resolvedEvent = patchEvent ?: return
@@ -52,17 +50,8 @@ internal class PatchHistoryItemViewModelImpl(
     }
 
     override fun collapse() {
-        when (val current = mutableState.value) {
-            is PatchHistoryItemState.Expanding -> {
-                current.loadingJob.cancel()
-                mutableState.value = PatchHistoryItemState.Collapsed(current.header)
-            }
-
-            is PatchHistoryItemState.Expanded ->
-                mutableState.value = PatchHistoryItemState.Collapsed(current.header)
-
-            else -> Unit
-        }
+        val current = mutableState.value as? PatchHistoryItemState.Expanded ?: return
+        mutableState.value = PatchHistoryItemState.Collapsed(current.header)
     }
 
     override fun release() {

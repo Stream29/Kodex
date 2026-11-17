@@ -59,53 +59,13 @@ public sealed interface AgentHistoryActionState {
     }
 }
 
-public enum class AgentNotificationLevel {
-    Information,
-    Warning,
-    Error,
-}
-
-/**
- * Latest Agent-scoped operation result, isolated from other Agents.
- *
- * Only information is rendered at the Agent host. Actual errors and warnings are
- * reported through the Application's existing Error Hook outlet, not this presentation
- * state. Composer retains its typed submission state without a second inline error.
- *
- * @throws IllegalArgumentException when [id] is not positive or [message] is blank.
- */
-public data class AgentNotification(
-    public val id: Long,
-    public val level: AgentNotificationLevel,
-    public val message: String,
-    public val detail: String? = null,
-) {
-    init {
-        require(id > 0) { "An Agent notification id must be positive." }
-        require(message.isNotBlank()) { "An Agent notification message must not be blank." }
-    }
-}
-
 /**
  * UI-facing lifetime of one materialized Agent ViewModel.
  *
- * [Open] permits commands subject to backend admission; [Closing]/[Closed] are not
- * runnable. [Failed] exposes the failure message, not an empty/idle Agent. Binding
- * replacement publishes a different owner; a renderer must not retarget old callbacks.
+ * [Open] permits commands subject to backend admission; [Closed] is not runnable.
+ * Binding replacement publishes a different owner; a renderer must not retarget old callbacks.
  */
 public sealed interface AgentLifecycleState {
     public data object Open : AgentLifecycleState
-    public data object Closing : AgentLifecycleState
     public data object Closed : AgentLifecycleState
-
-    /**
-     * @throws IllegalArgumentException when [message] is blank.
-     */
-    public data class Failed(
-        public val message: String,
-    ) : AgentLifecycleState {
-        init {
-            require(message.isNotBlank()) { "An Agent lifecycle failure message must not be blank." }
-        }
-    }
 }

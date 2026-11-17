@@ -11,6 +11,7 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.io.files.Path
 import kotlin.test.*
 
 /** Backend observations/CAS/auth/reset are exercised in RpcSettingsTest and BackendAccountStateTest. */
@@ -23,7 +24,7 @@ val settingsViewModelTest by testSuite {
                 override suspend fun refreshAccountUsage() { refreshes.value++ }
             }
             val global = RpcGlobalSettings.open(rpc, this, 120)
-            val editor = RpcGlobalEditor(global, rpc, this)
+            val editor = RpcGlobalEditor(global, rpc, this, root.toString())
             val view = views.open(create("initial OpenAI").sessionIndex)
             val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
             val defaults = RpcNewSessionSettings(global, this)
@@ -42,13 +43,13 @@ val settingsViewModelTest by testSuite {
                 assertEquals(1, refreshes.value)
                 assertSame(session, vm.session)
                 assertEquals("initial OpenAI", view.current().settings.value.threadName)
-            } finally { vm.close(); global.close(); global.join() }
+            } finally { vm.close(); global.close() }
         }
     }
     test("close attempts real children in original order and propagates the last disposal failure") {
         withRpcFrontend {
             val global = RpcGlobalSettings.open(services.global, this, 120)
-            val editor = RpcGlobalEditor(global, services.global, this)
+            val editor = RpcGlobalEditor(global, services.global, this, root.toString())
             val view = views.open(create("close order").sessionIndex)
             val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
             val defaults = RpcNewSessionSettings(global, this)
@@ -78,14 +79,14 @@ val settingsViewModelTest by testSuite {
                 assertEquals(listOf("global", "session", "defaults"), order)
                 assertEquals(SettingsPage.General, vm.selectedPage.value)
                 assertNotNull(services.global.getSettings())
-            } finally { editor.close(); session.close(); defaults.close(); global.close(); global.join() }
+            } finally { editor.close(); session.close(); defaults.close(); global.close() }
         }
     }
     test("settings root observes independent authorities and closes only its children") {
         withRpcFrontend {
             val global = RpcGlobalSettings.open(services.global, this, 120)
             val view = views.open(create("target").sessionIndex)
-            val editor = RpcGlobalEditor(global, services.global, this)
+            val editor = RpcGlobalEditor(global, services.global, this, root.toString())
             val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
             val vm = createSettingsViewModel(SettingsPage.General, editor, session, RpcNewSessionSettings(global, this))
             try {
@@ -100,10 +101,10 @@ val settingsViewModelTest by testSuite {
                 assertEquals(SettingsPage.CurrentSession, vm.selectedPage.value)
                 vm.close()
                 editor.applicationPreferences.setNewLineKey(NewLineKey.ShiftEnter)
-                assertEquals(NewLineKey.Enter, global.frontend.settings.value.newLineKey)
+                assertEquals(NewLineKey.Enter, services.global.getFrontendSettings().newLineKey)
                 assertEquals("target", view.current().settings.value.threadName)
                 assertNotNull(services.global.getSettings())
-            } finally { vm.close(); global.close(); global.join() }
+            } finally { vm.close(); global.close() }
         }
     }
     test("navigation retains component handles and refreshes only on entering OpenAI") {
@@ -113,7 +114,7 @@ val settingsViewModelTest by testSuite {
                 override suspend fun refreshAccountUsage() { refreshes.value++ }
             }
             val global = RpcGlobalSettings.open(rpc, this, 120)
-            val editor = RpcGlobalEditor(global, rpc, this)
+            val editor = RpcGlobalEditor(global, rpc, this, root.toString())
             val view = views.open(create("navigation").sessionIndex)
             val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
             val vm = createSettingsViewModel(SettingsPage.General, editor, session, RpcNewSessionSettings(global, this))
@@ -155,7 +156,7 @@ val settingsViewModelTest by testSuite {
                 assertTrue(vm.global.applicationPreferences.state.value.closed)
                 assertEquals(UsageResetState.Hidden, reset.state.value)
                 assertNotNull(services.global.getSettings()) // shared backend remains alive.
-            } finally { vm.close(); global.close(); global.join() }
+            } finally { vm.close(); global.close() }
         }
     }
     test("session settings rejects stale revisions and never retargets") {
@@ -166,23 +167,31 @@ val settingsViewModelTest by testSuite {
             val editor = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
             try {
                 val revision = assertIs<SessionSettingsState.Available>(editor.state.value).snapshot.revision
-                editor.renameSession(revision, "renamed")
+                editor.requestRename(revision)
+                val firstRename = assertNotNull(editor.rename.value)
+                firstRename.viewModel.updateDraftName("renamed")
+                firstRename.viewModel.rename()
+                editor.dismissRename(firstRename)
                 editor.state.first { (it as? SessionSettingsState.Available)?.snapshot?.sessionName == "renamed" }
-                editor.renameSession(revision, "stale")
+                editor.requestRename(revision)
+                assertNull(editor.rename.value)
                 assertEquals("B", b.settings.value.threadName)
                 assertEquals("renamed", view.current().settings.value.threadName)
                 sessions.release(a.sessionIndex)
                 editor.state.first { it == SessionSettingsState.Unavailable }
-                editor.renameSession(revision, "closed")
+                editor.requestRename(revision)
+                assertNull(editor.rename.value)
             } finally { editor.close() }
         }
     }
     test("context sources and business hooks use their backend-owned settings projection") {
         withRpcFrontend {
             val global = RpcGlobalSettings.open(services.global, this, 120)
-            val editor = RpcGlobalEditor(global, services.global, this)
+            val editor = RpcGlobalEditor(global, services.global, this, root.toString())
             try {
-                val contextPath = SystemCoroutineFileSystem.resolve(root).toString()
+                val customRoot = Path(SystemCoroutineFileSystem.resolve(root), "custom-context")
+                SystemCoroutineFileSystem.createDirectories(customRoot)
+                val contextPath = customRoot.toString()
                 val sources = editor.contextSourceSettings
                 sources.setBuiltInEnabled(BuiltInContextSource.WorkingDirectory, false)
                 sources.add()
@@ -226,7 +235,7 @@ val settingsViewModelTest by testSuite {
                 assertTrue(services.global.getSettings().hooks.isEmpty())
                 sources.removeCustom(contextPath)
                 global.settings.first { it.contextSources.customSources.isEmpty() }
-            } finally { editor.close(); global.close(); global.join() }
+            } finally { editor.close(); global.close() }
         }
     }
 }

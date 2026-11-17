@@ -6,11 +6,13 @@ import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarCallbacks
+import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarContent
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarState
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabIdentity
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabPresentation
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
-import io.github.stream29.kodex.cli.sessiontabbar.SessionTabBar as ComponentSessionTabBar
+import io.github.stream29.kodex.cli.sessiontabbar.MosaicSessionTabMenuPlacement
+import io.github.stream29.kodex.cli.sessiontabbar.rememberMosaicSessionTabBarRenderer
 
 /**
  * Maps persisted host fixtures to component presentation identities for renderer tests.
@@ -35,7 +37,7 @@ internal fun SessionTabBar(
         identity to tab
     }
     val byIdentity = entries.associate { it.first to it.second }
-    ComponentSessionTabBar(
+    SessionTabBarContent(
         state = SessionTabBarState(
             tabs = entries.map { (identity, tab) ->
                 SessionTabPresentation(
@@ -46,28 +48,24 @@ internal fun SessionTabBar(
             },
             selected = entries.firstOrNull { it.second.selected }?.first,
         ),
-        runningIndicatorFrame = runningIndicatorFrame,
-        columns = columns,
         callbacks = object : SessionTabBarCallbacks {
             override fun select(identity: SessionTabIdentity) {
                 byIdentity[identity]?.target?.let(onSelectTab)
             }
 
-            override fun close(identity: SessionTabIdentity) = Unit
-
-            override fun openContextMenu(identity: SessionTabIdentity) = Unit
-
             override fun selectNewSession() = onSelectNewSession()
 
             override fun openSessions() = onOpenSessions()
         },
+        renderer = rememberMosaicSessionTabBarRenderer(columns, runningIndicatorFrame),
         onOpenTabMenu = { request ->
-            val tab = byIdentity[request.identity] ?: return@ComponentSessionTabBar
+            val tab = byIdentity[request.identity] ?: return@SessionTabBarContent
+            val placement = request.placement as MosaicSessionTabMenuPlacement
             onOpenTabMenu(
                 tab.target,
                 tab.sessionName,
-                request.anchor,
-                request.clickPosition,
+                placement.anchor,
+                placement.clickPosition,
             )
         },
     )

@@ -318,13 +318,13 @@ val tuiPopupMenuTest by testSuite {
         }
     }
 
-    test("item slots and dividers share the measured menu width") {
+    test("item slots share the measured menu width") {
         val state = TuiPopupMenuState()
 
         runMosaicTest {
             setContentAndSnapshot {
                 Box {
-                    PopupMenuHarness(state = state, width = 20, height = 4) {
+                    PopupMenuHarness(state = state, width = 20, height = 3) {
                         TuiPopupMenuItem(
                             key = "open",
                             leadingContent = { Text("*") },
@@ -333,7 +333,6 @@ val tuiPopupMenuTest by testSuite {
                         ) {
                             Text("open")
                         }
-                        TuiPopupMenuDivider(key = "divider")
                         TuiPopupMenuItem(key = "close", onClick = {}) { Text("close") }
                     }
                 }
@@ -341,8 +340,7 @@ val tuiPopupMenuTest by testSuite {
             val snapshot = awaitSnapshotContaining("[* open Ctrl+1]")
 
             assertTrue(snapshot.lines()[0].startsWith("[* open Ctrl+1]"), snapshot)
-            assertTrue(snapshot.lines()[1].startsWith("-".repeat(15)), snapshot)
-            assertTrue(snapshot.lines()[2].startsWith("[close        ]"), snapshot)
+            assertTrue(snapshot.lines()[1].startsWith("[close        ]"), snapshot)
         }
     }
 

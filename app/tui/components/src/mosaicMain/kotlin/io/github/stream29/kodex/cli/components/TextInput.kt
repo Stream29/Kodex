@@ -39,9 +39,6 @@ public actual class TextInputLayout private constructor(
     public actual val cursorRow: Int,
     public actual val cursorContentColumn: Int,
 ) {
-    public actual val renderedText: String
-        get() = lines.joinToString("\n")
-
     public actual val lines: List<String> = visualLines.map { it.prefix + it.content }
 
     public actual val rowCount: Int

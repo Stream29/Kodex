@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.ui
 
 import androidx.compose.runtime.Composable
+import io.github.stream29.kodex.cli.settings.SubmitKey
 
 internal object BrowserUiRenderer : UiRenderer {
     @Composable
@@ -28,7 +29,7 @@ internal object BrowserUiRenderer : UiRenderer {
         BrowserUiAction(label, onClick, enabled, autoFocus, role)
 
     @Composable
-    override fun UiEditor(text: String, cursorOffset: Int, onChange: (String, Int) -> Long?, onSubmit: (text: String, cursorOffset: Int) -> Unit, label: String, enabled: Boolean, readOnly: Boolean, autoFocus: Boolean, multiline: Boolean, maximumLines: Int, submitKey: UiSubmitKey, revision: Long?): Unit =
+    override fun UiEditor(text: String, cursorOffset: Int, onChange: (String, Int) -> Long?, onSubmit: (text: String, cursorOffset: Int) -> Unit, label: String, enabled: Boolean, readOnly: Boolean, autoFocus: Boolean, multiline: Boolean, maximumLines: Int, submitKey: SubmitKey, revision: Long?): Unit =
         BrowserUiEditor(text, cursorOffset, onChange, onSubmit, label, enabled, readOnly, autoFocus, multiline, maximumLines, submitKey, revision)
 
     @Composable

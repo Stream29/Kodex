@@ -25,6 +25,7 @@ val mcpSettingsContentTest by testSuite {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                val renderer = androidx.compose.runtime.remember { MosaicSettingsRenderer() }
                 Column(Modifier.width(80)) {
                     McpSettingsContent(
                         servers = listOf(
@@ -56,6 +57,7 @@ val mcpSettingsContentTest by testSuite {
                                 status = McpServerSettingsStatus.Disabled,
                             ),
                         ),
+                        renderer = renderer,
                         onAdd = {},
                         onOpenDetails = {},
                         onImport = {},

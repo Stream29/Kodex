@@ -15,16 +15,12 @@ kotlin {
         }
         commonMain.dependencies {
             implementation(libs.kotlin.logging)
-            implementation(project(":agent-state-contract"))
-            implementation(project(":agent-storage-core"))
-            implementation(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-rpc-exception"))
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
             implementation(project(":openai-json-codec"))
-            implementation(project(":agent-storage-core"))
         }
         nativeTest.dependencies {
             implementation(project(":agent-session-test"))

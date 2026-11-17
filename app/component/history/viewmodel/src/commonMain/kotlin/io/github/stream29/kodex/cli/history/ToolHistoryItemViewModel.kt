@@ -13,7 +13,7 @@ internal class ToolHistoryItemViewModelImpl(
     override val index: Int,
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
-) : ToolHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
+) : ToolHistoryItemViewModel, ReleasableHistoryItem {
     private val tool: StableCleanEvent.CompletedTool?
     private val header: ToolHistoryItemHeader?
     private val mutableState: MutableStateFlow<ToolHistoryItemState>
@@ -42,8 +42,6 @@ internal class ToolHistoryItemViewModelImpl(
 
     override val state: StateFlow<ToolHistoryItemState> = mutableState.asStateFlow()
 
-    override fun ensureLoaded() = Unit
-
     override fun expand() {
         val collapsed = mutableState.value as? ToolHistoryItemState.Collapsed ?: return
         val resolvedTool = tool ?: return
@@ -56,17 +54,8 @@ internal class ToolHistoryItemViewModelImpl(
     }
 
     override fun collapse() {
-        when (val current = mutableState.value) {
-            is ToolHistoryItemState.Expanding -> {
-                current.loadingJob.cancel()
-                mutableState.value = ToolHistoryItemState.Collapsed(current.header)
-            }
-
-            is ToolHistoryItemState.Expanded ->
-                mutableState.value = ToolHistoryItemState.Collapsed(current.header)
-
-            else -> Unit
-        }
+        val current = mutableState.value as? ToolHistoryItemState.Expanded ?: return
+        mutableState.value = ToolHistoryItemState.Collapsed(current.header)
     }
 
     override fun release() {

@@ -539,10 +539,10 @@ try {
     await waitText(check, "Kodex renderer smoke — isolated fixture");
     await click(check, "Check RPC descriptor assembly");
     const nodes = await waitFor(() => tree(check), (nodes) =>
-      text(nodes).includes("All eight production RPC proxies constructed.") ||
+      text(nodes).includes("Both production RPC proxies constructed.") ||
       text(nodes).includes("Descriptor assembly failed:"), "production descriptor assembly");
     const result = text(nodes);
-    assert.ok(result.includes("All eight production RPC proxies constructed."),
+    assert.ok(result.includes("Both production RPC proxies constructed."),
       result.split("\n").find((line) => line.includes("Descriptor assembly failed:")));
     await click(check, "Check RPC serialization");
     const serializers = text(await waitFor(() => tree(check), (nodes) =>
@@ -593,24 +593,24 @@ try {
     await waitFor(() => tree(live), (nodes) =>
       assistantCount(nodes) === 2, "recovered committed answer");
     await waitText(live, "Persisted Composer: running=false; submitting=false");
-    await waitText(live, "Fixture write attempts: appends=2; resumes=2");
+    await waitText(live, "Fixture write attempts: submits=2; resumes=2");
     await waitText(live, "Open fixture tabs: 1");
     console.log("PASS transport replacement reactivates the retained Session and its state/History subscriptions");
 
-    await click(live, "Discard next accepted append reply");
-    await insert(live, "unknown accepted append 995");
+    await click(live, "Discard next accepted submit reply");
+    await insert(live, "unknown accepted submit 995");
     await key(live, "Enter", 13);
     await waitText(live, "Fixture connection: Connected; generation=3; discarded replies=1");
     await waitFor(() => tree(live), (nodes) => {
       const failed = nodes.find((node) => node.name?.value?.startsWith("Persisted lifecycle: Failed"));
       assert.equal(failed, undefined, failed?.name.value);
-      return text(nodes).includes("unknown accepted append 995");
-    }, "recovered accepted append");
-    await waitText(live, "Fixture write attempts: appends=3; resumes=2");
+      return text(nodes).includes("unknown accepted submit 995");
+    }, "recovered accepted submit");
+    await waitText(live, "Fixture write attempts: submits=3; resumes=2");
     const unknown = await tree(live);
     assert.equal(assistantCount(unknown), 2);
     assert.equal(unknown.filter((node) => node.role?.value === "StaticText" &&
-      node.name?.value === "unknown accepted append 995").length, 1, "Accepted message is present exactly once.");
+      node.name?.value === "unknown accepted submit 995").length, 1, "Accepted message is present exactly once.");
     await waitText(live, "Persisted Composer: running=false; submitting=false");
     await insert(live, "explicit action after reconnect");
     await key(live, "Enter", 13);
@@ -618,9 +618,9 @@ try {
     await waitText(live, "History window: newest=7;");
     await waitText(live, "Persisted Composer: running=false; submitting=false");
     assert.ok(assistantCount(await tree(live)) >= 1, "The newest committed answer is rendered; older rows may be offscreen.");
-    await waitText(live, "Fixture write attempts: appends=4; resumes=3");
+    await waitText(live, "Fixture write attempts: submits=4; resumes=3");
     assert.equal(live.sockets.length, 3);
-    console.log("PASS discarded accepted append is not replayed or resumed; explicit later submission works");
+    console.log("PASS discarded accepted submit is not replayed or resumed; explicit later submission works");
   } else {
   await insert(live, "persisted Composer — 继续");
   await key(live, "Enter", 13);

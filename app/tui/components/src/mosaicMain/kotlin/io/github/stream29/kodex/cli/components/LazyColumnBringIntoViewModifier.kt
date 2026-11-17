@@ -87,7 +87,7 @@ internal class LazyColumnBringIntoViewNode(
     }
 }
 
-private fun calculateScrollDistance(
+internal fun calculateScrollDistance(
     offset: Int,
     size: Int,
     containerSize: Int,

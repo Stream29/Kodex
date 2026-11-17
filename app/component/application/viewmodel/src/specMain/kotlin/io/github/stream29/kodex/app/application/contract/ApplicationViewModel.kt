@@ -96,37 +96,6 @@ public interface ApplicationViewModel : AutoCloseable {
     public suspend fun closeAndArchiveSession(target: PersistedSessionViewModel): Boolean
 
     /**
-     * Deletes one persisted Session and removes any matching open tab on success.
-     *
-     * A current Delete popup for [sessionIndex], or a target-owned popup for the
-     * matching open child, is also closed. Returns false if persisted data was
-     * absent; storage/transport failures are not absence.
-     *
-     * @throws IllegalStateException if the Application is closed.
-     * @throws Exception if deletion or local cleanup fails.
-     * @throws kotlinx.coroutines.CancellationException if caller waiting is cancelled;
-     * accepted backend deletion is not undone.
-     */
-    public suspend fun deleteSession(sessionIndex: Int): Boolean
-
-    /**
-     * Forks one complete persisted root Session without changing navigation.
-     * @throws IllegalStateException if the Application is closed.
-     * @throws Exception if source admission, storage, or transport fails.
-     * @throws kotlinx.coroutines.CancellationException if caller waiting is cancelled.
-     */
-    public suspend fun forkSession(sessionIndex: Int): Int
-
-    /**
-     * Adds already-created child tabs without repeating creation or changing selection.
-     * Duplicated indexes already opened by this Application are skipped.
-     * @throws IllegalStateException if the Application is closed.
-     * @throws Exception if opening a child fails; previous additions remain.
-     * @throws kotlinx.coroutines.CancellationException if caller waiting is cancelled.
-     */
-    public suspend fun openCreatedSessions(sessionIndexes: List<Int>): Unit
-
-    /**
      * Submits the singleton's exact composer revision, then appends/selects the result.
      * Zero-length, stale and in-progress duplicate events return null without effects.
      * Admission rejects duplicates before waiting for the application command mutex;

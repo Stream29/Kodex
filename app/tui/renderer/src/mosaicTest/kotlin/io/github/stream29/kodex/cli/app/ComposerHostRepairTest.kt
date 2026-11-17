@@ -55,33 +55,6 @@ import kotlin.time.Duration.Companion.seconds
 private val composerHostDispatcher = Dispatchers.Default.limitedParallelism(1)
 
 val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("host renders information only and never renders warnings or errors above the composer") {
-        composerHost {
-            val agent = requireNotNull(session.rootAgent.value)
-            val notices = MutableStateFlow<AgentNotification?>(
-                AgentNotification(1, AgentNotificationLevel.Information, "Information notice.", "Information detail."),
-            )
-            val presented = object : AgentViewModel by agent {
-                override val notification: StateFlow<AgentNotification?> = notices
-            }
-            runComposerHostMosaicTest {
-                setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { RepairHost(presented, FocusRequester()) }
-                }
-                assertContains(snapshotContaining("Information notice."), "Information detail.")
-                notices.value = AgentNotification(2, AgentNotificationLevel.Warning, "hidden warning", "hidden detail")
-                val warningSnapshot = snapshotMatching { "Information notice." !in it }
-                assertFalse("hidden warning" in warningSnapshot, warningSnapshot)
-                assertFalse("hidden detail" in warningSnapshot, warningSnapshot)
-                notices.value = AgentNotification(3, AgentNotificationLevel.Information, "Next information.", null)
-                snapshotContaining("Next information.")
-                notices.value = AgentNotification(4, AgentNotificationLevel.Error, "hidden operation error", null)
-                val errorSnapshot = snapshotMatching { "Next information." !in it }
-                assertFalse("hidden operation error" in errorSnapshot, errorSnapshot)
-            }
-        }
-    }
-
     test("real host Enter reports submit failure once and retains exact draft and cursor") {
         val entered = CompletableDeferred<Unit>()
         val proceed = CompletableDeferred<Unit>()
@@ -125,7 +98,6 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 // Existing failure transition advances revision; it does not edit the failed draft.
                 assertEquals(revision + 1, agent.composer.state.value.revision)
                 assertIs<ComposerSubmissionState.Failed>(agent.composer.state.value.submission)
-                assertNull(agent.notification.value)
                 assertEquals("injected submit failure", failures.value.single().message)
                 assertEquals(1, submits)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
@@ -163,7 +135,6 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertFalse("Unable to submit:" in snapshot, snapshot)
                 assertEquals(AgentStateValue.UserMessage, services.runtime.getState(view.sessionIndex))
                 assertEquals(1, resumes)
-                assertNull(agent.notification.value)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
                 assertSame(agent, view.rootAgent.value)
@@ -227,7 +198,6 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                     val after = snapshotContaining("Pending steer (2)")
                     assertEquals(1, Regex.escape("Pending steer (2)").toRegex().findAll(after).count(), after)
                     assertFalse("Submit to steer" in after, after)
-                    assertNull(agent.notification.value)
                 }
             } finally {
                 allowCancellation.complete(Unit)
@@ -282,7 +252,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertEquals(AgentStateValue.UserMessage, recovered.state.value)
                 assertEquals(ComposerLifecycle.Closed, agent.composer.state.value.lifecycle)
                 assertFailsWith<CancellationException> { oldBinding.resume() }
-                assertEquals(ComposerSubmissionResult.Unavailable, agent.composer.submit(agent.composer.state.value.revision))
+                agent.composer.submit(agent.composer.state.value.revision)
             }
         }
     }
@@ -318,7 +288,6 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 proceed.complete(Unit)
                 val snapshot = snapshotMatching { "Submitting…" !in it }
                 assertFalse("Session operation failed." in snapshot, snapshot)
-                assertNull(agent.notification.value)
                 assertTrue(failures.value.isEmpty(), "Cancellation must not enter the error outlet.")
                 assertSame(agent, view.rootAgent.value)
                 assertEquals("retained on cancellation", agent.composer.state.value.text)
@@ -370,7 +339,6 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertEquals(1, submits)
                 assertSame(agent, session.rootAgent.value)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
-                assertNull(agent.notification.value)
                 assertEquals(ComposerLifecycle.Open, agent.composer.state.value.lifecycle)
             }
         }

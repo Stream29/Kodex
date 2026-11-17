@@ -2,9 +2,7 @@ package io.github.stream29.kodex.app.agent.contract
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.RequestUserInputMode
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 /** Exact Agent or New Session address bound to one Composer child. */
@@ -20,8 +18,6 @@ public value class ComposerOwnerId(
 public enum class ComposerOperation {
     Submit,
     Steer,
-    Resume,
-    Cancel,
 }
 
 /** A framework-free failure summary retained by the component. */
@@ -59,19 +55,16 @@ public sealed interface ComposerRequestInputPresentation {
     /**
      * A sibling child owns the pending answers and lifecycle.
      *
-     * [callId], [mode], title and question count are presentation facts only. The Composer does
+     * [title] and [questionCount] are presentation facts only. The Composer does
      * not expose, copy or mutate answer drafts.
      *
-     * @throws IllegalArgumentException if [callId] or [title] is blank, or [questionCount] is negative.
+     * @throws IllegalArgumentException if [title] is blank or [questionCount] is negative.
      */
     public data class Pending(
-        public val callId: String,
-        public val mode: RequestUserInputMode,
         public val title: String,
         public val questionCount: Int,
     ) : ComposerRequestInputPresentation {
         init {
-            require(callId.isNotBlank()) { "A request-user-input call id must not be blank." }
             require(title.isNotBlank()) { "A request-user-input title must not be blank." }
             require(questionCount >= 0) {
                 "A request-user-input question count must not be negative."
@@ -139,44 +132,6 @@ public data class ComposerState(
             text.isBlank() -> ComposerMode.Empty
             else -> ComposerMode.Ready
         }
-
-}
-
-/** Result returned after exact revision admission and one explicit dependency command. */
-public sealed interface ComposerSubmissionResult {
-    /**
-     * The user message was persisted by [ComposerSubmitPort] and the exact owner was asked to
-     * resume. A resume return does not prove that execution has completed.
-     */
-    public data object Submitted : ComposerSubmissionResult
-
-    /**
-     * The exact steer was accepted into the owner runtime projection. Acceptance is not a
-     * persistence receipt and does not create a component-global queue.
-     */
-    public data object QueuedAsSteer : ComposerSubmissionResult
-
-    /** The admitted draft contained only blank/whitespace text. */
-    public data object Empty : ComposerSubmissionResult
-
-    /** The caller supplied a revision that is no longer the component's exact revision. */
-    public data object Stale : ComposerSubmissionResult
-
-    /** The component is closed or no longer available for a command. */
-    public data object Unavailable : ComposerSubmissionResult
-
-    /**
-     * A non-cancellation dependency failure; side effects may already have happened.
-     *
-     * @throws IllegalArgumentException if [message] is blank.
-     */
-    public data class Failed(
-        public val message: String,
-    ) : ComposerSubmissionResult {
-        init {
-            require(message.isNotBlank()) { "A Composer failure message must not be blank." }
-        }
-    }
 }
 
 /**
@@ -194,21 +149,6 @@ public fun interface ComposerSubmitPort {
         ownerId: ComposerOwnerId,
         content: List<ContentItem>,
     ): Unit
-}
-
-/**
- * Explicit cancellation port for the exact current owner.
- *
- * Calling [ComposerViewModel.cancel] is distinct from cancelling the caller waiting for submit;
- * caller cancellation is propagated and never translated into this command.
- * A host may admit asynchronous cancellation in its fixed owner scope; in that case ordinary
- * completion failures use that owner's existing failure outlet, not an uncaught child failure.
- *
- * @throws CancellationException when the owner cancellation is cancelled.
- * @throws Exception when the exact owner reports a cancellation failure.
- */
-public fun interface ComposerCancellationPort {
-    public fun cancel(ownerId: ComposerOwnerId): Unit
 }
 
 /** Backend observations used to choose Running/Steer branches; no command authority is exposed. */
@@ -243,7 +183,6 @@ public fun interface ComposerFailureReporter {
 public interface ComposerDependencies {
     public val runtime: ComposerRuntimePort
     public val submit: ComposerSubmitPort
-    public val cancellation: ComposerCancellationPort
     public val requestInput: ComposerRequestInputPort
     public val failures: ComposerFailureReporter
 }
@@ -283,18 +222,14 @@ public interface ComposerViewModel : AutoCloseable {
     public fun clear(expectedRevision: Long): Boolean
 
     /**
-     * Admits one exact draft and preserves existing behavior:
-     * running owners call [ComposerSubmitPort], clear after submission, and return
-     * [ComposerSubmissionResult.QueuedAsSteer]; idle owners call [ComposerSubmitPort],
-     * clear after submission, and return [ComposerSubmissionResult.Submitted].
+     * Admits one exact draft, calls [ComposerSubmitPort], and clears the draft after submission.
+     * Stale, empty, submitting, or closed drafts are ignored without side effects.
      *
-     * Accepted/persisted work is never retried, compensated or rolled back. Caller cancellation
-     * propagates as [CancellationException]; it does not invoke [ComposerCancellationPort].
-     * Dependency cancellation also propagates. Non-cancellation failures retain the draft as
-     * [ComposerSubmissionState.Failed] when the captured owner/revision is still current.
+     * Accepted/persisted work is never retried, compensated or rolled back. Caller and dependency
+     * cancellation propagate as [CancellationException]. Non-cancellation failures retain the draft
+     * as [ComposerSubmissionState.Failed] when the captured owner/revision is still current.
      * Late success/failure after close cannot publish local state; successful work still uses
-     * its captured exact owner port. Replacing an Agent creates a different Composer with its
-     * own dependencies rather than changing this child's identity and reusing old-owner ports.
+     * its captured exact owner port.
      *
      * @throws CancellationException for caller, owner or dependency cancellation.
      * @throws IllegalStateException if an admitted transition exhausts revisions.
@@ -302,15 +237,7 @@ public interface ComposerViewModel : AutoCloseable {
      * nonblank message.
      * @throws Exception if the dependency's failure reporter itself fails.
      */
-    public suspend fun submit(expectedRevision: Long): ComposerSubmissionResult
-
-    /**
-     * Requests cancellation for the exact owner without changing the draft or inventing a queue.
-     *
-     * @throws CancellationException if the exact cancellation is cancelled.
-     * @throws Exception for an exact-owner cancellation failure; the failure is also reported.
-     */
-    public fun cancel(): Unit
+    public suspend fun submit(expectedRevision: Long): Unit
 
     /**
      * Closes observations and rejects future local commands. It does not cancel already accepted
@@ -318,23 +245,4 @@ public interface ComposerViewModel : AutoCloseable {
      * Late callbacks are stale and cannot publish into this closed state.
      */
     override fun close(): Unit
-}
-
-/**
- * Creates a child with explicit owner identity and narrow ports.
- *
- * The factory borrows [ownerScope] and never closes it. Implementations observe runtime and
- * request-input projections there; host adapters own the scope and close the child at the exact
- * owner lifecycle boundary.
- */
-public fun interface ComposerViewModelFactory {
-    /**
-     * @throws IllegalArgumentException if [ownerId] is invalid.
-     * @throws IllegalStateException if dependency observation cannot be installed.
-     */
-    public fun create(
-        ownerId: ComposerOwnerId,
-        dependencies: ComposerDependencies,
-        ownerScope: CoroutineScope,
-    ): ComposerViewModel
 }

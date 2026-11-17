@@ -11,7 +11,7 @@ internal class RequestUserInputHistoryItemViewModelImpl(
     override val index: Int,
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
-) : RequestUserInputHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
+) : RequestUserInputHistoryItemViewModel, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<RequestUserInputHistoryItemState> = MutableStateFlow(
         try {
             val event = descriptor.event as? StableAskUserEvent
@@ -27,8 +27,6 @@ internal class RequestUserInputHistoryItemViewModelImpl(
     )
 
     override val state: StateFlow<RequestUserInputHistoryItemState> = mutableState.asStateFlow()
-
-    override fun ensureLoaded() = Unit
 
     override fun release() = Unit
 }

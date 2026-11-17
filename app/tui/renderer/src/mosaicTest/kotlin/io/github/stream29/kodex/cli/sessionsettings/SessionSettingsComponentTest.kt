@@ -11,11 +11,18 @@ import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.BoxScope
+import com.jakewharton.mosaic.ui.Column
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.pathpicker.contract.*
 import io.github.stream29.kodex.app.settings.createSessionSettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.*
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.cli.components.TuiPopupHost
+import io.github.stream29.kodex.cli.sessionrename.SessionRenamePopup
+import io.github.stream29.kodex.cli.sessionrename.SessionRenamePresentation
+import io.github.stream29.kodex.cli.settings.rememberFourChoiceDropdowns
+import io.github.stream29.kodex.cli.workingdirectory.WorkingDirectoryPopup
 import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
@@ -30,14 +37,16 @@ val sessionSettingsComponentTest by testSuite {
         withRenderer(ports) { vm, _ ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) { SessionSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) { RenderSessionSettings(vm) }
+                    }
                 }
                 var previous = -1
-                for (text in listOf("Identity", "Session name", "Target", "Working directory", "/original",
+                for (text in listOf(
+                    "Identity", "Session name", "Target", "Working directory", "/original",
                     "Model behavior", "Model [orphan]", "Reasoning [medium]", "Service tier [default]",
-                    "Questions [ask user]")) {
+                    "Questions [ask user]",
+                )) {
                     val next = snapshot.indexOf(text)
                     assertTrue(next > previous, snapshot)
                     previous = next
@@ -57,9 +66,9 @@ val sessionSettingsComponentTest by testSuite {
         withRenderer(ports) { vm, _ ->
             runMosaicTest {
                 var snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) { SessionSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) { RenderSessionSettings(vm) }
+                    }
                 }
                 clickText(snapshot, "Model [orphan]", "Model [".length)
                 snapshot = snapshotWith("[catalog-a")
@@ -102,9 +111,9 @@ val sessionSettingsComponentTest by testSuite {
         withRenderer(ports) { vm, _ ->
             runMosaicTest {
                 var snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) { SessionSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) { RenderSessionSettings(vm) }
+                    }
                 }
                 clickText(snapshot, "Service tier [default]", "Service tier [".length)
                 snapshotWith("[flex")
@@ -128,9 +137,9 @@ val sessionSettingsComponentTest by testSuite {
         withRenderer(ports) { vm, browsers ->
             runMosaicTest {
                 var snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) { SessionSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) { RenderSessionSettings(vm) }
+                    }
                 }
                 clickText(snapshot, "Model [orphan]", "Model [".length)
                 snapshot = snapshotWith("Identity")
@@ -159,9 +168,9 @@ val sessionSettingsComponentTest by testSuite {
         withRenderer(ports) { vm, browsers ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) { SessionSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) { RenderSessionSettings(vm) }
+                    }
                 }
                 clickText(snapshot, "[Browse]")
                 snapshotWith("Select directory")
@@ -193,11 +202,11 @@ val sessionSettingsComponentTest by testSuite {
             var visible by mutableStateOf(true)
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) {
-                        if (visible) SessionSettingsComponent(vm)
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) {
+                            if (visible) RenderSessionSettings(vm)
+                        }
                     }
-                }
                 }
                 vm.requestRename(0)
                 snapshotWith("Rename session")
@@ -234,9 +243,9 @@ val sessionSettingsComponentTest by testSuite {
         withRenderer(ports) { vm, _ ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(32)) { SessionSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(32)) { RenderSessionSettings(vm) }
+                    }
                 }
                 assertTrue("No selected session" in snapshot, snapshot)
                 assertFalse("Identity" in snapshot, snapshot)
@@ -256,20 +265,43 @@ val sessionSettingsComponentTest by testSuite {
     }
 }
 
+@Composable
+private fun BoxScope.RenderSessionSettings(vm: SessionSettingsViewModel) {
+    val menus = rememberFourChoiceDropdowns(
+        SessionChoiceField.Model.name,
+        SessionChoiceField.Reasoning.name,
+        SessionChoiceField.ServiceTier.name,
+        SessionChoiceField.Questions.name,
+    )
+    Column { SessionSettingsContent(vm, menus.renderer) }
+    with(menus.renderer) { Menus() }
+    SessionSettingsChildren(
+        viewModel = vm,
+        rename = { handle, onDismiss ->
+            SessionRenamePopup(handle.viewModel, onDismiss, onDismiss, SessionRenamePresentation.Labeled)
+        },
+        directory = { handle, onDismiss ->
+            WorkingDirectoryPopup(handle.selection, onDismiss, {})
+        },
+    )
+}
+
 private suspend fun withRenderer(
     ports: SessionRenderSource,
     action: suspend (SessionSettingsViewModel, List<RenderBrowser>) -> Unit,
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     val browsers = mutableListOf<RenderBrowser>()
-    val models = MutableStateFlow(listOf(
-        ModelInfo(OpenAiModelId("catalog-a"), "a"), ModelInfo(OpenAiModelId("catalog-b"), "b"),
-    ))
-    val vm = createSessionSettingsViewModel(SessionSettingsDependencies(ports, models, {
-        RenderBrowser(it).also(browsers::add)
-    }), scope)
+    val models = MutableStateFlow(
+        listOf(ModelInfo(OpenAiModelId("catalog-a"), "a"), ModelInfo(OpenAiModelId("catalog-b"), "b")),
+    )
+    val vm = createSessionSettingsViewModel(
+        SessionSettingsDependencies(ports, models, { RenderBrowser(it).also(browsers::add) }),
+        scope,
+    )
     try { action(vm, browsers) } finally { vm.close(); scope.cancel() }
 }
+
 private suspend fun TestMosaic<String>.snapshotWith(expected: String): String {
     var snapshot = ""
     repeat(5) {
@@ -281,6 +313,7 @@ private suspend fun TestMosaic<String>.snapshotWith(expected: String): String {
     assertTrue(expected in snapshot, snapshot)
     return snapshot
 }
+
 private suspend fun TestMosaic<String>.clickText(snapshot: String, text: String, offset: Int = 1) {
     val lines = snapshot.lines()
     val row = lines.indexOfFirst { text in it }
@@ -291,11 +324,16 @@ private suspend fun TestMosaic<String>.clickText(snapshot: String, text: String,
     sendMouseEvent(MouseEvent(column, row, MouseEvent.Type.Release))
     snapshotWith("")
 }
+
 private class SessionRenderSource : SessionSettingsDataSource {
-    private val initial = SessionSettingsSnapshot(0, "Target", SessionSettingsConfiguration(
-        OpenAiModelId("orphan"), Path("/original"), ReasoningEffort.Medium, ServiceTier.Default,
-        RequestUserInputMode.AskUser,
-    ), true)
+    private val initial = SessionSettingsSnapshot(
+        0, "Target",
+        SessionSettingsConfiguration(
+            OpenAiModelId("orphan"), Path("/original"), ReasoningEffort.Medium, ServiceTier.Default,
+            RequestUserInputMode.AskUser,
+        ),
+        true,
+    )
     override val state = MutableStateFlow<SessionSettingsDataState>(SessionSettingsDataState.Available(initial))
     val writes = mutableListOf<Pair<Long, SessionSettingsConfiguration>>()
     val renames = mutableListOf<Pair<Long, String>>()
@@ -320,17 +358,22 @@ private class SessionRenderSource : SessionSettingsDataSource {
         val current = (state.value as? SessionSettingsDataState.Available)?.snapshot ?: return false
         if (current.revision != expectedRevision) return false
         renames += expectedRevision to sessionName
-        state.value = SessionSettingsDataState.Available(current.copy(revision = current.revision + 1, sessionName = sessionName))
+        state.value = SessionSettingsDataState.Available(
+            current.copy(revision = current.revision + 1, sessionName = sessionName),
+        )
         return true
     }
     override fun close() { closes++ }
 }
+
 private class RenderBrowser(path: Path) : DirectoryPickerViewModel {
-    override val state = MutableStateFlow(DirectoryPickerState(
-        loadState = DirectoryPickerLoadState.Ready(
-            1, path, path, listOf(Path(path, "Alpha")), path.parent, mapOf(Path(path, "Alpha") to "Alpha"),
+    override val state = MutableStateFlow(
+        DirectoryPickerState(
+            loadState = DirectoryPickerLoadState.Ready(
+                1, path, path, listOf(Path(path, "Alpha")), path.parent, mapOf(Path(path, "Alpha") to "Alpha"),
+            ),
         ),
-    ))
+    )
     private val output = Channel<DirectoryPickerEffect>(Channel.BUFFERED)
     override val effects = output.receiveAsFlow()
     var closes = 0

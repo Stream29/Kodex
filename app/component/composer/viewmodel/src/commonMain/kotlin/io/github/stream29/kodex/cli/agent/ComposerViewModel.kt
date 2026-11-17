@@ -6,10 +6,8 @@ import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.agent.contract.ComposerOperation
 import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
 import io.github.stream29.kodex.app.agent.contract.ComposerState
-import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
-import io.github.stream29.kodex.app.agent.contract.ComposerViewModelFactory
 import io.github.stream29.kodex.openai.ContentItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -17,7 +15,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -27,9 +24,6 @@ public actual fun createComposerViewModel(
     dependencies: ComposerDependencies,
     ownerScope: CoroutineScope,
 ): ComposerViewModel = ComposerViewModelImpl(ownerId, dependencies, ownerScope)
-
-public actual val composerViewModelFactory: ComposerViewModelFactory =
-    ComposerViewModelFactory(::createComposerViewModel)
 
 /**
  * Owns the Composer draft and command admission without constructing an Agent or repository.
@@ -123,29 +117,16 @@ private class ComposerViewModelImpl(
         }
     }
 
-    override suspend fun submit(expectedRevision: Long): ComposerSubmissionResult =
+    override suspend fun submit(expectedRevision: Long) {
         submissionMutex.withLock {
             val captured = state.value
-            if (
-                closed ||
-                captured.lifecycle == ComposerLifecycle.Closed
-            ) {
-                return@withLock ComposerSubmissionResult.Unavailable
-            }
-            if (captured.revision != expectedRevision) {
-                return@withLock ComposerSubmissionResult.Stale
-            }
-            if (captured.submission is ComposerSubmissionState.Submitting) {
-                return@withLock ComposerSubmissionResult.Stale
-            }
+            if (closed || captured.lifecycle == ComposerLifecycle.Closed) return@withLock
+            if (captured.revision != expectedRevision) return@withLock
+            if (captured.submission is ComposerSubmissionState.Submitting) return@withLock
             val text = captured.text.trim()
-            if (text.isEmpty()) {
-                return@withLock ComposerSubmissionResult.Empty
-            }
+            if (text.isEmpty()) return@withLock
             val submitting = captured.copy(submission = ComposerSubmissionState.Submitting)
-            if (!mutableState.compareAndSet(captured, submitting)) {
-                return@withLock ComposerSubmissionResult.Stale
-            }
+            if (!mutableState.compareAndSet(captured, submitting)) return@withLock
 
             val owner = captured.ownerId
             val content = listOf(ContentItem.InputText(text))
@@ -159,11 +140,6 @@ private class ComposerViewModelImpl(
             try {
                 dependencies.submit.submit(owner, content)
                 clearAccepted(owner, captured.revision)
-                if (running) {
-                    ComposerSubmissionResult.QueuedAsSteer
-                } else {
-                    ComposerSubmissionResult.Submitted
-                }
             } catch (cancelled: CancellationException) {
                 restoreAfterCancellation(owner, captured.revision)
                 throw cancelled
@@ -175,25 +151,7 @@ private class ComposerViewModelImpl(
                 )
                 retainFailure(owner, captured.revision, summary)
                 dependencies.failures.report(owner, summary)
-                ComposerSubmissionResult.Failed(summary.message)
             }
-        }
-
-    override fun cancel() {
-        if (closed) return
-        val owner = state.value.ownerId
-        try {
-            dependencies.cancellation.cancel(owner)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Throwable) {
-            val summary = ComposerFailure(
-                ComposerOperation.Cancel,
-                failure.message.takeUnless { it.isNullOrBlank() }
-                    ?: failure.toString().ifBlank { "Composer cancellation failed." },
-            )
-            dependencies.failures.report(owner, summary)
-            throw failure
         }
     }
 
@@ -258,17 +216,14 @@ private class ComposerViewModelImpl(
     ) {
         while (true) {
             val current = mutableState.value
-            if (current.lifecycle == ComposerLifecycle.Closed || current.ownerId != owner) {
+            if (
+                current.lifecycle == ComposerLifecycle.Closed ||
+                current.ownerId != owner ||
+                current.revision != revision ||
+                current.submission !is ComposerSubmissionState.Submitting
+            ) {
                 return
             }
-            val commandStillSubmitting =
-                current.revision == revision &&
-                    current.submission is ComposerSubmissionState.Submitting
-            val persistedBeforeResume =
-                current.revision == revision + 1 &&
-                    current.text.isEmpty() &&
-                    current.submission is ComposerSubmissionState.Editing
-            if (!commandStillSubmitting && !persistedBeforeResume) return
             val failed = current.copy(
                 revision = current.nextRevision(),
                 submission = ComposerSubmissionState.Failed(failure),

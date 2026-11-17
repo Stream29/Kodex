@@ -15,7 +15,6 @@ kotlin {
             api(project(":app-component-history-viewmodel"))
             api(project(":openai-models"))
             api(project(":rpc-models"))
-            api(project(":tool-request-user-input"))
             api(project(":tool-unified-exec-contract"))
             api(project(":utils-rpc-exception"))
             api(libs.kotlinx.coroutines.core)

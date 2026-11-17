@@ -31,38 +31,18 @@ public interface HistoryItemWindow {
     public val hasNewer: Boolean
 
     /**
-     * Returns the exact materialized child without starting its payload read.
+     * Returns the exact materialized child without submitting a prefetch access hint.
      * @throws IndexOutOfBoundsException if [index] is outside this snapshot's visible rows.
      */
     public fun peek(index: Int): HistoryItemViewModel
 
     /**
-     * Returns that same child and starts its lazy payload read once. Repeated viewport access
-     * does not create another state machine. Also submits an access hint for two-sided prefetch.
+     * Returns that same child and submits an access hint for two-sided prefetch.
      * Hints during a load are retained and rechecked against the new window; stale-window hints
-     * are ignored. Read failure is published by the child, not as empty content.
-     * This index addresses the bounded window, not a storage timeline.
+     * are ignored. This index addresses the bounded window, not a storage timeline.
      * @throws IndexOutOfBoundsException if [index] is outside this snapshot's visible rows.
      */
     public operator fun get(index: Int): HistoryItemViewModel
-
-    /**
-     * Explicitly requests one adjacent older page using the same retention policy as prefetch.
-     * Duplicate in-flight, stale-window and post-close demand is ignored. Structural failures
-     * publish the owner's Failed state, not an empty page. Demand requires Ready and an older
-     * edge; a full command buffer may reject it without changing state. A later edge demand may
-     * try again; no automatic retry or retained navigation intent is created. No synchronous throws.
-     */
-    public fun requestOlder()
-
-    /**
-     * Explicitly requests one adjacent newer page using the same retention policy as prefetch.
-     * Duplicate in-flight, stale-window and post-close demand is ignored. Structural failures
-     * publish the owner's Failed state, not an empty page. Demand requires Ready and a newer
-     * edge; a full command buffer may reject it without changing state. A later edge demand may
-     * try again; no automatic retry or retained navigation intent is created. No synchronous throws.
-     */
-    public fun requestNewer()
 }
 
 /** Current structural loading state of the materialized history sequence. */

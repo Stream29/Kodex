@@ -10,11 +10,10 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":app-component-session-catalog-viewmodel"))
-            api(project(":app-component-session-delete-viewmodel"))
             api(compose.runtime)
         }
         commonMain.dependencies {
-            implementation(libs.kotlinx.coroutines.core)
+            implementation(project(":app-component-widgets"))
         }
     }
 }

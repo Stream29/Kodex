@@ -24,7 +24,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEv
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
-import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -123,21 +122,9 @@ internal class HistoryItemLoadContext(
     }
 }
 
-/**
- * Internal loading hook used by [HistoryItemWindow]. It is not part of the public contract because
- * the View should not know how a particular item starts its work.
- */
-internal interface LoadableHistoryItem {
-    fun ensureLoaded()
-}
-
 /** Cancels work and releases detail held by a group-local child that is about to be dropped. */
 internal interface ReleasableHistoryItem {
     fun release()
-}
-
-internal fun HistoryItemViewModel.ensureLoaded() {
-    (this as? LoadableHistoryItem)?.ensureLoaded()
 }
 
 internal fun HistoryItemViewModel.release() {

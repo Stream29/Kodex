@@ -14,9 +14,10 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarCallbacks
+import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarContent
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarState
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabIdentity
-import io.github.stream29.kodex.cli.sessiontabbar.SessionTabBar as ComponentSessionTabBar
+import io.github.stream29.kodex.cli.sessiontabbar.rememberMosaicSessionTabBarRenderer
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
@@ -88,11 +89,8 @@ val sessionTabContextMenuTest by testSuite {
     test("singletonPlusHasNoOrdinaryTabContextMenu") {
         var selections by mutableStateOf(0)
         var menus = 0
-        var closes = 0
         val callbacks = object : SessionTabBarCallbacks {
             override fun select(identity: SessionTabIdentity) = Unit
-            override fun close(identity: SessionTabIdentity) { closes++ }
-            override fun openContextMenu(identity: SessionTabIdentity) { menus++ }
             override fun selectNewSession() { selections++ }
             override fun openSessions() = Unit
         }
@@ -100,11 +98,10 @@ val sessionTabContextMenuTest by testSuite {
             val snapshot = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Column(Modifier.width(48)) {
-                    ComponentSessionTabBar(
+                    SessionTabBarContent(
                         state = SessionTabBarState(emptyList(), null),
                         callbacks = callbacks,
-                        runningIndicatorFrame = mutableStateOf(""),
-                        columns = 48,
+                        renderer = rememberMosaicSessionTabBarRenderer(48, mutableStateOf("")),
                         onOpenTabMenu = { menus++ },
                     )
                     Text("selections=$selections")
@@ -122,7 +119,6 @@ val sessionTabContextMenuTest by testSuite {
             assertFalse("Rename" in latest || "Close and archive" in latest, latest)
         }
         assertEquals(0, menus)
-        assertEquals(0, closes)
         assertEquals(1, selections)
     }
 }

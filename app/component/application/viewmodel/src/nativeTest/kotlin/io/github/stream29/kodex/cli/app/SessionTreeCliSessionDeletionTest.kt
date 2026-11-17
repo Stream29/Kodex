@@ -19,7 +19,7 @@ val sessionTreeCliSessionDeletionTest by testSuite {
             val catalog = vm.openSessionCatalogPopup().viewModel
             catalog.refresh()
             assertTrue(assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.isEmpty())
-            assertFalse(vm.deleteSession(session.sessionIndex))
+            assertFalse(vm.openDeleteSessionPopup(session.sessionIndex).viewModel.delete())
         }
     }
     test("delete preserves the selected surviving instance then chooses successor and last item") {
@@ -30,13 +30,13 @@ val sessionTreeCliSessionDeletionTest by testSuite {
             val successor = vm.submitTestSession()
             val last = vm.submitTestSession()
             vm.selectTab(selected)
-            assertTrue(vm.deleteSession(preceding.sessionIndex))
+            assertTrue(vm.openDeleteSessionPopup(preceding.sessionIndex).viewModel.delete())
             assertSame(selected, vm.navigation.value.selectedSession)
             assertEquals(ApplicationTabSelection.SelectedTab(0), vm.navigation.value.selection)
-            assertTrue(vm.deleteSession(selected.sessionIndex))
+            assertTrue(vm.openDeleteSessionPopup(selected.sessionIndex).viewModel.delete())
             assertSame(successor, vm.navigation.value.selectedSession)
             vm.selectTab(last)
-            assertTrue(vm.deleteSession(last.sessionIndex))
+            assertTrue(vm.openDeleteSessionPopup(last.sessionIndex).viewModel.delete())
             assertSame(successor, vm.navigation.value.selectedSession)
         }
     }
@@ -48,7 +48,7 @@ val sessionTreeCliSessionDeletionTest by testSuite {
             vm.selectNewSession()
             vm.newSession.composer.update("keep on plus")
             val input = vm.newSession.composer.state.value
-            assertTrue(vm.deleteSession(deleted.sessionIndex))
+            assertTrue(vm.openDeleteSessionPopup(deleted.sessionIndex).viewModel.delete())
             assertEquals(ApplicationTabSelection.NewSession, vm.navigation.value.selection)
             assertTrue(vm.closeAndArchiveSession(archived))
             assertTrue(vm.navigation.value.tabs.isEmpty())

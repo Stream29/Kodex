@@ -111,7 +111,10 @@ val newSessionStatusBarTest by testSuite {
                 dropdowns = RuntimeConfigurationDropdowns.remember(owner = Unit)
                 TuiPopupHost(modifier = Modifier.width(60).height(12)) {
                     Row {
-                        RuntimeConfigurationTriggers(configurationState(configuration, listOf(modelInfo)), dropdowns)
+                        RuntimeConfigurationStatusItemsWithoutSpacing(
+                            configurationState(configuration, listOf(modelInfo)),
+                            dropdowns,
+                        )
                     }
                     RuntimeConfigurationMenus(
                         state = configurationState(configuration, listOf(modelInfo)),
@@ -167,7 +170,7 @@ val newSessionStatusBarTest by testSuite {
                 val dropdowns = RuntimeConfigurationDropdowns.remember(owner = Unit)
                 TuiPopupHost(modifier = Modifier.width(60).height(8)) {
                     Row {
-                        RuntimeConfigurationTriggers(configurationState(configuration), dropdowns)
+                        RuntimeConfigurationStatusItemsWithoutSpacing(configurationState(configuration), dropdowns)
                     }
                     RuntimeConfigurationMenus(
                         state = configurationState(configuration),

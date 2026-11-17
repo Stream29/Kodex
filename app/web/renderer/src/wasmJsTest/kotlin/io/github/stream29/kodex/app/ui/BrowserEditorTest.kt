@@ -15,6 +15,7 @@ import androidx.compose.ui.focus.FocusDirection
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.events.KeyboardEvent
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.cli.settings.SubmitKey
 import kotlinx.browser.document
 import org.w3c.dom.HTMLTextAreaElement
 import kotlin.test.*
@@ -40,7 +41,7 @@ val browserEditorTest by testSuite {
                                     text = "", cursorOffset = 0, onChange = { _, _ -> null },
                                     onSubmit = { _, _ -> }, label = "Mount focus regression",
                                     enabled = true, readOnly = false, autoFocus = false,
-                                    multiline = true, maximumLines = 2, submitKey = UiSubmitKey.CtrlEnter,
+                                    multiline = true, maximumLines = 2, submitKey = SubmitKey.CtrlEnter,
                                     revision = null,
                                 )
                             }

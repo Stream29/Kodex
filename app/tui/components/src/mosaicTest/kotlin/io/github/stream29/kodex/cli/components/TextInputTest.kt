@@ -312,8 +312,8 @@ val textInputTest by testSuite {
         state.reset()
 
         assertEquals(TextInputValue(), state.value)
-        assertFalse(state.canUndo)
-        assertFalse(state.canRedo)
+        assertFalse(state.undo())
+        assertFalse(state.redo())
         assertEquals(0, state.scrollOffset)
     }
 
@@ -441,10 +441,9 @@ val textInputTest by testSuite {
         state.edit(TextInputEdit.Insert("a"))
         state.edit(TextInputEdit.Insert("b"))
         assertTrue(state.undo())
-        assertTrue(state.canRedo)
 
         state.edit(TextInputEdit.Insert("x"))
-        assertFalse(state.canRedo)
+        assertFalse(state.redo())
         assertEquals(TextInputValue("ax"), state.value)
 
         state.reset()
@@ -466,7 +465,7 @@ val textInputTest by testSuite {
             continuationLinePrefix = "  ",
         )
 
-        assertEquals("> first\n  second", layout.renderedText)
+        assertEquals(listOf("> first", "  second"), layout.lines)
         assertEquals(2, layout.rowCount)
     }
 

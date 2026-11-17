@@ -12,13 +12,20 @@ import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerBrowser
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerDependencies
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerEffect
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerFailure
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerListing
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerLoadResult
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerLoadState
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerState
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerValidationResult
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.pathpicker.createDirectoryPickerViewModel
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,7 +53,9 @@ val directoryPickerPopupTest by testSuite {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Box {
-                    TuiPopupHost(Modifier.width(80).height(24)) { DirectoryPickerPopup(viewModel, {}, {}) }
+                    TuiPopupHost(Modifier.width(80).height(24)) {
+                        DirectoryPickerContent(viewModel, MosaicDirectoryPickerRenderer(this), {}, {})
+                    }
                 }
             }
             }
@@ -71,8 +80,9 @@ val directoryPickerPopupTest by testSuite {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Box {
                     TuiPopupHost(modifier = Modifier.width(80).height(24)) {
-                        DirectoryPickerPopup(
+                        DirectoryPickerContent(
                             viewModel = viewModel,
+                            renderer = MosaicDirectoryPickerRenderer(this),
                             onDismissRequest = { dismissed = true },
                             onDirectorySelected = { selected = it },
                         )
@@ -109,8 +119,9 @@ val directoryPickerPopupTest by testSuite {
                     Box {
                         TuiPopupHost(modifier = Modifier.width(80).height(24)) {
                             if (expanded) {
-                                DirectoryPickerPopup(
+                                DirectoryPickerContent(
                                     viewModel = viewModel,
+                                    renderer = MosaicDirectoryPickerRenderer(this),
                                     onDismissRequest = { expanded = false },
                                     onDirectorySelected = { path ->
                                         selected = path
@@ -161,8 +172,9 @@ val directoryPickerPopupTest by testSuite {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     Box {
                         TuiPopupHost(modifier = Modifier.width(80).height(24)) {
-                            DirectoryPickerPopup(
+                            DirectoryPickerContent(
                                 viewModel = viewModel,
+                                renderer = MosaicDirectoryPickerRenderer(this),
                                 onDismissRequest = {},
                                 onDirectorySelected = {},
                             )
@@ -210,8 +222,9 @@ val directoryPickerPopupTest by testSuite {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     Box {
                         TuiPopupHost(modifier = Modifier.width(80).height(24)) {
-                            DirectoryPickerPopup(
+                            DirectoryPickerContent(
                                 viewModel = viewModel,
+                                renderer = MosaicDirectoryPickerRenderer(this),
                                 onDismissRequest = {},
                                 onDirectorySelected = { directory -> selected = directory },
                             )
@@ -265,8 +278,9 @@ val directoryPickerPopupTest by testSuite {
                     Box {
                         TuiPopupHost(modifier = Modifier.width(80).height(24)) {
                             if (expanded) {
-                                DirectoryPickerPopup(
+                                DirectoryPickerContent(
                                     viewModel = viewModel,
+                                    renderer = MosaicDirectoryPickerRenderer(this),
                                     onDismissRequest = { expanded = false },
                                     onDirectorySelected = {},
                                 )
@@ -306,10 +320,62 @@ private class DirectoryPickerViewModels {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     fun create(initialDirectory: Path): DirectoryPickerViewModel =
-        createDirectoryPickerViewModel(initialDirectory, scope)
+        createDirectoryPickerViewModel(
+            initialDirectory,
+            object : DirectoryPickerDependencies {
+                override val browser: DirectoryPickerBrowser = TestSystemDirectoryPickerBrowser
+            },
+            scope,
+        )
 
     fun close() {
         scope.cancel()
+    }
+}
+
+private object TestSystemDirectoryPickerBrowser : DirectoryPickerBrowser {
+    override suspend fun validate(directory: Path): DirectoryPickerValidationResult = try {
+        val resolved = SystemCoroutineFileSystem.resolve(directory)
+        if (SystemCoroutineFileSystem.metadataOrNull(resolved)?.isDirectory != true) {
+            DirectoryPickerValidationResult.Failure(DirectoryPickerFailure.NotDirectory(resolved), directory.parent)
+        } else {
+            DirectoryPickerValidationResult.Success(resolved)
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Exception) {
+        DirectoryPickerValidationResult.Failure(
+            DirectoryPickerFailure.FileSystem(failure.toString().ifBlank { "Unknown filesystem failure" }),
+            directory.parent,
+        )
+    }
+
+    override suspend fun load(directory: Path): DirectoryPickerLoadResult {
+        val resolved = when (val validation = validate(directory)) {
+            is DirectoryPickerValidationResult.Success -> validation.directory
+            is DirectoryPickerValidationResult.Failure ->
+                return DirectoryPickerLoadResult.Failure(validation.failure, validation.parentDirectory)
+        }
+        return try {
+            val children = SystemCoroutineFileSystem.list(resolved)
+                .filter { SystemCoroutineFileSystem.metadataOrNull(it)?.isDirectory == true }
+                .sortedWith(compareBy<Path> { it.name.lowercase() }.thenBy(Path::toString))
+            DirectoryPickerLoadResult.Success(
+                DirectoryPickerListing(
+                    directory = resolved,
+                    children = children,
+                    parentDirectory = resolved.parent,
+                    childNames = children.associateWith { it.name },
+                ),
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            DirectoryPickerLoadResult.Failure(
+                DirectoryPickerFailure.FileSystem(failure.toString().ifBlank { "Unknown filesystem failure" }),
+                directory.parent,
+            )
+        }
     }
 }
 

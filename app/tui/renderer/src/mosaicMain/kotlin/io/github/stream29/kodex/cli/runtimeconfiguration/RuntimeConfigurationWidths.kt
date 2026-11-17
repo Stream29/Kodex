@@ -3,7 +3,7 @@ package io.github.stream29.kodex.cli.runtimeconfiguration
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfiguration
 import io.github.stream29.kodex.cli.components.buttonWidth
 
-public actual fun runtimeConfigurationButtonWidths(
+internal fun runtimeConfigurationButtonWidths(
     configuration: RuntimeConfiguration,
 ): List<Int> = listOf(
     buttonWidth(

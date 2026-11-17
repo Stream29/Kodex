@@ -82,7 +82,7 @@ public actual fun WriteStdinArguments.expandedCommandContext(): String = compact
     "max_output_tokens" to maxOutputTokens.takeUnless { it == UnifiedExecDefaultMaxOutputTokens },
 )
 
-public actual fun compactToolLine(name: String, vararg fields: Pair<String, Any?>): String = buildString {
+internal fun compactToolLine(name: String, vararg fields: Pair<String, Any?>): String = buildString {
     append(name)
     fields.forEach { (key, value) -> if (value != null) append("; $key=$value") }
 }

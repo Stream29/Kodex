@@ -18,15 +18,12 @@ public expect fun ComposerContent(
     newLineKey: NewLineKey,
     autoFocus: Boolean = true,
     enabled: Boolean = true,
-    showPendingSteer: Boolean = true,
-    showFailure: Boolean = true,
-    maximumPreviewLines: Int = 6,
     maximumEditorLines: Int = 6,
     frame: @Composable (content: @Composable () -> Unit) -> Unit = { it() },
 ): Unit
 
 /** Status copy, not a second submission/failure authority. */
-public expect fun composerStatusLine(state: ComposerState, showFailure: Boolean = true): String?
+public expect fun composerStatusLine(state: ComposerState): String?
 
 /** Queue-ordered content, before renderer-specific single-line truncation. Never claims inputs. */
 public expect fun pendingSteerPreviewContent(

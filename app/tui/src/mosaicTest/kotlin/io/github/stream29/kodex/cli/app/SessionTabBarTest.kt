@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.cli.app
 
-import io.github.stream29.kodex.cli.sessioncatalog.sessionBrowserLabel
-
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -15,23 +14,19 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
-import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
-import io.github.stream29.kodex.cli.sessiontabbar.SessionTabBounds
-import io.github.stream29.kodex.cli.sessiontabbar.sessionTabBounds
-import kotlinx.coroutines.TimeoutCancellationException
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.flow.first
-import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
-import kotlin.time.Instant
 
 private val ansi16Snapshots = SnapshotStrategy { mosaic ->
     mosaic.draw().render(AnsiLevel.ANSI16, supportsKittyUnderlines = false)
@@ -40,37 +35,6 @@ private val ansi16Snapshots = SnapshotStrategy { mosaic ->
 private val fixedRunningIndicatorFrame = mutableStateOf("⠋")
 
 val sessionTabBarTest by testSuite {
-    test("sessionBrowserUsesTheCatalogTitleAndLastActivityWithANumericFallback") {
-        val now = Instant.parse("2026-07-31T10:30:00Z")
-        val fullLabel = SessionCatalogEntry(
-            sessionIndex = 7,
-            threadName = "Review session title catalog",
-            createdAt = Instant.parse("2026-07-01T00:00:00Z"),
-            updatedAt = Instant.parse("2026-07-31T10:25:00Z"),
-        ).sessionBrowserLabel(80, now)
-        assertEquals(
-            "Review session title catalog 5m ago",
-            fullLabel.text,
-        )
-        val activityStyle = fullLabel.spanStyles.single()
-        assertEquals(fullLabel.text.indexOf(" 5m ago"), activityStyle.start)
-        assertEquals(fullLabel.text.length, activityStyle.end)
-        assertEquals(TextStyle.Dim, activityStyle.item.textStyle)
-        assertEquals(
-            "Review s... 5m ago",
-            SessionCatalogEntry(
-                sessionIndex = 7,
-                threadName = "Review session title catalog",
-                createdAt = Instant.parse("2026-07-01T00:00:00Z"),
-                updatedAt = Instant.parse("2026-07-31T10:25:00Z"),
-            ).sessionBrowserLabel(18, now).text,
-        )
-        assertEquals(
-            "Session 7",
-            SessionCatalogEntry(sessionIndex = 7).sessionBrowserLabel(80, now).text,
-        )
-    }
-
     test("renamedPersistedSessionDisplaysItsTitle") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
@@ -82,20 +46,20 @@ val sessionTabBarTest by testSuite {
 
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box(Modifier.width(80)) {
-                        val tabs = collectSessionTabRenderStates(listOf(target), selectedIndex = 0)
-                        SessionTabBar(
-                            tabs = tabs,
-                            runningIndicatorFrame = fixedRunningIndicatorFrame,
-                            columns = 80,
-                            onSelectTab = {},
-                            onOpenTabMenu = { _, _, _, _ -> },
-                            onSelectNewSession = {},
-                            onOpenSessions = {},
-                        )
+                    WithMosaicComponentRenderers {
+                        Box(Modifier.width(80)) {
+                            val name by target.name.collectAsState()
+                            SessionTabBar(
+                                tabs = listOf(SessionTabRenderState(target = target, selected = true, sessionName = name)),
+                                runningIndicatorFrame = fixedRunningIndicatorFrame,
+                                columns = 80,
+                                onSelectTab = {},
+                                onOpenTabMenu = { _, _, _, _ -> },
+                                onSelectNewSession = {},
+                                onOpenSessions = {},
+                            )
+                        }
                     }
-                }
                 }
 
                 assertTrue("Research plan" in snapshot, snapshot)
@@ -113,30 +77,30 @@ val sessionTabBarTest by testSuite {
 
             runMosaicTest(snapshotStrategy = ansi16Snapshots) {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box(Modifier.width(80)) {
-                        SessionTabBar(
-                            tabs = listOf(
-                                SessionTabRenderState(
-                                    target = selected,
-                                    selected = true,
-                                    sessionName = "First",
+                    WithMosaicComponentRenderers {
+                        Box(Modifier.width(80)) {
+                            SessionTabBar(
+                                tabs = listOf(
+                                    SessionTabRenderState(
+                                        target = selected,
+                                        selected = true,
+                                        sessionName = "First",
+                                    ),
+                                    SessionTabRenderState(
+                                        target = inactive,
+                                        selected = false,
+                                        sessionName = "Second",
+                                    ),
                                 ),
-                                SessionTabRenderState(
-                                    target = inactive,
-                                    selected = false,
-                                    sessionName = "Second",
-                                ),
-                            ),
-                            runningIndicatorFrame = fixedRunningIndicatorFrame,
-                            columns = 80,
-                            onSelectTab = {},
-                            onOpenTabMenu = { _, _, _, _ -> },
-                            onSelectNewSession = {},
-                            onOpenSessions = {},
-                        )
+                                runningIndicatorFrame = fixedRunningIndicatorFrame,
+                                columns = 80,
+                                onSelectTab = {},
+                                onOpenTabMenu = { _, _, _, _ -> },
+                                onSelectNewSession = {},
+                                onOpenSessions = {},
+                            )
+                        }
                     }
-                }
                 }
 
                 assertTrue(Regex("\u001B\\[(?:[0-9]+;)*7m\\[First]").containsMatchIn(snapshot), snapshot)
@@ -154,26 +118,26 @@ val sessionTabBarTest by testSuite {
 
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box(Modifier.width(80)) {
-                        SessionTabBar(
-                            tabs = listOf(
-                                SessionTabRenderState(
-                                    target = target,
-                                    selected = true,
-                                    sessionName = "abcdefghijklmnopqrstuv",
-                                    running = true,
+                    WithMosaicComponentRenderers {
+                        Box(Modifier.width(80)) {
+                            SessionTabBar(
+                                tabs = listOf(
+                                    SessionTabRenderState(
+                                        target = target,
+                                        selected = true,
+                                        sessionName = "abcdefghijklmnopqrstuv",
+                                        running = true,
+                                    ),
                                 ),
-                            ),
-                            runningIndicatorFrame = fixedRunningIndicatorFrame,
-                            columns = 80,
-                            onSelectTab = {},
-                            onOpenTabMenu = { _, _, _, _ -> },
-                            onSelectNewSession = {},
-                            onOpenSessions = {},
-                        )
+                                runningIndicatorFrame = fixedRunningIndicatorFrame,
+                                columns = 80,
+                                onSelectTab = {},
+                                onOpenTabMenu = { _, _, _, _ -> },
+                                onSelectNewSession = {},
+                                onOpenSessions = {},
+                            )
+                        }
                     }
-                }
                 }
 
                 assertTrue("[⠋abcdefghijklmnop...]" in snapshot, snapshot)
@@ -201,19 +165,19 @@ val sessionTabBarTest by testSuite {
 
             runMosaicTest {
                 val initial = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box(Modifier.width(32)) {
-                        SessionTabBar(
-                            tabs = tabs,
-                            runningIndicatorFrame = fixedRunningIndicatorFrame,
-                            columns = 32,
-                            onSelectTab = {},
-                            onOpenTabMenu = { _, _, _, _ -> },
-                            onSelectNewSession = {},
-                            onOpenSessions = {},
-                        )
+                    WithMosaicComponentRenderers {
+                        Box(Modifier.width(32)) {
+                            SessionTabBar(
+                                tabs = tabs,
+                                runningIndicatorFrame = fixedRunningIndicatorFrame,
+                                columns = 32,
+                                onSelectTab = {},
+                                onOpenTabMenu = { _, _, _, _ -> },
+                                onSelectNewSession = {},
+                                onOpenSessions = {},
+                            )
+                        }
                     }
-                }
                 }
                 assertTrue("[Tab 0]" in initial, initial)
                 assertFalse("[Tab 9]" in initial, initial)
@@ -257,19 +221,19 @@ val sessionTabBarTest by testSuite {
 
             runMosaicTest {
                 val initial = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box(Modifier.width(32)) {
-                        SessionTabBar(
-                            tabs = tabs,
-                            runningIndicatorFrame = fixedRunningIndicatorFrame,
-                            columns = 32,
-                            onSelectTab = {},
-                            onOpenTabMenu = { _, _, _, _ -> },
-                            onSelectNewSession = {},
-                            onOpenSessions = {},
-                        )
+                    WithMosaicComponentRenderers {
+                        Box(Modifier.width(32)) {
+                            SessionTabBar(
+                                tabs = tabs,
+                                runningIndicatorFrame = fixedRunningIndicatorFrame,
+                                columns = 32,
+                                onSelectTab = {},
+                                onOpenTabMenu = { _, _, _, _ -> },
+                                onSelectNewSession = {},
+                                onOpenSessions = {},
+                            )
+                        }
                     }
-                }
                 }
                 assertTrue("[Tab 0]" in initial, initial)
                 assertFalse("[Tab 2]" in initial, initial)
@@ -299,25 +263,25 @@ val sessionTabBarTest by testSuite {
 
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box(Modifier.width(32)) {
-                        SessionTabBar(
-                            tabs = targets.mapIndexed { index, target ->
-                                SessionTabRenderState(
-                                    target = target,
-                                    selected = index == targets.lastIndex,
-                                    sessionName = "Tab $index",
-                                )
-                            },
-                            runningIndicatorFrame = fixedRunningIndicatorFrame,
-                            columns = 32,
-                            onSelectTab = {},
-                            onOpenTabMenu = { _, _, _, _ -> },
-                            onSelectNewSession = {},
-                            onOpenSessions = {},
-                        )
+                    WithMosaicComponentRenderers {
+                        Box(Modifier.width(32)) {
+                            SessionTabBar(
+                                tabs = targets.mapIndexed { index, target ->
+                                    SessionTabRenderState(
+                                        target = target,
+                                        selected = index == targets.lastIndex,
+                                        sessionName = "Tab $index",
+                                    )
+                                },
+                                runningIndicatorFrame = fixedRunningIndicatorFrame,
+                                columns = 32,
+                                onSelectTab = {},
+                                onOpenTabMenu = { _, _, _, _ -> },
+                                onSelectNewSession = {},
+                                onOpenSessions = {},
+                            )
+                        }
                     }
-                }
                 }
                 val visible = awaitSnapshot()
 
@@ -327,15 +291,6 @@ val sessionTabBarTest by testSuite {
         } finally {
             fixture.close()
         }
-    }
-
-    test("tabBoundsIncludeBracketsAndInterTabSpacing") {
-        assertEquals(SessionTabBounds(start = 0, endExclusive = 5), sessionTabBounds(listOf("one"), 0))
-        assertEquals(
-            SessionTabBounds(start = 6, endExclusive = 11),
-            sessionTabBounds(listOf("one", "two"), 1),
-        )
-        assertEquals(null, sessionTabBounds(listOf("one"), 2))
     }
 
     test("secondaryClickTargetsAnInactiveTabWithoutSelectingIt") {
@@ -350,35 +305,35 @@ val sessionTabBarTest by testSuite {
 
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column {
-                        SessionTabBar(
-                            tabs = listOf(
-                                SessionTabRenderState(
-                                    target = activeTarget,
-                                    selected = true,
-                                    sessionName = "First",
+                    WithMosaicComponentRenderers {
+                        Column {
+                            SessionTabBar(
+                                tabs = listOf(
+                                    SessionTabRenderState(
+                                        target = activeTarget,
+                                        selected = true,
+                                        sessionName = "First",
+                                    ),
+                                    SessionTabRenderState(
+                                        target = inactiveTarget,
+                                        selected = false,
+                                        sessionName = "Second",
+                                    ),
                                 ),
-                                SessionTabRenderState(
-                                    target = inactiveTarget,
-                                    selected = false,
-                                    sessionName = "Second",
-                                ),
-                            ),
-                            runningIndicatorFrame = fixedRunningIndicatorFrame,
-                            columns = 80,
-                            onSelectTab = { target -> selectedTarget = target },
-                            onOpenTabMenu = { target, initialName, _, clickPosition ->
-                                menuTarget = target
-                                menuInitialName = initialName
-                                menuClickPosition = clickPosition
-                            },
-                            onSelectNewSession = {},
-                            onOpenSessions = {},
-                        )
-                        Text("${selectedTarget != null}/${menuTarget != null}/$menuInitialName")
+                                runningIndicatorFrame = fixedRunningIndicatorFrame,
+                                columns = 80,
+                                onSelectTab = { target -> selectedTarget = target },
+                                onOpenTabMenu = { target, initialName, _, clickPosition ->
+                                    menuTarget = target
+                                    menuInitialName = initialName
+                                    menuClickPosition = clickPosition
+                                },
+                                onSelectNewSession = {},
+                                onOpenSessions = {},
+                            )
+                            Text("${selectedTarget != null}/${menuTarget != null}/$menuInitialName")
+                        }
                     }
-                }
                 }
 
                 sendMouseEvent(MouseEvent(20, 0, MouseEvent.Type.Press, MouseEvent.Button.Right))
@@ -404,26 +359,26 @@ val sessionTabBarTest by testSuite {
 
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column {
-                        SessionTabBar(
-                            tabs = listOf(
-                                SessionTabRenderState(
-                                    target = target,
-                                    selected = true,
-                                    sessionName = "First",
+                    WithMosaicComponentRenderers {
+                        Column {
+                            SessionTabBar(
+                                tabs = listOf(
+                                    SessionTabRenderState(
+                                        target = target,
+                                        selected = true,
+                                        sessionName = "First",
+                                    ),
                                 ),
-                            ),
-                            runningIndicatorFrame = fixedRunningIndicatorFrame,
-                            columns = 80,
-                            onSelectTab = { selected -> selectedTarget = selected },
-                            onOpenTabMenu = { opened, _, _, _ -> menuTarget = opened },
-                            onSelectNewSession = {},
-                            onOpenSessions = {},
-                        )
-                        Text("${selectedTarget != null}/${menuTarget != null}")
+                                runningIndicatorFrame = fixedRunningIndicatorFrame,
+                                columns = 80,
+                                onSelectTab = { selected -> selectedTarget = selected },
+                                onOpenTabMenu = { opened, _, _, _ -> menuTarget = opened },
+                                onSelectNewSession = {},
+                                onOpenSessions = {},
+                            )
+                            Text("${selectedTarget != null}/${menuTarget != null}")
+                        }
                     }
-                }
                 }
 
                 sendMouseEvent(MouseEvent(12, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))

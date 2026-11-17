@@ -86,7 +86,7 @@ public actual fun HistoryIndexMenuContent(
 public actual fun historyIndexRowPresentation(
     entry: HistoryIndexEntry, position: HistoryIndexRowPosition,
 ): HistoryIndexRowPresentation =
-    HistoryIndexRowPresentation(HistoryIndexRowValue.Ready(entry.summary), position)
+    HistoryIndexRowPresentation(entry.summary, position)
 
 public actual fun historyIndexDetailPresentation(
     detail: HistoryIndexEntryDetail,
@@ -104,7 +104,7 @@ public actual fun historyIndexDetailPresentation(
         HistoryPlanModel(explanation, steps, pending = false, emptyLabel = if (explanation == null) "[empty]" else null)
     }
     return HistoryIndexDetailPresentation(
-        detail.kind.displayName, if (questions == null) detail.content else "", questions, false, plan,
+        detail.kind.displayName, if (questions == null) detail.content else "", questions, plan,
     )
 }
 

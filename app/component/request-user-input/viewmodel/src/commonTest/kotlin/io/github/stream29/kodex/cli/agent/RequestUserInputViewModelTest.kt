@@ -5,7 +5,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDependencies
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDraftAnswer
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
-import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
@@ -34,7 +33,7 @@ val requestUserInputViewModelTest by testSuite {
     test("declared selection is revision bound and invalid edits are inert") {
         runTest {
             val ports = RequestPorts()
-            val model = requestUserInputViewModelFactory.create(ports, backgroundScope)
+            val model = createRequestUserInputViewModel(ports, backgroundScope)
             runCurrent()
             val initial = model.pending()
             assertFalse(initial.canSubmit)
@@ -47,20 +46,21 @@ val requestUserInputViewModelTest by testSuite {
             val selected = model.pending()
             assertEquals(RequestUserInputDraftAnswer.Option("Current module"), selected.answers["scope"])
             assertTrue(selected.canSubmit)
-            assertEquals(
-                RequestUserInputSubmissionResult.StaleRevision,
-                model.submit(initial.askId, initial.revision),
-            )
-            assertEquals(RequestUserInputSubmissionResult.StaleAsk, model.submit(999, 0))
+            model.submit(initial.askId, initial.revision)
+            model.submit(999, 0)
+            assertTrue(ports.submitted.isEmpty())
+            assertEquals(selected, model.state.value)
             model.close()
         }
     }
 
     test("incomplete and Other drafts preserve validation and repeated-edit rules") {
         runTest {
-            val model = createRequestUserInputViewModel(RequestPorts(), backgroundScope)
+            val ports = RequestPorts()
+            val model = createRequestUserInputViewModel(ports, backgroundScope)
             runCurrent()
-            assertEquals(RequestUserInputSubmissionResult.Incomplete, model.submit(1, 0))
+            model.submit(1, 0)
+            assertTrue(ports.submitted.isEmpty())
             assertTrue(model.selectOther(1, "scope"))
             assertFalse(model.pending().canSubmit)
             assertTrue(model.updateFreeForm(1, "scope", "   "))
@@ -92,10 +92,7 @@ val requestUserInputViewModelTest by testSuite {
             assertFalse(model.selectOther(request.askId, "text"))
             assertTrue(model.updateFreeForm(request.askId, "text", "  free form  "))
             model.selectOption(request.askId, "scope", "Current module")
-            assertEquals(
-                RequestUserInputSubmissionResult.Submitted,
-                model.submit(request.askId, model.pending().revision),
-            )
+            model.submit(request.askId, model.pending().revision)
             val (submittedAskId, response) = ports.submitted.single()
             assertEquals(request.askId, submittedAskId)
             assertEquals(listOf("text", "scope"), response.answers.keys.toList())
@@ -140,16 +137,12 @@ val requestUserInputViewModelTest by testSuite {
             val frozen = model.pending()
             assertIs<RequestUserInputSubmissionState.Submitting>(frozen.submission)
             assertFalse(model.selectOther(frozen.askId, "scope"))
-            assertEquals(
-                RequestUserInputSubmissionResult.StaleRevision,
-                model.submit(frozen.askId, editing.revision),
-            )
-            assertEquals(
-                RequestUserInputSubmissionResult.Busy,
-                model.submit(frozen.askId, frozen.revision),
-            )
+            model.submit(frozen.askId, editing.revision)
+            model.submit(frozen.askId, frozen.revision)
+            assertEquals(1, ports.submitted.size)
             gate.complete(Unit)
-            assertEquals(RequestUserInputSubmissionResult.Submitted, submission.await())
+            submission.await()
+            assertIs<RequestUserInputState.Idle>(model.state.value)
             model.close()
         }
     }
@@ -162,23 +155,18 @@ val requestUserInputViewModelTest by testSuite {
             model.selectOther(1, "scope")
             model.updateFreeForm(1, "scope", "answer")
             val editing = model.pending()
-            assertEquals(
-                RequestUserInputSubmissionResult.Failed("submission failed"),
-                model.submit(editing.askId, editing.revision),
-            )
+            model.submit(editing.askId, editing.revision)
             val failed = model.pending()
             assertEquals(editing.answers, failed.answers)
             assertEquals(editing.revision + 2, failed.revision)
-            assertIs<RequestUserInputSubmissionState.Failed>(failed.submission)
+            assertEquals("submission failed", assertIs<RequestUserInputSubmissionState.Failed>(failed.submission).message)
             assertTrue(failed.canSubmit)
             assertEquals(listOf("submit"), ports.order)
             model.updateFreeForm(failed.askId, "scope", "answer")
             assertIs<RequestUserInputSubmissionState.Editing>(model.pending().submission)
             ports.submissionHook = {}
-            assertEquals(
-                RequestUserInputSubmissionResult.Submitted,
-                model.submit(failed.askId, model.pending().revision),
-            )
+            model.submit(failed.askId, model.pending().revision)
+            assertIs<RequestUserInputState.Idle>(model.state.value)
             assertEquals(listOf("submit", "submit"), ports.order)
             model.close()
         }
@@ -243,18 +231,14 @@ val requestUserInputViewModelTest by testSuite {
                 runCurrent()
                 val replacement = model.pending()
                 gate.complete(Unit)
-                val result = waiting.await()
-                if (succeeds) assertEquals(RequestUserInputSubmissionResult.Submitted, result)
-                else assertEquals(RequestUserInputSubmissionResult.Failed("late"), result)
+                waiting.await()
                 assertEquals(replacement, model.state.value)
                 assertEquals(listOf("submit"), ports.order)
                 if (succeeds) {
                     ports.submissionHook = {}
                     model.selectOption(2, "scope", "Current module")
-                    assertEquals(
-                        RequestUserInputSubmissionResult.Submitted,
-                        model.submit(2, model.pending().revision),
-                    )
+                    model.submit(2, model.pending().revision)
+                    assertIs<RequestUserInputState.Idle>(model.state.value)
                 }
                 model.close()
             }
@@ -314,7 +298,7 @@ val requestUserInputViewModelTest by testSuite {
             ports.pending.value = null
             runCurrent()
             assertIs<RequestUserInputState.Idle>(model.state.value)
-            assertEquals(RequestUserInputSubmissionResult.StaleAsk, model.submit(1, 0))
+            model.submit(1, 0)
             assertTrue(ports.order.isEmpty())
             model.close()
         }

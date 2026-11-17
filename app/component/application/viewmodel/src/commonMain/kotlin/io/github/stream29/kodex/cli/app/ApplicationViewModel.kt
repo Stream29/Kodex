@@ -11,11 +11,9 @@ import io.github.stream29.kodex.app.sessionrename.createSessionRenameViewModel
 import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameDependencies
 import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameViewModel
 import io.github.stream29.kodex.app.application.contract.RenameSessionPopupViewModel
-import io.github.stream29.kodex.app.application.contract.WorkingDirectoryPopupViewModel
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.workingdirectory.createWorkingDirectoryViewModel
 import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryDependencies
-import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
@@ -87,6 +85,7 @@ internal class ApplicationViewModelImpl(
     )
     private val mutablePopup =
         MutableStateFlow<ApplicationPopupState>(ApplicationPopupState.Closed)
+    private var workingDirectoryOwner: Pair<ApplicationPopupState.WorkingDirectory, PersistedSessionViewModel>? = null
 
     override val navigation: StateFlow<ApplicationNavigationState> =
         mutableNavigation.asStateFlow()
@@ -153,25 +152,14 @@ internal class ApplicationViewModelImpl(
         true
     }
 
-    override suspend fun deleteSession(sessionIndex: Int): Boolean = commandMutex.withLock {
+    private suspend fun deleteSession(sessionIndex: Int): Boolean = commandMutex.withLock {
         ensureOpen()
         deleteSessionLocked(sessionIndex)
     }
 
-    override suspend fun forkSession(sessionIndex: Int): Int = commandMutex.withLock {
+    internal suspend fun forkSession(sessionIndex: Int): Int = commandMutex.withLock {
         ensureOpen()
         sessions.fork(sessionIndex)
-    }
-
-    override suspend fun openCreatedSessions(sessionIndexes: List<Int>): Unit = commandMutex.withLock {
-        ensureOpen()
-        for (index in sessionIndexes.distinct()) {
-            val current = mutableNavigation.value
-            if (current.tabs.any { it.sessionIndex == index }) continue
-            val child = sessions.open(index)
-            ensureOpen()
-            mutableNavigation.value = current.copy(tabs = current.tabs + child)
-        }
     }
 
     override suspend fun submitNewSession(expectedRevision: Long): PersistedSessionViewModel? {
@@ -273,7 +261,7 @@ internal class ApplicationViewModelImpl(
                 createSessionDeleteViewModel(
                     sessionIndex = sessionIndex,
                     threadName = target?.name?.value,
-                    dependencies = SessionDeleteDependencies(::deleteSessionFromPopup),
+                    dependencies = SessionDeleteDependencies(::deleteSession),
                 ),
             ),
         )
@@ -300,16 +288,14 @@ internal class ApplicationViewModelImpl(
     ): ApplicationPopupState.WorkingDirectory = commandMutex.withLock {
         ensureOpen()
         val sessionOwner = requireOwned(target)
-        installPopup(
-            ApplicationPopupState.WorkingDirectory(
-                ApplicationWorkingDirectoryAdapter(
-                    target = target,
-                    sessionOwner = sessionOwner,
-                    picker = createDirectoryPicker(target.settings.value.cwd),
-                    dependencies = WorkingDirectoryDependencies(target::updateWorkingDirectory),
-                ),
+        val created = ApplicationPopupState.WorkingDirectory(
+            createWorkingDirectoryViewModel(
+                picker = createDirectoryPicker(target.settings.value.cwd),
+                dependencies = WorkingDirectoryDependencies(target::updateWorkingDirectory),
             ),
         )
+        workingDirectoryOwner = sessionOwner?.let { created to it }
+        installPopup(created)
     }
 
     override fun dismissPopup(expected: ApplicationPopupState.Open): Boolean {
@@ -322,7 +308,7 @@ internal class ApplicationViewModelImpl(
         if (!mutablePopup.compareAndSet(current, replacement)) return false
         when (current) {
             is ApplicationPopupState.Login -> current.viewModel.close()
-            else -> current.closeChild()
+            else -> closePopupChild(current)
         }
         return true
     }
@@ -351,7 +337,7 @@ internal class ApplicationViewModelImpl(
     private fun <T : ApplicationPopupState.Open> installPopup(created: T): T {
         val replaced = mutablePopup.value
         mutablePopup.value = created
-        (replaced as? ApplicationPopupState.Open)?.closeChild()
+        (replaced as? ApplicationPopupState.Open)?.let(::closePopupChild)
         return created
     }
 
@@ -361,7 +347,7 @@ internal class ApplicationViewModelImpl(
             is ApplicationPopupState.Settings -> current.target === target
             is ApplicationPopupState.RenameSession -> current.viewModel.target === target
             is ApplicationPopupState.WorkingDirectory ->
-                (current.viewModel as ApplicationWorkingDirectoryAdapter).sessionOwner === target
+                workingDirectoryOwner?.let { (popup, owner) -> popup === current && owner === target } == true
 
             is ApplicationPopupState.Login -> current.returnTo.target === target
             is ApplicationPopupState.DeleteSession,
@@ -370,7 +356,7 @@ internal class ApplicationViewModelImpl(
         }
         if (ownsTarget) {
             mutablePopup.value = ApplicationPopupState.Closed
-            current.closeChild()
+            closePopupChild(current)
         }
     }
 
@@ -378,12 +364,9 @@ internal class ApplicationViewModelImpl(
         val current = mutablePopup.value as? ApplicationPopupState.DeleteSession ?: return
         if (current.viewModel.sessionIndex == sessionIndex) {
             mutablePopup.value = ApplicationPopupState.Closed
-            current.closeChild()
+            closePopupChild(current)
         }
     }
-
-    private suspend fun deleteSessionFromPopup(sessionIndex: Int): Boolean =
-        deleteSession(sessionIndex)
 
     private suspend fun deleteSessionLocked(sessionIndex: Int): Boolean {
         val current = mutableNavigation.value
@@ -432,10 +415,27 @@ internal class ApplicationViewModelImpl(
     private fun closeOwnedResources() {
         if (!closed.compareAndSet(false, true)) return
         commandOwner.cancel()
-        (mutablePopup.value as? ApplicationPopupState.Open)?.closeChild()
+        (mutablePopup.value as? ApplicationPopupState.Open)?.let(::closePopupChild)
         mutablePopup.value = ApplicationPopupState.Closed
         newSession.close()
         mutableNavigation.value.tabs.asReversed().forEach(PersistedSessionViewModel::close)
+    }
+
+    private fun closePopupChild(popup: ApplicationPopupState.Open) {
+        if (workingDirectoryOwner?.first === popup) {
+            workingDirectoryOwner = null
+        }
+        when (popup) {
+            is ApplicationPopupState.DeleteSession -> popup.viewModel.close()
+            is ApplicationPopupState.Login -> {
+                popup.viewModel.close()
+                popup.returnTo.viewModel.close()
+            }
+            is ApplicationPopupState.RenameSession -> popup.viewModel.close()
+            is ApplicationPopupState.SessionCatalog -> popup.viewModel.close()
+            is ApplicationPopupState.Settings -> popup.viewModel.close()
+            is ApplicationPopupState.WorkingDirectory -> popup.viewModel.close()
+        }
     }
 
     private fun ensureOpen() {
@@ -451,26 +451,3 @@ private class ApplicationSessionRenameAdapter(
         SessionRenameDependencies(target::rename),
     ),
 ) : RenameSessionPopupViewModel, SessionRenameViewModel by child
-
-private class ApplicationWorkingDirectoryAdapter(
-    override val target: AgentSettingsViewModel,
-    // Capture ownership while this exact Agent is current; rebind may later withdraw it.
-    val sessionOwner: PersistedSessionViewModel?,
-    picker: DirectoryPickerViewModel,
-    dependencies: WorkingDirectoryDependencies,
-    private val child: WorkingDirectoryViewModel = createWorkingDirectoryViewModel(picker, dependencies),
-) : WorkingDirectoryPopupViewModel, WorkingDirectoryViewModel by child
-
-private fun ApplicationPopupState.Open.closeChild() {
-    when (this) {
-        is ApplicationPopupState.DeleteSession -> viewModel.close()
-        is ApplicationPopupState.Login -> {
-            viewModel.close()
-            returnTo.viewModel.close()
-        }
-        is ApplicationPopupState.RenameSession -> viewModel.close()
-        is ApplicationPopupState.SessionCatalog -> viewModel.close()
-        is ApplicationPopupState.Settings -> viewModel.close()
-        is ApplicationPopupState.WorkingDirectory -> viewModel.close()
-    }
-}

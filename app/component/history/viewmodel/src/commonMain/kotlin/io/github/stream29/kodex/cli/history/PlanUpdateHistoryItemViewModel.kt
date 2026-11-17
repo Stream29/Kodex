@@ -11,7 +11,7 @@ internal class PlanUpdateHistoryItemViewModelImpl(
     override val index: Int,
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
-) : PlanUpdateHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
+) : PlanUpdateHistoryItemViewModel, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<PlanUpdateHistoryItemState> = MutableStateFlow(
         try {
             val event = descriptor.event as? StablePlanUpdate
@@ -27,8 +27,6 @@ internal class PlanUpdateHistoryItemViewModelImpl(
     )
 
     override val state: StateFlow<PlanUpdateHistoryItemState> = mutableState.asStateFlow()
-
-    override fun ensureLoaded() = Unit
 
     override fun release() = Unit
 }

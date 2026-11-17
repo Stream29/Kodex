@@ -33,6 +33,7 @@ import androidx.compose.ui.viewinterop.HtmlElementView
 import androidx.navigationevent.DirectNavigationEventInput
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import io.github.stream29.kodex.app.ui.browser.BrowserInputFontFamily
+import io.github.stream29.kodex.cli.settings.SubmitKey
 import kotlinx.browser.document
 import kotlinx.browser.window
 import org.w3c.dom.HTMLTextAreaElement
@@ -54,7 +55,7 @@ internal fun BrowserUiEditor(
     autoFocus: Boolean,
     multiline: Boolean,
     maximumLines: Int,
-    submitKey: UiSubmitKey,
+    submitKey: SubmitKey,
     revision: Long?,
 ) {
     require(maximumLines > 0)
@@ -183,9 +184,9 @@ internal fun BrowserUiEditor(
                                     !bridge.composing && !event.isComposing && event.keyCode != 229
                                 ) {
                                     val command = !event.altKey && !event.metaKey && !event.shiftKey &&
-                                        event.ctrlKey == (current.submitKey == UiSubmitKey.CtrlEnter)
+                                        event.ctrlKey == (current.submitKey == SubmitKey.CtrlEnter)
                                     val newline = current.multiline && !event.ctrlKey && !event.altKey && !event.metaKey &&
-                                        event.shiftKey == (current.submitKey == UiSubmitKey.Enter)
+                                        event.shiftKey == (current.submitKey == SubmitKey.Enter)
                                     if (command) {
                                         event.preventDefault()
                                         bridge.publish(this, change)
@@ -257,7 +258,7 @@ internal fun configureBrowserEditorInteraction(input: HTMLTextAreaElement, enabl
 }
 
 private data class EditorPolicy(
-    val enabled: Boolean, val readOnly: Boolean, val multiline: Boolean, val submitKey: UiSubmitKey,
+    val enabled: Boolean, val readOnly: Boolean, val multiline: Boolean, val submitKey: SubmitKey,
 )
 private class EditorMeasurementFrame {
     // Scheduling is not UI state: observing this token would schedule another measure on every echo.

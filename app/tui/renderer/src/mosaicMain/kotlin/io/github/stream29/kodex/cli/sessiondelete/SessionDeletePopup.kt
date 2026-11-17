@@ -11,7 +11,7 @@ import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiTheme
 
 @Composable
-public actual fun BoxScope.SessionDeletePopup(
+internal fun BoxScope.SessionDeletePopup(
     viewModel: SessionDeleteViewModel,
     onDismissRequest: () -> Unit,
     onResult: (Boolean) -> Unit,

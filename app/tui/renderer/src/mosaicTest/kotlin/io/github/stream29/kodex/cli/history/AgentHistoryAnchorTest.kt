@@ -61,10 +61,11 @@ val agentHistoryAnchorTest by testSuite {
                                 window.size == 64 &&
                                     (window.peek(0) as MessageHistoryItemViewModel).index == 500
                             }
-                            repeat(3) {
+                            while (model.historyItems.value.size < 256) {
                                 model.loadState.first { it == AgentHistoryLoadState.Ready }
                                 val window = model.historyItems.value
-                                window.requestOlder()
+                                if (window.size >= 256) break
+                                window[window.size - 1]
                                 model.historyItems.first { it !== window }
                             }
                             model.loadState.first { it == AgentHistoryLoadState.Ready }
@@ -73,6 +74,7 @@ val agentHistoryAnchorTest by testSuite {
                     val original = model.historyItems.value
                     assertEquals(256, original.size)
                     assertFalse(model.followsLatest.value)
+                    val expectedAnchorIndex = (original.peek(99) as MessageHistoryItemViewModel).index
                     var displayedWindow by mutableStateOf(original)
                     runMosaicTest {
                         // Hold the old provider across loading, without automatic edge demands.
@@ -96,7 +98,7 @@ val agentHistoryAnchorTest by testSuite {
                         viewState.listState.scrollToItem(index = 100, scrollOffset = scrollOffset)
                         settleAnchorFrames()
                         val anchor = viewState.listState.layoutInfo.visibleItemsInfo.first()
-                        assertEquals(401, (anchor.key as MessageHistoryItemViewModel).index)
+                        assertEquals(expectedAnchorIndex, (anchor.key as MessageHistoryItemViewModel).index)
                         assertEquals(-scrollOffset, anchor.offset)
 
                         model.reportViewport(
@@ -105,7 +107,7 @@ val agentHistoryAnchorTest by testSuite {
                                 it.key as? io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
                             },
                         )
-                        if (newer) original.requestNewer() else original.requestOlder()
+                        if (newer) original[0] else original[original.size - 1]
                         val replacement = withContext(Dispatchers.Default) {
                             withTimeout(5.seconds) {
                                 val window = model.historyItems.first { it !== original }

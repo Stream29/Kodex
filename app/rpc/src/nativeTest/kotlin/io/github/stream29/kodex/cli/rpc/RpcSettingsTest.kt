@@ -107,18 +107,18 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 val stale = requireNotNull(dependencies.captureEditor(original.name))
                 val conflictingAdd = requireNotNull(dependencies.captureEditor(null))
                 val admittedAdd = requireNotNull(dependencies.captureEditor(null))
-                assertEquals(io.github.stream29.kodex.app.hooksettings.HookWriteAdmission.Accepted,
+                assertEquals(SettingsWriteAdmission.Accepted,
                     stale.save(original.copy(command = "echo stale")))
-                assertEquals(io.github.stream29.kodex.app.hooksettings.HookWriteAdmission.Accepted,
+                assertEquals(SettingsWriteAdmission.Accepted,
                     conflictingAdd.save(original.copy(command = "echo conflict")))
-                assertEquals(io.github.stream29.kodex.app.hooksettings.HookWriteAdmission.Accepted,
+                assertEquals(SettingsWriteAdmission.Accepted,
                     admittedAdd.save(added))
-                assertEquals(io.github.stream29.kodex.app.hooksettings.HookWriteAdmission.Accepted,
+                assertEquals(SettingsWriteAdmission.Accepted,
                     dependencies.delete(original))
                 stale.release()
                 conflictingAdd.release()
                 admittedAdd.release()
-                assertIs<io.github.stream29.kodex.app.hooksettings.HookWriteAdmission.Rejected>(
+                assertIs<SettingsWriteAdmission.Rejected>(
                     admittedAdd.save(added.copy(command = "echo too late")),
                 )
                 // Mutate the backend-managed frontend projection before queued closures execute.
@@ -262,7 +262,10 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val source = RpcSessionSettingsSource(view, this)
             val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList())), this)
             val initial = assertIs<SessionSettingsState.Available>(vm.state.value).snapshot
-            vm.renameSession(initial.revision, "queued")
+            vm.requestRename(initial.revision)
+            val rename = assertNotNull(vm.rename.value)
+            rename.viewModel.updateDraftName("queued")
+            rename.viewModel.rename()
             calls.first { it > 0 }
             vm.close()
             val stopped = calls.value
@@ -290,14 +293,14 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("global page uses backend-managed frontend preferences and preserves unrelated concurrent fields") {
         frontend {
             val global = RpcGlobalSettings.open(services.global, this, 120)
-            val page = RpcGlobalEditor(global, services.global, this)
+            val page = RpcGlobalEditor(global, services.global, this, home.toString())
             try {
                 page.sessionTitleSettings.setEnabled(true)
                 page.sessionTitleSettings.setModel(OpenAiModelId("title-model"))
                 page.applicationPreferences.setNewLineKey(NewLineKey.Enter)
                 page.applicationPreferences.setLeftWidth(19)
                 page.sessionTitleSettings.state.first {
-                    it.enabled && it.configuredModel == OpenAiModelId("title-model")
+                    it.enabled && it.effectiveModel == OpenAiModelId("title-model")
                 }
                 page.applicationPreferences.state.first { it.newLineKey == NewLineKey.Enter && it.leftWidth == 19 }
                 val hook = NotificationHook("local", setOf(NotificationHookType.StopUnhandledError), "echo error")
@@ -330,7 +333,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             }
         }) {
             val global = RpcGlobalSettings.open(services.global, this, 80)
-            val page = RpcGlobalEditor(global, services.global, this)
+            val page = RpcGlobalEditor(global, services.global, this, home.toString())
             try {
                 page.sessionTitleSettings.setEnabled(true)
                 entered.await()
@@ -345,7 +348,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("component width writes preserve nonnegative runtime values without creating a preferences file") {
         frontend {
             val global = RpcGlobalSettings.open(services.global, this, 120)
-            val page = RpcGlobalEditor(global, services.global, this)
+            val page = RpcGlobalEditor(global, services.global, this, home.toString())
             try {
                 page.applicationPreferences.setLeftWidth(0)
                 assertEquals(0 to 30, global.sidebarWidths.value)
@@ -401,7 +404,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             }
         }) {
             val global = RpcGlobalSettings.open(services.global, this, 80)
-            val page = RpcGlobalEditor(global, services.global, this)
+            val page = RpcGlobalEditor(global, services.global, this, home.toString())
             try {
                 page.mcpSettings.add()
                 val editing = assertIs<io.github.stream29.kodex.app.mcpsettings.McpSettingsDialog.Editing>(
@@ -434,7 +437,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
             }
             val global = RpcGlobalSettings.open(rpc, this, 80)
-            val page = RpcGlobalEditor(global, rpc, this)
+            val page = RpcGlobalEditor(global, rpc, this, home.toString())
             try {
                 val child = page.mcpSettings
                 child.importCodex()
@@ -465,7 +468,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
             }
             val global = RpcGlobalSettings.open(rpc, this, 80)
-            val page = RpcGlobalEditor(global, rpc, this)
+            val page = RpcGlobalEditor(global, rpc, this, home.toString())
             val hook = NotificationHook("queued-after-mcp", setOf(NotificationHookType.StopAssistantMessage), "echo ordered")
             try {
                 val child = page.mcpSettings
@@ -492,7 +495,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("accepted frontend Hook edit drains after popup close") {
         frontend {
             val global = RpcGlobalSettings.open(services.global, this, 80)
-            val page = RpcGlobalEditor(global, services.global, this)
+            val page = RpcGlobalEditor(global, services.global, this, home.toString())
             val hook = NotificationHook("after-close", setOf(NotificationHookType.StopUnhandledError), "echo kept")
             try {
                 queueHook(page, hook, frontend = true)
@@ -520,7 +523,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             }
         }) {
             val global = RpcGlobalSettings.open(services.global, this, 80)
-            val page = RpcGlobalEditor(global, services.global, this)
+            val page = RpcGlobalEditor(global, services.global, this, home.toString())
             try {
                 page.sessionTitleSettings.setEnabled(true)
                 entered.await()
@@ -528,7 +531,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 proceed.complete(Unit)
                 global.operationFailure.first { it }
                 assertFalse(services.global.getSettings().sessionTitle.enabled)
-                val reopened = RpcGlobalEditor(global, services.global, this)
+                val reopened = RpcGlobalEditor(global, services.global, this, home.toString())
                 try {
                     assertTrue(reopened.operationFailure.value)
         reopened.sessionTitleSettings.setEnabled(true)
@@ -613,7 +616,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 var write: (suspend () -> Unit)? = null
                 val imported = mcp.readImport { write = it; true }
                 assertEquals(McpImportItemKind.Conflict, imported.preview.items.single().kind)
-                assertSame(io.github.stream29.kodex.app.mcpsettings.McpWriteAdmission.Accepted,
+                assertSame(SettingsWriteAdmission.Accepted,
                     imported.apply(mapOf("remote" to McpImportDecision.Replace)))
                 imported.release()
                 requireNotNull(write).invoke()

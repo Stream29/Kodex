@@ -44,9 +44,10 @@ val agentRuntimeStatusBarTest by testSuite {
                     runMosaicTest {
                         val snapshot = setContentAndSnapshot {
                             io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                            AgentRuntimeStatusBar(
-                                columns, agent, state, running, settings, 123L,
-                                RuntimeConfigurationDropdowns.remember(agent), {}, {},
+                            AgentRuntimeStatusContent(
+                                agent, state, running, settings, 123L,
+                                MosaicAgentStatusRenderer(columns, RuntimeConfigurationDropdowns.remember(agent)),
+                                {}, {},
                             )
                         }
                         }

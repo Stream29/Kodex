@@ -37,7 +37,7 @@ internal actual fun createAboveStartPopupPositionProvider(): TuiPopupPositionPro
         }
     }
 
-internal actual fun createEndTopPopupPositionProvider(): TuiPopupPositionProvider =
+internal val EndTopPopupPositionProvider: TuiPopupPositionProvider =
     object : TuiPopupPositionProvider {
         override fun calculateMaximumSize(
             anchorBounds: TuiPopupAnchorBounds,

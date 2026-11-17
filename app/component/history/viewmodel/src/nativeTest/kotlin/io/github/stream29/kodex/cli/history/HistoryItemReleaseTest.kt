@@ -58,7 +58,6 @@ val historyItemReleaseTest by testSuite {
                     val ownerJob = requireNotNull(itemOwner.coroutineContext[Job])
                     assertEquals(0, ownerJob.children.count())
                     item.release()
-                    item.ensureLoaded()
                     assertEquals(0, ownerJob.children.count())
                 } finally {
                     itemOwner.cancelAndJoin()

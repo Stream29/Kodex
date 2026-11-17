@@ -3,8 +3,6 @@ package io.github.stream29.kodex.cli.history
 import androidx.compose.runtime.Composable
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.TextStyle
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
-import kotlin.time.Duration
 
 /**
  * Shared read-only History/Index typography. Mosaic Text clips instead of wrapping;
@@ -16,16 +14,3 @@ public expect fun WrappedHistoryText(
     textStyle: TextStyle = TextStyle.Unspecified,
     color: Color = Color.Unspecified,
 ): Unit
-
-/** Renders an answered `ask_user` exchange as the read-only form the user answered. */
-@Composable
-public expect fun StableAskUserEvent.renderRequestUserInput(
-    elapsed: Duration?,
-): Unit
-
-/** Renders one shared read-only request-user-input row. */
-@Composable
-public expect fun RequestUserInputHistoryRow(row: RequestUserInputHistoryRowModel): Unit
-
-/** TUI-only decorations, also used to measure read-only Index popups. */
-public expect fun formatHistoryFormRowForTerminal(row: RequestUserInputHistoryRowModel): String

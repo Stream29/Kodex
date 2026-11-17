@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.settings
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
@@ -8,8 +11,11 @@ import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.BoxScope
+import com.jakewharton.mosaic.ui.Column
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.sessiontitlesettings.*
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.*
@@ -23,9 +29,9 @@ val sessionTitleSettingsComponentTest by testSuite {
         withTitleRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { SessionTitleSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderTitleSettings(vm) }
+                    }
                 }
                 var previous = -1
                 for (label in listOf("Title generation", "[x] Automatic session title", "Title model", "Title reasoning")) {
@@ -45,9 +51,9 @@ val sessionTitleSettingsComponentTest by testSuite {
         withTitleRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { SessionTitleSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderTitleSettings(vm) }
+                    }
                 }
                 assertTrue("Available when automatic session titles are enabled." in snapshot, snapshot)
                 clickTitleText(snapshot, "injected-render-default")
@@ -68,9 +74,9 @@ val sessionTitleSettingsComponentTest by testSuite {
         withTitleRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { SessionTitleSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderTitleSettings(vm) }
+                    }
                 }
                 clickTitleText(snapshot, "unavailable")
                 val menu = titleSnapshot("[first")
@@ -90,9 +96,9 @@ val sessionTitleSettingsComponentTest by testSuite {
         withTitleRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { SessionTitleSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderTitleSettings(vm) }
+                    }
                 }
                 clickTitleText(snapshot, "[low]")
                 val menu = titleSnapshot("[max")
@@ -113,19 +119,27 @@ val sessionTitleSettingsComponentTest by testSuite {
             }
         }
     }
-    test("application failure acknowledgement suppression and closed rendering have no second authority") {
+    test("application failure acknowledgement in host and closed rendering have no second authority") {
         val deps = TitleRenderPorts()
         deps.operationFailure.value = true
         withTitleRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { SessionTitleSettingsComponent(vm) }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) {
+                            val state by vm.state.collectAsState()
+                            val menus = rememberTwoChoiceDropdowns(TitleChoiceField.Model.name, TitleChoiceField.Reasoning.name)
+                            Column {
+                                SettingsOperationFailureBanner(state.operationFailure, vm::dismissFailure)
+                                SessionTitleSettingsContent(vm, menus.renderer)
+                            }
+                            with(menus.renderer) { Menus() }
+                        }
+                    }
                 }
-                }
-                assertTrue("A settings operation failed." in snapshot, snapshot)
+                assertTrue("Could not confirm a Settings operation" in snapshot, snapshot)
                 clickTitleText(snapshot, "[Dismiss]")
-                assertFalse("A settings operation failed." in titleSnapshot("Title generation"))
+                assertFalse("Could not confirm a Settings operation" in titleSnapshot("Title generation"))
                 vm.close()
                 assertFalse("Title generation" in titleSnapshot(""))
             }
@@ -134,17 +148,22 @@ val sessionTitleSettingsComponentTest by testSuite {
         withTitleRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) {
-                        SessionTitleSettingsComponent(vm, showOperationFailure = false)
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderTitleSettings(vm) }
                     }
                 }
-                }
-                assertFalse("A settings operation failed." in snapshot, snapshot)
+                assertFalse("Could not confirm a Settings operation" in snapshot, snapshot)
                 assertTrue(vm.state.value.operationFailure)
             }
         }
     }
+}
+
+@Composable
+private fun BoxScope.RenderTitleSettings(vm: SessionTitleSettingsViewModel) {
+    val menus = rememberTwoChoiceDropdowns(TitleChoiceField.Model.name, TitleChoiceField.Reasoning.name)
+    Column { SessionTitleSettingsContent(vm, menus.renderer) }
+    with(menus.renderer) { Menus() }
 }
 
 private suspend fun withTitleRenderer(deps: TitleRenderPorts, action: suspend (SessionTitleSettingsViewModel) -> Unit) {
@@ -152,6 +171,7 @@ private suspend fun withTitleRenderer(deps: TitleRenderPorts, action: suspend (S
     val vm = createSessionTitleSettingsViewModel(deps, scope)
     try { action(vm) } finally { vm.close(); scope.cancel() }
 }
+
 private suspend fun TestMosaic<String>.titleSnapshot(expected: String): String {
     var latest = ""
     repeat(5) {
@@ -163,6 +183,7 @@ private suspend fun TestMosaic<String>.titleSnapshot(expected: String): String {
     assertTrue(expected in latest, latest)
     return latest
 }
+
 private suspend fun TestMosaic<String>.clickTitleText(snapshot: String, text: String) {
     val lines = snapshot.lines()
     val row = lines.indexOfFirst { text in it }
@@ -173,27 +194,28 @@ private suspend fun TestMosaic<String>.clickTitleText(snapshot: String, text: St
     sendMouseEvent(MouseEvent(column, row, MouseEvent.Type.Release))
     titleSnapshot("")
 }
+
 private class TitleRenderPorts : SessionTitleSettingsDependencies {
     override val settings = MutableStateFlow(SessionTitleSettings())
     override val defaultModel = OpenAiModelId("injected-render-default")
-    override val models = MutableStateFlow(listOf(
-        ModelInfo(OpenAiModelId("first"), "first"), ModelInfo(OpenAiModelId("second"), "second"),
-    ))
+    override val models = MutableStateFlow(
+        listOf(ModelInfo(OpenAiModelId("first"), "first"), ModelInfo(OpenAiModelId("second"), "second")),
+    )
     override val operationFailure = MutableStateFlow(false)
     val enabledWrites = mutableListOf<Boolean>()
     val modelWrites = mutableListOf<OpenAiModelId?>()
     val reasoningWrites = mutableListOf<ReasoningEffort>()
-    override fun setEnabled(expected: Boolean, enabled: Boolean): SessionTitleWriteAdmission {
+    override fun setEnabled(expected: Boolean, enabled: Boolean): Boolean {
         enabledWrites += enabled
-        return SessionTitleWriteAdmission.Accepted
+        return true
     }
-    override fun setModel(expected: OpenAiModelId?, model: OpenAiModelId?): SessionTitleWriteAdmission {
+    override fun setModel(expected: OpenAiModelId?, model: OpenAiModelId?): Boolean {
         modelWrites += model
-        return SessionTitleWriteAdmission.Accepted
+        return true
     }
-    override fun setReasoningEffort(expected: ReasoningEffort, reasoningEffort: ReasoningEffort): SessionTitleWriteAdmission {
+    override fun setReasoningEffort(expected: ReasoningEffort, reasoningEffort: ReasoningEffort): Boolean {
         reasoningWrites += reasoningEffort
-        return SessionTitleWriteAdmission.Accepted
+        return true
     }
     override fun reportFailure(failure: Throwable) { operationFailure.value = true }
     override fun dismissFailure() { operationFailure.value = false }

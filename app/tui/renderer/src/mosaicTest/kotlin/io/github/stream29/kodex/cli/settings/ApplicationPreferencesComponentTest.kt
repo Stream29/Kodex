@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.settings
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
@@ -8,8 +11,11 @@ import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.BoxScope
+import com.jakewharton.mosaic.ui.Column
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.applicationpreferences.*
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,13 +27,15 @@ val applicationPreferencesComponentTest by testSuite {
         withPreferencesRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { ApplicationPreferencesComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderPreferences(vm) }
+                    }
                 }
                 var previous = -1
-                for (label in listOf("Sidebars", "Left sidebar width", "Right sidebar width",
-                    "Input", "New line key", "Submit key")) {
+                for (label in listOf(
+                    "Sidebars", "Left sidebar width", "Right sidebar width",
+                    "Input", "New line key", "Submit key",
+                )) {
                     val next = snapshot.indexOf(label)
                     assertTrue(next > previous, snapshot)
                     previous = next
@@ -47,9 +55,9 @@ val applicationPreferencesComponentTest by testSuite {
         withPreferencesRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { ApplicationPreferencesComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderPreferences(vm) }
+                    }
                 }
                 clickPreferencesText(snapshot, "Left sidebar width [-]", offset = "Left sidebar width [".length)
                 preferencesSnapshot("27 columns")
@@ -59,8 +67,11 @@ val applicationPreferencesComponentTest by testSuite {
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
                 preferencesSnapshot("28 columns")
                 assertEquals(28 to 24, deps.resizes.last())
-                clickPreferencesText(preferencesSnapshot("Right sidebar width"), "Right sidebar width [-][+]",
-                    offset = "Right sidebar width [-][".length)
+                clickPreferencesText(
+                    preferencesSnapshot("Right sidebar width"),
+                    "Right sidebar width [-][+]",
+                    offset = "Right sidebar width [-][".length,
+                )
                 preferencesSnapshot("25 columns")
                 assertEquals(28 to 25, deps.resizes.last())
                 assertTrue(deps.keys.isEmpty())
@@ -73,19 +84,25 @@ val applicationPreferencesComponentTest by testSuite {
         withPreferencesRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { ApplicationPreferencesComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderPreferences(vm) }
+                    }
                 }
                 assertTrue("4 columns" in snapshot, snapshot)
                 assertTrue("${Int.MAX_VALUE} columns" in snapshot, snapshot)
                 clickPreferencesText(snapshot, "Left sidebar width [-]", offset = "Left sidebar width [".length)
-                clickPreferencesText(preferencesSnapshot("Right sidebar width"), "Right sidebar width [-][+]",
-                    offset = "Right sidebar width [-][".length)
+                clickPreferencesText(
+                    preferencesSnapshot("Right sidebar width"),
+                    "Right sidebar width [-][+]",
+                    offset = "Right sidebar width [-][".length,
+                )
                 assertTrue(deps.resizes.isEmpty())
                 assertEquals(0 to Int.MAX_VALUE, deps.widths.value)
-                clickPreferencesText(preferencesSnapshot("Left sidebar width"), "Left sidebar width [-][+]",
-                    offset = "Left sidebar width [-][".length)
+                clickPreferencesText(
+                    preferencesSnapshot("Left sidebar width"),
+                    "Left sidebar width [-][+]",
+                    offset = "Left sidebar width [-][".length,
+                )
                 preferencesSnapshot("5 columns")
                 assertEquals(5 to Int.MAX_VALUE, deps.widths.value)
             }
@@ -96,9 +113,9 @@ val applicationPreferencesComponentTest by testSuite {
         withPreferencesRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { ApplicationPreferencesComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderPreferences(vm) }
+                    }
                 }
                 clickPreferencesText(snapshot, "New line key [Shift+Enter]", offset = "New line key [".length)
                 preferencesSnapshot("[Enter")
@@ -107,8 +124,11 @@ val applicationPreferencesComponentTest by testSuite {
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
                 preferencesSnapshot("Submit key [Ctrl+Enter]")
                 assertEquals(listOf(NewLineKey.Enter), deps.keys)
-                clickPreferencesText(preferencesSnapshot("Submit key"), "Submit key [Ctrl+Enter]",
-                    offset = "Submit key [".length)
+                clickPreferencesText(
+                    preferencesSnapshot("Submit key"),
+                    "Submit key [Ctrl+Enter]",
+                    offset = "Submit key [".length,
+                )
                 val menu = preferencesSnapshot("[Enter")
                 assertTrue("[Ctrl+Enter]" in menu, menu)
                 sendKeyEvent(KeyboardEvent(codepoint = 57352))
@@ -116,8 +136,11 @@ val applicationPreferencesComponentTest by testSuite {
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
                 preferencesSnapshot("New line key [Shift+Enter]")
                 assertEquals(listOf(NewLineKey.Enter, NewLineKey.ShiftEnter), deps.keys)
-                clickPreferencesText(preferencesSnapshot("New line key"), "New line key [Shift+Enter]",
-                    offset = "New line key [".length)
+                clickPreferencesText(
+                    preferencesSnapshot("New line key"),
+                    "New line key [Shift+Enter]",
+                    offset = "New line key [".length,
+                )
                 preferencesSnapshot("[Enter")
                 sendKeyEvent(KeyboardEvent(codepoint = 27))
                 preferencesSnapshot("Sidebars")
@@ -126,19 +149,29 @@ val applicationPreferencesComponentTest by testSuite {
             }
         }
     }
-    test("shared failure acknowledgement suppression and closed branch do not reset preferences") {
+    test("shared failure acknowledgement in host and closed branch do not reset preferences") {
         val deps = PreferencesRenderPorts()
         deps.operationFailure.value = true
         withPreferencesRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) { ApplicationPreferencesComponent(vm) }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) {
+                            val state by vm.state.collectAsState()
+                            val menus = rememberTwoChoiceDropdowns(
+                                PreferencesChoiceField.NewLineKey.name, PreferencesChoiceField.SubmitKey.name,
+                            )
+                            Column {
+                                SettingsOperationFailureBanner(state.operationFailure, vm::dismissFailure)
+                                ApplicationPreferencesContent(vm, menus.renderer)
+                            }
+                            with(menus.renderer) { Menus() }
+                        }
+                    }
                 }
-                }
-                assertTrue("A settings operation failed." in snapshot, snapshot)
+                assertTrue("Could not confirm a Settings operation" in snapshot, snapshot)
                 clickPreferencesText(snapshot, "[Dismiss]")
-                assertFalse("A settings operation failed." in preferencesSnapshot("Sidebars"))
+                assertFalse("Could not confirm a Settings operation" in preferencesSnapshot("Sidebars"))
                 vm.close()
                 assertFalse("Sidebars" in preferencesSnapshot(""))
                 assertEquals(28 to 24, deps.widths.value)
@@ -148,17 +181,22 @@ val applicationPreferencesComponentTest by testSuite {
         withPreferencesRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(30)) {
-                        ApplicationPreferencesComponent(vm, showOperationFailure = false)
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(30)) { RenderPreferences(vm) }
                     }
                 }
-                }
-                assertFalse("A settings operation failed." in snapshot, snapshot)
+                assertFalse("Could not confirm a Settings operation" in snapshot, snapshot)
                 assertTrue(vm.state.value.operationFailure)
             }
         }
     }
+}
+
+@Composable
+private fun BoxScope.RenderPreferences(vm: ApplicationPreferencesViewModel) {
+    val menus = rememberTwoChoiceDropdowns(PreferencesChoiceField.NewLineKey.name, PreferencesChoiceField.SubmitKey.name)
+    Column { ApplicationPreferencesContent(vm, menus.renderer) }
+    with(menus.renderer) { Menus() }
 }
 
 private suspend fun withPreferencesRenderer(
@@ -168,6 +206,7 @@ private suspend fun withPreferencesRenderer(
     val vm = createApplicationPreferencesViewModel(deps, scope)
     try { action(vm) } finally { vm.close(); scope.cancel() }
 }
+
 private suspend fun TestMosaic<String>.preferencesSnapshot(expected: String): String {
     var latest = ""
     repeat(5) {
@@ -179,6 +218,7 @@ private suspend fun TestMosaic<String>.preferencesSnapshot(expected: String): St
     assertTrue(expected in latest, latest)
     return latest
 }
+
 private suspend fun TestMosaic<String>.clickPreferencesText(snapshot: String, text: String, offset: Int = 1) {
     val lines = snapshot.lines()
     val row = lines.indexOfFirst { text in it }
@@ -189,6 +229,7 @@ private suspend fun TestMosaic<String>.clickPreferencesText(snapshot: String, te
     sendMouseEvent(MouseEvent(column, row, MouseEvent.Type.Release))
     preferencesSnapshot("")
 }
+
 private class PreferencesRenderPorts : ApplicationPreferencesDependencies {
     override val widths = MutableStateFlow(28 to 24)
     override val newLineKey = MutableStateFlow(NewLineKey.ShiftEnter)
@@ -203,10 +244,10 @@ private class PreferencesRenderPorts : ApplicationPreferencesDependencies {
         widths.value = widths.value.first to columns
         resizes += widths.value
     }
-    override fun setNewLineKey(newLineKey: NewLineKey): PreferencesWriteAdmission {
+    override fun setNewLineKey(newLineKey: NewLineKey): Boolean {
         keys += newLineKey
         this.newLineKey.value = newLineKey
-        return PreferencesWriteAdmission.Accepted
+        return true
     }
     override fun reportFailure(failure: Throwable) { operationFailure.value = true }
     override fun dismissFailure() { operationFailure.value = false }

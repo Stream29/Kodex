@@ -7,7 +7,7 @@ import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryVi
 import io.github.stream29.kodex.cli.pathpicker.MosaicDirectoryPickerRenderer
 
 @Composable
-public actual fun BoxScope.WorkingDirectoryPopup(
+internal fun BoxScope.WorkingDirectoryPopup(
     viewModel: WorkingDirectoryViewModel, onDismissRequest: () -> Unit, onSelected: () -> Unit,
 ) {
     WorkingDirectoryContent(viewModel, remember(this) { MosaicDirectoryPickerRenderer(this) }, onDismissRequest, onSelected)

@@ -43,7 +43,7 @@ val historyIndexPresentationTest by testSuite {
 
     test("row values and linear positions stay separate from platform decoration") {
         assertEquals(
-            HistoryIndexRowPresentation(HistoryIndexRowValue.Ready("┌● Original"), HistoryIndexRowPosition.Single),
+            HistoryIndexRowPresentation("┌● Original", HistoryIndexRowPosition.Single),
             historyIndexRowPresentation(
                 HistoryIndexEntry(7, HistoryIndexEntryKind.UserMessage, "┌● Original"),
                 HistoryIndexRowPosition.Single,
@@ -56,7 +56,7 @@ val historyIndexPresentationTest by testSuite {
 
     test("detail presentation preserves display title and full content") {
         assertEquals(
-            HistoryIndexDetailPresentation("Assistant final", "Full content", null, false),
+            HistoryIndexDetailPresentation("Assistant final", "Full content", null),
             historyIndexDetailPresentation(
                 HistoryIndexEntryDetail(HistoryIndexEntryKind.AssistantFinal, "Full content"),
             ),

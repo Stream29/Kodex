@@ -1,5 +1,12 @@
 package io.github.stream29.kodex.cli.historyindex
 
+import io.github.stream29.kodex.cli.app.SessionSidebarSide
+import io.github.stream29.kodex.cli.app.SidebarHoverPopupPositionProvider
+import io.github.stream29.kodex.cli.app.SidebarHoverPopupSurface
+import io.github.stream29.kodex.cli.app.mosaicIndexHover
+import io.github.stream29.kodex.cli.app.mosaicIndexMenu
+import io.github.stream29.kodex.cli.app.rememberMosaicIndexOverlayRenderer
+import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.formatPopupTimestamp as formatHistoryIndexTimestamp
 
 import androidx.compose.runtime.getValue
@@ -67,7 +74,11 @@ val historyIndexRendererTest by testSuite {
                         val request = remember(anchor) {
                             HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor), null)
                         }
-                        HistoryIndexContextMenu(if (visible) request else null, { visible = false })
+                        HistoryIndexMenuContent(
+                            if (visible) mosaicIndexMenu(request) else null,
+                            rememberMosaicIndexOverlayRenderer(0, 0),
+                            { visible = false },
+                        )
                     }
                 }
             }
@@ -96,7 +107,11 @@ val historyIndexRendererTest by testSuite {
                         val request = remember(anchor) {
                             HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor), null)
                         }
-                        HistoryIndexContextMenu(if (visible) request else null, { visible = false })
+                        HistoryIndexMenuContent(
+                            if (visible) mosaicIndexMenu(request) else null,
+                            rememberMosaicIndexOverlayRenderer(0, 0),
+                            { visible = false },
+                        )
                     }
                 }
             }
@@ -129,7 +144,14 @@ val historyIndexRendererTest by testSuite {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column(Modifier.width(28)) { HistoryIndexRowContent(entry(2, "row summary"), "┌●") }
+                    Column(Modifier.width(28)) {
+                        MosaicHistoryIndexRowText(
+                            historyIndexRowPresentation(entry(2, "row summary"), HistoryIndexRowPosition.Single),
+                            hovered = false,
+                            pressed = false,
+                            graphOverride = "┌●",
+                        )
+                    }
                 }
             }
             assertTrue("┌● row summary" in snapshot, snapshot)
@@ -140,10 +162,18 @@ val historyIndexRendererTest by testSuite {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(12)) {
-                    HistoryIndexRowContent(entry(2, "a long summary with 界 characters"), "●")
+                    Column(Modifier.width(12)) {
+                        MosaicHistoryIndexRowText(
+                            historyIndexRowPresentation(
+                                entry(2, "a long summary with 界 characters"),
+                                HistoryIndexRowPosition.Single,
+                            ),
+                            hovered = false,
+                            pressed = false,
+                            graphOverride = "●",
+                        )
+                    }
                 }
-            }
             }
             assertEquals(1, snapshot.lines().filter(String::isNotBlank).size)
             assertFalse("characters" in snapshot, snapshot)
@@ -254,9 +284,12 @@ val historyIndexRendererTest by testSuite {
                     TuiPopupHost(Modifier.width(70).height(12)) {
                         val anchor = rememberTuiPopupAnchor()
                         Text("entry", Modifier.tuiPopupAnchor(anchor))
-                        HistoryIndexHoverContent(anchor, HistoryIndexSide.Left, null,
-                            HistoryIndexEntryDetail(kind, "Complete detail"),
-                            60, 10, {})
+                        val presentation = historyIndexDetailPresentation(HistoryIndexEntryDetail(kind, "Complete detail"))
+                        SidebarHoverPopupSurface(
+                            anchor, SessionSidebarSide.Left, null,
+                            presentation.title, presentation.content, 60, 10, presentation.questionRows,
+                            TuiTheme.colorScheme.onSurface, {},
+                        )
                     }
                 }
                 }
@@ -287,10 +320,14 @@ val historyIndexRendererTest by testSuite {
                 TuiPopupHost(Modifier.width(65).height(12)) {
                     val anchor = rememberTuiPopupAnchor()
                     Text("entry", Modifier.tuiPopupAnchor(anchor))
-                    HistoryIndexHoverContent(anchor, HistoryIndexSide.Left, null,
-                        HistoryIndexEntryDetail(
-                            HistoryIndexEntryKind.RequestUserInput, "fallback", event),
-                        60, 11, {})
+                    val presentation = historyIndexDetailPresentation(
+                        HistoryIndexEntryDetail(HistoryIndexEntryKind.RequestUserInput, "fallback", event),
+                    )
+                    SidebarHoverPopupSurface(
+                        anchor, SessionSidebarSide.Left, null,
+                        presentation.title, presentation.content, 60, 11, presentation.questionRows,
+                        TuiTheme.colorScheme.onSurface, {},
+                    )
                 }
             }
             }
@@ -313,7 +350,12 @@ val historyIndexRendererTest by testSuite {
                     val anchor = rememberTuiPopupAnchor()
                     Text("entry", Modifier.tuiPopupAnchor(anchor))
                     val request = remember(anchor) { HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor) }
-                    HistoryIndexHoverPopup(if (visible) request else null, 40, 7, {})
+                    HistoryIndexHoverContent(
+                        if (visible) mosaicIndexHover(request) else null,
+                        rememberMosaicIndexOverlayRenderer(40, 7),
+                        {},
+                        {},
+                    )
                 }
             }
             }
@@ -334,7 +376,7 @@ val historyIndexRendererTest by testSuite {
                     val request = remember(anchor) {
                         HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor), null)
                     }
-                    HistoryIndexContextMenu(request, {})
+                    HistoryIndexMenuContent(mosaicIndexMenu(request), rememberMosaicIndexOverlayRenderer(0, 0), {})
                 }
             }
             }
@@ -363,7 +405,7 @@ val historyIndexRendererTest by testSuite {
                     val request = remember(anchor) {
                         HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Right, vm, 11, 7, anchor), null)
                     }
-                    HistoryIndexContextMenu(request, { dismissals++ })
+                    HistoryIndexMenuContent(mosaicIndexMenu(request), rememberMosaicIndexOverlayRenderer(0, 0), { dismissals++ })
                 }
             }
             }
@@ -406,13 +448,13 @@ val historyIndexRendererTest by testSuite {
         val anchor = TuiPopupAnchorBounds(IntOffset(20, 2), IntSize(10, 1))
         val size = IntSize(80, 24)
         val popup = IntSize(15, 4)
-        assertEquals(IntOffset(25, 3), HistoryIndexHoverPositionProvider(
-            HistoryIndexSide.Left, 60, 20, IntOffset(4, 0)).calculatePosition(anchor, size, popup))
-        assertEquals(IntOffset(9, 3), HistoryIndexHoverPositionProvider(
-            HistoryIndexSide.Right, 60, 20, IntOffset(4, 0)).calculatePosition(anchor, size, popup))
+        assertEquals(IntOffset(25, 3), SidebarHoverPopupPositionProvider(
+            SessionSidebarSide.Left, 60, 20, IntOffset(4, 0)).calculatePosition(anchor, size, popup))
+        assertEquals(IntOffset(9, 3), SidebarHoverPopupPositionProvider(
+            SessionSidebarSide.Right, 60, 20, IntOffset(4, 0)).calculatePosition(anchor, size, popup))
         val bottom = TuiPopupAnchorBounds(IntOffset(79, 23), IntSize(1, 1))
-        assertEquals(IntOffset(64, 19), HistoryIndexHoverPositionProvider(
-            HistoryIndexSide.Left, 60, 20, null).calculatePosition(bottom, size, popup))
+        assertEquals(IntOffset(64, 19), SidebarHoverPopupPositionProvider(
+            SessionSidebarSide.Left, 60, 20, null).calculatePosition(bottom, size, popup))
     }
 }
 

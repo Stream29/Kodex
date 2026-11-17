@@ -1,8 +1,8 @@
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.mcpsettings.McpImportHandle
-import io.github.stream29.kodex.app.mcpsettings.McpWriteAdmission
 import io.github.stream29.kodex.app.settings.contract.McpServerSettingsState
+import io.github.stream29.kodex.app.settings.contract.SettingsWriteAdmission
 import io.github.stream29.kodex.app.settings.toSettingsState
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
@@ -88,8 +88,8 @@ internal class RpcMcpSettings(
             private var released = false
             override val preview: McpImportPreview = value.present("")
             override fun filter(filter: String): McpImportPreview = value.present(filter)
-            override fun apply(decisions: Map<String, McpImportDecision>): McpWriteAdmission {
-                if (released) return McpWriteAdmission.Rejected("The import preview is no longer active.")
+            override fun apply(decisions: Map<String, McpImportDecision>): SettingsWriteAdmission {
+                if (released) return SettingsWriteAdmission.Rejected("The import preview is no longer active.")
                 val capturedDecisions = decisions.toMap()
                 val accepted = accept {
                     check(applyImport(value, capturedDecisions)) {
@@ -97,8 +97,8 @@ internal class RpcMcpSettings(
                     }
                 }
                 if (accepted) released = true
-                return if (accepted) McpWriteAdmission.Accepted
-                else McpWriteAdmission.Rejected("Settings is no longer accepting edits.")
+                return if (accepted) SettingsWriteAdmission.Accepted
+                else SettingsWriteAdmission.Rejected("Settings is no longer accepting edits.")
             }
             override fun release() { released = true }
         }

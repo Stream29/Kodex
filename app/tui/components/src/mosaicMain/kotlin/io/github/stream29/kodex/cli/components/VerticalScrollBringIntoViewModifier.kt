@@ -9,7 +9,6 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.node.ModifierNodeElement
 import com.jakewharton.mosaic.node.requireLayoutCoordinates
 import com.jakewharton.mosaic.ui.unit.IntRect
-import kotlin.math.abs
 import kotlinx.coroutines.CoroutineStart.UNDISPATCHED
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -108,21 +107,4 @@ internal class VerticalScrollBringIntoViewNode(
             }
         }
     }
-}
-
-private fun calculateScrollDistance(
-    offset: Int,
-    size: Int,
-    containerSize: Int,
-): Int {
-    val leadingEdge = offset.toLong()
-    val trailingEdge = leadingEdge + size
-    val containerEnd = containerSize.toLong()
-    val distance = when {
-        leadingEdge >= 0 && trailingEdge <= containerEnd -> 0
-        leadingEdge < 0 && trailingEdge > containerEnd -> 0
-        abs(leadingEdge) < abs(trailingEdge - containerEnd) -> leadingEdge
-        else -> trailingEdge - containerEnd
-    }
-    return distance.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
 }

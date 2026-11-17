@@ -110,7 +110,6 @@ val sessionTreeCliViewModelTest by testSuite {
             first.settings.first { it.cwd == chosen }
             assertEquals(chosen, first.settings.value.cwd)
             assertEquals(Fs.resolve(home), second.settings.value.cwd)
-            assertSame(first, popup.viewModel.target)
             assertTrue(vm.closeTab(second))
             assertSame(popup, vm.popup.value)
             assertEquals(ApplicationTabSelection.NewSession, vm.navigation.value.selection)
@@ -133,26 +132,6 @@ val sessionTreeCliViewModelTest by testSuite {
                 assertEquals(1, emissions)
                 assertEquals(128, agent.composer.state.value.revision)
             } finally { collector.cancelAndJoin() }
-        }
-    }
-    test("already-created child tabs are deduplicated without changing selection") {
-        applicationFixture { app, _ ->
-            val vm = app.viewModel
-            val source = vm.submitTestSession()
-            val fork = vm.forkSession(source.sessionIndex)
-            val selected = vm.navigation.value.selectedSession
-            vm.openCreatedSessions(listOf(fork, fork, source.sessionIndex))
-            assertSame(selected, vm.navigation.value.selectedSession)
-            assertEquals(2, vm.navigation.value.tabs.size)
-            vm.selectNewSession()
-            vm.newSession.composer.update("retain while opening background sessions")
-            val input = vm.newSession.composer.state.value
-            val next = vm.forkSession(source.sessionIndex)
-            vm.openCreatedSessions(listOf(next, fork, next))
-            assertEquals(ApplicationTabSelection.NewSession, vm.navigation.value.selection)
-            assertNull(vm.navigation.value.selectedSession)
-            assertEquals(input, vm.newSession.composer.state.value)
-            assertEquals(3, vm.navigation.value.tabs.size)
         }
     }
 }

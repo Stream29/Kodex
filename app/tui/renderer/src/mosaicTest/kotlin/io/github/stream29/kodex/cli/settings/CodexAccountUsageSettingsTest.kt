@@ -4,15 +4,16 @@ import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.accountusage.AccountUsageState
-import io.github.stream29.kodex.cli.accountusage.AccountUsageContent
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
+import io.github.stream29.kodex.cli.accountusage.AccountUsageContent
 import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimit
 import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimitWindow
 import io.github.stream29.kodex.openai.accountusage.CodexAccountTokenUsage
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageSnapshot
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetCredits
-import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Instant
@@ -21,16 +22,15 @@ val codexAccountUsageSettingsTest by testSuite {
     test("availableUsageRendersWindowsTokensAndActions") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(100)) {
-                    AccountUsageContent(
-                        state = AccountUsageState(SettingsAccountUsageState.Available(accountUsageSnapshot())),
-                        onRefresh = {},
-                        onUseReset = {},
-                        onDismissFailure = {},
-                    )
+                WithMosaicComponentRenderers {
+                    Column(Modifier.width(100)) {
+                        AccountUsageContent(
+                            state = AccountUsageState(SettingsAccountUsageState.Available(accountUsageSnapshot())),
+                            onRefresh = {},
+                            onUseReset = {},
+                        )
+                    }
                 }
-            }
             }
 
             assertTrue(
@@ -46,16 +46,15 @@ val codexAccountUsageSettingsTest by testSuite {
     test("unavailableUsageRequiresSignInAndHidesActions") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(80)) {
-                    AccountUsageContent(
-                        state = AccountUsageState(SettingsAccountUsageState.Unavailable),
-                        onRefresh = {},
-                        onUseReset = {},
-                        onDismissFailure = {},
-                    )
+                WithMosaicComponentRenderers {
+                    Column(Modifier.width(80)) {
+                        AccountUsageContent(
+                            state = AccountUsageState(SettingsAccountUsageState.Unavailable),
+                            onRefresh = {},
+                            onUseReset = {},
+                        )
+                    }
                 }
-            }
             }
 
             assertTrue("Sign in to view Codex usage." in snapshot, snapshot)

@@ -6,14 +6,16 @@ import com.jakewharton.mosaic.text.buildAnnotatedString
 import com.jakewharton.mosaic.text.withStyle
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.cli.components.RunningIndicatorFrames
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
+import kotlin.time.Clock
 import kotlin.time.Instant
 
-public actual fun SessionCatalogEntry.sessionBrowserLabel(
+internal fun SessionCatalogEntry.sessionBrowserLabel(
     maximumColumns: Int,
-    now: Instant,
-    runningFrame: String,
+    now: Instant = Clock.System.now(),
+    runningFrame: String = RunningIndicatorFrames.first(),
 ): AnnotatedString {
     val name = threadName ?: "Session $sessionIndex"
     val title = if (running) runningFrame + name else name

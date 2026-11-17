@@ -5,7 +5,6 @@ import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -144,12 +143,4 @@ public interface RuntimeConfigurationViewModel : AutoCloseable {
      * closing the borrowed child or redirecting its commands to the replacement.
      */
     public override fun close(): Unit
-}
-
-/** Creates local observation only: no writes, source close, store, active-owner lookup or I/O. */
-public fun interface RuntimeConfigurationViewModelFactory {
-    public fun create(
-        dependencies: RuntimeConfigurationDependencies,
-        ownerScope: CoroutineScope,
-    ): RuntimeConfigurationViewModel
 }

@@ -204,7 +204,7 @@ val sessionCatalogInteractionTest by testSuite {
         }
     }
 
-    for (command in listOf("archive", "unarchive", "fork", "delete")) {
+    for (command in listOf("archive", "unarchive", "fork")) {
         test("$command success followed by reload failure throws the original exception without replay") {
             runTest {
                 val backend = InteractionBackend().apply {
@@ -221,7 +221,6 @@ val sessionCatalogInteractionTest by testSuite {
                             "archive" -> catalog.archive(7)
                             "unarchive" -> catalog.unarchive(7)
                             "fork" -> catalog.fork(7)
-                            "delete" -> catalog.delete(7)
                             else -> error("Unknown test command: $command")
                         }
                     }.originalFailure())

@@ -190,18 +190,6 @@ public actual fun TuiPopupMenuScope.TuiPopupMenuItem(
 }
 
 @Suppress("FunctionName")
-public actual fun TuiPopupMenuScope.TuiPopupMenuDivider(
-    key: Any?,
-    modifier: Modifier,
-) {
-    val entries = entries
-    entries += TuiPopupMenuEntry.Divider(
-        key = key ?: TuiPopupMenuGeneratedKey(entries.size),
-        modifier = modifier,
-    )
-}
-
-@Suppress("FunctionName")
 public actual fun TuiPopupMenuScope.TuiPopupSubmenuItem(
     key: Any,
     submenuContent: TuiPopupMenuScope.() -> Unit,
@@ -211,7 +199,6 @@ public actual fun TuiPopupMenuScope.TuiPopupSubmenuItem(
     selected: Boolean,
     leadingContent: (@Composable () -> Unit)?,
     trailingContent: (@Composable () -> Unit)?,
-    positionProvider: TuiPopupPositionProvider,
     backgroundColor: Color,
     submenuModifier: Modifier,
     content: @Composable () -> Unit,
@@ -227,7 +214,7 @@ public actual fun TuiPopupMenuScope.TuiPopupSubmenuItem(
         onClick = {},
         submenu = TuiPopupSubmenu(
             initialFocusedKey = initialSubmenuFocusedKey,
-            positionProvider = positionProvider,
+            positionProvider = EndTopPopupPositionProvider,
             backgroundColor = backgroundColor,
             modifier = submenuModifier,
             content = submenuContent,
@@ -491,7 +478,6 @@ private fun TuiPopupMenuLayout(
             entries.forEachIndexed { index, entry ->
                 key(entry.key) {
                     when (entry) {
-                        is TuiPopupMenuEntry.Divider -> TuiPopupMenuDividerContent(entry)
                         is TuiPopupMenuEntry.Item -> TuiPopupMenuItemContent(
                             entry = entry,
                             entries = entries,
@@ -644,17 +630,6 @@ private fun TuiPopupMenuItemContent(
 }
 
 @Composable
-private fun TuiPopupMenuDividerContent(entry: TuiPopupMenuEntry.Divider) {
-    Filler(
-        char = '-',
-        modifier = entry.modifier
-            .fillMaxWidth()
-            .height(1),
-        textStyle = TuiTheme.typography.supporting,
-    )
-}
-
-@Composable
 private fun TuiPopupMenuOverflowIndicator(value: String) {
     Row(modifier = Modifier.fillMaxWidth()) {
         Text("[")
@@ -761,11 +736,6 @@ internal sealed interface TuiPopupMenuEntry {
         val submenu: TuiPopupSubmenu?,
         val dismissOnClick: Boolean = true,
     ) : TuiPopupMenuEntry
-
-    class Divider(
-        override val key: Any,
-        override val modifier: Modifier,
-    ) : TuiPopupMenuEntry
 }
 
 /** @property initialFocusedKey `null` lets the child derive focus from its declared items. */
@@ -776,8 +746,6 @@ internal class TuiPopupSubmenu(
     val modifier: Modifier,
     val content: TuiPopupMenuScope.() -> Unit,
 )
-
-private data class TuiPopupMenuGeneratedKey(val index: Int)
 
 internal data class TuiPopupMenuFocusRequest(
     val id: Long,

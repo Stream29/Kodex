@@ -3,7 +3,6 @@
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.app.agent.contract.ComposerDependencies
 import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
 import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
@@ -68,7 +67,6 @@ public actual class RpcSessionDraft actual constructor(
             override val submit = ComposerSubmitPort { _, _ ->
                 error("A draft must be submitted through its New Session owner.")
             }
-            override val cancellation = ComposerCancellationPort {}
             override val requestInput = object : ComposerRequestInputPort {
                 override val presentation = MutableStateFlow<ComposerRequestInputPresentation>(
                     ComposerRequestInputPresentation.None,

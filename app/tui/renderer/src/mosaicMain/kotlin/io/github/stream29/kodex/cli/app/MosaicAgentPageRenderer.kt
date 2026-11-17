@@ -97,14 +97,10 @@ private class MosaicAgentPageScope(
     }
 
     @Composable
-    override fun Notice(message: String) { Text(message.ellipsizeToTerminalWidth(columns), textStyle = TextStyle.Dim) }
-
-    @Composable
     override fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, enabled: Boolean) {
         ComposerView(
             viewModel, columns, layout.composerRows, newLineKey,
             autoFocus = enabled, enabled = enabled, focusRequester = composerFocusRequester,
-            showPendingSteer = false, showFailure = false,
         )
     }
 }
@@ -119,11 +115,10 @@ private fun measureAgentPage(inputs: AgentPageMeasureInputs, columns: Int, rows:
         value = TextInputValue(text = composerText, cursorOffset = composerText.length),
         width = columns, firstLinePrefix = "> ", continuationLinePrefix = "  ", softWrap = true,
     )
-    val composerStatusRows = if (composerStatusLine(inputs.composer, showFailure = false) == null) 0 else 1
-    val notificationRows = if (inputs.notice == null) 0 else 1
+    val composerStatusRows = if (composerStatusLine(inputs.composer) == null) 0 else 1
     val statusBarRows = agentRuntimeStatusBarRows(columns, inputs.state, inputs.running, inputs.settings, inputs.tokenCount)
     val flexibleRows =
-        (rows - HistoryComposerSeparatorRows - statusBarRows - composerStatusRows - notificationRows).coerceAtLeast(0)
+        (rows - HistoryComposerSeparatorRows - statusBarRows - composerStatusRows).coerceAtLeast(0)
     val minimumComposerRows = minOf(1, flexibleRows)
     val toolRows = agentPendingToolRows(flexibleRows - minimumComposerRows, inputs.pendingToolPanelCount)
     val allToolRows = toolRows * inputs.pendingToolPanelCount

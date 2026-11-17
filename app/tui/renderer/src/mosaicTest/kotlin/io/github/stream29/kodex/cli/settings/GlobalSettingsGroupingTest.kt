@@ -5,14 +5,15 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
-import io.github.stream29.kodex.app.sessiontitlesettings.SessionTitleSettingsState
-import io.github.stream29.kodex.app.sessiontitlesettings.SessionTitleSettingsViewModel
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.applicationpreferences.ApplicationPreferencesState
 import io.github.stream29.kodex.app.applicationpreferences.ApplicationPreferencesViewModel
+import io.github.stream29.kodex.app.sessiontitlesettings.SessionTitleSettingsState
+import io.github.stream29.kodex.app.sessiontitlesettings.SessionTitleSettingsViewModel
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import kotlinx.coroutines.flow.MutableStateFlow
-import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -21,22 +22,30 @@ val globalSettingsGroupingTest by testSuite {
         runMosaicTest {
             val titleModel = OpenAiModelId("title-model")
             val child = object : SessionTitleSettingsViewModel {
-                override val state = MutableStateFlow(SessionTitleSettingsState(
-                    true, null, titleModel, listOf(titleModel), ReasoningEffort.Low,
-                ))
+                override val state = MutableStateFlow(
+                    SessionTitleSettingsState(
+                        enabled = true,
+                        effectiveModel = titleModel,
+                        modelOptions = listOf(titleModel),
+                        reasoningEffort = ReasoningEffort.Low,
+                    ),
+                )
                 override fun setEnabled(enabled: Boolean) {}
                 override fun setModel(model: OpenAiModelId?) {}
                 override fun setReasoningEffort(reasoningEffort: ReasoningEffort) {}
-                override fun hidePage() {}
                 override fun dismissFailure() {}
                 override fun close() {}
             }
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(80)) {
-                    SessionTitleSettingsPanel(child, rememberSessionTitleSettingsDropdowns())
+                WithMosaicComponentRenderers {
+                    val menus = rememberTwoChoiceDropdowns(
+                        TitleChoiceField.Model.name,
+                        TitleChoiceField.Reasoning.name,
+                    )
+                    Column(Modifier.width(80)) {
+                        SessionTitleSettingsContent(child, menus.renderer)
+                    }
                 }
-            }
             }
 
             val section = snapshot.indexOf("Title generation")
@@ -59,17 +68,20 @@ val globalSettingsGroupingTest by testSuite {
             override fun setRightWidth(columns: Int) {}
             override fun setNewLineKey(newLineKey: NewLineKey) {}
             override fun setSubmitKey(submitKey: SubmitKey) {}
-            override fun hidePage() {}
             override fun dismissFailure() {}
             override fun close() {}
         }
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(80)) {
-                    ApplicationPreferencesPanel(child, rememberApplicationPreferencesDropdowns())
+                WithMosaicComponentRenderers {
+                    val menus = rememberTwoChoiceDropdowns(
+                        PreferencesChoiceField.NewLineKey.name,
+                        PreferencesChoiceField.SubmitKey.name,
+                    )
+                    Column(Modifier.width(80)) {
+                        ApplicationPreferencesContent(child, menus.renderer)
+                    }
                 }
-            }
             }
             assertTrue("Left sidebar width [-][+]" in snapshot, snapshot)
             assertTrue("28 columns" in snapshot, snapshot)

@@ -6,8 +6,8 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.cli.patch.StablePatchToolEventView
 import io.github.stream29.kodex.cli.patch.PendingPatchToolEventView
+import io.github.stream29.kodex.cli.patch.StablePatchToolEventView
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.utils.applypatch.Patch
 
@@ -50,9 +50,6 @@ internal class MosaicHistoryContentRenderer : HistoryContentRenderer {
             content(MosaicHistoryToolDetails(this))
         }
     }
-    @Composable override fun Expandable(
-        header: String, expansionKey: Any, style: HistoryTextStyle, content: @Composable () -> Unit,
-    ) { ExpandableHistoryEvent(header, expansionKey, style.mosaicStyle(), content) }
     @Composable override fun StablePatch(event: StablePatchToolEvent) {
         val expansion = LocalHistoryExpansion.current
         StablePatchToolEventView(
@@ -61,6 +58,25 @@ internal class MosaicHistoryContentRenderer : HistoryContentRenderer {
         )
     }
     @Composable override fun PendingPatch(diff: Patch) { PendingPatchToolEventView(diff) }
+}
+
+@Composable
+internal fun RequestUserInputHistoryRow(row: RequestUserInputHistoryRowModel) {
+    val textStyle = when (row.role) {
+        RequestUserInputHistoryRowRole.Header -> TextStyle.Bold
+        RequestUserInputHistoryRowRole.Supporting -> TextStyle.Dim
+        RequestUserInputHistoryRowRole.Body -> TextStyle.Unspecified
+    }
+    WrappedHistoryText(formatHistoryFormRowForTerminal(row), textStyle)
+}
+
+internal fun formatHistoryFormRowForTerminal(row: RequestUserInputHistoryRowModel): String = when (row.kind) {
+    HistoryFormValueKind.Plain -> row.value
+    HistoryFormValueKind.SelectedOption -> "[● ${row.value}]"
+    HistoryFormValueKind.OptionDescription -> "  ${row.value}"
+    HistoryFormValueKind.FreeText -> row.value.lines().mapIndexed { index, line ->
+        "${if (index == 0) "  > " else "    "}$line"
+    }.joinToString("\n")
 }
 
 private class MosaicHistoryToolDetails(private val original: ToolEventDetailsScope) : HistoryToolDetails {

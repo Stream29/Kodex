@@ -14,7 +14,7 @@ import io.github.stream29.kodex.cli.components.*
 import kotlin.time.Duration
 
 @Composable
-public actual fun StableCleanEvent.render(shellSessions: AgentShellSessionRegistry?) {
+internal fun StableCleanEvent.render(shellSessions: AgentShellSessionRegistry? = null) {
     render(shellSessions, expansion = null, elapsed = null)
 }
 
@@ -28,7 +28,7 @@ internal fun StableCleanEvent.render(
 }
 
 @Composable
-public actual fun UnstableCleanEvent.render(shellSessions: AgentShellSessionRegistry?) {
+internal fun UnstableCleanEvent.render(shellSessions: AgentShellSessionRegistry? = null) {
     HistoryEventContent(this, MosaicHistoryContentRenderer(), shellSessions)
 }
 
@@ -116,31 +116,6 @@ private fun ToolDetailBody(expandedState: State<Boolean>, content: @Composable (
 }
 
 private data class ToolDetailBodySlot(val expanded: Boolean)
-
-@Composable
-internal fun ExpandableHistoryEvent(
-    header: String, expansionKey: Any, headerStyle: TextStyle, content: @Composable () -> Unit,
-) {
-    var localExpanded by remember(expansionKey) { mutableStateOf(false) }
-    val externalExpansion = LocalHistoryExpansion.current
-    val expanded = externalExpansion?.expanded?.invoke() ?: localExpanded
-    Column(Modifier.fillMaxWidth()) {
-        TuiPressable(
-            onClick = {
-                if (externalExpansion == null) localExpanded = !localExpanded else externalExpansion.toggle()
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { _, isHovered, isPressed ->
-            HistoryItemHeader(
-                "${if (expanded) "v" else ">"} $header", modifier = Modifier.fillMaxWidth(),
-                textStyle = tuiInteractionTextStyle(
-                    hovered = isHovered, pressed = isPressed, idleTextStyle = headerStyle,
-                ),
-            )
-        }
-        if (expanded) content()
-    }
-}
 
 @Composable
 internal fun HistoryItemHeader(

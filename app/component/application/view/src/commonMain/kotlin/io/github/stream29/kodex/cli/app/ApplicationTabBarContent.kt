@@ -11,7 +11,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-public actual fun collectSessionTabRenderStates(
+internal fun collectSessionTabRenderStates(
     tabs: List<PersistedSessionViewModel>, selectedIndex: Int?,
 ): List<SessionTabRenderState> = buildList(tabs.size) {
     tabs.forEachIndexed { index, target ->
@@ -35,6 +35,7 @@ public actual fun <T : Any> applicationHistoryWidgetStateFor(
 ): T = states.firstOrNull { (owner, _) -> owner === history }?.second
     ?: create().also { states += history to it }
 
+/** Retains renderer keys by exact child; an observed departure retires its key before readmission. */
 @Composable
 public actual fun collectApplicationTabBar(navigation: ApplicationNavigationState): ApplicationTabBarProjection {
     val selectedIndex = (navigation.selection as? ApplicationTabSelection.SelectedTab)?.index
@@ -101,13 +102,6 @@ public actual fun ApplicationTabBarContent(
             override fun select(identity: SessionTabIdentity) {
                 val target = targetFor(identity) ?: return
                 command { viewModel.selectTab(target) }
-            }
-            override fun close(identity: SessionTabIdentity) {
-                val target = targetFor(identity) ?: return
-                command { viewModel.closeTab(target) }
-            }
-            override fun openContextMenu(identity: SessionTabIdentity) {
-                // The admitted geometry callback below opens the host's exact target.
             }
             override fun selectNewSession() { before(); command { viewModel.selectNewSession() } }
             override fun openSessions() { before(); command { viewModel.openSessionCatalogPopup() } }

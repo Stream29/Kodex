@@ -53,15 +53,10 @@ public fun interface TuiPopupPositionProvider {
     public companion object {
         /** Places the popup above the trigger when possible, otherwise below it. */
         public val AboveStart: TuiPopupPositionProvider = createAboveStartPopupPositionProvider()
-
-        /** Places a submenu beside the trigger, preferring its end side. */
-        public val EndTop: TuiPopupPositionProvider = createEndTopPopupPositionProvider()
     }
 }
 
 internal expect fun createAboveStartPopupPositionProvider(): TuiPopupPositionProvider
-
-internal expect fun createEndTopPopupPositionProvider(): TuiPopupPositionProvider
 
 /**
  * A bounded terminal surface that can host [TuiPopup] children.
@@ -169,17 +164,6 @@ public expect fun TuiPopupMenuScope.TuiPopupMenuItem(
 ): Unit
 
 /**
- * Declares a non-focusable separator.
- *
- * @param key `null` generates a composition-local key from the divider's declaration position.
- */
-@Suppress("FunctionName")
-public expect fun TuiPopupMenuScope.TuiPopupMenuDivider(
-    key: Any? = null,
-    modifier: Modifier = Modifier,
-): Unit
-
-/**
  * Declares a command that opens a child menu beside this item.
  *
  * @param initialSubmenuFocusedKey `null` lets the child derive focus from its selected or first
@@ -197,7 +181,6 @@ public expect fun TuiPopupMenuScope.TuiPopupSubmenuItem(
     selected: Boolean = false,
     leadingContent: (@Composable () -> Unit)? = null,
     trailingContent: (@Composable () -> Unit)? = null,
-    positionProvider: TuiPopupPositionProvider = TuiPopupPositionProvider.EndTop,
     backgroundColor: Color = Color.Unspecified,
     submenuModifier: Modifier = Modifier,
     content: @Composable () -> Unit,

@@ -1,5 +1,9 @@
 package io.github.stream29.kodex.cli.settings
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
@@ -8,10 +12,14 @@ import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.BoxScope
+import com.jakewharton.mosaic.ui.Column
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.*
 import io.github.stream29.kodex.app.contextsourcesettings.*
 import io.github.stream29.kodex.app.settings.contract.BuiltInContextSource
+import io.github.stream29.kodex.app.settings.contract.SettingsWriteAdmission
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,13 +32,25 @@ val contextSourceSettingsComponentTest by testSuite {
         withContextRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(35)) { ContextSourceSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(35)) {
+                            val state by vm.state.collectAsState()
+                            val renderer = remember { MosaicSettingsRenderer() }
+                            Column {
+                                SettingsOperationFailureBanner(state.operationFailure, vm::dismissFailure)
+                                ContextSourceSettingsContent(vm, renderer)
+                            }
+                            ContextSourceSettingsDialogHost(vm, renderer) { title, onDismiss, content ->
+                                SettingsModalDialogFrame(title, 96, onDismiss, content)
+                            }
+                        }
+                    }
                 }
                 var position = -1
-                for (label in listOf("Built-in sources", "Agents home", "Kodex home", "Codex home",
-                    "Git root", "Working directory", "Custom sources", "Add source", "None configured")) {
+                for (label in listOf(
+                    "Built-in sources", "Agents home", "Kodex home", "Codex home",
+                    "Git root", "Working directory", "Custom sources", "Add source", "None configured",
+                )) {
                     val next = snapshot.indexOf(label)
                     assertTrue(next > position, snapshot)
                     position = next
@@ -38,10 +58,10 @@ val contextSourceSettingsComponentTest by testSuite {
                 for (path in listOf("~/.agents/", "~/.kodex/", "~/.codex/", "<git-root>/", "<cwd>/")) {
                     assertTrue(path in snapshot, snapshot)
                 }
-                assertTrue("A settings operation failed." in snapshot, snapshot)
+                assertTrue("Could not confirm a Settings operation" in snapshot, snapshot)
                 clickContextText(snapshot, "[Dismiss]")
                 val acknowledged = contextSnapshot("Built-in sources")
-                assertFalse("A settings operation failed." in acknowledged, acknowledged)
+                assertFalse("Could not confirm a Settings operation" in acknowledged, acknowledged)
             }
         }
     }
@@ -51,9 +71,9 @@ val contextSourceSettingsComponentTest by testSuite {
         withContextRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(35)) { ContextSourceSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(35)) { RenderContextSettings(vm) }
+                    }
                 }
                 assertTrue("/custom" in snapshot, snapshot)
                 assertTrue("Global context source" in snapshot, snapshot)
@@ -71,9 +91,9 @@ val contextSourceSettingsComponentTest by testSuite {
         withContextRenderer(deps) { vm ->
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(35)) { ContextSourceSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(35)) { RenderContextSettings(vm) }
+                    }
                 }
                 clickContextText(snapshot, "[Add source]")
                 contextSnapshot("Add context source")
@@ -99,9 +119,9 @@ val contextSourceSettingsComponentTest by testSuite {
             vm.save(token)
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(35)) { ContextSourceSettingsComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(35)) { RenderContextSettings(vm) }
+                    }
                 }
                 assertTrue("Enter an absolute path, ~, or ~/path." in snapshot, snapshot)
                 sendKeyEvent(KeyboardEvent(codepoint = '/'.code))
@@ -110,7 +130,7 @@ val contextSourceSettingsComponentTest by testSuite {
                 assertNull((vm.state.value.dialog as ContextSourceSettingsDialog.Adding).error)
                 vm.updateDraft(token, "/from-vm")
                 contextSnapshot("/from-vm")
-                deps.admission = ContextSourceWriteAdmission.Rejected("Queue unavailable.")
+                deps.admission = SettingsWriteAdmission.Rejected("Queue unavailable.")
                 vm.save(token)
                 val rejected = contextSnapshot("Queue unavailable.")
                 assertTrue("/from-vm" in rejected, rejected)
@@ -132,14 +152,12 @@ val contextSourceSettingsComponentTest by testSuite {
             vm.updateDraft(next, "/replacement")
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(100).height(35)) {
-                        ContextSourceSettingsComponent(vm, showOperationFailure = false)
+                    WithMosaicComponentRenderers {
+                        TuiPopupHost(Modifier.width(100).height(35)) { RenderContextSettings(vm) }
                     }
                 }
-                }
                 assertTrue("/replacement" in snapshot, snapshot)
-                assertFalse("A settings operation failed." in snapshot, snapshot)
+                assertFalse("Could not confirm a Settings operation" in snapshot, snapshot)
                 vm.save(old)
                 vm.dismiss(old)
                 assertSame(next, (vm.state.value.dialog as ContextSourceSettingsDialog.Adding).token)
@@ -156,6 +174,15 @@ val contextSourceSettingsComponentTest by testSuite {
                 assertTrue(deps.saved.isEmpty())
             }
         }
+    }
+}
+
+@Composable
+private fun BoxScope.RenderContextSettings(vm: ContextSourceSettingsViewModel) {
+    val renderer = remember { MosaicSettingsRenderer() }
+    Column { ContextSourceSettingsContent(vm, renderer) }
+    ContextSourceSettingsDialogHost(vm, renderer) { title, onDismiss, content ->
+        SettingsModalDialogFrame(title, 96, onDismiss, content)
     }
 }
 
@@ -209,24 +236,26 @@ private class ContextRenderPorts : ContextSourceSettingsDependencies {
             else -> null
         }
     }
-    var admission: ContextSourceWriteAdmission = ContextSourceWriteAdmission.Accepted
+    var admission: SettingsWriteAdmission = SettingsWriteAdmission.Accepted
     val saved = mutableListOf<List<AgentContextCustomSource>>()
     val builtIns = mutableListOf<Pair<BuiltInContextSource, Boolean>>()
     val custom = mutableListOf<Pair<String, Boolean>>()
     val removed = mutableListOf<AgentContextCustomSource>()
-    override fun setBuiltInEnabled(source: BuiltInContextSource, expected: Boolean, enabled: Boolean): ContextSourceWriteAdmission {
+    override fun setBuiltInEnabled(source: BuiltInContextSource, expected: Boolean, enabled: Boolean): SettingsWriteAdmission {
         builtIns += source to enabled
         return admission
     }
-    override fun replaceCustomSources(expected: List<AgentContextCustomSource>, updated: List<AgentContextCustomSource>): ContextSourceWriteAdmission {
-        if (admission == ContextSourceWriteAdmission.Accepted) saved += updated.toList()
+    override fun replaceCustomSources(
+        expected: List<AgentContextCustomSource>, updated: List<AgentContextCustomSource>,
+    ): SettingsWriteAdmission {
+        if (admission == SettingsWriteAdmission.Accepted) saved += updated.toList()
         return admission
     }
-    override fun setCustomEnabled(original: AgentContextCustomSource, enabled: Boolean): ContextSourceWriteAdmission {
+    override fun setCustomEnabled(original: AgentContextCustomSource, enabled: Boolean): SettingsWriteAdmission {
         custom += original.path to enabled
         return admission
     }
-    override fun removeCustom(original: AgentContextCustomSource): ContextSourceWriteAdmission {
+    override fun removeCustom(original: AgentContextCustomSource): SettingsWriteAdmission {
         removed += original
         return admission
     }

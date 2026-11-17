@@ -1,9 +1,8 @@
 package io.github.stream29.kodex.app.history.contract.item
 
-import kotlinx.coroutines.Job
+import de.infix.testBalloon.framework.core.testSuite
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.time.Duration
@@ -49,7 +48,7 @@ private class TestToolHistoryItemViewModel(
     override val index: Int,
 ) : ToolHistoryItemViewModel {
     override val state: StateFlow<ToolHistoryItemState> =
-        MutableStateFlow(ToolHistoryItemState.Loading(Job()))
+        MutableStateFlow(ToolHistoryItemState.Failed)
 
     override fun expand() = Unit
 
@@ -60,7 +59,7 @@ private class TestPatchHistoryItemViewModel(
     override val index: Int,
 ) : PatchHistoryItemViewModel {
     override val state: StateFlow<PatchHistoryItemState> =
-        MutableStateFlow(PatchHistoryItemState.Loading(Job()))
+        MutableStateFlow(PatchHistoryItemState.Failed)
 
     override fun expand() = Unit
 

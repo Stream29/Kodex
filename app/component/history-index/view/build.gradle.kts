@@ -10,7 +10,7 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":app-component-history-index-viewmodel"))
-            api(project(":app-component-history-presentation"))
+            api(project(":app-component-history-view"))
             api(compose.runtime)
         }
     }

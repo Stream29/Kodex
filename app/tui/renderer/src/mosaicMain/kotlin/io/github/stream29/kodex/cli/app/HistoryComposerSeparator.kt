@@ -9,19 +9,6 @@ import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
-import kotlin.time.Duration
-
-@Composable
-internal fun HistoryComposerSeparator(
-    columns: Int,
-    liveDuration: Duration? = null,
-    showScrollToLatest: Boolean = false,
-    onScrollToLatest: () -> Unit = {},
-) {
-    AgentHistorySeparatorContent(
-        liveDuration, showScrollToLatest, onScrollToLatest, MosaicHistorySeparatorRenderer(columns),
-    )
-}
 
 internal class MosaicHistorySeparatorRenderer(private val columns: Int) : AgentHistorySeparatorRenderer {
     @Composable

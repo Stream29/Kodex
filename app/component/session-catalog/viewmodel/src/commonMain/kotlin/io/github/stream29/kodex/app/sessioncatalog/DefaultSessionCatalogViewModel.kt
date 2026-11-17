@@ -22,7 +22,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
-import kotlin.time.Instant
 
 public actual class DefaultSessionCatalogViewModel actual constructor(
     scope: CoroutineScope,
@@ -102,9 +101,6 @@ public actual class DefaultSessionCatalogViewModel actual constructor(
     }
     actual override suspend fun fork(sessionIndex: Int): Int = operation {
         dependencies.fork(sessionIndex).also { reload(state.value.showArchived) }
-    }
-    actual override suspend fun delete(sessionIndex: Int): Boolean = operation {
-        dependencies.delete(sessionIndex).also { reload(state.value.showArchived) }
     }
 
     private suspend fun reload(archived: Boolean) {

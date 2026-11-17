@@ -12,7 +12,6 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
-import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.ScrollState
@@ -65,28 +64,4 @@ public actual fun NewSessionScreen(
             statusBar(groupWidth)
         }
     }
-}
-
-@Composable
-public actual fun NewSessionContent(
-    composerViewModel: ComposerViewModel,
-    columns: Int,
-    rows: Int,
-    newLineKey: NewLineKey,
-    onSubmit: (expectedRevision: Long) -> Unit,
-) {
-    NewSessionDraft(
-        composerViewModel, newLineKey, onSubmit, maximumEditorLines = (rows - 1).coerceAtLeast(1),
-        frame = { content ->
-            Box(
-                modifier = Modifier.width(columns.coerceAtLeast(1)).height(rows.coerceAtLeast(0)).clipToBounds(),
-                contentAlignment = Alignment.BottomStart,
-            ) {
-                Column {
-                    Text("-".repeat(columns.coerceAtLeast(1)), textStyle = TuiTheme.typography.supporting)
-                    content()
-                }
-            }
-        },
-    )
 }

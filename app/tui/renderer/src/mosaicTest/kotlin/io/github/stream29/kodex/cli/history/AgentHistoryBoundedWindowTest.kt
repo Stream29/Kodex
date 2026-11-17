@@ -290,10 +290,7 @@ private fun AgentHistoryViewModel.historyDiagnostics(viewState: AgentHistoryView
     val window = historyItems.value
     val list = viewState.listState
     val layout = list.layoutInfo
-    fun MessageHistoryItemViewModel.payloadDescription(): String = when (val payload = state.value) {
-        is MessageHistoryItemState.Loading ->
-            "Loading(active=${payload.loadingJob.isActive}, completed=${payload.loadingJob.isCompleted}, " +
-                "cancelled=${payload.loadingJob.isCancelled})"
+    fun MessageHistoryItemViewModel.payloadDescription(): String = when (state.value) {
         is MessageHistoryItemState.Ready -> "Ready"
         MessageHistoryItemState.Failed -> "Failed"
     }

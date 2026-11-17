@@ -30,8 +30,6 @@ private class SettingsViewModelImpl(
             global.frontendErrorHooks.hidePage()
         }
         if (this.page.value == SettingsPage.ContextSources) global.contextSourceSettings.hidePage()
-        if (this.page.value == SettingsPage.General) global.applicationPreferences.hidePage()
-        if (this.page.value == SettingsPage.NewSession) global.sessionTitleSettings.hidePage()
         if (this.page.value == SettingsPage.OpenAi) global.authenticationSettings.hidePage()
         if (page != SettingsPage.OpenAi) global.usageReset.dismiss()
         this.page.value = page

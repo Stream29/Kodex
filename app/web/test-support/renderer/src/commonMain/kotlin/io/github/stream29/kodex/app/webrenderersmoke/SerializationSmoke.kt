@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
@@ -27,7 +27,7 @@ internal fun checkRpcSerialization(): String = try {
         typeOf<SettingsAuthenticationState>(), typeOf<SettingsAccountUsageState>(),
         typeOf<Notification>(), typeOf<OAuthTarget>(), typeOf<AgentStateValue>(),
         typeOf<ContentItem>(), typeOf<ResponsesStreamEvent>(),
-        typeOf<StableCleanEvent.CompletedTool>(), typeOf<StableIndexEvent.Steerable>(),
+        typeOf<AgentCommit>(), typeOf<StableIndexEvent.Steerable>(),
         typeOf<CleanIndexEntry>(), typeOf<StableWorkEvent>(), typeOf<UnstableCleanEvent>(),
         typeOf<KodexAuthSource>(), typeOf<CodexRateLimitResetOutcome>(),
         typeOf<List<Pair<Int, ContentItem?>>>(),

@@ -2,17 +2,17 @@ package io.github.stream29.kodex.cli.history
 
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
-import io.github.stream29.kodex.utils.applypatch.Patch
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
+import io.github.stream29.kodex.utils.applypatch.Patch
 import kotlin.time.Duration
 
 public enum class HistoryTextStyle { Normal, Dim, Bold }
@@ -62,14 +62,11 @@ public interface HistoryContentRenderer : HistoryFormRenderer {
         detailStyle: HistoryTextStyle, expandedSummary: String?,
         content: @Composable (HistoryToolDetails) -> Unit,
     )
-    @Composable public fun Expandable(
-        header: String, expansionKey: Any, style: HistoryTextStyle, content: @Composable () -> Unit,
-    )
     @Composable public fun StablePatch(event: StablePatchToolEvent)
     @Composable public fun PendingPatch(diff: Patch)
 }
 
-/** Shared exhaustive content dispatch. Shell sessions are borrowed, never started or closed here. */
+/** Shared tool/ask_user content dispatch. Shell sessions are borrowed, never started or closed here. */
 @Composable
 public expect fun HistoryEventContent(
     event: StableCleanEvent, renderer: HistoryContentRenderer,
@@ -103,7 +100,6 @@ public expect fun HistoryCommandContent(event: StableCommandExecutionToolEvent, 
 
 public expect fun ExecCommandArguments.expandedCommandContext(): String
 public expect fun WriteStdinArguments.expandedCommandContext(): String
-public expect fun compactToolLine(name: String, vararg fields: Pair<String, Any?>): String
 
 /** Same nearest-millisecond rounding as the History turn marker; infinite values stay infinite. */
 public expect fun Duration.historyElapsedSuffix(): String

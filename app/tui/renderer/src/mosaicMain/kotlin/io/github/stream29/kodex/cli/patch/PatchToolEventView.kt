@@ -34,7 +34,7 @@ import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 private const val DefaultPatchLinePageSize: Int = 200
 
 @Composable
-public actual fun PendingPatchToolEventView(diff: Patch) {
+internal fun PendingPatchToolEventView(diff: Patch) {
     val presentation = remember(diff) {
         diff.toPendingPatchPresentation()
     }
@@ -49,11 +49,11 @@ public actual fun PendingPatchToolEventView(diff: Patch) {
 }
 
 @Composable
-public actual fun StablePatchToolEventView(
+internal fun StablePatchToolEventView(
     event: StablePatchToolEvent,
-    expanded: Boolean?,
-    onToggleExpanded: (() -> Unit)?,
-    headerTrailingText: String?,
+    expanded: Boolean? = null,
+    onToggleExpanded: (() -> Unit)? = null,
+    headerTrailingText: String? = null,
 ) {
     require((expanded == null) == (onToggleExpanded == null)) {
         "External patch expansion value and toggle must be supplied together."

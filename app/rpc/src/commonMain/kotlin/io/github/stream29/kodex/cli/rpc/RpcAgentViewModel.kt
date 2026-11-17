@@ -3,11 +3,9 @@ package io.github.stream29.kodex.cli.rpc
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
 import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
-import io.github.stream29.kodex.app.agent.contract.AgentNotification
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
-import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
@@ -66,12 +64,9 @@ private class RpcAgentViewModel(
     override val tokenCount: StateFlow<Long?> = binding.tokenCount.projectState { it?.totalTokens }
     private val mutableLifecycle = MutableStateFlow<AgentLifecycleState>(AgentLifecycleState.Open)
     override val lifecycle = mutableLifecycle.asStateFlow()
-    private val mutableNotification = MutableStateFlow<AgentNotification?>(null)
-    override val notification = mutableNotification.asStateFlow()
     override val composer: ComposerViewModel = createRpcComposerViewModel(
         binding = binding,
         ownerScope = local,
-        cancellationPort = ComposerCancellationPort { cancel() },
         failureReporter = ComposerFailureReporter { _, failure ->
             // Retain the failed draft, but report through the Application's local Hook outlet.
             if (owner.isActive) report(IllegalStateException(failure.message))
@@ -148,11 +143,6 @@ private class RpcAgentViewModel(
     override fun cancel(): Unit = operate { binding.stop() }
     override fun forceCompact(): Unit = operate { binding.forcedCompact() }
     override fun clearPending(): Unit = operate { binding.clearPending() }
-    override fun dismissNotification(notificationId: Long) {
-        mutableNotification.value?.takeIf { it.id == notificationId }?.let {
-            mutableNotification.compareAndSet(it, null)
-        }
-    }
 
     override fun requestHistoryRevert(untilExclusive: Int, expectedGeneration: Long): Long {
         validateHistory(untilExclusive, expectedGeneration)

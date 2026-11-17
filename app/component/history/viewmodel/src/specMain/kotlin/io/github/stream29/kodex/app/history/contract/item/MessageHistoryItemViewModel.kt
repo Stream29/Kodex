@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.app.history.contract.item
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
 import kotlin.time.Instant
@@ -22,18 +21,8 @@ public interface MessageHistoryItemViewModel : HistoryItemViewModel {
     public suspend fun readTimestamp(): Instant?
 }
 
-/**
- * Complete state machine for a message row.
- *
- * Normal transition: [Loading] -> [Ready]. Loading failure transitions to [Failed]. Leaving the
- * measured viewport or switching sessions does not change this state.
- */
+/** Complete state machine for a message row. */
 public sealed interface MessageHistoryItemState {
-    /** The complete message presentation is not available yet; the View renders one empty row. */
-    public data class Loading(
-        public val loadingJob: Job,
-    ) : MessageHistoryItemState
-
     /**
      * The View can render the complete message without another storage read.
      * @throws IllegalArgumentException if [elapsed] or non-null [turnDuration] is negative or infinite.

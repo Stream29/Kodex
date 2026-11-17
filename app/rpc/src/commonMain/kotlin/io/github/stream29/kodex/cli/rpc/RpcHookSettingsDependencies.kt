@@ -2,7 +2,7 @@ package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.hooksettings.HookEditHandle
 import io.github.stream29.kodex.app.hooksettings.HookSettingsDependencies
-import io.github.stream29.kodex.app.hooksettings.HookWriteAdmission
+import io.github.stream29.kodex.app.settings.contract.SettingsWriteAdmission
 import io.github.stream29.kodex.rpc.models.NotificationHook
 import io.github.stream29.kodex.rpc.models.NotificationHookType
 import kotlinx.coroutines.delay
@@ -43,8 +43,8 @@ internal class RpcHookSettingsDependencies(
         return object : HookEditHandle {
             override val original: NotificationHook? = original
             private var released = false
-            override fun save(updated: NotificationHook): HookWriteAdmission {
-                if (released) return HookWriteAdmission.Rejected("The Hook editor is no longer active.")
+            override fun save(updated: NotificationHook): SettingsWriteAdmission {
+                if (released) return SettingsWriteAdmission.Rejected("The Hook editor is no longer active.")
                 // Copy intent into the queue before component release can discard the editor.
                 val accepted = accept {
                     change { value ->
@@ -61,7 +61,7 @@ internal class RpcHookSettingsDependencies(
         }
     }
 
-    override fun delete(original: NotificationHook): HookWriteAdmission = admission(accept {
+    override fun delete(original: NotificationHook): SettingsWriteAdmission = admission(accept {
         change { value ->
             if (value.find { it.name == original.name } != original) value
             else value.filterNot { it.name == original.name }
@@ -72,6 +72,6 @@ internal class RpcHookSettingsDependencies(
     override fun dismissFailure() { global.dismissOperationFailure() }
 }
 
-private fun admission(accepted: Boolean): HookWriteAdmission =
-    if (accepted) HookWriteAdmission.Accepted
-    else HookWriteAdmission.Rejected("Settings is no longer accepting edits.")
+private fun admission(accepted: Boolean): SettingsWriteAdmission =
+    if (accepted) SettingsWriteAdmission.Accepted
+    else SettingsWriteAdmission.Rejected("Settings is no longer accepting edits.")

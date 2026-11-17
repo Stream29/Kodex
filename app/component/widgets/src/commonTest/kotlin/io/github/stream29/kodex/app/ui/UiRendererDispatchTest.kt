@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Composition
 import androidx.compose.runtime.Recomposer
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.cli.settings.SubmitKey
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.assertEquals
 
@@ -39,7 +40,7 @@ val uiRendererDispatchTest by testSuite {
             UiEditor(
                 "value", 3, { _, _ -> 9L }, { _, _ -> }, label = "Name", enabled = false,
                 readOnly = true, autoFocus = true, multiline = false, maximumLines = 1,
-                submitKey = UiSubmitKey.CtrlEnter, revision = 9L,
+                submitKey = SubmitKey.CtrlEnter, revision = 9L,
             )
         }
         assertEquals(
@@ -85,7 +86,7 @@ private class RecordingUiRenderer : UiRenderer {
         text: String, cursorOffset: Int, onChange: (String, Int) -> Long?,
         onSubmit: (text: String, cursorOffset: Int) -> Unit, label: String, enabled: Boolean,
         readOnly: Boolean, autoFocus: Boolean, multiline: Boolean, maximumLines: Int,
-        submitKey: UiSubmitKey, revision: Long?,
+        submitKey: SubmitKey, revision: Long?,
     ) {
         calls += "editor:$text:$cursorOffset:$label:$enabled:$readOnly:$autoFocus:$multiline:$maximumLines:$submitKey:$revision"
     }

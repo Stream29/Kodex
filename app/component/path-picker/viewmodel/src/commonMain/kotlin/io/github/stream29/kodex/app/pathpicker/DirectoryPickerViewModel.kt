@@ -1,5 +1,3 @@
-@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-
 package io.github.stream29.kodex.app.pathpicker
 
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerEffect
@@ -10,7 +8,6 @@ import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerLoadResul
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerState
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerValidationResult
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModelFactory
 import io.github.stream29.kodex.app.pathpicker.contract.parentDirectory
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
@@ -31,16 +28,6 @@ internal class DirectoryPickerViewModelImpl(
     private val dependencies: DirectoryPickerDependencies,
     parentScope: CoroutineScope,
 ) : DirectoryPickerViewModel {
-    internal constructor(
-        initialDirectory: Path,
-        browser: DirectoryPickerBrowser,
-        parentScope: CoroutineScope,
-    ) : this(
-        initialDirectory = initialDirectory,
-        dependencies = directoryPickerDependencies(browser),
-        parentScope = parentScope,
-    )
-
     private val browser: DirectoryPickerBrowser = dependencies.browser
     private val scope = parentScope.supervisorChildScope()
     private val mutableState = MutableStateFlow(
@@ -205,23 +192,9 @@ internal class DirectoryPickerViewModelImpl(
     }
 }
 
-private fun directoryPickerDependencies(browser: DirectoryPickerBrowser): DirectoryPickerDependencies =
-    object : DirectoryPickerDependencies {
-        override val browser: DirectoryPickerBrowser = browser
-    }
-
 public actual fun createDirectoryPickerViewModel(
     initialDirectory: Path,
     dependencies: DirectoryPickerDependencies,
     ownerScope: CoroutineScope,
 ): DirectoryPickerViewModel =
-    DefaultDirectoryPickerViewModelFactory.create(initialDirectory, dependencies, ownerScope)
-
-public actual object DefaultDirectoryPickerViewModelFactory : DirectoryPickerViewModelFactory {
-    actual override fun create(
-        initialDirectory: Path,
-        dependencies: DirectoryPickerDependencies,
-        ownerScope: CoroutineScope,
-    ): DirectoryPickerViewModel =
-        DirectoryPickerViewModelImpl(initialDirectory, dependencies, ownerScope)
-}
+    DirectoryPickerViewModelImpl(initialDirectory, dependencies, ownerScope)

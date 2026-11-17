@@ -10,7 +10,6 @@ kotlin {
     sourceSets.named("specMain").dependencies {
         api(project(":app-component-application-viewmodel"))
         api(project(":app-rpc"))
-        api(project(":app-component-new-session-viewmodel"))
         api(project(":openai-models"))
         api(project(":agent-storage-clean-models"))
         api(project(":app-backend-migration"))

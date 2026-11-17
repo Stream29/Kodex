@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.app.pathpicker.contract
 
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
@@ -88,19 +87,4 @@ public interface DirectoryPickerViewModel : AutoCloseable {
      * The renderer must stop collecting the component after this call.
      */
     override fun close(): Unit
-}
-
-/**
- * Constructs one independently disposable component with explicit dependencies.
- *
- * The implementation must publish an initial [DirectoryPickerLoadState.Loading]
- * for the initial directory and begin loading through [DirectoryPickerDependencies.browser].
- * Child work belongs to the supplied owner scope; closing the child must not cancel its owner.
- */
-public fun interface DirectoryPickerViewModelFactory {
-    public fun create(
-        initialDirectory: Path,
-        dependencies: DirectoryPickerDependencies,
-        ownerScope: CoroutineScope,
-    ): DirectoryPickerViewModel
 }

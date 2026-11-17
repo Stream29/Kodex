@@ -23,7 +23,6 @@ private fun WorkGroupContent(
 ) {
     val state by group.state.collectAsState()
     when (val current = state) {
-        is WorkGroupHistoryItemState.Loading -> renderer.Loading()
         WorkGroupHistoryItemState.Failed -> renderer.Error()
         is WorkGroupHistoryItemState.Collapsed,
         is WorkGroupHistoryItemState.Expanding,
@@ -70,7 +69,6 @@ private fun StoredContent(
         is RequestUserInputHistoryItemViewModel -> {
             val state by item.state.collectAsState()
             when (val current = state) {
-                is RequestUserInputHistoryItemState.Loading -> renderer.Loading()
                 RequestUserInputHistoryItemState.Failed -> renderer.Error()
                 is RequestUserInputHistoryItemState.Ready -> renderer.Event(current.event, current.elapsed, null, shellSessions)
             }
@@ -78,7 +76,6 @@ private fun StoredContent(
         is PlanUpdateHistoryItemViewModel -> {
             val state by item.state.collectAsState()
             when (val current = state) {
-                is PlanUpdateHistoryItemState.Loading -> renderer.Loading()
                 PlanUpdateHistoryItemState.Failed -> renderer.Error()
                 is PlanUpdateHistoryItemState.Ready -> renderer.Event(current.event, current.elapsed, null, shellSessions)
             }
@@ -86,25 +83,18 @@ private fun StoredContent(
         is ToolHistoryItemViewModel -> {
             val state by item.state.collectAsState()
             when (val current = state) {
-                is ToolHistoryItemState.Loading -> renderer.Loading()
                 ToolHistoryItemState.Failed -> renderer.Error()
-                is ToolHistoryItemState.Collapsed -> ToolCollapsed(current.header, HistoryDisclosureState.Collapsed, item::expand, renderer)
-                is ToolHistoryItemState.Expanding -> ToolCollapsed(current.header, HistoryDisclosureState.Loading, item::collapse, renderer)
+                is ToolHistoryItemState.Collapsed -> ToolCollapsed(current.header, item::expand, renderer)
                 is ToolHistoryItemState.Expanded -> renderer.Event(current.event, current.header.elapsed, item::collapse, shellSessions)
             }
         }
         is PatchHistoryItemViewModel -> {
             val state by item.state.collectAsState()
             when (val current = state) {
-                is PatchHistoryItemState.Loading -> renderer.Loading()
                 PatchHistoryItemState.Failed -> renderer.Error()
                 is PatchHistoryItemState.Collapsed -> renderer.Collapsed(
                     current.header.summary(), current.header.status.historyStatus(), current.header.elapsed,
-                    HistoryDisclosureState.Collapsed, item::expand,
-                )
-                is PatchHistoryItemState.Expanding -> renderer.Collapsed(
-                    current.header.summary(), current.header.status.historyStatus(), current.header.elapsed,
-                    HistoryDisclosureState.Loading, item::collapse,
+                    item::expand,
                 )
                 is PatchHistoryItemState.Expanded -> renderer.Event(current.event, current.header.elapsed, item::collapse, shellSessions)
             }
@@ -115,11 +105,11 @@ private fun StoredContent(
 
 @Composable
 private fun ToolCollapsed(
-    header: ToolHistoryItemHeader, disclosure: HistoryDisclosureState, onClick: () -> Unit, renderer: HistoryItemRenderer,
+    header: ToolHistoryItemHeader, onClick: () -> Unit, renderer: HistoryItemRenderer,
 ) {
     when (header) {
-        is ToolHistoryItemHeader.Summary -> renderer.Collapsed(header.summary, header.status, header.elapsed, disclosure, onClick)
-        is ToolHistoryItemHeader.CommandExecution -> renderer.Collapsed(header.summary(), header.status(), header.elapsed, disclosure, onClick)
+        is ToolHistoryItemHeader.Summary -> renderer.Collapsed(header.summary, header.status, header.elapsed, onClick)
+        is ToolHistoryItemHeader.CommandExecution -> renderer.Collapsed(header.summary(), header.status(), header.elapsed, onClick)
     }
 }
 

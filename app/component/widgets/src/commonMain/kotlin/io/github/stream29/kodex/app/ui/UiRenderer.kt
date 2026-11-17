@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.ui
 
 import androidx.compose.runtime.*
+import io.github.stream29.kodex.cli.settings.SubmitKey
 
 private val LocalUiRenderer = staticCompositionLocalOf<UiRenderer> { error("Missing host UiRenderer") }
 
@@ -34,7 +35,7 @@ public actual fun UiAction(label: String, onClick: () -> Unit, enabled: Boolean,
     LocalUiRenderer.current.UiAction(label, onClick, enabled, autoFocus, role)
 
 @Composable
-public actual fun UiEditor(text: String, cursorOffset: Int, onChange: (String, Int) -> Long?, onSubmit: (text: String, cursorOffset: Int) -> Unit, label: String, enabled: Boolean, readOnly: Boolean, autoFocus: Boolean, multiline: Boolean, maximumLines: Int, submitKey: UiSubmitKey, revision: Long?): Unit =
+public actual fun UiEditor(text: String, cursorOffset: Int, onChange: (String, Int) -> Long?, onSubmit: (text: String, cursorOffset: Int) -> Unit, label: String, enabled: Boolean, readOnly: Boolean, autoFocus: Boolean, multiline: Boolean, maximumLines: Int, submitKey: SubmitKey, revision: Long?): Unit =
     LocalUiRenderer.current.UiEditor(text, cursorOffset, onChange, onSubmit, label, enabled, readOnly, autoFocus, multiline, maximumLines, submitKey, revision)
 
 @Composable

@@ -14,6 +14,7 @@ import com.jakewharton.mosaic.terminal.Terminal
 import com.jakewharton.mosaic.testing.TestTerminal
 import com.jakewharton.mosaic.ui.Layout
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.cli.settings.SubmitKey
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -35,7 +36,7 @@ val mosaicEditorIdleTest by testSuite {
             var multiline by mutableStateOf(true)
             var label by mutableStateOf("")
             var maximumLines by mutableIntStateOf(6)
-            var submitKey by mutableStateOf(UiSubmitKey.Enter)
+            var submitKey by mutableStateOf(SubmitKey.Enter)
             var callbackVersion by mutableIntStateOf(0)
             var acceptedRevision = 10L
             var localText = text
@@ -181,7 +182,7 @@ val mosaicEditorIdleTest by testSuite {
                 assertEquals(10, localCursor)
 
                 readOnly = false
-                submitKey = UiSubmitKey.CtrlEnter
+                submitKey = SubmitKey.CtrlEnter
                 assertSettled("> abcdefghijX")
                 terminal.events.send(KeyboardEvent(13, modifiers = KeyboardEvent.ModifierCtrl))
                 assertSettled("> abcdefghijX")

@@ -70,9 +70,10 @@ val agentHistoryEntryInteractionTest by testSuite {
             val rendered = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Column(Modifier.width(40)) {
-                    StoredHistoryEntry(
-                        item = item, generation = 4, shellSessions = EmptyHistoryShellSessions,
-                        onOpenContextMenu = { _, index, _, _, _ -> selected = index },
+                    HistoryItemContent(
+                        item = item,
+                        renderer = MosaicHistoryItemRenderer(item, 4, null) { _, index, _, _, _ -> selected = index },
+                        shellSessions = EmptyHistoryShellSessions,
                     )
                 }
             }
@@ -107,14 +108,13 @@ val agentHistoryEntryInteractionTest by testSuite {
             var rendered = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Column(modifier = Modifier.width(40)) {
-                    StoredHistoryEntry(
+                    HistoryItemContent(
                         item = item,
-                        generation = 4,
-                        shellSessions = EmptyHistoryShellSessions,
-                        onOpenContextMenu = { _, index, _, _, _ ->
+                        renderer = MosaicHistoryItemRenderer(item, 4, null) { _, index, _, _, _ ->
                             capturedIndex = index
                             callbackCount++
                         },
+                        shellSessions = EmptyHistoryShellSessions,
                     )
                 }
             }
@@ -151,11 +151,10 @@ val agentHistoryEntryInteractionTest by testSuite {
             var collapsed = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Column(modifier = Modifier.width(40)) {
-                    StoredHistoryEntry(
+                    HistoryItemContent(
                         item = item,
-                        generation = 8,
+                        renderer = MosaicHistoryItemRenderer(item, 8, null, null),
                         shellSessions = EmptyHistoryShellSessions,
-                        onOpenContextMenu = null,
                     )
                 }
             }
@@ -196,11 +195,10 @@ val agentHistoryEntryInteractionTest by testSuite {
             var collapsed = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Column(modifier = Modifier.width(40)) {
-                    StoredHistoryWorkGroup(
-                        group = group,
-                        generation = 12,
+                    HistoryItemContent(
+                        item = group,
+                        renderer = MosaicHistoryItemRenderer(group, 12, null, null),
                         shellSessions = EmptyHistoryShellSessions,
-                        onOpenContextMenu = null,
                     )
                 }
             }
@@ -261,11 +259,10 @@ val agentHistoryEntryInteractionTest by testSuite {
             val rendered = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Column(modifier = Modifier.width(60)) {
-                    StoredHistoryEntry(
+                    HistoryItemContent(
                         item = item,
-                        generation = 9,
+                        renderer = MosaicHistoryItemRenderer(item, 9, null, null),
                         shellSessions = EmptyHistoryShellSessions,
-                        onOpenContextMenu = null,
                     )
                 }
             }
@@ -310,11 +307,10 @@ val agentHistoryEntryInteractionTest by testSuite {
             val running = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Column(modifier = Modifier.width(width)) {
-                    StoredHistoryEntry(
+                    HistoryItemContent(
                         item = item,
-                        generation = 10,
+                        renderer = MosaicHistoryItemRenderer(item, 10, null, null),
                         shellSessions = sessions,
-                        onOpenContextMenu = null,
                     )
                 }
             }
@@ -368,7 +364,6 @@ private class FakeTool(
         val current = state.value
         state.value = when (current) {
             is ToolHistoryItemState.Expanded -> ToolHistoryItemState.Collapsed(current.header)
-            is ToolHistoryItemState.Expanding -> ToolHistoryItemState.Collapsed(current.header)
             else -> current
         }
     }

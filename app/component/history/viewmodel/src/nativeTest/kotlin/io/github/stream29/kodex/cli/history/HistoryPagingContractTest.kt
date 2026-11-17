@@ -48,10 +48,8 @@ val historyPagingContractTest by testSuite {
             delay(100)
             assertSame(loaded, model.historyItems.value, "No repeated idle load/drop cycle.")
 
-            // A replaced snapshot cannot inject a fresh access or an explicit paging demand.
+            // A replaced snapshot cannot inject a fresh access demand.
             initial[initial.size - 1]
-            initial.requestOlder()
-            initial.requestNewer()
             delay(100)
             assertSame(loaded, model.historyItems.value)
         }

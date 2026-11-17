@@ -4,10 +4,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDependencies
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDraftAnswer
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
-import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
-import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModelFactory
 import io.github.stream29.kodex.app.agent.contract.allowsOtherAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
@@ -38,9 +36,6 @@ public actual fun createRequestUserInputViewModel(
         }
     }
 }
-
-public actual val requestUserInputViewModelFactory: RequestUserInputViewModelFactory =
-    RequestUserInputViewModelFactory(::createRequestUserInputViewModel)
 
 /** Revision-bound answer drafts for one Agent's live `AskUserSnapshot` interaction. */
 internal class RequestUserInputViewModelImpl(
@@ -103,47 +98,35 @@ internal class RequestUserInputViewModelImpl(
     override suspend fun submit(
         askId: Int,
         expectedRevision: Long,
-    ): RequestUserInputSubmissionResult = ownerScope.async(
+    ): Unit = ownerScope.async(
         start = CoroutineStart.UNDISPATCHED,
     ) {
-        if (closed) return@async RequestUserInputSubmissionResult.StaleAsk
+        if (closed) return@async
         val entry = pendingEntry
             ?.takeIf { pending -> pending.askId == askId }
-            ?: return@async RequestUserInputSubmissionResult.StaleAsk
+            ?: return@async
         val captured = state.value as? RequestUserInputState.Pending
-            ?: return@async RequestUserInputSubmissionResult.StaleAsk
-        if (captured.askId != askId) {
-            return@async RequestUserInputSubmissionResult.StaleAsk
-        }
-        if (captured.revision != expectedRevision) {
-            return@async RequestUserInputSubmissionResult.StaleRevision
-        }
-        if (captured.submission is RequestUserInputSubmissionState.Submitting) {
-            return@async RequestUserInputSubmissionResult.Busy
-        }
-        if (!captured.canSubmit) {
-            return@async RequestUserInputSubmissionResult.Incomplete
+            ?: return@async
+        if (
+            captured.askId != askId ||
+            captured.revision != expectedRevision ||
+            captured.submission is RequestUserInputSubmissionState.Submitting ||
+            !captured.canSubmit
+        ) {
+            return@async
         }
         val response = captured.arguments.toResponse(captured.answers)
         val submitting = captured.copy(
             revision = captured.nextRevision(),
             submission = RequestUserInputSubmissionState.Submitting,
         )
-        if (!mutableState.compareAndSet(captured, submitting)) {
-            val latest = state.value as? RequestUserInputState.Pending
-            return@async if (latest?.askId != askId) {
-                RequestUserInputSubmissionResult.StaleAsk
-            } else {
-                RequestUserInputSubmissionResult.StaleRevision
-            }
-        }
+        if (!mutableState.compareAndSet(captured, submitting)) return@async
         try {
             submitAnswer(entry.askId, response)
             if (pendingEntry?.askId == entry.askId) {
                 pendingEntry = null
             }
             mutableState.compareAndSet(submitting, RequestUserInputState.Idle)
-            RequestUserInputSubmissionResult.Submitted
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
@@ -155,7 +138,6 @@ internal class RequestUserInputViewModelImpl(
                     submission = RequestUserInputSubmissionState.Failed(message),
                 ),
             )
-            RequestUserInputSubmissionResult.Failed(message)
         }
     }.await()
 

@@ -2,18 +2,10 @@
 
 package io.github.stream29.kodex.cli.historyindex
 
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.remember
-import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
-import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
-import io.github.stream29.kodex.cli.components.LazyListState
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
-import io.github.stream29.kodex.cli.components.TuiPopupMenuState
-import io.github.stream29.kodex.cli.components.rememberTuiPopupMenuState
 
 /** Renderer-local anchor/pointer and captured child target; host owns popup arbitration/grace. */
 @Stable
@@ -42,78 +34,3 @@ public class HistoryIndexMenuRequest(
     public val target: HistoryIndexInteractionRequest,
     public val clickPosition: IntOffset?,
 )
-
-/**
- * Complete index body, borrowing one stable child. Each composed row owns/releases its read
- * handle. Two bodies share window authority but have independent viewport/interaction lifetimes.
- * Pointer/keyboard upward scroll disables follow-latest; reaching the end restores it.
- */
-@Composable
-public expect fun HistoryIndexSidebarBody(
-    viewModel: HistoryIndexViewModel,
-    columns: Int,
-    rows: Int,
-    side: HistoryIndexSide = HistoryIndexSide.Left,
-    onHoverChanged: (HistoryIndexInteractionRequest, Boolean) -> Unit = { _, _ -> },
-    onOpenMenu: (HistoryIndexMenuRequest) -> Unit = {},
-    listState: LazyListState = remember(viewModel) { LazyListState().apply { requestScrollToEnd() } },
-): Unit
-
-/** Pure row rendering entrypoint, also useful for renderer snapshot coverage. */
-@Composable
-public expect fun HistoryIndexRowContent(
-    entry: HistoryIndexEntry,
-    graph: String,
-    hovered: Boolean = false,
-    pressed: Boolean = false,
-): Unit
-
-/**
- * Delays hover locally for this exact request.
- * Host filters selected child and popup priority before supplying request; hover exit grace
- * remains host-local. Invalid/released target is hidden, never shown as a new target's failure.
- */
-@Composable
-public expect fun BoxScope.HistoryIndexHoverPopup(
-    request: HistoryIndexInteractionRequest?,
-    contentColumns: Int,
-    contentRows: Int,
-    onHoverChanged: (Boolean) -> Unit,
-    onDismissRequest: () -> Unit = {},
-): Unit
-
-/** Full hover rendering including shared questions/options/hidden answers and scrollable detail. */
-@Composable
-public expect fun BoxScope.HistoryIndexHoverContent(
-    anchor: TuiPopupAnchor,
-    side: HistoryIndexSide,
-    pointerPosition: IntOffset?,
-    detail: HistoryIndexEntryDetail,
-    contentColumns: Int,
-    contentRows: Int,
-    onHoverChanged: (Boolean) -> Unit,
-): Unit
-
-/**
- * Exact menu opening owns timestamp and detail handles. Only Ready(non-null) displays timestamp.
- * Check out calls the child's captured-Agent port; it never obtains an Agent from the host.
- * Host supplies only selected-child-matching requests and arbitrates shared Shell/index popup.
- */
-@Composable
-public expect fun BoxScope.HistoryIndexContextMenu(
-    request: HistoryIndexMenuRequest?,
-    onDismissRequest: () -> Unit,
-): Unit
-
-/** Null click uses the keyboard anchor; optional Details keeps the exact opening alive. */
-@Composable
-public expect fun BoxScope.HistoryIndexContextMenuPopup(
-    anchor: TuiPopupAnchor,
-    clickPosition: IntOffset?,
-    index: Int,
-    onDismissRequest: () -> Unit,
-    onCheckOut: () -> Unit,
-    timestamp: String? = null,
-    onDetails: (() -> Unit)? = null,
-    state: TuiPopupMenuState = rememberTuiPopupMenuState(),
-): Unit

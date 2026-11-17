@@ -7,24 +7,7 @@ import com.jakewharton.mosaic.layout.*
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.ui.*
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.cli.components.*
-import kotlinx.io.files.Path
-
-@Composable
-public actual fun BoxScope.DirectoryPickerPopup(
-    viewModel: DirectoryPickerViewModel, onDismissRequest: () -> Unit, onDirectorySelected: (Path) -> Unit,
-) { DirectoryPickerPopup(viewModel, onDismissRequest, onDirectorySelected, closeOnDispose = true) }
-
-@Composable
-public actual fun BoxScope.DirectoryPickerPopup(
-    viewModel: DirectoryPickerViewModel, onDismissRequest: () -> Unit, onDirectorySelected: (Path) -> Unit, closeOnDispose: Boolean,
-) {
-    DirectoryPickerContent(
-        viewModel, remember(this) { MosaicDirectoryPickerRenderer(this) },
-        onDismissRequest, onDirectorySelected, closeOnDispose,
-    )
-}
 
 internal class MosaicDirectoryPickerRenderer(private val box: BoxScope) : DirectoryPickerRenderer {
     @Composable

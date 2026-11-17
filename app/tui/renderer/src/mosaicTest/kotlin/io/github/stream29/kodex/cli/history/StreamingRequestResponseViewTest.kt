@@ -45,7 +45,10 @@ val streamingRequestResponseViewTest by testSuite {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Box(Modifier.width(40)) {
-                    HistoryStreamingItem.Output(HistoryStreamingKind.Message, events).renderTransientTail()
+                    HistoryStreamingContent(
+                        HistoryStreamingItem.Output(HistoryStreamingKind.Message, events),
+                        MosaicHistoryContentRenderer(),
+                    ) {}
                 }
             }
             }
@@ -88,7 +91,10 @@ val streamingRequestResponseViewTest by testSuite {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Box(Modifier.width(40)) {
-                    HistoryStreamingItem.Output(HistoryStreamingKind.Message, events).renderTransientTail()
+                    HistoryStreamingContent(
+                        HistoryStreamingItem.Output(HistoryStreamingKind.Message, events),
+                        MosaicHistoryContentRenderer(),
+                    ) {}
                 }
             }
             }
@@ -120,7 +126,10 @@ val streamingRequestResponseViewTest by testSuite {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Box(Modifier.width(40)) {
-                    HistoryStreamingItem.Output(HistoryStreamingKind.Reasoning, events).renderTransientTail()
+                    HistoryStreamingContent(
+                        HistoryStreamingItem.Output(HistoryStreamingKind.Reasoning, events),
+                        MosaicHistoryContentRenderer(),
+                    ) {}
                 }
             }
             }
@@ -156,7 +165,10 @@ val streamingRequestResponseViewTest by testSuite {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Box(Modifier.width(40)) {
-                    HistoryStreamingItem.Output(HistoryStreamingKind.Reasoning, events).renderTransientTail()
+                    HistoryStreamingContent(
+                        HistoryStreamingItem.Output(HistoryStreamingKind.Reasoning, events),
+                        MosaicHistoryContentRenderer(),
+                    ) {}
                 }
             }
             }
@@ -183,7 +195,10 @@ val streamingRequestResponseViewTest by testSuite {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Box(Modifier.width(40)) {
-                    HistoryStreamingItem.Output(HistoryStreamingKind.Message, events).renderTransientTail()
+                    HistoryStreamingContent(
+                        HistoryStreamingItem.Output(HistoryStreamingKind.Message, events),
+                        MosaicHistoryContentRenderer(),
+                    ) {}
                 }
             }
             }
@@ -220,7 +235,10 @@ val streamingRequestResponseViewTest by testSuite {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Box(Modifier.width(60)) {
-                    HistoryStreamingItem.Output(HistoryStreamingKind.ToolCall, events).renderTransientTail()
+                    HistoryStreamingContent(
+                        HistoryStreamingItem.Output(HistoryStreamingKind.ToolCall, events),
+                        MosaicHistoryContentRenderer(),
+                    ) {}
                 }
             }
             }
@@ -260,7 +278,10 @@ val streamingRequestResponseViewTest by testSuite {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Box(Modifier.width(60)) {
-                    HistoryStreamingItem.Output(HistoryStreamingKind.ToolCall, events).renderTransientTail()
+                    HistoryStreamingContent(
+                        HistoryStreamingItem.Output(HistoryStreamingKind.ToolCall, events),
+                        MosaicHistoryContentRenderer(),
+                    ) {}
                 }
             }
             }
@@ -276,7 +297,10 @@ val streamingRequestResponseViewTest by testSuite {
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     Box(Modifier.width(40)) {
-                        HistoryStreamingItem.Started.renderTransientTail()
+                        HistoryStreamingContent(
+                            HistoryStreamingItem.Started,
+                            MosaicHistoryContentRenderer(),
+                        ) {}
                     }
                 }
                 },
@@ -291,7 +315,10 @@ val streamingRequestResponseViewTest by testSuite {
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     Box(Modifier.width(40)) {
-                        HistoryStreamingItem.Compacting.renderTransientTail()
+                        HistoryStreamingContent(
+                            HistoryStreamingItem.Compacting,
+                            MosaicHistoryContentRenderer(),
+                        ) {}
                     }
                 }
                 },
@@ -312,10 +339,13 @@ val streamingRequestResponseViewTest by testSuite {
             val collapsed = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 Box(Modifier.width(60)) {
-                    HistoryStreamingItem.Output(
-                        kind = HistoryStreamingKind.Unknown,
-                        events = events,
-                    ).renderTransientTail()
+                    HistoryStreamingContent(
+                        HistoryStreamingItem.Output(
+                            kind = HistoryStreamingKind.Unknown,
+                            events = events,
+                        ),
+                        MosaicHistoryContentRenderer(),
+                    ) {}
                 }
             }
             }

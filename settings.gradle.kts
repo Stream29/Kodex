@@ -151,10 +151,6 @@ moduleTree("app") {
     }
     module("cli")
     moduleTree("component") {
-        moduleTree("account-usage") {
-            module("view")
-            module("viewmodel")
-        }
         moduleTree("agent") {
             module("contract")
             module("view")
@@ -163,49 +159,15 @@ moduleTree("app") {
             module("view")
             module("viewmodel")
         }
-        moduleTree("application-preferences") {
-            module("view")
-            module("viewmodel")
-        }
-        moduleTree("authentication-settings") {
-            module("view")
-            module("viewmodel")
-        }
         moduleTree("composer") {
             module("view")
             module("viewmodel")
         }
-        moduleTree("context-source-settings") {
-            module("view")
-            module("viewmodel")
-        }
-        module("formatting")
         moduleTree("history") {
-            module("presentation")
             module("view")
             module("viewmodel")
         }
         moduleTree("history-index") {
-            module("view")
-            module("viewmodel")
-        }
-        moduleTree("hook-settings") {
-            module("view")
-            module("viewmodel")
-        }
-        moduleTree("mcp-settings") {
-            module("view")
-            module("viewmodel")
-        }
-        moduleTree("new-session") {
-            module("view")
-            module("viewmodel")
-        }
-        moduleTree("new-session-defaults") {
-            module("view")
-            module("viewmodel")
-        }
-        moduleTree("openai-login") {
             module("view")
             module("viewmodel")
         }
@@ -214,11 +176,9 @@ moduleTree("app") {
             module("viewmodel")
         }
         moduleTree("request-user-input") {
-            module("view")
             module("viewmodel")
         }
         moduleTree("runtime-configuration") {
-            module("view")
             module("viewmodel")
         }
         moduleTree("session") {
@@ -228,41 +188,11 @@ moduleTree("app") {
             module("view")
             module("viewmodel")
         }
-        moduleTree("session-delete") {
-            module("view")
-            module("viewmodel")
-        }
-        moduleTree("session-rename") {
-            module("view")
-            module("viewmodel")
-        }
-        moduleTree("session-settings") {
-            module("view")
-            module("viewmodel")
-        }
-        moduleTree("session-sidebar") {
-            module("view")
-        }
-        moduleTree("session-tab-bar") {
-            module("view")
-        }
-        moduleTree("session-title-settings") {
-            module("view")
-            module("viewmodel")
-        }
         moduleTree("settings") {
             module("view")
             module("viewmodel")
         }
-        moduleTree("usage-reset") {
-            module("view")
-            module("viewmodel")
-        }
         module("widgets")
-        moduleTree("working-directory") {
-            module("view")
-            module("viewmodel")
-        }
     }
     moduleTree("rpc") {
         module("protocol")
@@ -271,7 +201,6 @@ moduleTree("app") {
     moduleTree("tui") {
         module("components")
         module("host")
-        module("path-picker")
         module("renderer")
     }
     moduleTree("web") {

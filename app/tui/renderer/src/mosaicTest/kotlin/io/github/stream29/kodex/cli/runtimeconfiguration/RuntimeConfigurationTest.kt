@@ -2,6 +2,7 @@
 
 package io.github.stream29.kodex.cli.runtimeconfiguration
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -14,6 +15,7 @@ import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.Arrangement
 import com.jakewharton.mosaic.ui.Layout
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
@@ -57,7 +59,7 @@ val runtimeConfigurationRendererTest by testSuite {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 val dropdowns = RuntimeConfigurationDropdowns.remember(vm)
                 TuiPopupHost(modifier = Modifier.width(60).height(12)) {
-                    RuntimeConfigurationTriggers(vm, dropdowns)
+                    SpacedTriggers(vm, dropdowns)
                     RuntimeConfigurationMenus(vm, dropdowns)
                 }
             }
@@ -89,7 +91,7 @@ val runtimeConfigurationRendererTest by testSuite {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 val dropdowns = RuntimeConfigurationDropdowns.remember(vm)
                 TuiPopupHost(modifier = Modifier.width(60).height(8)) {
-                    RuntimeConfigurationTriggers(vm, dropdowns)
+                    SpacedTriggers(vm, dropdowns)
                     RuntimeConfigurationMenus(vm, dropdowns)
                 }
             }
@@ -117,7 +119,7 @@ val runtimeConfigurationRendererTest by testSuite {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 val dropdowns = RuntimeConfigurationDropdowns.remember(vm)
                 TuiPopupHost(modifier = Modifier.width(32).height(14)) {
-                    RuntimeConfigurationTriggers(vm, dropdowns)
+                    SpacedTriggers(vm, dropdowns)
                     RuntimeConfigurationMenus(vm, dropdowns)
                 }
             }
@@ -158,7 +160,7 @@ val runtimeConfigurationRendererTest by testSuite {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 val dropdowns = RuntimeConfigurationDropdowns.remember(vm)
                 TuiPopupHost(modifier = Modifier.width(75).height(12)) {
-                    RuntimeConfigurationTriggers(vm, dropdowns)
+                    SpacedTriggers(vm, dropdowns)
                     RuntimeConfigurationMenus(vm, dropdowns)
                 }
             }
@@ -194,7 +196,7 @@ val runtimeConfigurationRendererTest by testSuite {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 val dropdowns = RuntimeConfigurationDropdowns.remember(vm)
                 TuiPopupHost(modifier = Modifier.width(65).height(12)) {
-                    RuntimeConfigurationTriggers(vm, dropdowns)
+                    SpacedTriggers(vm, dropdowns)
                     RuntimeConfigurationMenus(vm, dropdowns)
                 }
             }
@@ -274,7 +276,7 @@ val runtimeConfigurationRendererTest by testSuite {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 handles = RuntimeConfigurationDropdowns.remember(current)
                 TuiPopupHost(modifier = Modifier.width(60).height(12)) {
-                    RuntimeConfigurationTriggers(current, handles)
+                    SpacedTriggers(current, handles)
                     RuntimeConfigurationMenus(current, handles)
                 }
             }
@@ -312,7 +314,7 @@ val runtimeConfigurationRendererTest by testSuite {
                 val snapshot = setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     TuiPopupHost(modifier = Modifier.width(columns).height(8)) {
-                        RuntimeConfigurationTriggers(vm.state.value, RuntimeConfigurationDropdowns.remember(vm))
+                        SpacedTriggers(vm.state.value, RuntimeConfigurationDropdowns.remember(vm))
                     }
                 }
                 }
@@ -327,7 +329,7 @@ val runtimeConfigurationRendererTest by testSuite {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 dropdowns = RuntimeConfigurationDropdowns.remember(vm)
                 TuiPopupHost(modifier = Modifier.width(60).height(12)) {
-                    RuntimeConfigurationTriggers(vm, dropdowns, enabled)
+                    SpacedTriggers(vm, dropdowns, enabled)
                     RuntimeConfigurationMenus(vm, dropdowns)
                 }
             }
@@ -349,7 +351,7 @@ val runtimeConfigurationRendererTest by testSuite {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 val dropdowns = RuntimeConfigurationDropdowns.remember(vm)
                 TuiPopupHost(modifier = Modifier.width(70).height(12)) {
-                    RuntimeConfigurationTriggers(vm, dropdowns)
+                    SpacedTriggers(vm, dropdowns)
                     RuntimeConfigurationMenus(vm, dropdowns)
                 }
             }
@@ -386,7 +388,7 @@ val runtimeConfigurationRendererTest by testSuite {
                 if (shown) {
                     val dropdowns = RuntimeConfigurationDropdowns.remember(current)
                     TuiPopupHost(modifier = Modifier.width(60).height(12)) {
-                        RuntimeConfigurationTriggers(current, dropdowns)
+                        SpacedTriggers(current, dropdowns)
                         RuntimeConfigurationMenus(current, dropdowns)
                     }
                 } else {
@@ -416,6 +418,27 @@ val runtimeConfigurationRendererTest by testSuite {
             assertEquals(0, replacement.closeCount)
         }
     }
+    }
+}
+
+@Composable
+private fun SpacedTriggers(
+    viewModel: RuntimeConfigurationViewModel,
+    dropdowns: RuntimeConfigurationDropdowns,
+    enabled: Boolean = true,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(1)) {
+        RuntimeConfigurationStatusItemsWithoutSpacing(viewModel, dropdowns, enabled)
+    }
+}
+
+@Composable
+private fun SpacedTriggers(
+    state: RuntimeConfigurationState,
+    dropdowns: RuntimeConfigurationDropdowns,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(1)) {
+        RuntimeConfigurationStatusItemsWithoutSpacing(state, dropdowns)
     }
 }
 

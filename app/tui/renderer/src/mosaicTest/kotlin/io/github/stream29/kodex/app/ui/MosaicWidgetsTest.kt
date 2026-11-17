@@ -15,6 +15,7 @@ import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.ui.Box
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.cli.components.TuiButton
+import io.github.stream29.kodex.cli.settings.SubmitKey
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -206,7 +207,7 @@ val mosaicWidgetsTest by testSuite {
             assertEquals(8, cursor)
         }
     }
-    for (policy in UiSubmitKey.entries) {
+    for (policy in SubmitKey.entries) {
         test("newline and submit are distinct for $policy") {
             var text by mutableStateOf("one")
             var cursor by mutableStateOf(text.length)
@@ -225,13 +226,13 @@ val mosaicWidgetsTest by testSuite {
                     }
                 }
                 }
-                val newlineModifiers = if (policy == UiSubmitKey.Enter) KeyboardEvent.ModifierShift else 0
-                val submitModifiers = if (policy == UiSubmitKey.CtrlEnter) KeyboardEvent.ModifierCtrl else 0
+                val newlineModifiers = if (policy == SubmitKey.Enter) KeyboardEvent.ModifierShift else 0
+                val submitModifiers = if (policy == SubmitKey.CtrlEnter) KeyboardEvent.ModifierCtrl else 0
                 sendKeyEvent(KeyboardEvent(13, modifiers = newlineModifiers))
                 awaitContaining("value=one| submits=0")
                 sendKeyEvent(KeyboardEvent(13, modifiers = submitModifiers))
                 awaitContaining("value=one| submits=1")
-                val ignored = if (policy == UiSubmitKey.Enter) {
+                val ignored = if (policy == SubmitKey.Enter) {
                     KeyboardEvent.ModifierCtrl or KeyboardEvent.ModifierShift
                 } else KeyboardEvent.ModifierShift
                 sendKeyEvent(KeyboardEvent(13, modifiers = ignored))

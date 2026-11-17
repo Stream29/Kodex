@@ -12,9 +12,6 @@ kotlin {
             api(project(":openai-models"))
             api(libs.kotlinx.coroutines.core)
         }
-        commonMain.dependencies {
-            implementation(libs.kotlinx.coroutines.core)
-        }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
         }

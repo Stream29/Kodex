@@ -5,7 +5,6 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -88,34 +87,6 @@ public sealed interface RequestUserInputState {
     }
 }
 
-/** Result of a revision-bound ask-user submission command. */
-public sealed interface RequestUserInputSubmissionResult {
-    /** `submitAnswer` returned normally; backend atomically recorded the answer and steered the Agent. */
-    public data object Submitted : RequestUserInputSubmissionResult
-    /** Closed, idle, or no longer the exact pending `askId`. */
-    public data object StaleAsk : RequestUserInputSubmissionResult
-    /** Exact `askId`, but revision changed, including losing the submission CAS. */
-    public data object StaleRevision : RequestUserInputSubmissionResult
-    /** At least one answer is absent, blank, or not a declared option. */
-    public data object Incomplete : RequestUserInputSubmissionResult
-    /** Exact current revision is already submitting. */
-    public data object Busy : RequestUserInputSubmissionResult
-
-    /**
-     * A non-cancellation submission failure; some side effects may have happened.
-     * @throws IllegalArgumentException if message is blank.
-     */
-    public data class Failed(
-        public val message: String,
-    ) : RequestUserInputSubmissionResult {
-        init {
-            require(message.isNotBlank()) {
-                "A request-user-input submission failure message must not be blank."
-            }
-        }
-    }
-}
-
 /**
  * Answer-draft owner for one Agent's live `AskUserSnapshot` interaction.
  *
@@ -170,7 +141,7 @@ public interface RequestUserInputViewModel : AutoCloseable {
     ): Boolean
 
     /**
-     * Checks [askId], revision, Busy, then completeness, before freezing an answer snapshot.
+     * Checks [askId], revision, active submission, and completeness before freezing an answer snapshot.
      * Executes [RequestUserInputDependencies.submitAnswer] in the supplied owner scope.
      * Free-form text is trimmed and prefixed with `user_note: `; options pass unchanged.
      * No retry or rollback is automatic.
@@ -188,7 +159,7 @@ public interface RequestUserInputViewModel : AutoCloseable {
     public suspend fun submit(
         askId: Int,
         expectedRevision: Long,
-    ): RequestUserInputSubmissionResult
+    ): Unit
 
     /**
      * Idempotently rejects edits, publishes Idle and releases the owned pending observer.
@@ -213,19 +184,6 @@ public interface RequestUserInputDependencies {
      * @throws Exception if submission fails.
      */
     public suspend fun submitAnswer(askId: Int, response: RequestUserInputResponse): Unit
-}
-
-/** Creates an Agent-owned child; it borrows but never closes [CoroutineScope]. */
-public fun interface RequestUserInputViewModelFactory {
-    /**
-     * Observes pending until close/owner termination/upstream completion; upstream completion
-     * closes the child. Accepted submit operations run directly in [ownerScope].
-     * Upstream failures follow that scope's existing coroutine failure policy.
-     */
-    public fun create(
-        dependencies: RequestUserInputDependencies,
-        ownerScope: CoroutineScope,
-    ): RequestUserInputViewModel
 }
 
 /** Whether the host must offer a free-form answer for this question. */

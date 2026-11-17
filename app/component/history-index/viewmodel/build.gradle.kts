@@ -14,10 +14,8 @@ kotlin {
         }
         commonMain.dependencies {
             implementation(project(":utils-rpc-exception"))
-            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
-            implementation(project(":agent-storage-core"))
             implementation(project(":agent-storage-in-memory"))
             implementation(project(":agent-state-contract"))
             implementation(project(":utils-coroutines"))

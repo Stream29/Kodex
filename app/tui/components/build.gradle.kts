@@ -8,10 +8,7 @@ plugins {
 kotlin {
     sourceSets {
         specMain.dependencies {
-            api(project(":app-component-formatting"))
-            api(project(":app-component-history-presentation"))
-            api(project(":app-component-application-preferences-viewmodel"))
-            api(project(":agent-storage-clean-models"))
+            api(project(":app-rpc-protocol"))
             api(libs.mosaic.runtime)
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)

@@ -71,8 +71,6 @@ internal class AgentHistoryViewModelImpl(
             items = emptyList(),
             hasOlder = false,
             hasNewer = false,
-            onOlderDemand = ::registerOlderDemand,
-            onNewerDemand = ::registerNewerDemand,
             onAccess = ::registerAccess,
         ),
     )
@@ -98,7 +96,7 @@ internal class AgentHistoryViewModelImpl(
     override val pendingScrollEffect: StateFlow<HistoryScrollEffect?> =
         mutablePendingScrollEffect.asStateFlow()
     private var navigationIntent: HistoryNavigationIntent? = null
-    private val pendingNavigation = MutableStateFlow<HistoryCommand?>(null)
+    private val pendingNavigation = MutableStateFlow<PendingNavigation?>(null)
     private var visibleItems: List<HistoryItemViewModel> = emptyList()
 
     init {
@@ -179,33 +177,27 @@ internal class AgentHistoryViewModelImpl(
         }
     }
 
-    private fun registerOlderDemand(
-        window: HistoryItemWindowImpl,
-        explicit: Boolean = true,
-    ) {
+    private fun registerOlderDemand(window: HistoryItemWindowImpl) {
         if (
             !closed && mutableHistoryItems.value === window &&
             window.hasOlder &&
             mutableLoadState.value == AgentHistoryLoadState.Ready &&
             olderDemandPending.compareAndSet(expect = false, update = true)
         ) {
-            if (commands.trySend(HistoryCommand.LoadOlder(window, explicit)).isFailure) {
+            if (commands.trySend(HistoryCommand.LoadOlder(window)).isFailure) {
                 olderDemandPending.value = false
             }
         }
     }
 
-    private fun registerNewerDemand(
-        window: HistoryItemWindowImpl,
-        explicit: Boolean = true,
-    ) {
+    private fun registerNewerDemand(window: HistoryItemWindowImpl) {
         if (
             !closed && mutableHistoryItems.value === window &&
             window.hasNewer &&
             mutableLoadState.value == AgentHistoryLoadState.Ready &&
             newerDemandPending.compareAndSet(expect = false, update = true)
         ) {
-            if (commands.trySend(HistoryCommand.LoadNewer(window, explicit)).isFailure) {
+            if (commands.trySend(HistoryCommand.LoadNewer(window)).isFailure) {
                 newerDemandPending.value = false
             }
         }
@@ -233,8 +225,8 @@ internal class AgentHistoryViewModelImpl(
 
     private fun scheduleAccessDemand() {
         val window = mutableHistoryItems.value
-        if (needsOlder(window)) registerOlderDemand(window, explicit = false)
-        if (needsNewer(window)) registerNewerDemand(window, explicit = false)
+        if (needsOlder(window)) registerOlderDemand(window)
+        if (needsNewer(window)) registerNewerDemand(window)
     }
 
     override fun contains(generation: Long, storageIndex: Int): Boolean {
@@ -298,7 +290,7 @@ internal class AgentHistoryViewModelImpl(
         val intent = HistoryNavigationIntent(agentState.cacheNonce?.value ?: activeGeneration)
         navigationIntent = intent
         mutablePendingScrollEffect.value = null
-        pendingNavigation.value = HistoryCommand.JumpToLatest(intent)
+        pendingNavigation.value = PendingNavigation.JumpToLatest(intent)
         commands.trySend(HistoryCommand.Navigate)
     }
 
@@ -307,7 +299,7 @@ internal class AgentHistoryViewModelImpl(
         val intent = HistoryNavigationIntent(agentState.cacheNonce?.value ?: activeGeneration)
         navigationIntent = intent
         mutablePendingScrollEffect.value = null
-        pendingNavigation.value = HistoryCommand.SeekToStorageIndex(storageIndex, intent)
+        pendingNavigation.value = PendingNavigation.SeekToStorageIndex(storageIndex, intent)
         commands.trySend(HistoryCommand.Navigate)
     }
 
@@ -828,16 +820,15 @@ internal class AgentHistoryViewModelImpl(
             }
         }
 
-        suspend fun navigate(command: HistoryCommand) {
+        suspend fun navigate(navigation: PendingNavigation) {
             // Retained navigation can run before the next channel receive as well.
             synchronizeGeneration()
-            when (command) {
-                is HistoryCommand.JumpToLatest -> if (isCurrent(command.intent)) {
+            when (navigation) {
+                is PendingNavigation.JumpToLatest -> if (isCurrent(navigation.intent)) {
                     replaceWindow(agentState.latestIndex.value, invalidate = false)
-                    publishScrollEffect(command.intent, HistoryScrollTarget.Latest)
+                    publishScrollEffect(navigation.intent, HistoryScrollTarget.Latest)
                 }
-                is HistoryCommand.SeekToStorageIndex -> seekToStorageIndex(command.storageIndex, command.intent)
-                else -> error("Not a navigation command.")
+                is PendingNavigation.SeekToStorageIndex -> seekToStorageIndex(navigation.storageIndex, navigation.intent)
             }
         }
 
@@ -856,15 +847,14 @@ internal class AgentHistoryViewModelImpl(
                         if (agentState.cacheNonce == null) command.latestIndex else agentState.latestIndex.value,
                     )
                     is HistoryCommand.LoadOlder -> {
-                        if (isCurrent(command.window) && (command.explicit || needsOlder(command.window))) loadOlder()
+                        if (isCurrent(command.window) && needsOlder(command.window)) loadOlder()
                         else olderDemandPending.value = false
                     }
                     is HistoryCommand.LoadNewer -> {
-                        if (isCurrent(command.window) && (command.explicit || needsNewer(command.window))) loadNewer()
+                        if (isCurrent(command.window) && needsNewer(command.window)) loadNewer()
                         else newerDemandPending.value = false
                     }
                     HistoryCommand.Navigate -> Unit
-                    is HistoryCommand.JumpToLatest, is HistoryCommand.SeekToStorageIndex -> navigate(command)
 
                     is HistoryCommand.UpdateLatestTurn -> {
                         val changed = activeTurn != command.active
@@ -953,8 +943,6 @@ internal class AgentHistoryViewModelImpl(
             items = items,
             hasOlder = hasOlder,
             hasNewer = hasNewer,
-            onOlderDemand = ::registerOlderDemand,
-            onNewerDemand = ::registerNewerDemand,
             onAccess = ::registerAccess,
         )
         visibleItems = visibleItems.filter { visible -> items.any { it === visible } }
@@ -1029,17 +1017,20 @@ private data class GroupKey(
 private sealed interface HistoryCommand {
     data class Invalidate(val generation: Long) : HistoryCommand
     data class Refresh(val latestIndex: Int) : HistoryCommand
-    data class LoadOlder(val window: HistoryItemWindowImpl, val explicit: Boolean) : HistoryCommand
-    data class LoadNewer(val window: HistoryItemWindowImpl, val explicit: Boolean) : HistoryCommand
+    data class LoadOlder(val window: HistoryItemWindowImpl) : HistoryCommand
+    data class LoadNewer(val window: HistoryItemWindowImpl) : HistoryCommand
     data object Navigate : HistoryCommand
-    data class JumpToLatest(val intent: HistoryNavigationIntent) : HistoryCommand
-    data class SeekToStorageIndex(val storageIndex: Int, val intent: HistoryNavigationIntent) : HistoryCommand
     data class UpdateLatestTurn(val active: Boolean) : HistoryCommand
     data class ExternalWriteFinished(
         val startIndex: Int,
         val endIndex: Int,
         val generation: Long?,
     ) : HistoryCommand
+}
+
+private sealed interface PendingNavigation {
+    data class JumpToLatest(val intent: HistoryNavigationIntent) : PendingNavigation
+    data class SeekToStorageIndex(val storageIndex: Int, val intent: HistoryNavigationIntent) : PendingNavigation
 }
 
 private class HistoryNavigationIntent(val generation: Long)
@@ -1049,8 +1040,6 @@ private class HistoryItemWindowImpl(
     val items: List<HistoryItemViewModel>,
     override val hasOlder: Boolean,
     override val hasNewer: Boolean,
-    private val onOlderDemand: (HistoryItemWindowImpl) -> Unit,
-    private val onNewerDemand: (HistoryItemWindowImpl) -> Unit,
     private val onAccess: (HistoryItemWindowImpl, Int) -> Unit,
 ) : HistoryItemWindow {
     override val size: Int = items.size
@@ -1059,17 +1048,8 @@ private class HistoryItemWindowImpl(
 
     override fun get(index: Int): HistoryItemViewModel {
         val item = items[index]
-        item.ensureLoaded()
         onAccess(this, index)
         return item
-    }
-
-    override fun requestOlder() {
-        onOlderDemand(this)
-    }
-
-    override fun requestNewer() {
-        onNewerDemand(this)
     }
 
     fun containsStableIndex(index: Int): Boolean =

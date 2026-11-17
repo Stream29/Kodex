@@ -12,13 +12,27 @@ public data class UiChoiceOption(public val key: String, public val label: Strin
  */
 public interface SettingsRenderer {
     @Composable
-    public fun Section(title: String, content: @Composable () -> Unit)
+    public fun Section(title: String, content: @Composable () -> Unit): Unit
+
+    /** Section heading paired with inline header actions (e.g., list management controls). */
+    @Composable
+    public fun SectionHeader(title: String, actions: @Composable () -> Unit): Unit
 
     @Composable
-    public fun Item(label: String, supportingText: String?, enabled: Boolean, content: @Composable () -> Unit)
+    public fun Item(label: String, supportingText: String?, enabled: Boolean, content: @Composable () -> Unit): Unit
+
+    /** Full-width selectable or navigable row button within a Settings list/import surface. */
+    @Composable
+    public fun Entry(label: String, enabled: Boolean, onClick: () -> Unit): Unit
 
     @Composable
-    public fun Action(label: String, onClick: () -> Unit, enabled: Boolean, autoFocus: Boolean)
+    public fun Action(
+        label: String,
+        onClick: () -> Unit,
+        enabled: Boolean,
+        autoFocus: Boolean,
+        role: UiActionRole,
+    ): Unit
 
     /** Controlled value from the owning child; activation emits a Boolean without optimistic storage. */
     @Composable
@@ -28,7 +42,30 @@ public interface SettingsRenderer {
         onChange: (Boolean) -> Unit,
         enabled: Boolean,
         supportingText: String?,
-    )
+    ): Unit
+
+    /** Compact inline checkbox for multi-control [Item] rows with explicit accessibility description. */
+    @Composable
+    public fun InlineToggle(
+        label: String,
+        contentDescription: String,
+        checked: Boolean,
+        onChange: (Boolean) -> Unit,
+        enabled: Boolean,
+    ): Unit
+
+    /**
+     * Single-line form input keyed by [token] so replacing a dialog/preview resets renderer-owned
+     * cursor/focus state while same-frame edits across sibling fields preserve each other's drafts.
+     */
+    @Composable
+    public fun TextField(
+        token: Any,
+        label: String,
+        value: String,
+        autoFocus: Boolean,
+        onChange: (String) -> Unit,
+    ): Unit
 
     /**
      * Option keys are unique in this field. Emit only a captured option's key, and never while disabled.
@@ -44,5 +81,5 @@ public interface SettingsRenderer {
         onSelect: (String) -> Unit,
         enabled: Boolean,
         supportingText: String?,
-    )
+    ): Unit
 }

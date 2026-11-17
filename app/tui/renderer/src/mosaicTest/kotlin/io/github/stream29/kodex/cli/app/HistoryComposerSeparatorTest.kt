@@ -21,11 +21,13 @@ val historyComposerSeparatorTest by testSuite {
         runMosaicTest(snapshotStrategy = historySeparatorAnsiSnapshots) {
             val idle = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                HistoryComposerSeparator(
-                    columns = 12,
-                    showScrollToLatest = true,
-                )
-            }
+                    AgentHistorySeparatorContent(
+                        liveDuration = null,
+                        showScrollToLatest = true,
+                        onScrollToLatest = {},
+                        renderer = MosaicHistorySeparatorRenderer(columns = 12),
+                    )
+                }
             }
             assertEquals("\u001B[2m-----[↓]----\u001B[0m", idle)
 
@@ -44,15 +46,16 @@ val historyComposerSeparatorTest by testSuite {
                 "------------",
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    HistoryComposerSeparator(
-                        columns = 12,
-                        showScrollToLatest = showButton,
-                        onScrollToLatest = {
-                            clicks++
-                            showButton = false
-                        },
-                    )
-                }
+                        AgentHistorySeparatorContent(
+                            liveDuration = null,
+                            showScrollToLatest = showButton,
+                            onScrollToLatest = {
+                                clicks++
+                                showButton = false
+                            },
+                            renderer = MosaicHistorySeparatorRenderer(columns = 12),
+                        )
+                    }
                 },
             )
 
@@ -80,11 +83,13 @@ val historyComposerSeparatorTest by testSuite {
         runMosaicTest(snapshotStrategy = historySeparatorAnsiSnapshots) {
             val snapshot = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                HistoryComposerSeparator(
-                    columns = 30,
-                    liveDuration = 1_500.milliseconds,
-                )
-            }
+                    AgentHistorySeparatorContent(
+                        liveDuration = 1_500.milliseconds,
+                        showScrollToLatest = false,
+                        onScrollToLatest = {},
+                        renderer = MosaicHistorySeparatorRenderer(columns = 30),
+                    )
+                }
             }
             val plain = snapshot.replace(AnsiStyleEscape, "")
             assertTrue(plain.startsWith("Worked for 2s"), plain)
@@ -95,12 +100,13 @@ val historyComposerSeparatorTest by testSuite {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                HistoryComposerSeparator(
-                    columns = 30,
-                    liveDuration = 1_500.milliseconds,
-                    showScrollToLatest = true,
-                )
-            }
+                    AgentHistorySeparatorContent(
+                        liveDuration = 1_500.milliseconds,
+                        showScrollToLatest = true,
+                        onScrollToLatest = {},
+                        renderer = MosaicHistorySeparatorRenderer(columns = 30),
+                    )
+                }
             }
 
             assertEquals("Worked for 2s-[↓]-------------", snapshot)

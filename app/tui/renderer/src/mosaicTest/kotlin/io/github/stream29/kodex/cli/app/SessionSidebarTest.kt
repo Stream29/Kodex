@@ -236,13 +236,16 @@ val sessionSidebarTest by testSuite {
                 val anchor = rememberTuiPopupAnchor()
                 TuiPopupHost(modifier = Modifier.width(28).height(5)) {
                     Text("terminal", modifier = Modifier.tuiPopupAnchor(anchor))
-                    ShellSessionContextMenu(
-                        request = ShellSessionMenuRequest(
-                            session = session,
-                            anchor = anchor,
-                            clickPosition = null,
+                    SidebarShellMenuContent(
+                        opening = mosaicShellMenu(
+                            ShellSessionMenuRequest(
+                                session = session,
+                                anchor = anchor,
+                                clickPosition = null,
+                            ),
                         ),
-                        onDismissRequest = {},
+                        renderer = rememberMosaicSidebarOverlayRenderer(0, 0),
+                        onDismiss = {},
                     )
                 }
             }
@@ -260,27 +263,26 @@ val sessionSidebarTest by testSuite {
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(modifier = Modifier.width(12)) {
-                    ShellSessionSidebarRow(
-                        side = SessionSidebarSide.Left,
-                        session = TestAgentShellSession(
-                            sessionId = 41,
-                            command = "first",
-                        ),
-                        columns = 12,
-                        onHoverChanged = { _, _ -> },
-                        onOpenMenu = { _, _ -> },
-                    )
-                    ShellSessionSidebarRow(
-                        side = SessionSidebarSide.Left,
-                        session = TestAgentShellSession(
-                            sessionId = 42,
-                            command = "abcdefghijklmnop",
-                        ),
-                        columns = 12,
-                        onHoverChanged = { _, _ -> },
-                        onOpenMenu = { _, _ -> },
-                    )
+                TuiPopupHost(modifier = Modifier.width(12).height(4)) {
+                    val renderer = rememberMosaicSidebarOverlayRenderer(12, 1)
+                    Column(modifier = Modifier.width(12)) {
+                        ShellSessionSidebarContent(
+                            side = SessionSidebarSide.Left,
+                            session = TestAgentShellSession(
+                                sessionId = 41,
+                                command = "first",
+                            ),
+                            renderer = renderer,
+                        )
+                        ShellSessionSidebarContent(
+                            side = SessionSidebarSide.Left,
+                            session = TestAgentShellSession(
+                                sessionId = 42,
+                                command = "abcdefghijklmnop",
+                            ),
+                            renderer = renderer,
+                        )
+                    }
                 }
             }
             }
@@ -312,12 +314,11 @@ val sessionSidebarTest by testSuite {
                             anchor = anchor,
                         )
                     }
-                    ShellSessionHoverPopup(
-                        request = request,
-                        contentColumns = 30,
-                        contentRows = 7,
+                    SidebarShellHoverContent(
+                        interaction = mosaicShellHover(request),
+                        renderer = rememberMosaicSidebarOverlayRenderer(30, 7),
                         onHoverChanged = {},
-                        onDismissRequest = {},
+                        onDismiss = {},
                     )
                 }
             }
@@ -422,11 +423,11 @@ val sessionSidebarTest by testSuite {
                         }
                     }
                     request = current
-                    HistoryIndexHoverPopup(
-                        request = current,
-                        contentColumns = 30,
-                        contentRows = 7,
+                    HistoryIndexHoverContent(
+                        interaction = mosaicIndexHover(current),
+                        renderer = rememberMosaicIndexOverlayRenderer(30, 7),
                         onHoverChanged = {},
+                        onDismiss = {},
                     )
                 }
             }
@@ -529,17 +530,19 @@ val sessionSidebarTest by testSuite {
                 TuiPopupHost(modifier = Modifier.width(60).height(12)) {
                     val anchor = rememberTuiPopupAnchor()
                     Text("entry", modifier = Modifier.tuiPopupAnchor(anchor))
-                    HistoryIndexHoverPopup(
-                        request = HistoryIndexInteractionRequest(
-                            side = HistoryIndexSide.Left,
-                            viewModel = viewModel,
-                            generation = 0,
-                            index = 7,
-                            anchor = anchor,
+                    HistoryIndexHoverContent(
+                        interaction = mosaicIndexHover(
+                            HistoryIndexInteractionRequest(
+                                side = HistoryIndexSide.Left,
+                                viewModel = viewModel,
+                                generation = 0,
+                                index = 7,
+                                anchor = anchor,
+                            ),
                         ),
-                        contentColumns = 50,
-                        contentRows = 11,
+                        renderer = rememberMosaicIndexOverlayRenderer(50, 11),
                         onHoverChanged = {},
+                        onDismiss = {},
                     )
                 }
             }
@@ -908,7 +911,11 @@ val sessionSidebarTest by testSuite {
                 val request = remember(anchor) { ShellSessionMenuRequest(captured, anchor, null) }
                 TuiPopupHost(Modifier.width(28).height(5)) {
                     Text("${selected.arguments.command} menu=$menuOpen", Modifier.tuiPopupAnchor(anchor))
-                    ShellSessionContextMenu(if (menuOpen) request else null) { menuOpen = false }
+                    SidebarShellMenuContent(
+                        opening = if (menuOpen) mosaicShellMenu(request) else null,
+                        renderer = rememberMosaicSidebarOverlayRenderer(0, 0),
+                        onDismiss = { menuOpen = false },
+                    )
                 }
             }
             }
@@ -933,10 +940,14 @@ val sessionSidebarTest by testSuite {
                 val request = remember(anchor) { ShellSessionMenuRequest(session, anchor, null) }
                 TuiPopupHost(Modifier.width(28).height(5)) {
                     Text("terminal menu=$menuOpen", Modifier.tuiPopupAnchor(anchor))
-                    ShellSessionContextMenu(if (menuOpen) request else null) {
-                        dismissals++
-                        menuOpen = false
-                    }
+                    SidebarShellMenuContent(
+                        opening = if (menuOpen) mosaicShellMenu(request) else null,
+                        renderer = rememberMosaicSidebarOverlayRenderer(0, 0),
+                        onDismiss = {
+                            dismissals++
+                            menuOpen = false
+                        },
+                    )
                 }
             }
             }

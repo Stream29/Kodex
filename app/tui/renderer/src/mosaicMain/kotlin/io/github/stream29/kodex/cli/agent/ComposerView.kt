@@ -14,21 +14,21 @@ import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.settings.NewLineKey
 
 @Composable
-public actual fun ComposerView(
+internal fun ComposerView(
     viewModel: ComposerViewModel,
     columns: Int,
     rows: Int,
     newLineKey: NewLineKey,
-    autoFocus: Boolean,
-    enabled: Boolean,
-    focusRequester: FocusRequester?,
-    showPendingSteer: Boolean,
-    showFailure: Boolean,
+    autoFocus: Boolean = true,
+    enabled: Boolean = true,
+    focusRequester: FocusRequester? = null,
 ) {
     if (rows <= 0) return
     ComposerContent(
-        viewModel, newLineKey, autoFocus, enabled, showPendingSteer, showFailure,
-        maximumPreviewLines = minOf(6, (rows - 1).coerceAtLeast(0)),
+        viewModel = viewModel,
+        newLineKey = newLineKey,
+        autoFocus = autoFocus,
+        enabled = enabled,
         maximumEditorLines = rows,
         frame = { content ->
             CompositionLocalProvider(LocalTextInputFocusRequester provides focusRequester) {
@@ -38,12 +38,12 @@ public actual fun ComposerView(
     )
 }
 
-public actual fun boundedComposerRows(availableRows: Int, desiredRows: Int): Int {
+internal fun boundedComposerRows(availableRows: Int, desiredRows: Int): Int {
     require(desiredRows > 0) { "Composer content must contain at least one row." }
     return minOf(desiredRows, availableRows.coerceAtLeast(1))
 }
 
-public actual fun pendingSteerPreviewLines(
+internal fun pendingSteerPreviewLines(
     pending: List<StableIndexEvent.Steerable>,
     columns: Int,
     maximumRows: Int,

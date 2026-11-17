@@ -164,13 +164,6 @@ public interface SessionCatalogViewModel : AutoCloseable {
     public suspend fun fork(sessionIndex: Int): Int
 
     /**
-     * Deletes one root Session, reloads, and reports whether it existed.
-     * @throws CancellationException when the caller or component is cancelled.
-     * @throws Exception when deletion or subsequent reload fails, without rollback/replay.
-     */
-    public suspend fun delete(sessionIndex: Int): Boolean
-
-    /**
      * Cancels owned work. Subsequent commands throw [CancellationException].
      * Closes/removes the owned Delete child. Does not close the backend or cancel
      * the parent, undo accepted mutations, or dismiss a replacement popup;

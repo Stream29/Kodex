@@ -47,9 +47,6 @@ public expect fun SettingsCheckboxItem(
 ): Unit
 
 @Composable
-public expect fun SettingsErrorText(value: String): Unit
-
-@Composable
 public expect fun SettingsActionButton(
     label: String,
     modifier: Modifier = Modifier,
@@ -102,10 +99,6 @@ public expect val SettingsForeground: Color
 @get:Composable
 @get:ReadOnlyComposable
 public expect val SettingsSupportingForeground: Color
-
-@get:Composable
-@get:ReadOnlyComposable
-public expect val SettingsActionForeground: Color
 
 @get:Composable
 @get:ReadOnlyComposable

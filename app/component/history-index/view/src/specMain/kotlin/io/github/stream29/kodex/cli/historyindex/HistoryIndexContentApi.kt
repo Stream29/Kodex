@@ -2,8 +2,8 @@ package io.github.stream29.kodex.cli.historyindex
 
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.app.agent.contract.*
-import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRowModel
 import io.github.stream29.kodex.cli.history.HistoryPlanModel
+import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRowModel
 import kotlin.time.Instant
 
 /** Placement only, not Agent identity. */
@@ -36,21 +36,16 @@ public class HistoryIndexMenuOpening(public val interaction: HistoryIndexInterac
 /** Position within the current linear window, not an Agent relationship. */
 public enum class HistoryIndexRowPosition { Single, First, Middle, Last }
 
-public sealed interface HistoryIndexRowValue {
-    public data object Loading : HistoryIndexRowValue
-    public data object Failed : HistoryIndexRowValue
-    public data class Ready(public val summary: String) : HistoryIndexRowValue
-}
-
 public data class HistoryIndexRowPresentation(
-    public val value: HistoryIndexRowValue,
+    public val summary: String,
     public val position: HistoryIndexRowPosition,
 )
 
 /** Question rows are already redacted; raw fallback content is empty when those rows are present. */
 public data class HistoryIndexDetailPresentation(
-    public val title: String, public val content: String,
-    public val questionRows: List<RequestUserInputHistoryRowModel>?, public val failed: Boolean,
+    public val title: String,
+    public val content: String,
+    public val questionRows: List<RequestUserInputHistoryRowModel>?,
     public val plan: HistoryPlanModel? = null,
 )
 

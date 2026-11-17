@@ -12,6 +12,7 @@ import io.github.stream29.kodex.app.accountusage.AccountUsageDependencies
 import io.github.stream29.kodex.app.accountusage.AccountUsageState
 import io.github.stream29.kodex.app.accountusage.createAccountUsageViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
+import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimit
 import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimitWindow
 import io.github.stream29.kodex.openai.accountusage.CodexAccountTokenUsage
@@ -43,11 +44,11 @@ val accountUsageComponentTest by testSuite {
         test("complete usage branch ${case.name}") {
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column(Modifier.width(140)) {
-                        AccountUsageContent(AccountUsageState(case.usage), {}, {}, {})
+                    WithMosaicComponentRenderers {
+                        Column(Modifier.width(140)) {
+                            AccountUsageContent(AccountUsageState(case.usage), {}, {})
+                        }
                     }
-                }
                 }
                 assertTrue("Codex usage" in snapshot, snapshot)
                 assertTrue(case.text in snapshot, snapshot)
@@ -65,16 +66,25 @@ val accountUsageComponentTest by testSuite {
             for (count in listOf(null, 0L)) {
                 runMosaicTest {
                     val snapshot = setContentAndSnapshot {
-                        io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                        Column(Modifier.width(140)) {
-                            AccountUsageContent(AccountUsageState(SettingsAccountUsageState.Available(
-                                renderSnapshot(tokens = tokens, count = count, credits = emptyList()))), {}, {}, {})
+                        WithMosaicComponentRenderers {
+                            Column(Modifier.width(140)) {
+                                AccountUsageContent(
+                                    AccountUsageState(
+                                        SettingsAccountUsageState.Available(
+                                            renderSnapshot(tokens = tokens, count = count, credits = emptyList()),
+                                        ),
+                                    ),
+                                    {}, {},
+                                )
+                            }
                         }
                     }
-                    }
                     assertTrue("Lifetime tokens: ${tokens ?: "unavailable"}" in snapshot, snapshot)
-                    assertTrue(if (count == null) "Usage limit resets: unavailable" in snapshot
-                        else "Usage limit resets: 0 available" in snapshot, snapshot)
+                    assertTrue(
+                        if (count == null) "Usage limit resets: unavailable" in snapshot
+                        else "Usage limit resets: 0 available" in snapshot,
+                        snapshot,
+                    )
                     assertFalse("Reset details unavailable" in snapshot, snapshot)
                 }
             }
@@ -83,14 +93,24 @@ val accountUsageComponentTest by testSuite {
     test("count-only details unavailable tells user to refresh never backend auto-selection") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(140)) {
-                    AccountUsageContent(AccountUsageState(SettingsAccountUsageState.Available(
-                        renderSnapshot(credits = null, unavailable = setOf(
-                            CodexAccountUsageSection.ResetCreditDetails, CodexAccountUsageSection.TokenUsage)))),
-                        {}, {}, {})
+                WithMosaicComponentRenderers {
+                    Column(Modifier.width(140)) {
+                        AccountUsageContent(
+                            AccountUsageState(
+                                SettingsAccountUsageState.Available(
+                                    renderSnapshot(
+                                        credits = null,
+                                        unavailable = setOf(
+                                            CodexAccountUsageSection.ResetCreditDetails,
+                                            CodexAccountUsageSection.TokenUsage,
+                                        ),
+                                    ),
+                                ),
+                            ),
+                            {}, {},
+                        )
+                    }
                 }
-            }
             }
             assertTrue("Reset details unavailable. Refresh usage" in snapshot, snapshot)
             assertTrue("Token activity details unavailable." in snapshot, snapshot)
@@ -100,12 +120,18 @@ val accountUsageComponentTest by testSuite {
     test("known empty rate limits and nullable token section do not produce fake windows or zeroes") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(140)) {
-                    AccountUsageContent(AccountUsageState(SettingsAccountUsageState.Available(
-                        renderSnapshot().copy(rateLimits = emptyList(), tokenUsage = null))), {}, {}, {})
+                WithMosaicComponentRenderers {
+                    Column(Modifier.width(140)) {
+                        AccountUsageContent(
+                            AccountUsageState(
+                                SettingsAccountUsageState.Available(
+                                    renderSnapshot().copy(rateLimits = emptyList(), tokenUsage = null),
+                                ),
+                            ),
+                            {}, {},
+                        )
+                    }
                 }
-            }
             }
             assertTrue("Rate limits unavailable" in snapshot, snapshot)
             assertTrue("Lifetime tokens: unavailable" in snapshot, snapshot)
@@ -123,31 +149,45 @@ val accountUsageComponentTest by testSuite {
         for ((duration, delay, expected) in cases) {
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    val limit = usage.rateLimits.single().copy(
-                        allowed = false,
-                        primaryWindow = usage.rateLimits.single().primaryWindow!!.copy(
-                            durationSeconds = duration, resetAfterSeconds = delay),
-                        secondaryWindow = null,
-                    )
-                    Column(Modifier.width(140)) {
-                        AccountUsageContent(AccountUsageState(SettingsAccountUsageState.Available(
-                            usage.copy(rateLimits = listOf(limit)))), {}, {}, {})
+                    WithMosaicComponentRenderers {
+                        val limit = usage.rateLimits.single().copy(
+                            allowed = false,
+                            primaryWindow = usage.rateLimits.single().primaryWindow!!.copy(
+                                durationSeconds = duration, resetAfterSeconds = delay,
+                            ),
+                            secondaryWindow = null,
+                        )
+                        Column(Modifier.width(140)) {
+                            AccountUsageContent(
+                                AccountUsageState(SettingsAccountUsageState.Available(usage.copy(rateLimits = listOf(limit)))),
+                                {}, {},
+                            )
+                        }
                     }
-                }
                 }
                 assertTrue("Codex: $expected limit reached" in snapshot, snapshot)
             }
         }
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Column(Modifier.width(140)) {
-                    AccountUsageContent(AccountUsageState(SettingsAccountUsageState.Available(
-                        usage.copy(rateLimits = listOf(usage.rateLimits.single().copy(
-                            primaryWindow = null, secondaryWindow = null, limitReached = true))))), {}, {}, {})
+                WithMosaicComponentRenderers {
+                    Column(Modifier.width(140)) {
+                        AccountUsageContent(
+                            AccountUsageState(
+                                SettingsAccountUsageState.Available(
+                                    usage.copy(
+                                        rateLimits = listOf(
+                                            usage.rateLimits.single().copy(
+                                                primaryWindow = null, secondaryWindow = null, limitReached = true,
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                            {}, {},
+                        )
+                    }
                 }
-            }
             }
             assertTrue("Codex: unavailable limit reached" in snapshot, snapshot)
         }
@@ -158,11 +198,11 @@ val accountUsageComponentTest by testSuite {
             var resets = 0
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column(Modifier.width(140)) {
-                        AccountUsageContent(AccountUsageState(initial), { refreshes++ }, { resets++ }, {})
+                    WithMosaicComponentRenderers {
+                        Column(Modifier.width(140)) {
+                            AccountUsageContent(AccountUsageState(initial), { refreshes++ }, { resets++ })
+                        }
                     }
-                }
                 }
                 repeat(4) {
                     sendKeyEvent(KeyboardEvent(codepoint = 9))
@@ -180,9 +220,9 @@ val accountUsageComponentTest by testSuite {
         try {
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column(Modifier.width(140)) { AccountUsageComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        Column(Modifier.width(140)) { AccountUsageComponent(vm) }
+                    }
                 }
                 assertEquals(0, deps.refreshes) // Not a composition/constructor side effect.
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -201,16 +241,17 @@ val accountUsageComponentTest by testSuite {
     }
     test("known zero reset credits disable reset but count-only availability sends selection intent") {
         for (count in listOf(0L, 2L)) {
-            val deps = RenderUsagePorts(SettingsAccountUsageState.Available(
-                renderSnapshot(count = count, credits = null)))
+            val deps = RenderUsagePorts(
+                SettingsAccountUsageState.Available(renderSnapshot(count = count, credits = null)),
+            )
             val owner = Job()
             val vm = createAccountUsageViewModel(deps, CoroutineScope(Dispatchers.Unconfined + owner))
             try {
                 runMosaicTest {
                     setContentAndSnapshot {
-                        io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                        Column(Modifier.width(140)) { AccountUsageComponent(vm) }
-                    }
+                        WithMosaicComponentRenderers {
+                            Column(Modifier.width(140)) { AccountUsageComponent(vm) }
+                        }
                     }
                     sendKeyEvent(KeyboardEvent(codepoint = 9))
                     flushUsageInput()
@@ -223,7 +264,7 @@ val accountUsageComponentTest by testSuite {
             } finally { vm.close(); owner.cancel() }
         }
     }
-    test("failed command reports shared safe banner and Dismiss does not refresh or clear source") {
+    test("failed command reports to shared authority without exposing raw diagnostic or duplicate inline banner") {
         val deps = RenderUsagePorts(SettingsAccountUsageState.Failed("Safe source failure", usage))
         deps.refreshError = IllegalStateException("raw-secret-diagnostic")
         val owner = Job()
@@ -231,37 +272,39 @@ val accountUsageComponentTest by testSuite {
         try {
             runMosaicTest {
                 setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column(Modifier.width(140)) { AccountUsageComponent(vm) }
-                }
+                    WithMosaicComponentRenderers {
+                        Column(Modifier.width(140)) { AccountUsageComponent(vm) }
+                    }
                 }
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
-                val failure = awaitSnapshot()
-                assertTrue("A settings operation failed." in failure, failure)
+                val failure = flushUsageInput()
+                assertTrue(deps.operationFailure.value)
                 assertTrue("Safe source failure" in failure, failure)
                 assertFalse("raw-secret-diagnostic" in failure, failure)
-                // Disabled reset is skipped, so the next focus target is Dismiss.
-                sendKeyEvent(KeyboardEvent(codepoint = 9))
-                flushUsageInput()
-                sendKeyEvent(KeyboardEvent(codepoint = 13))
-                val dismissed = awaitSnapshot()
-                assertFalse("A settings operation failed." in dismissed, dismissed)
-                assertTrue("Safe source failure" in dismissed, dismissed)
+                assertFalse("A settings operation failed." in failure, failure)
+                vm.dismissFailure()
+                assertFalse(deps.operationFailure.value)
                 assertEquals(1, deps.dismissals)
                 assertEquals(1, deps.refreshes)
             }
         } finally { vm.close(); owner.cancel() }
     }
-    test("closed renders nothing and shared failure delegation avoids duplicate host banner") {
+    test("closed renders nothing and shared failure is owned by the host") {
         for (closed in listOf(false, true)) {
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
-                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Column(Modifier.width(140)) {
-                        AccountUsageContent(AccountUsageState(SettingsAccountUsageState.Available(usage),
-                            operationFailure = true, closed = closed), {}, {}, {}, showOperationFailure = false)
+                    WithMosaicComponentRenderers {
+                        Column(Modifier.width(140)) {
+                            AccountUsageContent(
+                                AccountUsageState(
+                                    SettingsAccountUsageState.Available(usage),
+                                    operationFailure = true,
+                                    closed = closed,
+                                ),
+                                {}, {},
+                            )
+                        }
                     }
-                }
                 }
                 assertEquals(!closed, "Codex usage" in snapshot)
                 assertFalse("A settings operation failed." in snapshot, snapshot)
@@ -280,15 +323,18 @@ private data class RenderUsageCase(
 private fun renderSnapshot(
     tokens: Long? = 123_456,
     count: Long? = 2,
-    credits: List<CodexRateLimitResetCredit>? = listOf(CodexRateLimitResetCredit(
-        "credit", grantedAt = null, expiresAt = null)),
+    credits: List<CodexRateLimitResetCredit>? = listOf(
+        CodexRateLimitResetCredit("credit", grantedAt = null, expiresAt = null),
+    ),
     unavailable: Set<CodexAccountUsageSection> = emptySet(),
 ): CodexAccountUsageSnapshot = CodexAccountUsageSnapshot(
-    rateLimits = listOf(CodexAccountRateLimit(
-        "Codex", "codex", allowed = true, limitReached = false,
-        primaryWindow = CodexAccountRateLimitWindow(42, 18_000, 900, Instant.parse("2026-10-02T01:15:00Z")),
-        secondaryWindow = CodexAccountRateLimitWindow(10, 604_800, 172_800, Instant.parse("2026-10-04T01:00:00Z")),
-    )),
+    rateLimits = listOf(
+        CodexAccountRateLimit(
+            "Codex", "codex", allowed = true, limitReached = false,
+            primaryWindow = CodexAccountRateLimitWindow(42, 18_000, 900, Instant.parse("2026-10-02T01:15:00Z")),
+            secondaryWindow = CodexAccountRateLimitWindow(10, 604_800, 172_800, Instant.parse("2026-10-04T01:00:00Z")),
+        ),
+    ),
     resetCredits = CodexRateLimitResetCredits(count, credits),
     tokenUsage = CodexAccountTokenUsage(lifetimeTokens = tokens),
     unavailableSections = unavailable,

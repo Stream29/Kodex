@@ -19,7 +19,6 @@ kotlin {
         }
         named("mosaicMain").dependencies {
             implementation(project(":app-tui"))
-            implementation(project(":app-tui-renderer"))
         }
         commonTest.dependencies {
             implementation(project(":app-backend-daemon"))

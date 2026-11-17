@@ -100,7 +100,7 @@ internal object MosaicUiRenderer : UiRenderer {
         autoFocus: Boolean,
         multiline: Boolean,
         maximumLines: Int,
-        submitKey: UiSubmitKey,
+        submitKey: SubmitKey,
         revision: Long?,
     ) {
         require(maximumLines > 0)
@@ -146,7 +146,7 @@ internal object MosaicUiRenderer : UiRenderer {
                         autoFocus = autoFocus,
                         focusRequester = focusRequester,
                         multiline = multiline,
-                        submitKey = if (submitKey == UiSubmitKey.Enter) SubmitKey.Enter else SubmitKey.CtrlEnter,
+                        submitKey = submitKey,
                         onSubmit = { onSubmit(input.value.text, input.value.cursorOffset) },
                         onValueChanged = {
                             onChange(it.text, it.cursorOffset)?.let { value -> acceptedRevision = value }

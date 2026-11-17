@@ -18,7 +18,6 @@ import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
@@ -60,12 +59,6 @@ val revertAndEditTest by testSuite {
         )
         assertNull(MessageHistoryItemState.Failed.revertAndEditText())
         assertNull(null.revertAndEditText())
-        val loading = Job()
-        try {
-            assertNull(MessageHistoryItemState.Loading(loading).revertAndEditText())
-        } finally {
-            loading.cancel()
-        }
     }
 
     test("first user message reverts to empty history and replaces only its owner's draft") {

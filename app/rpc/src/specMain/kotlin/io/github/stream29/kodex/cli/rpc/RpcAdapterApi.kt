@@ -88,7 +88,7 @@ public expect class RpcGlobalEditor(
     global: RpcGlobalSettings,
     rpc: GlobalRpc,
     applicationScope: CoroutineScope,
-    launchBaseDirectory: String = ".",
+    launchBaseDirectory: String,
 ) : GlobalSettingsViewModel {
     override val contextSourceSettings: ContextSourceSettingsViewModel
     override val sessionTitleSettings: SessionTitleSettingsViewModel

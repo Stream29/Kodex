@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.mcpsettings.*
 import io.github.stream29.kodex.app.settings.contract.McpServerSettingsState
+import io.github.stream29.kodex.app.settings.contract.SettingsWriteAdmission
 import io.github.stream29.kodex.mcp.contract.*
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.models.OAuthTarget
@@ -25,8 +26,8 @@ internal class RpcMcpSettingsDependencies(
             override val originalName: String? = serverName
             override val initialDraft: McpServerDraft? = initial
             private var released = false
-            override fun save(draft: McpServerDraft): McpWriteAdmission {
-                if (released) return McpWriteAdmission.Rejected("The MCP editor is no longer active.")
+            override fun save(draft: McpServerDraft): SettingsWriteAdmission {
+                if (released) return SettingsWriteAdmission.Rejected("The MCP editor is no longer active.")
                 val admitted = accept {
                     check(mcp.save(captured, serverName, draft)) { "The MCP configuration changed." }
                 }
@@ -42,16 +43,16 @@ internal class RpcMcpSettingsDependencies(
         return object : McpServerHandle {
             override val serverName: String = serverName
             private var released = false
-            override fun delete(): McpWriteAdmission {
-                if (released) return McpWriteAdmission.Rejected("The MCP target is no longer active.")
+            override fun delete(): SettingsWriteAdmission {
+                if (released) return SettingsWriteAdmission.Rejected("The MCP target is no longer active.")
                 val admitted = accept {
                     check(mcp.delete(serverName, captured)) { "The MCP configuration changed." }
                 }
                 if (admitted) released = true
                 return admission(admitted)
             }
-            override fun setEnabled(enabled: Boolean): McpWriteAdmission {
-                if (released) return McpWriteAdmission.Rejected("The MCP target is no longer active.")
+            override fun setEnabled(enabled: Boolean): SettingsWriteAdmission {
+                if (released) return SettingsWriteAdmission.Rejected("The MCP target is no longer active.")
                 val admitted = accept {
                     check(mcp.setEnabled(serverName, captured, enabled)) { "The MCP configuration changed." }
                 }
@@ -82,9 +83,9 @@ internal class RpcMcpSettingsDependencies(
     override fun dismissFailure() { global.dismissOperationFailure() }
 }
 
-private fun admission(accepted: Boolean): McpWriteAdmission =
-    if (accepted) McpWriteAdmission.Accepted
-    else McpWriteAdmission.Rejected("Settings is no longer accepting edits.")
+private fun admission(accepted: Boolean): SettingsWriteAdmission =
+    if (accepted) SettingsWriteAdmission.Accepted
+    else SettingsWriteAdmission.Rejected("Settings is no longer accepting edits.")
 
 private fun McpServerConfiguration.editorDraft(name: String): McpServerDraft = when (this) {
     is McpServerConfiguration.StreamableHttp -> McpServerDraft.StreamableHttp(

@@ -9,25 +9,21 @@ import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPresentat
 import io.github.stream29.kodex.app.agent.contract.ComposerRuntimePort
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmitPort
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
-import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.cli.agent.createComposerViewModel
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 
 internal fun createRpcComposerViewModel(
     binding: RpcSessionBinding,
     ownerScope: CoroutineScope,
-    cancellationPort: ComposerCancellationPort,
     failureReporter: ComposerFailureReporter,
 ): ComposerViewModel {
-    val presentation = combine(binding.pendingAskUser, binding.settings) { pending, settings ->
+    val presentation = binding.pendingAskUser.map { pending ->
         pending?.let {
             ComposerRequestInputPresentation.Pending(
-                callId = "ask-${it.askId}",
-                mode = settings.requestUserInputMode,
                 title = "Request user input",
                 questionCount = it.questions.questions.size,
             )
@@ -45,8 +41,6 @@ internal fun createRpcComposerViewModel(
             override val submit = ComposerSubmitPort { _, content ->
                 binding.submit(content)
             }
-
-            override val cancellation = cancellationPort
 
             override val requestInput = object : ComposerRequestInputPort {
                 override val presentation: StateFlow<ComposerRequestInputPresentation> = presentation

@@ -116,15 +116,6 @@ public actual fun SettingsCheckboxItem(
 }
 
 @Composable
-public actual fun SettingsErrorText(value: String) {
-    Text(
-        value = value,
-        color = SettingsErrorForeground,
-        textStyle = TuiTheme.typography.body + TextStyle.Bold,
-    )
-}
-
-@Composable
 public actual fun SettingsActionButton(
     label: String,
     modifier: Modifier,
@@ -274,11 +265,6 @@ public actual val SettingsSupportingForeground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.onSurfaceVariant
-
-public actual val SettingsActionForeground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.primary
 
 public actual val SettingsErrorForeground: Color
     @Composable
