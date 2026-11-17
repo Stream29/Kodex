@@ -5,7 +5,7 @@ import kotlin.io.encoding.Base64
 public actual fun pkceS256CodeChallenge(codeVerifier: String): String =
     Base64.UrlSafe.encode(sha256(codeVerifier.encodeToByteArray())).trimEnd('=')
 
-public actual fun sha256(input: ByteArray): ByteArray {
+internal fun sha256(input: ByteArray): ByteArray {
     val bitLength = input.size.toLong() * 8L
     val paddingLength = ((56 - (input.size + 1) % Sha256BlockSize) + Sha256BlockSize) % Sha256BlockSize
     val padded = ByteArray(input.size + 1 + paddingLength + Sha256LengthFieldSize)

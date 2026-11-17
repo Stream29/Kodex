@@ -5,6 +5,3 @@ package io.github.stream29.kodex.utils.oauthloopback
  * SHA-256 digest) for [codeVerifier].
  */
 public expect fun pkceS256CodeChallenge(codeVerifier: String): String
-
-/** Computes the 32-byte FIPS 180-4 SHA-256 digest of [input]. */
-public expect fun sha256(input: ByteArray): ByteArray
