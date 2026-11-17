@@ -5,7 +5,7 @@ package io.github.stream29.kodex.cli.rpc
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.app.accountusage.AccountUsageViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
@@ -137,7 +137,7 @@ public expect class RpcSessionBinding {
     public val running: StateFlow<Boolean>
     public val shellSessions: StateFlow<Map<Int, ShellSessionState>>
     public val settings: SuspendMutableStateFlow<KodexAgentSettings>
-    public val pendingSteer: StateFlow<List<StableIndexEvent.Steerable>>
+    public val pendingSteer: StateFlow<List<AgentCommit.Steerable>>
     public val tokenCount: StateFlow<LlmRequestMeta?>
     public fun ensureActive(): Unit
     public suspend fun submit(content: List<ContentItem>): Unit

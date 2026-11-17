@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.rpc.models
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -28,7 +28,7 @@ public sealed interface AgentStateValue {
     @Serializable
     @SerialName("tool_pending")
     public data class ToolPending(
-        public val events: List<PendingToolEvent>,
+        public val events: List<PendingToolCall>,
     ) : AgentStateValue {
         init {
             require(events.isNotEmpty()) {

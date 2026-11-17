@@ -11,9 +11,8 @@ import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
@@ -343,7 +342,7 @@ private class FakeTool(
         elapsed = Duration.ZERO,
     ),
 ) : ToolHistoryItemViewModel {
-    private val event = StableTextToolEvent(
+    private val event = StableTextTool(
         callId = "call-$index",
         name = "demo",
         arguments = JsonObject(emptyMap()),

@@ -7,19 +7,19 @@ import com.jakewharton.mosaic.ui.*
 import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.cli.components.*
 import kotlin.time.Duration
 
 @Composable
-internal fun StableCleanEvent.render(shellSessions: AgentShellSessionRegistry? = null) {
+internal fun AgentCommit.render(shellSessions: AgentShellSessionRegistry? = null) {
     render(shellSessions, expansion = null, elapsed = null)
 }
 
 @Composable
-internal fun StableCleanEvent.render(
+internal fun AgentCommit.render(
     shellSessions: AgentShellSessionRegistry?, expansion: HistoryExpansionBinding?, elapsed: Duration?,
 ) {
     CompositionLocalProvider(LocalHistoryExpansion provides expansion, LocalHistoryElapsed provides elapsed) {
@@ -28,7 +28,7 @@ internal fun StableCleanEvent.render(
 }
 
 @Composable
-internal fun UnstableCleanEvent.render(shellSessions: AgentShellSessionRegistry? = null) {
+internal fun PendingRecord.render(shellSessions: AgentShellSessionRegistry? = null) {
     HistoryEventContent(this, MosaicHistoryContentRenderer(), shellSessions)
 }
 

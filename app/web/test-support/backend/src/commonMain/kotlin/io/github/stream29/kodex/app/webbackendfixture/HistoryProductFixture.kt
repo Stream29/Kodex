@@ -7,9 +7,9 @@ import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
@@ -24,7 +24,7 @@ internal suspend fun CoroutineScope.seedHistoryProductFixture(home: Path) {
         2 to StableUserMessage(listOf(ContentItem.InputText("HISTORY_SPARSE_OLD"))),
         5 to StableAssistantMessage(listOf(ContentItem.OutputText("HISTORY_SPARSE_LATEST"))),
     ))
-    val events = linkedMapOf<Int, StableIndexEvent>()
+    val events = linkedMapOf<Int, IndexCommit>()
     repeat(420) { row ->
         val marker = "HISTORY_ROW_${row.toString().padStart(3, '0')}"
         events[2 + row * 3] = if (row % 2 == 0) {
@@ -36,7 +36,7 @@ internal suspend fun CoroutineScope.seedHistoryProductFixture(home: Path) {
     events[1263] = StableAssistantMessage(listOf(ContentItem.OutputText(
         (0 until 100).joinToString("\n") { "HISTORY_LONG_${it.toString().padStart(3, '0')}" },
     )))
-    events[1266] = Json.decodeFromString<StableIndexEvent>(
+    events[1266] = Json.decodeFromString<IndexCommit>(
         """{"type":"plan_update","call_id":"history-plan","item_id":"history-plan","arguments":{"explanation":"History disclosure geometry fixture","plan":[{"step":"HISTORY_DISCLOSURE_FIRST","status":"completed"},{"step":"HISTORY_DISCLOSURE_LAST","status":"in_progress"}]}}""",
     )
     events[1269] = StableAssistantMessage(listOf(ContentItem.OutputText("HISTORY_MANY_LATEST")))
@@ -50,7 +50,7 @@ internal suspend fun CoroutineScope.seedHistoryProductFixture(home: Path) {
             storage.commit(StableUserMessage(listOf(ContentItem.InputText("HISTORY_TOOL_OLD"))))
             val output = (0 until 100).joinToString("\n") { "HISTORY_TOOL_OUTPUT_$it" }
             storage.commit(
-                Json.decodeFromString<StableWorkEvent>(
+                Json.decodeFromString<WorkCommit>(
                     """{"type":"command_execution_tool_event","call_id":"history-tool","action":{"type":"exec_command","arguments":{"cmd":"history-fixture-not-executed","yield_time_ms":1000,"max_output_tokens":10000}},"result":{"type":"output","value":{"chunk_id":"history","wall_time_seconds":0.12,"exit_code":0,"original_token_count":100,"output":${Json.encodeToString(output)}}}}""",
                 ),
             )

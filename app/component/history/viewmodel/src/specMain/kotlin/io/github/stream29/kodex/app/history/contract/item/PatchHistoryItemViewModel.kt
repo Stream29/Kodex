@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.app.history.contract.item
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
 
@@ -29,7 +29,7 @@ public sealed interface PatchHistoryItemState {
 
     public data class Expanded(
         public val header: PatchHistoryItemHeader,
-        public val event: StablePatchToolEvent,
+        public val event: StablePatch,
     ) : PatchHistoryItemState
 
     public data object Failed : PatchHistoryItemState

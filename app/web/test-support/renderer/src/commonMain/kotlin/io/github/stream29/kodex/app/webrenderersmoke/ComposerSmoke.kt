@@ -8,7 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.app.ui.UiAction
@@ -29,7 +29,7 @@ internal fun ComposerSmoke(onBack: () -> Unit) {
     val runtimeFixture = remember {
         object : ComposerRuntimePort {
             override val running = MutableStateFlow(false)
-            override val pendingSteer = MutableStateFlow<List<StableIndexEvent.Steerable>>(emptyList())
+            override val pendingSteer = MutableStateFlow<List<AgentCommit.Steerable>>(emptyList())
         }
     }
     val model = remember {

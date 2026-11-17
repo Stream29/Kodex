@@ -2,14 +2,14 @@ package io.github.stream29.kodex.cli.agent
 
 import de.infix.testBalloon.framework.core.testSuite
 import de.infix.testBalloon.framework.core.TestCompartment
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
@@ -229,10 +229,10 @@ val historyIndexComponentTest by testSuite(compartment = { TestCompartment.RealT
     }
 }
 
-private fun message(text: String): CleanIndexEntry = StableUserMessage(listOf(ContentItem.InputText(text)))
+private fun message(text: String): IndexCommit = StableUserMessage(listOf(ContentItem.InputText(text)))
 
 private class IndexPorts(production: Boolean = true) : HistoryIndexDependencies {
-    val timeline = FakeTimeline<CleanIndexEntry>()
+    val timeline = FakeTimeline<IndexCommit>()
     val timestamp = FakeTimeline<Instant>()
     override val storage: KodexAgentStorage = object : KodexAgentStorage {
         override val uri: String = "kodex://test"
@@ -251,7 +251,7 @@ private class IndexPorts(production: Boolean = true) : HistoryIndexDependencies 
             when (types) {
                 AgentCommitType.IndexTypes -> timeline.indexesIn(range).mapNotNull { idx ->
                     timeline.values[idx]?.let { entry ->
-                        val createdAt = if (entry is StableIndexEvent.Steerable) {
+                        val createdAt = if (entry is AgentCommit.Steerable) {
                             timestamp.values[idx] ?: Instant.DISTANT_PAST
                         } else {
                             Instant.DISTANT_PAST

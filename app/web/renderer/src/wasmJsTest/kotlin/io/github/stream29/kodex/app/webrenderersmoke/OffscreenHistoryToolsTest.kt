@@ -104,14 +104,14 @@ val offscreenHistoryToolsTest by testSuite {
             test("recorded exec and poll outputs wrap as monospace width=$width scale=$scale exit=$exitCode") { offscreenTest {
                 val output = "  EXEC_路径\t" + "long output ".repeat(18) + "\n[output truncated]\n"
                 val pollOutput = "POLL_UNCHANGED_" + "long output ".repeat(18)
-                val run = StableCommandExecutionToolEvent(
+                val run = StableCommandExecution(
                     "recorded-exec", action = StableCommandExecutionAction.ExecCommand(ExecCommandArguments(
                         "fixture-command", yieldTimeMillis = 1000,
                     )), result = StableCommandExecutionResult.Output(UnifiedExecOutput(
                         "private-exec-chunk", 0.5, exitCode = exitCode, originalTokenCount = 7, output = output,
                     )),
                 )
-                val poll = StableCommandExecutionToolEvent(
+                val poll = StableCommandExecution(
                     "recorded-poll", action = StableCommandExecutionAction.WriteStdin(WriteStdinArguments(
                         98765, chars = "", yieldTimeMillis = 0, maxOutputTokens = 0,
                     )), result = StableCommandExecutionResult.Output(UnifiedExecOutput(
@@ -153,7 +153,7 @@ val offscreenHistoryToolsTest by testSuite {
         for ((chars, exitCode) in listOf("" to null, "hello\n" to 0, " \n" to 7)) {
             test("recorded stdin output preserves input and wraps width=$width scale=$scale chars=${chars.length} exit=$exitCode") { offscreenTest {
                 val output = "  POLL_路径\t" + "long terminal output ".repeat(12) + "\n[output truncated]\n"
-                val event = StableCommandExecutionToolEvent(
+                val event = StableCommandExecution(
                     "recorded-stdin",
                     action = StableCommandExecutionAction.WriteStdin(WriteStdinArguments(
                         98765, chars = chars, yieldTimeMillis = 0, maxOutputTokens = 0,
@@ -189,7 +189,7 @@ val offscreenHistoryToolsTest by testSuite {
     test("command disclosure preserves multiline input and output and omits private chunk/session identifiers") { offscreenTest {
         val command = "printf first\n  " + "x".repeat(180) + "\nlast"
         val output = "  output\n[output truncated]\n"
-        val event = StableCommandExecutionToolEvent(
+        val event = StableCommandExecution(
             "recorded", action = StableCommandExecutionAction.ExecCommand(ExecCommandArguments(
                 command, workdir = "/repo", yieldTimeMillis = 10_000, maxOutputTokens = 42,
             )),
@@ -221,7 +221,7 @@ val offscreenHistoryToolsTest by testSuite {
     )
     for ((index, entry) in outcomes.withIndex()) {
         test("recorded result status remains distinct and never invents an exit code branch=$index") { offscreenTest {
-            val event = StableCommandExecutionToolEvent(
+            val event = StableCommandExecution(
                 "outcome-$index", action = StableCommandExecutionAction.WriteStdin(WriteStdinArguments(98765, yieldTimeMillis = 0)),
                 result = entry.first,
             )
@@ -254,7 +254,7 @@ val offscreenHistoryToolsTest by testSuite {
     }
 
     test("whitespace stdin and empty output are still rendered while polling metadata remains private") { offscreenTest {
-        val event = StableCommandExecutionToolEvent(
+        val event = StableCommandExecution(
             "whitespace", action = StableCommandExecutionAction.WriteStdin(WriteStdinArguments(87654, chars = " \n", yieldTimeMillis = 0, maxOutputTokens = 0)),
             result = StableCommandExecutionResult.Output(UnifiedExecOutput("private-chunk", 0.0, originalTokenCount = 0, output = "")),
         )

@@ -32,8 +32,8 @@ val pendingToolEventSerializationTest by testSuite {
             *** Delete File: obsolete.txt
             *** End Patch
         """.trimIndent()
-        val events: List<PendingToolEvent> = listOf(
-            PendingFunctionToolEvent(
+        val events: List<PendingToolCall> = listOf(
+            PendingFunctionToolCall(
                 callId = "call_function",
                 itemId = ResponseItemId("item_function"),
                 name = "search",
@@ -42,18 +42,18 @@ val pendingToolEventSerializationTest by testSuite {
                     put("query", "design context")
                 },
             ),
-            PendingCustomToolEvent(
+            PendingCustomToolCall(
                 callId = "call_custom",
                 itemId = ResponseItemId("item_custom"),
                 name = "custom_tool",
                 input = "freeform input",
             ),
-            PendingPatchToolEvent(
+            PendingPatch(
                 callId = "call_apply_patch",
                 itemId = ResponseItemId("item_apply_patch"),
                 diff = patchText.parsePatch(),
             ),
-            PendingReadMediaToolEvent(
+            PendingReadMedia(
                 callId = "call_read_media",
                 itemId = ResponseItemId("item_read_media"),
                 arguments = ReadMediaToolArguments(path = "diagram.png"),
@@ -68,7 +68,7 @@ val pendingToolEventSerializationTest by testSuite {
             assertEquals(event.callId, projected.callId)
             assertEquals(event.itemId, projected.itemId())
             assertEquals(true, "type" in element)
-            assertEquals(event, pendingEventJson.decodeFromString<PendingToolEvent>(encoded))
+            assertEquals(event, pendingEventJson.decodeFromString<PendingToolCall>(encoded))
         }
 
         assertEquals(
@@ -99,7 +99,7 @@ val pendingToolEventSerializationTest by testSuite {
                     arguments = """{"path":"diagram.png"}""",
                 ),
             ),
-            events.flatMap(PendingToolEvent::toResponseHistoryItems),
+            events.flatMap(PendingToolCall::toResponseHistoryItems),
         )
     }
 
@@ -127,10 +127,10 @@ val pendingToolEventSerializationTest by testSuite {
         )
 
         calls.forEach { call ->
-            val encoded = pendingEventJson.encodeToString<PendingToolEvent>(call)
+            val encoded = pendingEventJson.encodeToString<PendingToolCall>(call)
             val projected = call.toResponseHistoryItems().single()
 
-            assertEquals(call, pendingEventJson.decodeFromString<PendingToolEvent>(encoded))
+            assertEquals(call, pendingEventJson.decodeFromString<PendingToolCall>(encoded))
             assertEquals(call.callId, (projected as ResponseItem.ToolCall).callId)
         }
         assertEquals(
@@ -149,27 +149,27 @@ val pendingToolEventSerializationTest by testSuite {
                     input = "not a patch",
                 ),
             ),
-            calls.flatMap(PendingToolEvent::toResponseHistoryItems),
+            calls.flatMap(PendingToolCall::toResponseHistoryItems),
         )
     }
 
     test("projects every specialized function identity") {
-        val cases: List<Pair<PendingToolEvent, Pair<String, String?>>> = listOf(
-            PendingReadMediaToolEvent(
+        val cases: List<Pair<PendingToolCall, Pair<String, String?>>> = listOf(
+            PendingReadMedia(
                 callId = "call_read_media",
                 arguments = ReadMediaToolArguments("image.png"),
             ) to ("read_media" to null),
-            PendingAwaitEventToolEvent(
+            PendingAwait(
                 callId = "call_await",
                 arguments = AwaitEventArguments(listOf(7)),
             ) to ("await_event" to null),
-            PendingCommandExecutionToolEvent(
+            PendingCommandExecution(
                 callId = "call_exec",
                 action = PendingCommandExecutionAction.ExecCommand(
                     ExecCommandArguments("pwd", yieldTimeMillis = 10_000),
                 ),
             ) to ("exec_command" to null),
-            PendingCommandExecutionToolEvent(
+            PendingCommandExecution(
                 callId = "call_write",
                 action = PendingCommandExecutionAction.WriteStdin(
                     WriteStdinArguments(7, yieldTimeMillis = 250),
@@ -204,12 +204,12 @@ val pendingToolEventSerializationTest by testSuite {
         assertTrue(""""yield_time_ms":250""" in writeCall.arguments)
 
         assertFailsWith<SerializationException> {
-            pendingEventJson.decodeFromString<PendingToolEvent>(
+            pendingEventJson.decodeFromString<PendingToolCall>(
                 """{"type":"command_execution","call_id":"call_exec","action":{"type":"exec_command","arguments":{"cmd":"pwd"}}}""",
             )
         }
         assertFailsWith<SerializationException> {
-            pendingEventJson.decodeFromString<PendingToolEvent>(
+            pendingEventJson.decodeFromString<PendingToolCall>(
                 """{"type":"command_execution","call_id":"call_write","action":{"type":"write_stdin","arguments":{"session_id":7}}}""",
             )
         }

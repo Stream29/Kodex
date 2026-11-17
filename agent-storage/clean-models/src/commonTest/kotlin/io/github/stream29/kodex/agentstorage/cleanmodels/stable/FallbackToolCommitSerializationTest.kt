@@ -20,8 +20,8 @@ private val toolEventJson = Json
 val stableToolEventSerializationTest by testSuite {
     test("function fallbacks reconstruct calls and typed outputs") {
         val arguments = buildJsonObject { put("query", "design context") }
-        val events: List<StableWorkEvent.CompletedTool> = listOf(
-            StableJsonToolEvent(
+        val events: List<WorkCommit> = listOf(
+            StableJsonTool(
                 callId = "call_json",
                 itemId = ResponseItemId("item_json"),
                 name = "search",
@@ -30,7 +30,7 @@ val stableToolEventSerializationTest by testSuite {
                 result = buildJsonObject { put("matches", 1) },
                 success = true,
             ),
-            StableTextToolEvent(
+            StableTextTool(
                 callId = "call_text",
                 itemId = ResponseItemId("item_text"),
                 name = "search",
@@ -62,7 +62,7 @@ val stableToolEventSerializationTest by testSuite {
 
     test("custom fallback retains only irreducible payloads") {
         val customResult = FunctionCallOutputPayload.fromText("done")
-        val event = StableCustomToolEvent(
+        val event = StableCustomTool(
             callId = "call_custom",
             itemId = ResponseItemId("item_custom"),
             name = "custom_tool",
@@ -117,7 +117,7 @@ val stableToolEventSerializationTest by testSuite {
         events.forEach(::assertToolEventRoundTripWithoutRawItems)
         events.forEach { event ->
             val element = toolEventJson.parseToJsonElement(
-                toolEventJson.encodeToString<StableWorkEvent>(event),
+                toolEventJson.encodeToString<WorkCommit>(event),
             ).jsonObject
             assertEquals(JsonPrimitive("invalid_tool_call"), element["type"])
         }
@@ -147,20 +147,20 @@ val stableToolEventSerializationTest by testSuite {
                         .copy(success = false),
                 ),
             ),
-            events.flatMap(StableCleanEvent::toResponseHistoryItems),
+            events.flatMap(AgentCommit::toResponseHistoryItems),
         )
     }
 }
 
 private fun assertToolEventRoundTripWithoutRawItems(
-    event: StableWorkEvent.CompletedTool,
+    event: WorkCommit,
 ) {
-    val encoded = toolEventJson.encodeToString<StableWorkEvent>(event)
+    val encoded = toolEventJson.encodeToString<WorkCommit>(event)
     val element = toolEventJson.parseToJsonElement(encoded).jsonObject
 
     assertTrue("call" !in element)
     assertTrue("output" !in element)
-    assertEquals(event, toolEventJson.decodeFromString<StableWorkEvent>(encoded))
+    assertEquals(event, toolEventJson.decodeFromString<WorkCommit>(encoded))
     assertEquals(2, event.toResponseHistoryItems().size)
 }
 

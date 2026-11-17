@@ -24,8 +24,8 @@ public data class StableAskUserEvent(
     public val askId: Int,
     public val arguments: RequestUserInputArgs,
     public val response: RequestUserInputResponse,
-) : StableIndexEvent.Steerable, CompactionRetainedItem {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : CompactionRetainedItem, AgentCommit.Steerable {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.Message(
                 role = MessageRole.User,

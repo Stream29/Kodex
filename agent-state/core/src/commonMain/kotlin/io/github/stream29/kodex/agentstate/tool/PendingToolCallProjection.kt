@@ -1,16 +1,16 @@
 package io.github.stream29.kodex.agentstate.tool
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecution
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMedia
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
@@ -26,25 +26,25 @@ import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
 
 /** Converts one provider-issued local tool call at the AgentState boundary. */
-public actual fun ResponseItem.ToolCall.toPendingToolEvent(): PendingToolEvent =
+public actual fun ResponseItem.ToolCall.toPendingToolEvent(): PendingToolCall =
     when (this) {
         is ResponseItem.FunctionCall -> toPendingToolEvent()
         is ResponseItem.CustomToolCall -> toPendingToolEvent()
         is ResponseItem.ClientToolSearchCall -> toPendingToolEvent()
     }
 
-private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
+private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolCall {
     fun <Arguments> typed(
         deserializer: DeserializationStrategy<Arguments>,
-        transform: (Arguments) -> PendingToolEvent,
-    ): PendingToolEvent =
+        transform: (Arguments) -> PendingToolCall,
+    ): PendingToolCall =
         decodeArguments(deserializer)?.let(transform)
             ?: invalid("Invalid JSON arguments for ${qualifiedName()}.")
 
     return when {
         namespace == null && name == UnifiedExecTools.ExecCommandName ->
             typed(ExecCommandArguments.serializer()) { arguments ->
-                PendingCommandExecutionToolEvent(
+                PendingCommandExecution(
                     callId = callId,
                     itemId = id,
                     action = PendingCommandExecutionAction.ExecCommand(arguments),
@@ -53,7 +53,7 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
 
         namespace == null && name == AwaitEventTools.Name ->
             typed(AwaitEventArguments.serializer()) { arguments ->
-                PendingAwaitEventToolEvent(
+                PendingAwait(
                     callId = callId,
                     itemId = id,
                     arguments = arguments,
@@ -62,7 +62,7 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
 
         namespace == null && name == ReadMediaTools.Name ->
             typed(ReadMediaToolArguments.serializer()) { arguments ->
-                PendingReadMediaToolEvent(
+                PendingReadMedia(
                     callId = callId,
                     itemId = id,
                     arguments = arguments,
@@ -80,7 +80,7 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
 
         else ->
             parsedJson()?.let { arguments ->
-                PendingFunctionToolEvent(
+                PendingFunctionToolCall(
                     callId = callId,
                     itemId = id,
                     name = name,
@@ -91,10 +91,10 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
     }
 }
 
-private fun ResponseItem.CustomToolCall.toPendingToolEvent(): PendingToolEvent =
+private fun ResponseItem.CustomToolCall.toPendingToolEvent(): PendingToolCall =
     if (namespace == null && name == ApplyPatchTools.Name) {
         try {
-            PendingPatchToolEvent(
+            PendingPatch(
                 callId = callId,
                 itemId = id,
                 diff = input.parsePatch(),
@@ -112,7 +112,7 @@ private fun ResponseItem.CustomToolCall.toPendingToolEvent(): PendingToolEvent =
             )
         }
     } else {
-        PendingCustomToolEvent(
+        PendingCustomToolCall(
             callId = callId,
             itemId = id,
             name = name,
@@ -121,7 +121,7 @@ private fun ResponseItem.CustomToolCall.toPendingToolEvent(): PendingToolEvent =
         )
     }
 
-private fun ResponseItem.ClientToolSearchCall.toPendingToolEvent(): PendingToolEvent =
+private fun ResponseItem.ClientToolSearchCall.toPendingToolEvent(): PendingToolCall =
     PendingInvalidToolCall(
         callId = callId,
         itemId = id,

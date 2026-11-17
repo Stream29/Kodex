@@ -5,7 +5,7 @@ package io.github.stream29.kodex.app.test
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.app.migration.prepareKodexHome
@@ -157,7 +157,7 @@ public actual suspend fun deleteTestDirectory(path: Path) {
 }
 
 public actual suspend fun CoroutineScope.seedTestHistory(
-    home: Path, name: String, events: Map<Int, StableIndexEvent>,
+    home: Path, name: String, events: Map<Int, IndexCommit>,
 ): Int {
     val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies())
     try {

@@ -15,7 +15,7 @@ public data class PendingPlanUpdate(
     @SerialName("item_id")
     override val itemId: ResponseItemId? = null,
     public val arguments: UpdatePlanArgs,
-) : PendingToolEvent {
+) : PendingToolCall {
     override val toolName: String = "update_plan"
     override val toolNamespace: String? = null
 

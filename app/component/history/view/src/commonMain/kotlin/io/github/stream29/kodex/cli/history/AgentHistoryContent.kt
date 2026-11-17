@@ -85,13 +85,13 @@ private fun HistoryItemViewModel.historyContentType(): HistoryContentType = when
     is WorkGroupHistoryItemViewModel -> HistoryContentType.WorkGroup
 }
 
-private fun UnstableCleanEvent.historyContentType(): HistoryContentType = when (this) {
-    is PendingPatchToolEvent -> HistoryContentType.Patch
+private fun PendingRecord.historyContentType(): HistoryContentType = when (this) {
+    is PendingPatch -> HistoryContentType.Patch
     else -> HistoryContentType.PendingTool
 }
 
-private fun UnstableCleanEvent.historyIdentity(position: Int): String = when (this) {
-    is PendingToolEvent -> "call:$callId"
+private fun PendingRecord.historyIdentity(position: Int): String = when (this) {
+    is PendingToolCall -> "call:$callId"
     is PendingServerToolSearch -> "server:${call.id?.value ?: position}"
 }
 

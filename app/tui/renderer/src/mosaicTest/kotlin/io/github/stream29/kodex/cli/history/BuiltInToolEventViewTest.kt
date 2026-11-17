@@ -77,7 +77,7 @@ val builtInToolEventViewTest by testSuite {
     }
 
     test("pollHasNoSyntheticExitCodeAndWhitespaceWriteRemainsInput") {
-        val event = StableCommandExecutionToolEvent(
+        val event = StableCommandExecution(
             callId = "stdin",
             action = StableCommandExecutionAction.WriteStdin(
                 WriteStdinArguments(sessionId = 98765, chars = " \n", yieldTimeMillis = 0),
@@ -162,7 +162,7 @@ val builtInToolEventViewTest by testSuite {
 
     test("utilityRendersOriginalTextWithoutArgumentOrResultGroups") {
         listOf("clock" to "curr_time", null to "get_context_remaining").forEach { (namespace, name) ->
-            val event = StableTextToolEvent(
+            val event = StableTextTool(
                 "utility",
                 name = name,
                 namespace = namespace,
@@ -184,7 +184,7 @@ val builtInToolEventViewTest by testSuite {
     }
 
     test("readMediaKeepsFullPathAndOnlyShowsChangedOutputDetail") {
-        val event = StableReadMediaToolEvent(
+        val event = StableReadMedia(
             "media",
             arguments = ReadMediaToolArguments(
                 "/images/" + "z".repeat(270) + ".png",
@@ -214,7 +214,7 @@ val builtInToolEventViewTest by testSuite {
     }
 
     test("readMediaFailureStaysFlatAndPreservesItsRecordedMessage") {
-        val event = StableReadMediaToolEvent(
+        val event = StableReadMedia(
             "media",
             arguments = ReadMediaToolArguments("/missing.png"),
             result = StableReadMediaResult.Failure("read media failed"),
@@ -303,14 +303,14 @@ val builtInToolEventViewTest by testSuite {
 }
 
 @Composable
-private fun ExpandedEvent(event: StableCleanEvent, width: Int = 100) {
+private fun ExpandedEvent(event: AgentCommit, width: Int = 100) {
     Box(Modifier.width(width)) {
         event.render(null, HistoryExpansionBinding({ true }, {}), null)
     }
 }
 
-private fun commandEvent(arguments: ExecCommandArguments): StableCommandExecutionToolEvent =
-    StableCommandExecutionToolEvent(
+private fun commandEvent(arguments: ExecCommandArguments): StableCommandExecution =
+    StableCommandExecution(
         "command",
         action = StableCommandExecutionAction.ExecCommand(arguments),
         result = StableCommandExecutionResult.Output(

@@ -6,6 +6,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.*
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
@@ -109,6 +110,49 @@ val sqliteRepositoryTest by testSuite {
             }
         }
     }
+    test("legacy terminal rows load as work without moving their old mirror") {
+        fixture { root ->
+            fs.createDirectories(root)
+            val terminalJson = """{"type":"event_terminal_exited","session_id":37,"command":"./fixture","exit_code":1}"""
+            val terminal = StableTerminalExitedEvent(37, command = "./fixture", exitCode = 1)
+            val oldIndex = Path(root, "sessions", "0", "index")
+            fs.createDirectories(oldIndex)
+            fs.writeString(Path(oldIndex, "0.json"), terminalJson)
+            fs.writeString(Path(oldIndex, "latest.json"), "0")
+            openSqliteConnection(Path(root, "kodex.db")).use { db ->
+                ensureSqlitePhaseOneSchema(db)
+                db.execute("INSERT INTO sessions VALUES(0,0)")
+                db.execute("INSERT INTO agents VALUES(0,0,NULL)")
+                db.execute(
+                    """INSERT INTO agent_commits VALUES
+                       (0,'settings',0,'{"model":"test","thread_name":"older"}','2026-11-17T00:00:00Z'),
+                       (0,'steer',0,'[$terminalJson]','2026-11-17T00:00:00Z'),
+                       (0,'event_terminal_exited',0,'$terminalJson','2026-11-17T00:00:00Z')""",
+                )
+                testKodexAgentDependencies().use { dependencies ->
+                    SqliteKodexSessionRepository(root, dependencies).use { repository ->
+                        val storage = repository.open(0).storage
+                        assertEquals(OpenAiModelId("test"), storage.getSettingsAt(0).model)
+                        assertEquals(terminal, storage.getCommitExact(0, AgentCommitType.WorkTypes)?.commit)
+                        assertNull(storage.getCommitExact(0, AgentCommitType.IndexTypes))
+                        assertEquals(listOf(terminal), storage.consumeSteer())
+                        assertEquals(emptyList(), storage.getSteerAt(1))
+                        val fork = repository.createFork(0)
+                        assertEquals(terminal, repository.open(fork).storage.getCommitExact(0, AgentCommitType.WorkTypes)?.commit)
+                        repository.closeAndJoin()
+                        assertContains(fs.readString(Path(root, "sessions", "$fork", "work", "0.json")), "event_terminal_exited")
+                    }
+                }
+                assertEquals(
+                    listOf(listOf(terminalJson)),
+                    db.query("""SELECT payload_json FROM agent_commits WHERE agent_id = 0 AND type = 'event_terminal_exited' AND "index" = 0"""),
+                )
+            }
+            assertEquals(terminalJson, fs.readString(Path(oldIndex, "0.json")))
+            assertContains(fs.readString(Path(root, "sessions", "0", "work", "1.json")), "event_terminal_exited")
+        }
+    }
+
     test("rollback leaves cache flows and mirror untouched") {
         fixture { root ->
             fs.createDirectories(root)

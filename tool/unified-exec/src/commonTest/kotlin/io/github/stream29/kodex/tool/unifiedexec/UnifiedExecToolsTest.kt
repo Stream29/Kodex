@@ -5,9 +5,9 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecution
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.utils.shellclient.ProcessSession
@@ -79,7 +79,7 @@ private suspend fun testUnifiedExecToolClient(
         workingDirectoryProvider = { workingDirectory },
     )
 
-private fun StableCommandExecutionToolEvent.requireUnifiedExecOutput(): UnifiedExecOutput =
+private fun StableCommandExecution.requireUnifiedExecOutput(): UnifiedExecOutput =
     when (val completed = result) {
         is StableCommandExecutionResult.Output -> completed.value
         is StableCommandExecutionResult.Failure -> fail("Unified exec tool failed: ${completed.message}")
@@ -120,10 +120,10 @@ private val EmptyStdoutSlice: StdoutSlice =
         totalByteCount = 0uL,
     )
 
-private suspend fun Tool.exec(arguments: ExecCommandArguments): StableCommandExecutionToolEvent =
-    assertIs<StableCommandExecutionToolEvent>(
+private suspend fun Tool.exec(arguments: ExecCommandArguments): StableCommandExecution =
+    assertIs<StableCommandExecution>(
         handle(
-            PendingCommandExecutionToolEvent(
+            PendingCommandExecution(
                 callId = "call_exec_command",
                 action = PendingCommandExecutionAction.ExecCommand(arguments),
             ),

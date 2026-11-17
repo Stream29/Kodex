@@ -20,15 +20,15 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 @SerialName("read_media_tool_event")
-public data class StableReadMediaToolEvent(
+public data class StableReadMedia(
     @SerialName("call_id")
     public val callId: String,
     @SerialName("item_id")
     public val itemId: ResponseItemId? = null,
     public val arguments: ReadMediaToolArguments,
     public val result: StableReadMediaResult,
-) : StableWorkEvent.CompletedTool {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit, AgentCommit.CompletedTool {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(
                 callId = callId,

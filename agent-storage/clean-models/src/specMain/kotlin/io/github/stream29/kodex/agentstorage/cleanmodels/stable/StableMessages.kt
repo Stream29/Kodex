@@ -14,8 +14,8 @@ import kotlinx.serialization.Serializable
 @SerialName("user_message")
 public data class StableUserMessage(
     public val content: List<ContentItem>,
-) : StableIndexEvent.Steerable, CompactionRetainedItem {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : CompactionRetainedItem, AgentCommit.Steerable {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.Message(
                 role = MessageRole.User,
@@ -31,7 +31,7 @@ public data class StableAssistantMessage(
     public val content: List<ContentItem>,
     public val id: ResponseItemId? = null,
     public val phase: MessagePhase? = null,
-) : StableIndexEvent.Steerable {
+) : IndexCommit, AgentCommit.Steerable {
     public val text: String
         get() = content.mapNotNull { part ->
             when (part) {
@@ -41,7 +41,7 @@ public data class StableAssistantMessage(
             }
         }.joinToString(separator = "")
 
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.Message(
                 id = id,
@@ -57,8 +57,8 @@ public data class StableAssistantMessage(
 @SerialName("developer_message")
 public data class StableDeveloperMessage(
     public val content: List<ContentItem>,
-) : StableIndexEvent.Steerable {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : IndexCommit, AgentCommit.Steerable {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.Message(
                 role = MessageRole.Developer,
@@ -74,8 +74,8 @@ public data class StableAgentMessage(
     public val author: String,
     public val recipient: String,
     public val content: List<AgentMessageInputContent>,
-) : StableIndexEvent.Steerable {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : IndexCommit, AgentCommit.Steerable {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.AgentMessage(
                 author = author,

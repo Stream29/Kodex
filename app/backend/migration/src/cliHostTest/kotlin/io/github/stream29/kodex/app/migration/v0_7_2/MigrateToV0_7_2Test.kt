@@ -4,15 +4,15 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonTool
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
@@ -120,7 +120,7 @@ public val migrateToV0_7_2Test by testSuite {
                     assertEquals(listOf(compactionTwo), window)
 
                     val mirrorFive = OpenAiJsonCodec.decodeFromString(
-                        CleanIndexEntry.serializer(),
+                        IndexCommit.serializer(),
                         fs.readString(Path(home, "sessions", "1", "index", "5.json")),
                     )
                     assertEquals(compactionTwo, mirrorFive)
@@ -161,7 +161,7 @@ public val migrateToV0_7_2Test by testSuite {
             upgrade(home)
             assertEquals("\"0.7.2\"", fs.readString(Path(home, "version.json")))
             val mirrorTwo = OpenAiJsonCodec.decodeFromString(
-                CleanIndexEntry.serializer(),
+                IndexCommit.serializer(),
                 fs.readString(targetMirror),
             ) as StableContextCompaction
             assertEquals(
@@ -272,25 +272,25 @@ public val migrateToV0_7_2Test by testSuite {
                     )
                     assertEquals(1, askEvent.askId)
 
-                    val askFail = assertIs<StableTextToolEvent>(
+                    val askFail = assertIs<StableTextTool>(
                         storage.getCommitExact(3, AgentCommitType.WorkTypes)?.commit,
                     )
                     assertEquals("request_user_input", askFail.name)
                     assertEquals(false, askFail.success)
 
-                    val readMedia = assertIs<StableReadMediaToolEvent>(
+                    val readMedia = assertIs<StableReadMedia>(
                         storage.getCommitExact(4, AgentCommitType.WorkTypes)?.commit,
                     )
                     assertEquals("a.png", readMedia.arguments.path)
 
                     for (idx in listOf(5, 6, 7, 9)) {
-                        val jsonEvent = assertIs<StableJsonToolEvent>(
+                        val jsonEvent = assertIs<StableJsonTool>(
                             storage.getCommitExact(idx, AgentCommitType.WorkTypes)?.commit,
                         )
                         kotlin.test.assertNull(jsonEvent.itemId)
                     }
 
-                    val genFail = assertIs<StableTextToolEvent>(
+                    val genFail = assertIs<StableTextTool>(
                         storage.getCommitExact(8, AgentCommitType.WorkTypes)?.commit,
                     )
                     assertEquals("imagegen", genFail.name)

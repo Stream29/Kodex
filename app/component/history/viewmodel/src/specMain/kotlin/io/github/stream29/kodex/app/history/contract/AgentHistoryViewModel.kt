@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.app.history.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.flow.SharedFlow
@@ -156,7 +156,7 @@ public interface AgentHistoryViewModel : AutoCloseable {
     public val loadState: StateFlow<AgentHistoryLoadState>
 
     /** Pending tools in storage order; renderer reverses them independently of stored rows. */
-    public val pendingTools: StateFlow<List<UnstableCleanEvent>>
+    public val pendingTools: StateFlow<List<PendingRecord>>
 
     /** Transient newest row, or null when no streaming presentation is active. */
     public val streamingItem: StateFlow<HistoryStreamingItem?>

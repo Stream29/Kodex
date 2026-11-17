@@ -15,10 +15,9 @@ import androidx.compose.ui.unit.dp
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.app.history.contract.*
@@ -178,8 +177,8 @@ val offscreenHistoryTest by testSuite {
             AgentHistorySource(stored, latest, MutableStateFlow(KodexAgentStateValue.UserMessage)), owner, MutableStateFlow(false),
         )
         val pending = MutableStateFlow(listOf(
-            PendingFunctionToolEvent("first", name = "first", arguments = JsonObject(emptyMap())),
-            PendingFunctionToolEvent("second", name = "second", arguments = JsonObject(emptyMap())),
+            PendingFunctionToolCall("first", name = "first", arguments = JsonObject(emptyMap())),
+            PendingFunctionToolCall("second", name = "second", arguments = JsonObject(emptyMap())),
         ))
         val streaming = MutableStateFlow<HistoryStreamingItem?>(HistoryStreamingItem.Started)
         val displayed = object : AgentHistoryViewModel by model {

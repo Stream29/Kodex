@@ -39,7 +39,7 @@ val stablePatchToolEventSerializationTest by testSuite {
             +new
             *** End Patch
         """.trimIndent()
-        val event = StablePatchToolEvent(
+        val event = StablePatch(
             callId = "call_apply_patch",
             itemId = ResponseItemId("item_apply_patch"),
             diff = patchText.parsePatch(),
@@ -78,7 +78,7 @@ val stablePatchToolEventSerializationTest by testSuite {
                 ?.jsonObject
                 ?.keys,
         )
-        assertEquals(event, json.decodeFromString<StablePatchToolEvent>(encoded))
+        assertEquals(event, json.decodeFromString<StablePatch>(encoded))
         assertEquals(
             listOf(
                 ResponseItem.CustomToolCall(
@@ -101,7 +101,7 @@ val stablePatchToolEventSerializationTest by testSuite {
 
     test("ignores legacy full-content delta while decoding") {
         val event = successfulPatchEvent()
-        val encoded = json.encodeToJsonElement(StablePatchToolEvent.serializer(), event).jsonObject
+        val encoded = json.encodeToJsonElement(StablePatch.serializer(), event).jsonObject
         val result = encoded.getValue("result").jsonObject
         val applyResult = result.getValue("apply_result").jsonObject
         val legacyDelta = json.parseToJsonElement(
@@ -137,7 +137,7 @@ val stablePatchToolEventSerializationTest by testSuite {
 
         assertEquals(
             event,
-            OpenAiJsonCodec.decodeFromJsonElement(StablePatchToolEvent.serializer(), legacy),
+            OpenAiJsonCodec.decodeFromJsonElement(StablePatch.serializer(), legacy),
         )
     }
 
@@ -208,7 +208,7 @@ val stablePatchToolEventSerializationTest by testSuite {
                 *** Delete File: missing.txt
                 *** End Patch
                 """.trimIndent()
-        val event = StablePatchToolEvent(
+        val event = StablePatch(
             callId = "call_apply_patch",
             diff = patchText.parsePatch(),
             result = StablePatchToolExecutionResult.Failure("File does not exist: missing.txt"),
@@ -218,7 +218,7 @@ val stablePatchToolEventSerializationTest by testSuite {
         val element = json.parseToJsonElement(encoded).jsonObject
 
         assertEquals(JsonPrimitive("failure"), element["result"]?.jsonObject?.get("type"))
-        assertEquals(event, json.decodeFromString<StablePatchToolEvent>(encoded))
+        assertEquals(event, json.decodeFromString<StablePatch>(encoded))
         assertEquals(
             ResponseItem.CustomToolCallOutput(
                 callId = event.callId,
@@ -241,8 +241,8 @@ private fun successfulPatchEvent(
             deleted = emptyList(),
         ),
     ),
-): StablePatchToolEvent =
-    StablePatchToolEvent(
+): StablePatch =
+    StablePatch(
         callId = "call_apply_patch",
         diff = patch,
         result = StablePatchToolExecutionResult.Success(applyResult),

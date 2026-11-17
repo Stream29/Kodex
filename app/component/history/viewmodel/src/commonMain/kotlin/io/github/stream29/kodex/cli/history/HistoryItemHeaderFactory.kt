@@ -1,22 +1,22 @@
 package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonTool
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryResult
@@ -30,7 +30,7 @@ import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration
 
-internal fun StablePatchToolEvent.toHistoryHeader(elapsed: Duration): PatchHistoryItemHeader {
+internal fun StablePatch.toHistoryHeader(elapsed: Duration): PatchHistoryItemHeader {
     val paths = diff.hunks.map { hunk -> hunk.path }
     return PatchHistoryItemHeader(
         target = paths.toPatchHistoryTarget(),
@@ -43,10 +43,10 @@ internal fun StablePatchToolEvent.toHistoryHeader(elapsed: Duration): PatchHisto
 }
 
 /** Produces only the lightweight presentation retained before a tool is expanded. */
-internal fun StableCleanEvent.CompletedTool.toHistoryHeader(
+internal fun AgentCommit.CompletedTool.toHistoryHeader(
     elapsed: Duration,
 ): ToolHistoryItemHeader = when (this) {
-    is StableCommandExecutionToolEvent -> ToolHistoryItemHeader.CommandExecution(
+    is StableCommandExecution -> ToolHistoryItemHeader.CommandExecution(
         action = when (val action = action) {
             is StableCommandExecutionAction.ExecCommand ->
                 CommandExecutionHistoryAction.Run(action.arguments.command.historyPreview())
@@ -69,17 +69,17 @@ internal fun StableCleanEvent.CompletedTool.toHistoryHeader(
         elapsed = elapsed,
     )
 
-    is StableAwaitEventToolEvent,
+    is StableAwait,
     is StableInvalidToolCall,
     is StableServerToolSearch,
     is StableWebSearchCall,
     is StableImageGenerationCall,
-    is StablePatchToolEvent,
-    is StableJsonToolEvent,
-    is StableTextToolEvent,
-    is StableCustomToolEvent,
+    is StablePatch,
+    is StableJsonTool,
+    is StableTextTool,
+    is StableCustomTool,
     is StablePlanUpdate,
-    is StableReadMediaToolEvent -> {
+    is StableReadMedia -> {
         val status = historyToolStatus()
         ToolHistoryItemHeader.Summary(
             summary = historyToolSummary(failed = status == "failed"),
@@ -89,8 +89,8 @@ internal fun StableCleanEvent.CompletedTool.toHistoryHeader(
     }
 }
 
-private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): String = when (this) {
-    is StableAwaitEventToolEvent -> functionToolSummary("await_event", null, failed)
+private fun AgentCommit.CompletedTool.historyToolSummary(failed: Boolean): String = when (this) {
+    is StableAwait -> functionToolSummary("await_event", null, failed)
     is StableInvalidToolCall -> "Model emitted an invalid tool call"
     is StableServerToolSearch -> functionToolSummary("server_tool_search", null, failed)
     is StableWebSearchCall ->
@@ -98,19 +98,19 @@ private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): 
 
     is StableImageGenerationCall -> "Generate image"
 
-    is StableCommandExecutionToolEvent ->
+    is StableCommandExecution ->
         error("Command execution uses a specialized history header.")
 
-    is StablePatchToolEvent -> "Apply patch"
-    is StableJsonToolEvent -> functionToolSummary(name, namespace, failed)
-    is StableTextToolEvent -> functionToolSummary(name, namespace, failed)
-    is StableCustomToolEvent -> customToolSummary(name, namespace, input, failed)
+    is StablePatch -> "Apply patch"
+    is StableJsonTool -> functionToolSummary(name, namespace, failed)
+    is StableTextTool -> functionToolSummary(name, namespace, failed)
+    is StableCustomTool -> customToolSummary(name, namespace, input, failed)
     is StablePlanUpdate -> if (failed) "Failed to update the plan" else "Update the plan"
-    is StableReadMediaToolEvent -> arguments.historySummary(failed)
+    is StableReadMedia -> arguments.historySummary(failed)
 }
 
-private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (this) {
-    is StableAwaitEventToolEvent -> when (result) {
+private fun AgentCommit.CompletedTool.historyToolStatus(): String = when (this) {
+    is StableAwait -> when (result) {
         is StableAwaitEventResult.Output -> "completed"
         is StableAwaitEventResult.Failure -> "failed"
     }
@@ -118,19 +118,19 @@ private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (t
     is StableServerToolSearch -> output.status.ifBlank { "completed" }
     is StableWebSearchCall -> item.status ?: "completed"
     is StableImageGenerationCall -> item.status
-    is StableCommandExecutionToolEvent ->
+    is StableCommandExecution ->
         error("Command execution uses a specialized history header.")
 
-    is StablePatchToolEvent -> when (result) {
+    is StablePatch -> when (result) {
         is StablePatchToolExecutionResult.Success -> "completed"
         is StablePatchToolExecutionResult.Failure -> "failed"
     }
 
-    is StableJsonToolEvent -> success.successHistoryStatus()
-    is StableTextToolEvent -> success.successHistoryStatus()
-    is StableCustomToolEvent -> success.successHistoryStatus()
+    is StableJsonTool -> success.successHistoryStatus()
+    is StableTextTool -> success.successHistoryStatus()
+    is StableCustomTool -> success.successHistoryStatus()
     is StablePlanUpdate -> "completed"
-    is StableReadMediaToolEvent -> when (result) {
+    is StableReadMedia -> when (result) {
         is StableReadMediaResult.Success -> "completed"
         is StableReadMediaResult.Failure -> "failed"
     }

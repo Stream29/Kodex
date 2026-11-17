@@ -1,9 +1,9 @@
 package io.github.stream29.kodex.tool.contract
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
 import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import kotlinx.coroutines.CancellationException
@@ -26,9 +26,9 @@ val toolFailureBoundaryTest by testSuite {
     test("handler exception propagates to runtime caller") {
         val tool = typedTool(
             spec = testSpec,
-            select = { it as? PendingFunctionToolEvent },
+            select = { it as? PendingFunctionToolCall },
         ) { error("private-marker") }
-        val pending = PendingFunctionToolEvent(
+        val pending = PendingFunctionToolCall(
             name = "test",
             namespace = "local",
             arguments = JsonObject(emptyMap()),
@@ -43,9 +43,9 @@ val toolFailureBoundaryTest by testSuite {
     test("selector mismatch propagates IllegalArgumentException to runtime caller") {
         val tool = typedTool(
             spec = testSpec,
-            select = { it as? PendingFunctionToolEvent },
+            select = { it as? PendingFunctionToolCall },
         ) { error("must not run") }
-        val pending = PendingCustomToolEvent(
+        val pending = PendingCustomToolCall(
             name = "test",
             input = "input",
             callId = "call-two",
@@ -59,9 +59,9 @@ val toolFailureBoundaryTest by testSuite {
         val cancellation = CancellationException("cancel test")
         val tool = typedTool(
             spec = testSpec,
-            select = { it as? PendingFunctionToolEvent },
+            select = { it as? PendingFunctionToolCall },
         ) { throw cancellation }
-        val pending = PendingFunctionToolEvent(
+        val pending = PendingFunctionToolCall(
             name = "test",
             arguments = JsonObject(emptyMap()),
             callId = "call-three",
@@ -73,12 +73,12 @@ val toolFailureBoundaryTest by testSuite {
     test("concurrent cancellation is not hidden by a different handler exception") {
         val tool = typedTool(
             spec = testSpec,
-            select = { it as? PendingFunctionToolEvent },
+            select = { it as? PendingFunctionToolCall },
         ) {
             currentCoroutineContext().cancel()
             error("exception after cancellation")
         }
-        val pending = PendingFunctionToolEvent(
+        val pending = PendingFunctionToolCall(
             name = "test",
             arguments = JsonObject(emptyMap()),
             callId = "call-four",
@@ -92,10 +92,10 @@ val toolFailureBoundaryTest by testSuite {
     test("a normal handler return cannot hide an already cancelled invocation") {
         val tool = typedTool(
             spec = testSpec,
-            select = { it as? PendingFunctionToolEvent },
+            select = { it as? PendingFunctionToolCall },
         ) { pending ->
             currentCoroutineContext().cancel()
-            StableTextToolEvent(
+            StableTextTool(
                 callId = pending.callId,
                 name = pending.name,
                 arguments = pending.arguments,
@@ -103,7 +103,7 @@ val toolFailureBoundaryTest by testSuite {
                 success = true,
             )
         }
-        val pending = PendingFunctionToolEvent(
+        val pending = PendingFunctionToolCall(
             name = "test",
             arguments = JsonObject(emptyMap()),
             callId = "call-five",

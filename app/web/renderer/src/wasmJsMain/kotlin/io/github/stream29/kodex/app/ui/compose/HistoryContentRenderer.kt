@@ -18,7 +18,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.cli.history.*
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.cli.patch.*
 import io.github.stream29.kodex.utils.applypatch.Patch
@@ -121,7 +121,7 @@ private class ComposeHistoryContentRenderer(
             }
         }
     }
-    @Composable override fun StablePatch(event: StablePatchToolEvent) {
+    @Composable override fun StablePatch(event: StablePatch) {
         val presentation = remember(event) { event.toStablePatchPresentation() }
         PatchContent(presentation, event)
     }

@@ -14,10 +14,10 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getAskUsersAt
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
@@ -142,7 +142,7 @@ val agentEventBusTest by testSuite(
                 // First response parked on await_1: runningTurn is null and no stopEvent was emitted.
                 assertNull(session.runtime.runningTurn.value)
                 val parkedState = assertIs<KodexAgentStateValue.ToolPending>(session.runtime.state.value)
-                assertEquals("await_1", assertIs<PendingAwaitEventToolEvent>(parkedState.events.single()).callId)
+                assertEquals("await_1", assertIs<PendingAwait>(parkedState.events.single()).callId)
                 assertTrue(stopEvents.isEmpty())
 
                 // Let TTL expire so the session unloads while parked on await_1.
@@ -185,7 +185,7 @@ val agentEventBusTest by testSuite(
                 ).map { it.commit }
                 assertEquals(1, historyCommits.filterIsInstance<StableAskUserEvent>().size)
                 assertEquals(1, historyCommits.filterIsInstance<StableScheduleEvent>().size)
-                val completedAwaits = historyCommits.filterIsInstance<StableAwaitEventToolEvent>()
+                val completedAwaits = historyCommits.filterIsInstance<StableAwait>()
                 assertEquals(2, completedAwaits.size)
                 assertTrue(completedAwaits.all { it.result is StableAwaitEventResult.Output })
 
@@ -253,7 +253,7 @@ val agentEventBusTest by testSuite(
                 val completed = session.storage.getCommitsIn(
                     0..session.runtime.latestIndex.value,
                     setOf(AgentCommitType.AwaitEventToolEvent),
-                ).single().commit as StableAwaitEventToolEvent
+                ).single().commit as StableAwait
                 assertIs<StableAwaitEventResult.Failure>(completed.result)
             } finally {
                 repository.cancelAndJoin()
@@ -326,7 +326,7 @@ val agentEventBusRealTerminalTest by testSuite(
             withTimeout(5.seconds) {
                 session.runtime.state.first { state ->
                     state is KodexAgentStateValue.ToolPending &&
-                        state.events.any { it is PendingAwaitEventToolEvent }
+                        state.events.any { it is PendingAwait }
                 }
                 session.runtime.runningTurn.first { it == null }
             }

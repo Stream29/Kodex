@@ -20,7 +20,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettin
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.toResponseHistoryItems
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
@@ -291,7 +291,7 @@ private suspend fun InMemoryKodexAgentStorage.lastAssistantMessage(): String? {
 
 private suspend fun InMemoryKodexAgentStorage.historyItems(): List<ResponseItem.HistoryItem> =
     getCommitsIn(0..latestIndex(), AgentCommitType.CleanEventTypes)
-        .flatMap { (it.commit as StableCleanEvent).toResponseHistoryItems() }
+        .flatMap { it.commit.toResponseHistoryItems() }
 
 private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(

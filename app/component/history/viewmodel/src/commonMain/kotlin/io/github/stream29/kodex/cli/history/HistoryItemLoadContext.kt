@@ -1,26 +1,26 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
@@ -40,7 +40,7 @@ internal data class HistoryItemDescriptor(
     val source: HistoryItemSource,
     val kind: HistoryItemKind,
     val elapsed: Duration,
-    val event: StableCleanEvent,
+    val event: AgentCommit,
     val createdAt: Instant = Instant.DISTANT_PAST,
     val turnDuration: Duration? = null,
 )
@@ -60,7 +60,7 @@ internal enum class HistoryItemKind {
     ContextCompaction,
 }
 
-internal fun StableCleanEvent.toHistoryItemDescriptor(
+internal fun AgentCommit.toHistoryItemDescriptor(
     index: Int,
     source: HistoryItemSource,
     elapsed: Duration,
@@ -85,18 +85,20 @@ internal fun StableCleanEvent.toHistoryItemDescriptor(
         is StableAskUserEvent -> HistoryItemKind.RequestUserInput
         is StableReasoning -> HistoryItemKind.Reasoning
         is StableContextCompaction -> HistoryItemKind.ContextCompaction
-        is StablePatchToolEvent -> HistoryItemKind.Patch
+        is StablePatch -> HistoryItemKind.Patch
         is StablePlanUpdate -> HistoryItemKind.PlanUpdate
-        is StableAwaitEventToolEvent,
-        is StableCommandExecutionToolEvent,
-        is StableCustomToolEvent,
+        is StableAwait,
+        is StableCommandExecution,
+        is StableCustomTool,
         is StableImageGenerationCall,
         is StableInvalidToolCall,
-        is StableJsonToolEvent,
-        is StableReadMediaToolEvent,
+        is StableJsonTool,
+        is StableReadMedia,
         is StableServerToolSearch,
-        is StableTextToolEvent,
+        is StableTextTool,
         is StableWebSearchCall -> HistoryItemKind.Tool
+
+        else -> throw IllegalArgumentException("Commit ${commitType.wireName} is not a conversation record.")
     },
 )
 
@@ -131,17 +133,6 @@ internal fun HistoryItemViewModel.release() {
     (this as? ReleasableHistoryItem)?.release()
 }
 
-internal fun HistoryItemDescriptor.isFoldable(): Boolean = when (kind) {
-    HistoryItemKind.Reasoning,
-    HistoryItemKind.Tool,
-    HistoryItemKind.Patch,
-        -> true
-
-    HistoryItemKind.Message,
-    HistoryItemKind.RequestUserInput,
-    HistoryItemKind.PlanUpdate,
-    HistoryItemKind.ContextCompaction,
-        -> false
-}
+internal fun HistoryItemDescriptor.isFoldable(): Boolean = source == HistoryItemSource.Work
 
 private val historyLogger = KotlinLogging.logger("History")

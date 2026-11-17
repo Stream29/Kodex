@@ -65,8 +65,8 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 }
                 val storage = runtime.storage as ObservableKodexAgentStorage
                 val rpc = client.withService<AgentRuntimeRpc>()
-                checkTimeline(index, rpc, storage, AgentCommitType.IndexTypes) { it as CleanIndexEntry }
-                checkTimeline(index, rpc, storage, AgentCommitType.WorkTypes) { it as StableWorkEvent }
+                checkTimeline(index, rpc, storage, AgentCommitType.IndexTypes) { it as IndexCommit }
+                checkTimeline(index, rpc, storage, AgentCommitType.WorkTypes) { it as WorkCommit }
                 checkTimeline(index, rpc, storage, AgentCommitType.SettingsTypes) { it as KodexAgentSettings }
                 checkTimeline(index, rpc, storage, AgentCommitType.LlmRequestMetaTypes) { it as LlmRequestMeta }
                 checkTimeline(index, rpc, storage, AgentCommitType.UnstableTypes) { (it as UnstableSnapshot).events }

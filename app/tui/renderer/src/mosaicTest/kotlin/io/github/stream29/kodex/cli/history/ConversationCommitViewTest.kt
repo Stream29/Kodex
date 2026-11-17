@@ -13,19 +13,18 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
@@ -95,7 +94,7 @@ val cleanEventViewTest by testSuite {
 
     test("stableHeadersRenderElapsedWithoutAllowingLongTitlesToDisplaceIt") {
         val elapsed = 1_500.milliseconds
-        val tool = StableTextToolEvent(
+        val tool = StableTextTool(
             callId = "call",
             name = "very-long-tool-name",
             arguments = JsonObject(emptyMap()),
@@ -229,7 +228,7 @@ val cleanEventViewTest by testSuite {
     }
 
     test("unknownToolUsesItsRawNameAndDefersPayloadDetails") {
-        val event = StableTextToolEvent(
+        val event = StableTextTool(
             callId = "call",
             name = "demo",
             arguments = JsonObject(emptyMap()),
@@ -261,7 +260,7 @@ val cleanEventViewTest by testSuite {
 
     test("customWebToolKeepsItsQuerySummaryBeforeAndAfterCompletion") {
         val input = """{"search_query":[{"q":"Kotlin Duration"}]}"""
-        val stable = StableCustomToolEvent(
+        val stable = StableCustomTool(
             callId = "stable-web",
             name = "run",
             namespace = "web",
@@ -269,7 +268,7 @@ val cleanEventViewTest by testSuite {
             result = FunctionCallOutputPayload.fromText("done"),
             success = true,
         )
-        val pending = PendingCustomToolEvent(
+        val pending = PendingCustomToolCall(
             callId = "pending-web",
             name = "run",
             namespace = "web",
@@ -297,7 +296,7 @@ val cleanEventViewTest by testSuite {
     }
 
     test("commandToolSummarizesItsCommandAndDefersTheFunctionName") {
-        val event = StableCommandExecutionToolEvent(
+        val event = StableCommandExecution(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
                 ExecCommandArguments(command = "pwd", yieldTimeMillis = 10_000),
@@ -332,7 +331,7 @@ val cleanEventViewTest by testSuite {
     }
 
     test("commandToolSummaryEllipsizesToAvailableHistoryWidth") {
-        val event = StableCommandExecutionToolEvent(
+        val event = StableCommandExecution(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
                 ExecCommandArguments(command = "A你B".repeat(30), yieldTimeMillis = 10_000),
@@ -367,7 +366,7 @@ val cleanEventViewTest by testSuite {
             sessionId = 7,
             arguments = ExecCommandArguments(command = "sleep 5", yieldTimeMillis = 10_000),
         )
-        val event = StableCommandExecutionToolEvent(
+        val event = StableCommandExecution(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(session.arguments),
             result = StableCommandExecutionResult.Output(
@@ -410,7 +409,7 @@ val cleanEventViewTest by testSuite {
     }
 
     test("commandWithoutAnObservableSessionDoesNotClaimToBeRunning") {
-        val event = StableCommandExecutionToolEvent(
+        val event = StableCommandExecution(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
                 ExecCommandArguments(command = "sleep 5", yieldTimeMillis = 10_000),
@@ -443,7 +442,7 @@ val cleanEventViewTest by testSuite {
             sessionId = 7,
             arguments = ExecCommandArguments(command = "tail -f build.log", yieldTimeMillis = 10_000),
         )
-        val event = StableCommandExecutionToolEvent(
+        val event = StableCommandExecution(
             callId = "write",
             action = StableCommandExecutionAction.WriteStdin(
                 WriteStdinArguments(sessionId = session.sessionId, yieldTimeMillis = 250),
@@ -619,7 +618,7 @@ val cleanEventViewTest by testSuite {
     }
 
     test("unstableEventsRenderFromTheirOwnRoot") {
-        val event = PendingFunctionToolEvent(
+        val event = PendingFunctionToolCall(
             callId = "call",
             name = "demo",
             arguments = JsonObject(emptyMap()),
@@ -650,7 +649,7 @@ val cleanEventViewTest by testSuite {
                 ),
             ),
         )
-        val event = PendingPatchToolEvent(callId = "patch", diff = diff)
+        val event = PendingPatch(callId = "patch", diff = diff)
 
         runMosaicTest {
             val collapsed = setContentAndSnapshot {
@@ -671,19 +670,19 @@ val cleanEventViewTest by testSuite {
     }
 
     test("toolHeadersUseColorInsteadOfTextualStatus") {
-        val running = PendingFunctionToolEvent(
+        val running = PendingFunctionToolCall(
             callId = "running",
             name = "demo",
             arguments = JsonObject(emptyMap()),
         )
-        val succeeded = StableTextToolEvent(
+        val succeeded = StableTextTool(
             callId = "succeeded",
             name = "demo",
             arguments = JsonObject(emptyMap()),
             result = "done",
             success = true,
         )
-        val failed = StableTextToolEvent(
+        val failed = StableTextTool(
             callId = "failed",
             name = "demo",
             arguments = JsonObject(emptyMap()),

@@ -15,9 +15,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecution
 import io.github.stream29.kodex.app.history.contract.item.*
 import io.github.stream29.kodex.app.ui.compose.rememberComposeHistoryItemRenderer
 import io.github.stream29.kodex.cli.history.*
@@ -42,7 +42,7 @@ val offscreenHistoryToolHierarchyTest by testSuite {
             val preview = "printf " + "long-command-".repeat(12)
             val command = "$preview\nprintf 'second line'"
             val summary = "${if (failed) "Failed to run" else "Run"}: $preview"
-            val event = StableCommandExecutionToolEvent(
+            val event = StableCommandExecution(
                 "one-line", action = StableCommandExecutionAction.ExecCommand(
                     ExecCommandArguments(command, yieldTimeMillis = 1000)),
                 result = if (failed) StableCommandExecutionResult.Failure("fixture error")
@@ -81,7 +81,7 @@ val offscreenHistoryToolHierarchyTest by testSuite {
         test("running command stays one visual line when collapsed width=$width") { offscreenTest {
             val command = "printf " + "long-command-".repeat(12)
             val summary = "Running: $command"
-            val event = PendingCommandExecutionToolEvent(
+            val event = PendingCommandExecution(
                 "running-one-line", action = PendingCommandExecutionAction.ExecCommand(
                     ExecCommandArguments(command, yieldTimeMillis = 1000)),
             )
@@ -98,7 +98,7 @@ val offscreenHistoryToolHierarchyTest by testSuite {
         test("ordinary stored tool title and detail hierarchy width=$width dark=$dark failed=$failed") { offscreenTest {
             val summary = if (failed) "Failed to run external" else "external"
             val status = if (failed) "failed" else "succeeded"
-            val event = StableTextToolEvent("hierarchy", name = "external", arguments = JsonObject(emptyMap()),
+            val event = StableTextTool("hierarchy", name = "external", arguments = JsonObject(emptyMap()),
                 result = "full result\n  retained", success = !failed)
             val header = ToolHistoryItemHeader.Summary(summary, status, 0.milliseconds)
             val states = MutableStateFlow<ToolHistoryItemState>(ToolHistoryItemState.Collapsed(header))
@@ -146,7 +146,7 @@ val offscreenHistoryToolHierarchyTest by testSuite {
     }
     for (dark in listOf(false, true)) {
         test("command metadata is secondary and recorded output stays primary dark=$dark") { offscreenTest {
-            val event = StableCommandExecutionToolEvent(
+            val event = StableCommandExecution(
                 "command-hierarchy",
                 action = StableCommandExecutionAction.ExecCommand(
                     ExecCommandArguments("printf hello", workdir = "/fixture", yieldTimeMillis = 10_000)),
@@ -177,8 +177,8 @@ val offscreenHistoryToolHierarchyTest by testSuite {
                 MaterialTheme(colorScheme = scheme) {
                     val renderer = rememberComposeHistoryItemRenderer()
                     renderer.Text("Body reference", HistoryTextStyle.Normal)
-                    HistoryEventContent(PendingFunctionToolEvent("running", name = "external", arguments = JsonObject(emptyMap())), renderer)
-                    HistoryEventContent(StableReadMediaToolEvent("media", arguments = ReadMediaToolArguments("sample.png"),
+                    HistoryEventContent(PendingFunctionToolCall("running", name = "external", arguments = JsonObject(emptyMap())), renderer)
+                    HistoryEventContent(StableReadMedia("media", arguments = ReadMediaToolArguments("sample.png"),
                         result = StableReadMediaResult.Failure("fixture failed")), renderer)
                 }
             }

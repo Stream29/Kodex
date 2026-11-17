@@ -1,17 +1,16 @@
 package io.github.stream29.kodex.cli.agent
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
@@ -253,7 +252,7 @@ internal class HistoryIndexViewModelImpl(
 }
 
 private fun IndexedAgentCommit.toHistoryIndexEntryOrNull(): HistoryIndexEntry? {
-    val event = commit as? CleanIndexEntry ?: return null
+    val event = commit as? IndexCommit ?: return null
     val kind = event.toHistoryIndexEntryKind()
     val summary = event.toHistoryIndexSummary()
     val detail = HistoryIndexEntryDetail(
@@ -262,7 +261,7 @@ private fun IndexedAgentCommit.toHistoryIndexEntryOrNull(): HistoryIndexEntry? {
         requestUserInput = event as? StableAskUserEvent,
         plan = event as? StablePlanUpdate,
     )
-    val messageTimestamp = if (event is StableIndexEvent.Steerable) {
+    val messageTimestamp = if (event is AgentCommit.Steerable) {
         createdAt.takeIf { it != Instant.DISTANT_PAST }
     } else {
         null
@@ -276,11 +275,10 @@ private fun IndexedAgentCommit.toHistoryIndexEntryOrNull(): HistoryIndexEntry? {
     )
 }
 
-private fun CleanIndexEntry.toHistoryIndexEntryKind(): HistoryIndexEntryKind = when (this) {
+private fun IndexCommit.toHistoryIndexEntryKind(): HistoryIndexEntryKind = when (this) {
     is StableContextCompaction -> HistoryIndexEntryKind.CompactionPoint
     is StableUserMessage,
     is StableScheduleEvent,
-    is StableTerminalExitedEvent,
         -> HistoryIndexEntryKind.UserMessage
     is StableAssistantMessage -> when (phase) {
         MessagePhase.Commentary -> HistoryIndexEntryKind.AssistantCommentary
@@ -293,7 +291,7 @@ private fun CleanIndexEntry.toHistoryIndexEntryKind(): HistoryIndexEntryKind = w
     is StablePlanUpdate -> HistoryIndexEntryKind.PlanUpdate
 }
 
-private fun CleanIndexEntry.toHistoryIndexSummary(): String = when (this) {
+private fun IndexCommit.toHistoryIndexSummary(): String = when (this) {
     is StableContextCompaction -> "Context compacted"
     is StableUserMessage -> content.toDisplayContent().toSummary()
     is StableAssistantMessage -> content.toDisplayContent().toSummary()
@@ -302,17 +300,13 @@ private fun CleanIndexEntry.toHistoryIndexSummary(): String = when (this) {
     is StableAskUserEvent ->
         arguments.questions.joinToString(separator = " ") { it.question }.toSummary()
     is StableScheduleEvent -> "schedule #$scheduleId: $description".toSummary()
-    is StableTerminalExitedEvent -> {
-        val label = if (!name.isNullOrBlank()) "terminal #$sessionId ($name)" else "terminal #$sessionId"
-        "$label exited ($exitCode): $command".toSummary()
-    }
     is StablePlanUpdate -> {
         val selected = arguments.plan.lastOrNull { it.status != StepStatus.Pending } ?: arguments.plan.firstOrNull()
         selected?.step.orEmpty().toSummary()
     }
 }
 
-private fun CleanIndexEntry.toHistoryIndexDetail(): String = when (this) {
+private fun IndexCommit.toHistoryIndexDetail(): String = when (this) {
     is StableContextCompaction -> "Context compacted"
     is StableUserMessage -> content.toDisplayContent().toDetail()
     is StableAssistantMessage -> content.toDisplayContent().toDetail()
@@ -325,10 +319,6 @@ private fun CleanIndexEntry.toHistoryIndexDetail(): String = when (this) {
     }.joinToString("\n")
     is StableAskUserEvent -> toRequestUserInputDetail()
     is StableScheduleEvent -> "Schedule #$scheduleId\n\n$description".toDetail()
-    is StableTerminalExitedEvent -> {
-        val label = if (!name.isNullOrBlank()) "Terminal #$sessionId ($name)" else "Terminal #$sessionId"
-        "$label exited with code $exitCode\n\n$command".toDetail()
-    }
     is StablePlanUpdate -> toPlanDetail()
 }
 

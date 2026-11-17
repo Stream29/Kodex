@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.agentstate.tool
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ToolSpec
 
@@ -11,4 +11,4 @@ import io.github.stream29.kodex.openai.ToolSpec
 public expect fun visibleToolSpecs(): List<ToolSpec>
 
 /** Converts one provider-issued local tool call at the AgentState boundary. */
-public expect fun ResponseItem.ToolCall.toPendingToolEvent(): PendingToolEvent
+public expect fun ResponseItem.ToolCall.toPendingToolEvent(): PendingToolCall

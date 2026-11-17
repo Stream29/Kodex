@@ -2,38 +2,38 @@ package io.github.stream29.kodex.agentstorage.cleanmodels
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolJson
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecution
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMedia
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 
 /** Converts one pending local call into its matching durable failed tool event. */
-public actual fun PendingToolEvent.toFailedToolEvent(message: String): StableCleanEvent.CompletedTool =
+public actual fun PendingToolCall.toFailedToolEvent(message: String): AgentCommit.CompletedTool =
     when (this) {
-        is PendingFunctionToolEvent ->
-            StableTextToolEvent(
+        is PendingFunctionToolCall ->
+            StableTextTool(
                 callId = callId,
                 itemId = itemId,
                 name = name,
@@ -43,8 +43,8 @@ public actual fun PendingToolEvent.toFailedToolEvent(message: String): StableCle
                 success = false,
             )
 
-        is PendingCustomToolEvent ->
-            StableCustomToolEvent(
+        is PendingCustomToolCall ->
+            StableCustomTool(
                 callId = callId,
                 itemId = itemId,
                 name = name,
@@ -54,32 +54,32 @@ public actual fun PendingToolEvent.toFailedToolEvent(message: String): StableCle
                 success = false,
             )
 
-        is PendingPatchToolEvent ->
-            StablePatchToolEvent(
+        is PendingPatch ->
+            StablePatch(
                 callId = callId,
                 itemId = itemId,
                 diff = diff,
                 result = StablePatchToolExecutionResult.Failure(message),
             )
 
-        is PendingCommandExecutionToolEvent ->
-            StableCommandExecutionToolEvent(
+        is PendingCommandExecution ->
+            StableCommandExecution(
                 callId = callId,
                 itemId = itemId,
                 action = action.toStableAction(),
                 result = StableCommandExecutionResult.Failure(message),
             )
 
-        is PendingAwaitEventToolEvent ->
-            StableAwaitEventToolEvent(
+        is PendingAwait ->
+            StableAwait(
                 callId = callId,
                 itemId = itemId,
                 arguments = arguments,
                 result = StableAwaitEventResult.Failure(message),
             )
 
-        is PendingReadMediaToolEvent ->
-            StableReadMediaToolEvent(
+        is PendingReadMedia ->
+            StableReadMedia(
                 callId = callId,
                 itemId = itemId,
                 arguments = arguments,
@@ -87,7 +87,7 @@ public actual fun PendingToolEvent.toFailedToolEvent(message: String): StableCle
             )
 
         is PendingPlanUpdate ->
-            StableTextToolEvent(
+            StableTextTool(
                 callId = callId,
                 itemId = itemId,
                 name = toolName,

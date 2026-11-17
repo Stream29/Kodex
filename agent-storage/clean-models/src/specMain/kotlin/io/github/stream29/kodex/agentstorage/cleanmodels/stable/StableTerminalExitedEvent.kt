@@ -22,8 +22,8 @@ public data class StableTerminalExitedEvent(
     public val command: String,
     @SerialName("exit_code")
     public val exitCode: Int,
-) : StableIndexEvent.Steerable {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> {
+) : WorkCommit, AgentCommit.Steerable {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> {
         val label = if (!name.isNullOrBlank()) "terminal #$sessionId ($name)" else "terminal #$sessionId"
         return listOf(
             ResponseItem.Message(

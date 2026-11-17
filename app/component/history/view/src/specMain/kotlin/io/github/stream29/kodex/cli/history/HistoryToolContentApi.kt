@@ -2,12 +2,12 @@ package io.github.stream29.kodex.cli.history
 
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
@@ -62,20 +62,20 @@ public interface HistoryContentRenderer : HistoryFormRenderer {
         detailStyle: HistoryTextStyle, expandedSummary: String?,
         content: @Composable (HistoryToolDetails) -> Unit,
     )
-    @Composable public fun StablePatch(event: StablePatchToolEvent)
+    @Composable public fun StablePatch(event: StablePatch)
     @Composable public fun PendingPatch(diff: Patch)
 }
 
 /** Shared tool/ask_user content dispatch. Shell sessions are borrowed, never started or closed here. */
 @Composable
 public expect fun HistoryEventContent(
-    event: StableCleanEvent, renderer: HistoryContentRenderer,
+    event: AgentCommit, renderer: HistoryContentRenderer,
     shellSessions: AgentShellSessionRegistry? = null, elapsed: Duration? = null,
 )
 
 @Composable
 public expect fun HistoryEventContent(
-    event: UnstableCleanEvent, renderer: HistoryContentRenderer,
+    event: PendingRecord, renderer: HistoryContentRenderer,
     shellSessions: AgentShellSessionRegistry? = null,
 )
 
@@ -96,7 +96,7 @@ public expect fun HistoryPlanContent(event: PendingPlanUpdate, renderer: History
  * stdin (including whitespace) and empty output remain meaningful content.
  */
 @Composable
-public expect fun HistoryCommandContent(event: StableCommandExecutionToolEvent, renderer: HistoryContentRenderer)
+public expect fun HistoryCommandContent(event: StableCommandExecution, renderer: HistoryContentRenderer)
 
 public expect fun ExecCommandArguments.expandedCommandContext(): String
 public expect fun WriteStdinArguments.expandedCommandContext(): String

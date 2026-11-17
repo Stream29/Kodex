@@ -1,13 +1,14 @@
 package io.github.stream29.kodex.app.migration.v0_7_2
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.decodePayloadJson
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
 import io.github.stream29.kodex.agentstorage.filesystemlayout.latestIndexPath
@@ -660,6 +661,7 @@ private fun mergeWithinBudget(
 private fun CompactionRetainedItem.approximateTokenCount(): Int =
     when (this) {
         is StableUserMessage -> content.approximateTokenCount()
+        is StableScheduleEvent -> "schedule #$scheduleId fired: $description".approximateTokenCount()
         is StableAskUserEvent ->
             (
                 24L +
@@ -763,12 +765,12 @@ private val SyncedMirrorTimelines: Set<String> = setOf("index", "work", "unstabl
 private fun encodeMirrorPayload(commitType: AgentCommitType, payloadJson: String): String =
     when (commitType) {
         in AgentCommitType.IndexTypes -> {
-            val decoded = commitType.decodePayloadJson(payloadJson, OpenAiJsonCodec) as CleanIndexEntry
-            OpenAiJsonCodec.encodeToString(CleanIndexEntry.serializer(), decoded)
+            val decoded = commitType.decodePayloadJson(payloadJson, OpenAiJsonCodec) as IndexCommit
+            OpenAiJsonCodec.encodeToString(IndexCommit.serializer(), decoded)
         }
         in AgentCommitType.WorkTypes -> {
-            val decoded = commitType.decodePayloadJson(payloadJson, OpenAiJsonCodec) as StableWorkEvent
-            OpenAiJsonCodec.encodeToString(StableWorkEvent.serializer(), decoded)
+            val decoded = commitType.decodePayloadJson(payloadJson, OpenAiJsonCodec) as WorkCommit
+            OpenAiJsonCodec.encodeToString(WorkCommit.serializer(), decoded)
         }
         else -> payloadJson
     }

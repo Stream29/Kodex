@@ -10,15 +10,15 @@ import kotlinx.serialization.Serializable
 /** Stable clean projection of a completed `await_event` tool call. */
 @Serializable
 @SerialName("await_event_tool_event")
-public data class StableAwaitEventToolEvent(
+public data class StableAwait(
     @SerialName("call_id")
     public val callId: String,
     @SerialName("item_id")
     public val itemId: ResponseItemId? = null,
     public val arguments: AwaitEventArguments,
     public val result: StableAwaitEventResult,
-) : StableWorkEvent.CompletedTool {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit, AgentCommit.CompletedTool {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(
                 callId = callId,

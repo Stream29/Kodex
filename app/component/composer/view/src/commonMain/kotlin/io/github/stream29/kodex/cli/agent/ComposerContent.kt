@@ -9,7 +9,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessa
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
@@ -93,7 +93,7 @@ private fun submitToSteerHint(running: Boolean, draft: String): String? =
     "Submit to steer".takeIf { running && draft.isNotBlank() }
 
 public actual fun pendingSteerPreviewContent(
-    pending: List<StableIndexEvent.Steerable>,
+    pending: List<AgentCommit.Steerable>,
     maximumRows: Int,
 ): List<String> {
     if (pending.isEmpty() || maximumRows <= 0) return emptyList()
@@ -113,7 +113,7 @@ public actual fun pendingSteerPreviewContent(
     }
 }
 
-private fun StableIndexEvent.Steerable.previewText(): String = when (this) {
+private fun AgentCommit.Steerable.previewText(): String = when (this) {
     is StableUserMessage -> content.previewContentText()
     is StableAssistantMessage -> "Assistant: ${content.previewContentText()}"
     is StableDeveloperMessage -> "Developer: ${content.previewContentText()}"

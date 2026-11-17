@@ -19,7 +19,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecution
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
@@ -641,7 +641,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
                 modelCatalog = testModelCatalog(),
                 logger = TestLogger,
             )
-            val pending = PendingCommandExecutionToolEvent(
+            val pending = PendingCommandExecution(
                 callId = "call_1",
                 action = PendingCommandExecutionAction.ExecCommand(
                     ExecCommandArguments(command = "date", yieldTimeMillis = 10_000),

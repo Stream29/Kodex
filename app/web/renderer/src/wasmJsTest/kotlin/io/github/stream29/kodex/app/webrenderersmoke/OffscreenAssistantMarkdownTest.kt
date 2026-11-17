@@ -23,7 +23,7 @@ import kotlin.test.assertNotNull
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
@@ -252,7 +252,7 @@ val offscreenAssistantMarkdownTest by testSuite {
 }
 
 @androidx.compose.runtime.Composable
-private fun RenderedHistoryMessage(event: StableIndexEvent.Steerable, renderer: HistoryContentRenderer) {
+private fun RenderedHistoryMessage(event: AgentCommit.Steerable, renderer: HistoryContentRenderer) {
     HistoryMessageContent(
         event,
         heading = { renderer.Heading(it, HistoryTextStyle.Bold) },

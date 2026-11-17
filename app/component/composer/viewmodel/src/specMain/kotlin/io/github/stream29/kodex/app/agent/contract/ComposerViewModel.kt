@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.app.agent.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.openai.ContentItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
@@ -107,7 +107,7 @@ public data class ComposerState(
     /** The current insertion point retained for hosts that restore the editable projection. */
     public val cursorOffset: Int = text.length,
     public val running: Boolean = false,
-    public val pendingSteer: List<StableIndexEvent.Steerable> = emptyList(),
+    public val pendingSteer: List<AgentCommit.Steerable> = emptyList(),
     public val requestInput: ComposerRequestInputPresentation =
         ComposerRequestInputPresentation.None,
     public val submission: ComposerSubmissionState = ComposerSubmissionState.Editing,
@@ -154,7 +154,7 @@ public fun interface ComposerSubmitPort {
 /** Backend observations used to choose Running/Steer branches; no command authority is exposed. */
 public interface ComposerRuntimePort {
     public val running: StateFlow<Boolean>
-    public val pendingSteer: StateFlow<List<StableIndexEvent.Steerable>>
+    public val pendingSteer: StateFlow<List<AgentCommit.Steerable>>
 }
 
 /**

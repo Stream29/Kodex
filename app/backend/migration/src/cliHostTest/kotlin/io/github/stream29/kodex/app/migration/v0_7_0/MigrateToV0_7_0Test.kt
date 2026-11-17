@@ -4,10 +4,10 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrAfter
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
@@ -122,10 +122,10 @@ public val migrateToV0_7_0Test by testSuite {
                     assertEquals(fs.resolve(Path(home, "sessions", "2")).toStorageUri(), storage.uri)
                     assertEquals("migration", checkNotNull(storage.getSettingsAt(7)).threadName)
                     assertEquals(Instant.parse("2026-10-25T12:00:07.987654321Z"), storage.getCommitExact(7)?.createdAt)
-                    assertEquals(OpenAiJsonCodec.decodeFromString(CleanIndexEntry.serializer(), Index), storage.getCommitAtOrBefore(7, AgentCommitType.IndexTypes)?.commit)
-                    assertEquals(OpenAiJsonCodec.decodeFromString(StableWorkEvent.serializer(), Work), storage.getCommitAtOrBefore(7, AgentCommitType.WorkTypes)?.commit)
+                    assertEquals(OpenAiJsonCodec.decodeFromString(IndexCommit.serializer(), Index), storage.getCommitAtOrBefore(7, AgentCommitType.IndexTypes)?.commit)
+                    assertEquals(OpenAiJsonCodec.decodeFromString(WorkCommit.serializer(), Work), storage.getCommitAtOrBefore(7, AgentCommitType.WorkTypes)?.commit)
                     assertEquals(OpenAiJsonCodec.decodeFromString(TokenCountSnapshot.Response.serializer(), TokenCount), storage.getLlmRequestMetaAtOrNull(7))
-                    assertEquals(OpenAiJsonCodec.decodeFromString(ListSerializer(UnstableCleanEvent.serializer()), Unstable), storage.getUnstableAtOrNull(7))
+                    assertEquals(OpenAiJsonCodec.decodeFromString(ListSerializer(PendingRecord.serializer()), Unstable), storage.getUnstableAtOrNull(7))
                     assertNull(storage.getCommitExact(6, AgentCommitType.IndexTypes))
                     assertEquals(0, storage.getCommitAtOrBefore(6, AgentCommitType.IndexTypes)?.index)
                     assertEquals(7, storage.getCommitAtOrAfter(6, AgentCommitType.IndexTypes)?.index)

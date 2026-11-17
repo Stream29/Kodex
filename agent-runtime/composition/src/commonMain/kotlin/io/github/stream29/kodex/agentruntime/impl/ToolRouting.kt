@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.agentruntime.impl
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.openai.FreeformTool
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.ResponsesApiTool
@@ -27,7 +27,7 @@ internal object ToolRouting {
     }
 
     /** Requires a local route name from a pending event, preserving any model-supplied namespace. */
-    fun requireName(pending: PendingToolEvent): ToolName =
+    fun requireName(pending: PendingToolCall): ToolName =
         ToolName(
             name = requireNotNull(pending.toolName) {
                 "Pending event ${pending::class.simpleName} does not identify a local tool route."

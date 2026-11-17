@@ -6,7 +6,7 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getAskUsersAt
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
@@ -46,7 +46,7 @@ public actual class RpcSessionBinding private constructor(
     public actual val running: StateFlow<Boolean>,
     public actual val shellSessions: StateFlow<Map<Int, ShellSessionState>>,
     public actual val settings: SuspendMutableStateFlow<KodexAgentSettings>,
-    public actual val pendingSteer: StateFlow<List<StableIndexEvent.Steerable>>,
+    public actual val pendingSteer: StateFlow<List<AgentCommit.Steerable>>,
     internal val pendingAskUser: StateFlow<AskUserEntry?>,
     public actual val tokenCount: StateFlow<LlmRequestMeta?>,
     private val owner: Job,

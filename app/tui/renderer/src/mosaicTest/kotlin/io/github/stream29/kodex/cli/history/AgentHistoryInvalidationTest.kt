@@ -6,7 +6,7 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
@@ -151,7 +151,7 @@ private class ReplaceableHistoryModel(
 
     override val historyItems: StateFlow<HistoryItemWindow> = mutableCommittedItems
     override val loadState: StateFlow<AgentHistoryLoadState> = mutableLoadState
-    override val pendingTools: StateFlow<List<UnstableCleanEvent>> = MutableStateFlow(emptyList())
+    override val pendingTools: StateFlow<List<PendingRecord>> = MutableStateFlow(emptyList())
     override val streamingItem: StateFlow<HistoryStreamingItem?> = MutableStateFlow(null)
     override val activeTurnDuration: StateFlow<Duration?> = MutableStateFlow(null)
     override val followsLatest = MutableStateFlow(false)

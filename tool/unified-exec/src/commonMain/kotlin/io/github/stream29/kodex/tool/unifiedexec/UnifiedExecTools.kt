@@ -2,13 +2,13 @@
 
 package io.github.stream29.kodex.tool.unifiedexec
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecution
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.typedTool
@@ -29,13 +29,13 @@ internal actual object UnifiedExecToolImplementation {
             delegate = typedTool(
                 spec = execCommandSpec,
                 select = { event ->
-                    (event as? PendingCommandExecutionToolEvent)
+                    (event as? PendingCommandExecution)
                         ?.takeIf { it.action is PendingCommandExecutionAction.ExecCommand }
                 },
             ) { pending ->
                 val action = pending.action as PendingCommandExecutionAction.ExecCommand
                 try {
-                    StableCommandExecutionToolEvent(
+                    StableCommandExecution(
                         callId = pending.callId,
                         itemId = pending.itemId,
                         action = StableCommandExecutionAction.ExecCommand(action.arguments),
@@ -44,7 +44,7 @@ internal actual object UnifiedExecToolImplementation {
                         ),
                     )
                 } catch (failure: UnifiedExecToolException) {
-                    StableCommandExecutionToolEvent(
+                    StableCommandExecution(
                         callId = pending.callId,
                         itemId = pending.itemId,
                         action = StableCommandExecutionAction.ExecCommand(action.arguments),
@@ -65,7 +65,7 @@ private class CloseableUnifiedExecTool(
     override val spec: ResponsesApiTool
         get() = delegate.spec as ResponsesApiTool
 
-    override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
+    override suspend fun handle(pending: PendingToolCall): AgentCommit.CompletedTool =
         delegate.handle(pending)
 
     override fun close() {

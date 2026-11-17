@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.tool.applypatch
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatch
 import io.github.stream29.kodex.utils.applypatch.Patch
 import kotlinx.coroutines.CancellationException
 import kotlin.test.assertEquals
@@ -12,7 +12,7 @@ val applyPatchFailureBoundaryTest by testSuite {
         val tool = ApplyPatchTool(ApplyPatchToolClient(workingDirectoryProvider = {
             error("private directory error")
         }))
-        val pending = PendingPatchToolEvent(
+        val pending = PendingPatch(
             callId = "patch-call",
             diff = Patch("*** Begin Patch\n*** End Patch", emptyList()),
         )
@@ -23,7 +23,7 @@ val applyPatchFailureBoundaryTest by testSuite {
     test("cancellation from the patch client propagates") {
         val cancellation = CancellationException("cancel")
         val tool = ApplyPatchTool(ApplyPatchToolClient(workingDirectoryProvider = { throw cancellation }))
-        val pending = PendingPatchToolEvent(
+        val pending = PendingPatch(
             callId = "patch-cancel",
             diff = Patch("*** Begin Patch\n*** End Patch", emptyList()),
         )

@@ -17,11 +17,9 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
@@ -36,8 +34,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.callId
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.codexRequestWindowId
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.toResponseHistoryItems
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.ext.appendCompaction
@@ -410,7 +408,7 @@ private class KodexAgentStateImpl(
         }
     }
 
-    override suspend fun steer(events: List<StableIndexEvent.Steerable>): Int =
+    override suspend fun steer(events: List<AgentCommit.Steerable>): Int =
         writeMutex.withLock {
             if (events.isEmpty()) return@withLock latestIndex.value
             val index = storage.steer(events)
@@ -418,7 +416,7 @@ private class KodexAgentStateImpl(
             index
         }
 
-    override suspend fun consumeSteer(): List<StableIndexEvent.Steerable> {
+    override suspend fun consumeSteer(): List<AgentCommit.Steerable> {
         writeMutex.lock()
         try {
             val currentState = state.value
@@ -478,8 +476,8 @@ private class KodexAgentStateImpl(
             index
         }
 
-    override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int {
-        var pendingEvents = emptyList<PendingToolEvent>()
+    override suspend fun completeToolCall(completed: AgentCommit.CompletedTool): Int {
+        var pendingEvents = emptyList<PendingToolCall>()
         return mutate(
             validate = { value ->
                 val pending = value.requireToolPending()
@@ -564,25 +562,26 @@ private class KodexAgentStateImpl(
                 appendServerToolSearchOutput(item, timestamp)
 
             else ->
-                appendStableEvent(item.toIndependentStableCleanEvent(), timestamp)
+                appendConversationCommit(item.toIndependentConversationCommit(), timestamp)
         }
     }
 
-    private suspend fun appendStableEvent(
-        event: StableCleanEvent,
+    private suspend fun appendConversationCommit(
+        event: AgentCommit,
         timestamp: Instant,
     ): Int {
+        require(event.commitType in AgentCommitType.CleanEventTypes)
         val index = storage.commit(listOf(event), timestamp)
         latestIndex.value = index
         return index
     }
 
     private suspend fun appendPendingToolEvent(
-        event: PendingToolEvent,
+        event: PendingToolCall,
         timestamp: Instant,
     ): Int {
         val current = storage.unstableEventsAt(storage.latestIndex())
-        require(current.filterIsInstance<PendingToolEvent>().none { pending -> pending.callId == event.callId }) {
+        require(current.filterIsInstance<PendingToolCall>().none { pending -> pending.callId == event.callId }) {
             "Duplicate pending tool call id: ${event.callId}"
         }
         val index = storage.commit(listOf(UnstableSnapshot(current + event)), timestamp)
@@ -896,11 +895,11 @@ private suspend fun KodexAgentStorage.stateAt(index: Int): KodexAgentStateValue 
 
     val lastTransition = getLastCommitsIn(0..index, StateTransitionCommitTypes, limit = 1)
         .lastOrNull()
-        ?.commit as? StableCleanEvent
+        ?.commit
     return lastTransition?.toAgentStateValueOrNull() ?: KodexAgentStateValue.Empty
 }
 
-private fun StableCleanEvent.toAgentStateValueOrNull(): KodexAgentStateValue? =
+private fun AgentCommit.toAgentStateValueOrNull(): KodexAgentStateValue? =
     when (this) {
         is StableUserMessage,
         is StableAgentMessage,
@@ -912,32 +911,32 @@ private fun StableCleanEvent.toAgentStateValueOrNull(): KodexAgentStateValue? =
         is StableAssistantMessage ->
             KodexAgentStateValue.AssistantMessage
 
-        is StableCleanEvent.CompletedTool ->
+        is AgentCommit.CompletedTool ->
             KodexAgentStateValue.ToolCompleted
 
         else -> null
     }
 
-private fun List<PendingToolEvent>.requireEvent(callId: String): PendingToolEvent =
+private fun List<PendingToolCall>.requireEvent(callId: String): PendingToolCall =
     firstOrNull { event -> event.callId == callId }
         ?: throw IllegalArgumentException("Tool output does not match a pending call id: $callId")
 
 private suspend fun KodexAgentStorage.unstableWithoutPendingToolCall(
     index: Int,
     callId: String,
-): List<UnstableCleanEvent> {
+): List<PendingRecord> {
     val events = unstableEventsAt(index)
-    require(events.filterIsInstance<PendingToolEvent>().any { event -> event.callId == callId }) {
+    require(events.filterIsInstance<PendingToolCall>().any { event -> event.callId == callId }) {
         "Unstable clean timeline does not contain pending call id: $callId"
     }
-    return events.filterNot { event -> event is PendingToolEvent && event.callId == callId }
+    return events.filterNot { event -> event is PendingToolCall && event.callId == callId }
 }
 
-private suspend fun KodexAgentStorage.unstableEventsAt(index: Int): List<UnstableCleanEvent> =
+private suspend fun KodexAgentStorage.unstableEventsAt(index: Int): List<PendingRecord> =
     if (index < 0) emptyList() else getUnstableAtOrNull(index).orEmpty()
 
-private suspend fun KodexAgentStorage.pendingToolEventsAt(index: Int): List<PendingToolEvent> =
-    unstableEventsAt(index).filterIsInstance<PendingToolEvent>()
+private suspend fun KodexAgentStorage.pendingToolEventsAt(index: Int): List<PendingToolCall> =
+    unstableEventsAt(index).filterIsInstance<PendingToolCall>()
 
 private suspend fun KodexAgentStorage.startsNewTurnBefore(
     index: Int,
@@ -958,7 +957,7 @@ private suspend fun KodexAgentStorage.requireNoPendingServerToolSearch() {
     }
 }
 
-private fun ResponseItem.HistoryItem.toIndependentStableCleanEvent(): StableCleanEvent =
+private fun ResponseItem.HistoryItem.toIndependentConversationCommit(): AgentCommit =
     when (this) {
         is ResponseItem.Message ->
             when (role) {
@@ -1001,7 +1000,7 @@ private fun ResponseItem.HistoryItem.toIndependentStableCleanEvent(): StableClea
         -> error("Response item ${this::class.simpleName} requires a dedicated clean-history path.")
     }
 
-private fun toolPendingState(events: List<PendingToolEvent>): KodexAgentStateValue {
+private fun toolPendingState(events: List<PendingToolCall>): KodexAgentStateValue {
     return if (events.isEmpty()) {
         KodexAgentStateValue.ToolCompleted
     } else {

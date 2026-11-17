@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.tool.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.openai.ToolSpec
 
 /**
@@ -20,7 +20,7 @@ public interface Tool : AutoCloseable {
      * unexpected exceptions propagate to the runtime caller for contextual
      * logging and conversion, while coroutine cancellation propagates unchanged.
      */
-    public suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool
+    public suspend fun handle(pending: PendingToolCall): AgentCommit.CompletedTool
 }
 
 /**
@@ -28,8 +28,8 @@ public interface Tool : AutoCloseable {
  * shape. [select] keeps the downcast at the contract boundary so tool business
  * logic receives its typed pending model directly.
  */
-public expect fun <Pending : PendingToolEvent> typedTool(
+public expect fun <Pending : PendingToolCall> typedTool(
     spec: ToolSpec,
-    select: (PendingToolEvent) -> Pending?,
-    handler: suspend (Pending) -> StableCleanEvent.CompletedTool,
+    select: (PendingToolCall) -> Pending?,
+    handler: suspend (Pending) -> AgentCommit.CompletedTool,
 ): Tool

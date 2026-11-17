@@ -13,7 +13,7 @@ import kotlinx.serialization.json.JsonElement
 /** Completed function tool with decoded JSON arguments and result. */
 @Serializable
 @SerialName("json_tool_event")
-public data class StableJsonToolEvent(
+public data class StableJsonTool(
     @SerialName("call_id")
     public val callId: String,
     @SerialName("item_id")
@@ -23,8 +23,8 @@ public data class StableJsonToolEvent(
     public val arguments: JsonElement,
     public val result: JsonElement,
     public val success: Boolean? = null,
-) : StableWorkEvent.CompletedTool {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit, AgentCommit.CompletedTool {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(
                 callId = callId,
@@ -44,7 +44,7 @@ public data class StableJsonToolEvent(
 /** Completed function tool with decoded JSON arguments and a text result. */
 @Serializable
 @SerialName("text_tool_event")
-public data class StableTextToolEvent(
+public data class StableTextTool(
     @SerialName("call_id")
     public val callId: String,
     @SerialName("item_id")
@@ -54,8 +54,8 @@ public data class StableTextToolEvent(
     public val arguments: JsonElement,
     public val result: String,
     public val success: Boolean? = null,
-) : StableWorkEvent.CompletedTool {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit, AgentCommit.CompletedTool {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(
                 callId = callId,
@@ -75,7 +75,7 @@ public data class StableTextToolEvent(
 /** Completed custom tool retained when no dedicated semantic event applies. */
 @Serializable
 @SerialName("custom_tool_event")
-public data class StableCustomToolEvent(
+public data class StableCustomTool(
     @SerialName("call_id")
     public val callId: String,
     @SerialName("item_id")
@@ -85,8 +85,8 @@ public data class StableCustomToolEvent(
     public val input: String,
     public val result: FunctionCallOutputPayload,
     public val success: Boolean? = null,
-) : StableWorkEvent.CompletedTool {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit, AgentCommit.CompletedTool {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.CustomToolCall(
                 id = itemId,

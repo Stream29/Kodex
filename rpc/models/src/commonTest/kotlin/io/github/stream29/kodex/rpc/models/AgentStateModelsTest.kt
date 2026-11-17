@@ -1,8 +1,8 @@
 package io.github.stream29.kodex.rpc.models
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertEquals
@@ -19,12 +19,12 @@ val agentStateModelsTest by testSuite {
             AgentStateValue.AssistantMessage,
             AgentStateValue.ToolPending(
                 listOf(
-                    PendingFunctionToolEvent(
+                    PendingFunctionToolCall(
                         callId = "call-1",
                         name = "function",
                         arguments = Json.parseToJsonElement("""{"query":"你好"}"""),
                     ),
-                    PendingCustomToolEvent(callId = "call-2", name = "custom", input = "Input"),
+                    PendingCustomToolCall(callId = "call-2", name = "custom", input = "Input"),
                 ),
             ),
             AgentStateValue.ToolCompleted,

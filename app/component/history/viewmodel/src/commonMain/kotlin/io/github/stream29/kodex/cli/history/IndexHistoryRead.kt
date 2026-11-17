@@ -1,11 +1,11 @@
 package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrAfter
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
@@ -479,7 +479,7 @@ internal fun StableAssistantMessage.isFinal(): Boolean =
 
 private data class IndexedEntry(
     val index: Int,
-    val entry: CleanIndexEntry,
+    val entry: IndexCommit,
     val createdAt: Instant,
 ) {
     fun normalWorkLowerBound(): Int = index + 1
@@ -491,7 +491,7 @@ private data class IndexedEntry(
 }
 
 private fun IndexedAgentCommit.toIndexedEntry(): IndexedEntry? =
-    (commit as? CleanIndexEntry)?.let { IndexedEntry(index, it, createdAt) }
+    (commit as? IndexCommit)?.let { IndexedEntry(index, it, createdAt) }
 
 private data class SealedWorkSummary(
     val indexRange: IntRange,
@@ -528,7 +528,7 @@ private fun individualWorkItems(
 ): List<HistoryProjectionItem> {
     if (commitsNewestFirst.isEmpty()) return emptyList()
     return commitsNewestFirst.mapIndexed { position, (index, commit, createdAt) ->
-        val event = commit as StableWorkEvent
+        val event = commit as WorkCommit
         val predecessorCommit = commitsNewestFirst.getOrNull(position + 1)
         val predecessorTimestamp = predecessorCommit?.createdAt
             ?.takeIf { it != Instant.DISTANT_PAST }

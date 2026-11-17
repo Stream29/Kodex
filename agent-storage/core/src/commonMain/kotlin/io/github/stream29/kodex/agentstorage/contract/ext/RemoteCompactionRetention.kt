@@ -5,6 +5,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetain
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.openai.ContentItem
@@ -88,6 +89,7 @@ public actual suspend fun KodexAgentStorage.buildCompactionRetainedItems(
 private fun CompactionRetainedItem.approximateTokenCount(): Int =
     when (this) {
         is StableUserMessage -> content.textTokenCount()
+        is StableScheduleEvent -> "schedule #$scheduleId fired: $description".approximateTokenCount()
         is StableAskUserEvent ->
             (
                 24L +

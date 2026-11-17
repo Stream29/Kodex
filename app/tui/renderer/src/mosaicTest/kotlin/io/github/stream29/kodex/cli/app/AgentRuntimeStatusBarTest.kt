@@ -5,7 +5,7 @@ import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.runMosaicTest
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.test.startRpcFrontendFixture
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMedia
 import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDropdowns
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
@@ -32,7 +32,7 @@ val agentRuntimeStatusBarTest by testSuite {
                 override fun forceCompact() { commands += "compact" }
             }
             val settings = agent.settings.value
-            val pending = AgentStateValue.ToolPending(listOf(PendingReadMediaToolEvent(
+            val pending = AgentStateValue.ToolPending(listOf(PendingReadMedia(
                 "media", arguments = ReadMediaToolArguments("sample.png"),
             )))
             listOf(

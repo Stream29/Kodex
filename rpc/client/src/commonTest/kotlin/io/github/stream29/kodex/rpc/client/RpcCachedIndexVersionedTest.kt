@@ -7,7 +7,7 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.reactivecircus.cache4k.FakeTimeSource
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
@@ -510,10 +510,10 @@ private suspend fun ObservableKodexAgentStorage.readUsing(method: String): Any? 
     else -> error("Unexpected method")
 }
 
-private suspend fun KodexAgentStorage.getIndexEntryExact(index: Int): CleanIndexEntry? =
-    getCommitExact(index, AgentCommitType.IndexTypes)?.commit as? CleanIndexEntry
+private suspend fun KodexAgentStorage.getIndexEntryExact(index: Int): IndexCommit? =
+    getCommitExact(index, AgentCommitType.IndexTypes)?.commit as? IndexCommit
 
-private suspend fun KodexAgentStorage.getIndexEntryAt(index: Int): CleanIndexEntry {
+private suspend fun KodexAgentStorage.getIndexEntryAt(index: Int): IndexCommit {
     require(index >= 0) { "Index $index must be non-negative." }
-    return requireNotNull(getCommitAtOrBefore(index, AgentCommitType.IndexTypes)?.commit as? CleanIndexEntry)
+    return requireNotNull(getCommitAtOrBefore(index, AgentCommitType.IndexTypes)?.commit as? IndexCommit)
 }

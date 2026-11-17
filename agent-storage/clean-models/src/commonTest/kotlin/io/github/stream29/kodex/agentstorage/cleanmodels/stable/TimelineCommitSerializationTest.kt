@@ -24,7 +24,7 @@ val stableCleanEventSerializationTest by testSuite {
             content = listOf(ContentItem.OutputText("done")),
             phase = MessagePhase.FinalAnswer,
         )
-        val event: StableIndexEvent = StableAssistantMessage(
+        val event: IndexCommit = StableAssistantMessage(
             content = item.content,
             id = item.id,
             phase = item.phase,
@@ -35,12 +35,12 @@ val stableCleanEventSerializationTest by testSuite {
 
         assertEquals(JsonPrimitive("assistant_message"), element["type"])
         assertEquals(setOf("type", "content", "id", "phase"), element.keys)
-        assertEquals(event, stableEventJson.decodeFromString<StableIndexEvent>(encoded))
+        assertEquals(event, stableEventJson.decodeFromString<IndexCommit>(encoded))
         assertEquals(listOf(item), event.toResponseHistoryItems())
     }
 
     test("round trips content-only user and developer messages") {
-        val events: List<StableIndexEvent> = listOf(
+        val events: List<IndexCommit> = listOf(
             StableUserMessage(
                 listOf(ContentItem.InputText("user content")),
             ),
@@ -56,12 +56,12 @@ val stableCleanEventSerializationTest by testSuite {
                 setOf("type", "content"),
                 stableEventJson.parseToJsonElement(encoded).jsonObject.keys,
             )
-            assertEquals(event, stableEventJson.decodeFromString<StableIndexEvent>(encoded))
+            assertEquals(event, stableEventJson.decodeFromString<IndexCommit>(encoded))
         }
     }
 
     test("round trips flattened inter-agent fields") {
-        val event: StableIndexEvent = StableAgentMessage(
+        val event: IndexCommit = StableAgentMessage(
             author = "/root/worker",
             recipient = "/root",
             content = listOf(
@@ -74,7 +74,7 @@ val stableCleanEventSerializationTest by testSuite {
         val element = stableEventJson.parseToJsonElement(encoded).jsonObject
 
         assertEquals(setOf("type", "author", "recipient", "content"), element.keys)
-        assertEquals(event, stableEventJson.decodeFromString<StableIndexEvent>(encoded))
+        assertEquals(event, stableEventJson.decodeFromString<IndexCommit>(encoded))
         assertEquals(
             listOf(
                 ResponseItem.AgentMessage(
@@ -104,18 +104,18 @@ val stableCleanEventSerializationTest by testSuite {
             status = "completed",
             result = "base64",
         )
-        val events: List<StableWorkEvent.CompletedTool> = listOf(
+        val events: List<WorkCommit> = listOf(
             StableServerToolSearch(serverSearchCall, serverSearchOutput),
             StableWebSearchCall(webSearch),
             StableImageGenerationCall(imageGeneration),
         )
 
         events.forEach { event ->
-            val encoded = stableEventJson.encodeToString<StableWorkEvent>(event)
+            val encoded = stableEventJson.encodeToString<WorkCommit>(event)
 
             assertEquals(
                 event,
-                stableEventJson.decodeFromString<StableWorkEvent>(encoded),
+                stableEventJson.decodeFromString<WorkCommit>(encoded),
             )
         }
         assertEquals(
@@ -128,7 +128,7 @@ val stableCleanEventSerializationTest by testSuite {
 
     test("round trips index events and context compaction through the index union") {
         val compaction = ResponseItem.Compaction(encryptedContent = "encrypted")
-        val entries: List<StableIndexEvent> = listOf(
+        val entries: List<IndexCommit> = listOf(
             StableUserMessage(
                 listOf(ContentItem.InputText("retained")),
             ),
@@ -142,21 +142,21 @@ val stableCleanEventSerializationTest by testSuite {
         )
 
         entries.forEach { entry ->
-            val encoded = stableEventJson.encodeToString<StableIndexEvent>(entry)
+            val encoded = stableEventJson.encodeToString<IndexCommit>(entry)
 
             assertEquals(
                 entry,
-                stableEventJson.decodeFromString<StableIndexEvent>(encoded),
+                stableEventJson.decodeFromString<IndexCommit>(encoded),
             )
         }
-        assertIs<StableIndexEvent>(entries[0])
-        assertIs<StableIndexEvent>(entries[1])
-        assertIs<StableCleanEvent>(entries[2])
+        assertIs<StableUserMessage>(entries[0])
+        assertIs<StableAssistantMessage>(entries[1])
+        assertIs<StableContextCompaction>(entries[2])
         assertEquals(
             JsonPrimitive("context_compaction"),
             stableEventJson
                 .parseToJsonElement(
-                    stableEventJson.encodeToString<StableIndexEvent>(entries[2]),
+                    stableEventJson.encodeToString<IndexCommit>(entries[2]),
                 )
                 .jsonObject["type"],
         )

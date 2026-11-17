@@ -9,7 +9,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentComm
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
@@ -320,8 +320,8 @@ private fun historyUser(text: String): StableUserMessage =
 private fun historyAssistant(text: String): StableAssistantMessage =
     StableAssistantMessage(listOf(ContentItem.OutputText(text)))
 
-private fun historyWork(index: Int): StableTextToolEvent =
-    StableTextToolEvent(
+private fun historyWork(index: Int): StableTextTool =
+    StableTextTool(
         callId = "call-$index",
         name = "tool-$index",
         arguments = JsonObject(emptyMap()),

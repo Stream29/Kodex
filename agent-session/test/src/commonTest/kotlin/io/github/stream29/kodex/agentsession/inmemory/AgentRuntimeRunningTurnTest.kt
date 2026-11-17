@@ -14,13 +14,13 @@ import io.github.stream29.kodex.agentstate.impl.KodexAgentStateInvalidTransition
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
@@ -93,7 +93,7 @@ val agentRuntimeRunningTurnTest by testSuite {
                     throw cancellation
                 }
 
-                override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int =
+                override suspend fun completeToolCall(completed: AgentCommit.CompletedTool): Int =
                     throw cleanup
             }
             val runtime = faultingState.buildMasterAgentRuntime(testKodexAgentDependencies(client))
@@ -184,13 +184,13 @@ val agentRuntimeRunningTurnTest by testSuite {
             assertEquals(2, requests)
             val workEvents = root.storage.getCommitsIn(0..runtime.latestIndex.value, AgentCommitType.WorkTypes)
                 .map { it.commit }
-            val failedRetired = workEvents.filterIsInstance<StableTextToolEvent>().single { it.callId == "retired-call" }
+            val failedRetired = workEvents.filterIsInstance<StableTextTool>().single { it.callId == "retired-call" }
             assertFalse(failedRetired.success ?: true)
             assertTrue("unsupported tool call" in failedRetired.result)
             val beforeIndex = runtime.latestIndex.value
             val pending = runtime.state.value as KodexAgentStateValue.ToolPending
             assertEquals(listOf("await-1"), pending.events.map { it.callId })
-            assertEquals(listOf(awaitArgs), pending.events.filterIsInstance<PendingAwaitEventToolEvent>().map { it.arguments })
+            assertEquals(listOf(awaitArgs), pending.events.filterIsInstance<PendingAwait>().map { it.arguments })
             runtime.resume()
             assertEquals(2, requests)
             assertEquals(beforeIndex, runtime.latestIndex.value)

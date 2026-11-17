@@ -1,10 +1,9 @@
 package io.github.stream29.kodex.app.webrenderersmoke
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
@@ -27,8 +26,8 @@ internal fun checkRpcSerialization(): String = try {
         typeOf<SettingsAuthenticationState>(), typeOf<SettingsAccountUsageState>(),
         typeOf<Notification>(), typeOf<OAuthTarget>(), typeOf<AgentStateValue>(),
         typeOf<ContentItem>(), typeOf<ResponsesStreamEvent>(),
-        typeOf<AgentCommit>(), typeOf<StableIndexEvent.Steerable>(),
-        typeOf<CleanIndexEntry>(), typeOf<StableWorkEvent>(), typeOf<UnstableCleanEvent>(),
+        typeOf<AgentCommit>(), typeOf<AgentCommit.Steerable>(),
+        typeOf<IndexCommit>(), typeOf<WorkCommit>(), typeOf<PendingRecord>(),
         typeOf<KodexAuthSource>(), typeOf<CodexRateLimitResetOutcome>(),
         typeOf<List<Pair<Int, ContentItem?>>>(),
     )

@@ -14,7 +14,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.dp
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
@@ -429,7 +429,7 @@ internal open class SidebarTestAgent(
     override val running: StateFlow<Boolean> get() = unused()
     override val latestIndex: StateFlow<Int> get() = unused()
     override val tokenCount: StateFlow<Long?> get() = unused()
-    override val pendingSteer: StateFlow<List<StableIndexEvent.Steerable>> get() = unused()
+    override val pendingSteer: StateFlow<List<AgentCommit.Steerable>> get() = unused()
     override val historyAction: StateFlow<AgentHistoryActionState> get() = unused()
     override val lifecycle: StateFlow<AgentLifecycleState> get() = unused()
     override val settings: StateFlow<KodexAgentSettings> get() = unused()

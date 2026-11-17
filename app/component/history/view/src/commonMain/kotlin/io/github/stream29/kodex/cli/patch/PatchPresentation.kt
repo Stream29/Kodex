@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.patch
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.kodex.utils.applypatch.AddFileHunk
 import io.github.stream29.kodex.utils.applypatch.DeleteFileHunk
@@ -17,7 +17,7 @@ public actual fun Patch.toPendingPatchPresentation(): PatchPresentation =
         emptyMessage = "No patch hunks",
     )
 
-public actual fun StablePatchToolEvent.toStablePatchPresentation(): PatchPresentation =
+public actual fun StablePatch.toStablePatchPresentation(): PatchPresentation =
     when (val result = result) {
         is StablePatchToolExecutionResult.Success ->
             diff.toPatchPresentation(

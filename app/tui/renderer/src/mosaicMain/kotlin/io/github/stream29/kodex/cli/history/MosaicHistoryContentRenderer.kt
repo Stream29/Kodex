@@ -5,7 +5,7 @@ import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.TextStyle
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.cli.patch.PendingPatchToolEventView
 import io.github.stream29.kodex.cli.patch.StablePatchToolEventView
 import io.github.stream29.kodex.openai.StepStatus
@@ -50,7 +50,7 @@ internal class MosaicHistoryContentRenderer : HistoryContentRenderer {
             content(MosaicHistoryToolDetails(this))
         }
     }
-    @Composable override fun StablePatch(event: StablePatchToolEvent) {
+    @Composable override fun StablePatch(event: StablePatch) {
         val expansion = LocalHistoryExpansion.current
         StablePatchToolEventView(
             event, expansion?.expanded?.invoke(), expansion?.toggle,

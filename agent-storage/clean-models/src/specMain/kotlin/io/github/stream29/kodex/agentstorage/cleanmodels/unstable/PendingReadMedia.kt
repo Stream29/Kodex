@@ -9,13 +9,13 @@ import kotlinx.serialization.Serializable
 /** Local `read_media` call waiting for execution. */
 @Serializable
 @SerialName("read_media")
-public data class PendingReadMediaToolEvent(
+public data class PendingReadMedia(
     @SerialName("call_id")
     override val callId: String,
     @SerialName("item_id")
     override val itemId: ResponseItemId? = null,
     public val arguments: ReadMediaToolArguments,
-) : PendingToolEvent {
+) : PendingToolCall {
     override val toolName: String = "read_media"
     override val toolNamespace: String? = null
 

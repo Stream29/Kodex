@@ -1,14 +1,14 @@
 package io.github.stream29.kodex.rpc.contract
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.StepStatus
@@ -22,7 +22,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 val completedToolValuesTest by testSuite {
-    val serializer = StableCleanEvent.CompletedTool.serializer()
+    val serializer = AgentCommit.CompletedTool.serializer()
     val planUpdate = StablePlanUpdate(
         callId = "plan-1",
         arguments = UpdatePlanArgs(
@@ -30,7 +30,7 @@ val completedToolValuesTest by testSuite {
             plan = listOf(PlanItemArg("Implement", StepStatus.InProgress)),
         ),
     )
-    val readMedia = StableReadMediaToolEvent(
+    val readMedia = StableReadMedia(
         callId = "media-1",
         arguments = ReadMediaToolArguments(
             path = "/tmp/diagram.png",
@@ -43,7 +43,7 @@ val completedToolValuesTest by testSuite {
             ),
         ),
     )
-    val work = StableTextToolEvent(
+    val work = StableTextTool(
         callId = "work-1",
         name = "tool",
         arguments = Json.parseToJsonElement("""{"n":1}"""),
@@ -64,12 +64,12 @@ val completedToolValuesTest by testSuite {
 
     test("completion encoding agrees with the existing timeline unions") {
         assertEquals(
-            Json.encodeToJsonElement(StableIndexEvent.serializer(), planUpdate),
+            Json.encodeToJsonElement(IndexCommit.serializer(), planUpdate),
             Json.encodeToJsonElement(serializer, planUpdate),
         )
         for (event in listOf(readMedia, work)) {
             assertEquals(
-                Json.encodeToJsonElement(StableWorkEvent.serializer(), event),
+                Json.encodeToJsonElement(WorkCommit.serializer(), event),
                 Json.encodeToJsonElement(serializer, event),
             )
         }
@@ -77,7 +77,7 @@ val completedToolValuesTest by testSuite {
 
     test("non tool and unknown events cannot decode as tool completions") {
         val user = Json.encodeToString(
-            StableIndexEvent.serializer(),
+            IndexCommit.serializer(),
             StableUserMessage(listOf(ContentItem.InputText("Not a tool result"))),
         )
         for (encoded in listOf(user, """{"type":"unknown_tool"}""", "null")) {

@@ -19,8 +19,8 @@ import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionReposi
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
@@ -313,8 +313,8 @@ val agentHistoryRendererStateTest by testSuite {
         val viewState = AgentHistoryViewState()
         model.streamingItem.value = HistoryStreamingItem.Started
         model.pendingTools.value = listOf(
-            PendingCustomToolEvent(callId = "a", name = "alpha", input = "a"),
-            PendingCustomToolEvent(callId = "b", name = "beta", input = "b"),
+            PendingCustomToolCall(callId = "a", name = "alpha", input = "a"),
+            PendingCustomToolCall(callId = "b", name = "beta", input = "b"),
         )
         model.requestScrollToStorageIndex(15)
         val first = model.pendingScrollEffect.value!!
@@ -484,7 +484,7 @@ private class RendererWorkGroup : WorkGroupHistoryItemViewModel {
 private class RendererHistoryModel(window: RendererWindow) : AgentHistoryViewModel {
     override val historyItems = MutableStateFlow<HistoryItemWindow>(window)
     override val loadState = MutableStateFlow<AgentHistoryLoadState>(AgentHistoryLoadState.Ready)
-    override val pendingTools = MutableStateFlow<List<UnstableCleanEvent>>(emptyList())
+    override val pendingTools = MutableStateFlow<List<PendingRecord>>(emptyList())
     override val streamingItem = MutableStateFlow<HistoryStreamingItem?>(null)
     override val activeTurnDuration = MutableStateFlow<Duration?>(null)
     override val followsLatest = MutableStateFlow(true)

@@ -2,7 +2,7 @@ package io.github.stream29.kodex.agentruntime.contract
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
@@ -24,7 +24,7 @@ public class ConcurrentAgentRuntimeResumeException : IllegalStateException(
  * [AgentRuntime.resume] turn stops at an assistant message or an unhandled non-cancellation failure.
  *
  * Cancellations, standalone [AgentRuntime.compact] calls, pre-admission rejections, and
- * `PendingAwaitEventToolEvent` parked waits do not emit stop events.
+ * `PendingAwait` parked waits do not emit stop events.
  */
 public sealed interface AgentStopEvent {
     /** The assistant message produced at the end of this turn. */
@@ -62,7 +62,7 @@ public interface AgentRuntime : KodexAgentState {
     /**
      * Runs one outer turn through the composed runtime layers.
      *
-     * `PendingAwaitEventToolEvent` and any remaining unowned `PendingToolEvent` items are
+     * `PendingAwait` and any remaining unowned `PendingToolCall` items are
      * resolved within this [runningTurn] slot after inner `KodexToolRuntime` handling:
      * - Any non-`await_event` pending tool call left unmatched by `KodexToolRuntime` (such as an
      *   unknown or retired tool name emitted by the model) is completed as a failed tool output
@@ -115,7 +115,7 @@ public interface AgentRuntime : KodexAgentState {
      *   [AgentRuntime]'s own [kotlinx.coroutines.CoroutineScope] (`UNDISPATCHED`) so [runningTurn]
      *   is occupied before [submit] returns.
      */
-    public suspend fun submit(events: List<StableIndexEvent.Steerable>)
+    public suspend fun submit(events: List<AgentCommit.Steerable>)
 
     /**
      * Synchronously commits first-time [response] for [askId] via [answerAskUser]

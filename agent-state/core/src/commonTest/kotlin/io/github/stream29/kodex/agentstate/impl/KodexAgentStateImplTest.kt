@@ -13,7 +13,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.toResponseHistoryItems
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -22,14 +22,15 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCom
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.codexRequestWindowId
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
@@ -314,7 +315,7 @@ val kodexAgentStateImplTest by testSuite {
             assertEquals(
                 listOf(userEvent("Implement."), developer, assistant),
                 storage.getCommitsIn(1..agent.latestIndex.value, AgentCommitType.IndexTypes).map {
-                    it.commit as CleanIndexEntry
+                    it.commit as IndexCommit
                 },
             )
             assertEquals(0, storage.countCommitsIn(0..Int.MAX_VALUE, AgentCommitType.UnstableTypes))
@@ -472,7 +473,7 @@ val kodexAgentStateImplTest by testSuite {
 
             assertEquals(
                 listOf(
-                    PendingFunctionToolEvent(
+                    PendingFunctionToolCall(
                         callId = call.callId,
                         itemId = call.id,
                         name = call.name,
@@ -589,7 +590,7 @@ val kodexAgentStateImplTest by testSuite {
             agent.completeToolCall(secondCompleted)
             assertEquals(
                 listOf(first.callId),
-                checkNotNull(storage.getUnstableExact(4)).filterIsInstance<PendingToolEvent>().map { it.callId },
+                checkNotNull(storage.getUnstableExact(4)).filterIsInstance<PendingToolCall>().map { it.callId },
             )
             assertEquals(KodexAgentStateValue.ToolPending(listOf(pendingTool(first))), agent.state.value)
 
@@ -1306,8 +1307,8 @@ private fun functionCall(
 private fun completedTool(
     call: ResponseItem.FunctionCall,
     result: String,
-): StableTextToolEvent =
-    StableTextToolEvent(
+): StableTextTool =
+    StableTextTool(
         callId = call.callId,
         itemId = call.id,
         name = call.name,
@@ -1320,11 +1321,11 @@ private fun completedTool(
 private fun failedTool(
     call: ResponseItem.FunctionCall,
     result: String,
-): StableTextToolEvent =
+): StableTextTool =
     completedTool(call, result).copy(success = false)
 
-private fun pendingTool(call: ResponseItem.FunctionCall): PendingFunctionToolEvent =
-    PendingFunctionToolEvent(
+private fun pendingTool(call: ResponseItem.FunctionCall): PendingFunctionToolCall =
+    PendingFunctionToolCall(
         callId = call.callId,
         itemId = call.id,
         name = call.name,
@@ -1339,17 +1340,17 @@ private suspend fun KodexAgentStateContract.appendUserMessage(
     return appendUserMessage(message.content)
 }
 
-internal suspend fun KodexAgentStorage.getIndexEntryExact(index: Int): CleanIndexEntry? =
-    getCommitExact(index, AgentCommitType.IndexTypes)?.commit as? CleanIndexEntry
+internal suspend fun KodexAgentStorage.getIndexEntryExact(index: Int): IndexCommit? =
+    getCommitExact(index, AgentCommitType.IndexTypes)?.commit as? IndexCommit
 
-internal suspend fun KodexAgentStorage.getIndexEntryAt(index: Int): CleanIndexEntry =
-    requireNotNull(getCommitAtOrBefore(index, AgentCommitType.IndexTypes)?.commit as? CleanIndexEntry)
+internal suspend fun KodexAgentStorage.getIndexEntryAt(index: Int): IndexCommit =
+    requireNotNull(getCommitAtOrBefore(index, AgentCommitType.IndexTypes)?.commit as? IndexCommit)
 
-internal suspend fun KodexAgentStorage.getWorkEventExact(index: Int): StableWorkEvent? =
-    getCommitExact(index, AgentCommitType.WorkTypes)?.commit as? StableWorkEvent
+internal suspend fun KodexAgentStorage.getWorkEventExact(index: Int): WorkCommit? =
+    getCommitExact(index, AgentCommitType.WorkTypes)?.commit as? WorkCommit
 
-internal suspend fun KodexAgentStorage.getWorkEventAt(index: Int): StableWorkEvent =
-    requireNotNull(getCommitAtOrBefore(index, AgentCommitType.WorkTypes)?.commit as? StableWorkEvent)
+internal suspend fun KodexAgentStorage.getWorkEventAt(index: Int): WorkCommit =
+    requireNotNull(getCommitAtOrBefore(index, AgentCommitType.WorkTypes)?.commit as? WorkCommit)
 
 internal suspend fun KodexAgentStorage.getSettingsExact(index: Int): KodexAgentSettings? =
     getCommitExact(index, AgentCommitType.SettingsTypes)?.commit as? KodexAgentSettings
@@ -1357,10 +1358,10 @@ internal suspend fun KodexAgentStorage.getSettingsExact(index: Int): KodexAgentS
 internal suspend fun KodexAgentStorage.getLlmRequestMetaAt(index: Int): LlmRequestMeta =
     requireNotNull(getLlmRequestMetaAtOrNull(index))
 
-internal suspend fun KodexAgentStorage.getUnstableExact(index: Int): List< io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent>? =
+internal suspend fun KodexAgentStorage.getUnstableExact(index: Int): List<PendingRecord>? =
     (getCommitExact(index, AgentCommitType.UnstableTypes)?.commit as? UnstableSnapshot)?.events
 
-internal suspend fun KodexAgentStorage.getUnstableAt(index: Int): List<io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent> =
+internal suspend fun KodexAgentStorage.getUnstableAt(index: Int): List<PendingRecord> =
     requireNotNull(getUnstableAtOrNull(index))
 
 internal suspend fun KodexAgentStorage.getTimestampExact(index: Int): kotlin.time.Instant? =

@@ -7,9 +7,9 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecution
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.utils.shellclient.ProcessException
 import io.github.stream29.kodex.utils.shellclient.ProcessSession
@@ -286,9 +286,9 @@ private suspend fun TestScope.withVirtualWaitHarness(
 }
 
 private suspend fun Tool.invokeExec(arguments: ExecCommandArguments): UnifiedExecOutput {
-    val event = assertIs<StableCommandExecutionToolEvent>(
+    val event = assertIs<StableCommandExecution>(
         handle(
-            PendingCommandExecutionToolEvent(
+            PendingCommandExecution(
                 callId = "call_exec_wait_regression",
                 action = PendingCommandExecutionAction.ExecCommand(arguments),
             ),

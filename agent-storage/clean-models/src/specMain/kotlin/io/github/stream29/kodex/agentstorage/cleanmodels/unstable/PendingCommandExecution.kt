@@ -10,13 +10,13 @@ import kotlinx.serialization.Serializable
 /** Local command or process interaction waiting for execution. */
 @Serializable
 @SerialName("command_execution")
-public data class PendingCommandExecutionToolEvent(
+public data class PendingCommandExecution(
     @SerialName("call_id")
     override val callId: String,
     @SerialName("item_id")
     override val itemId: ResponseItemId? = null,
     public val action: PendingCommandExecutionAction,
-) : PendingToolEvent {
+) : PendingToolCall {
     override val toolName: String
         get() = when (action) {
             is PendingCommandExecutionAction.ExecCommand -> "exec_command"

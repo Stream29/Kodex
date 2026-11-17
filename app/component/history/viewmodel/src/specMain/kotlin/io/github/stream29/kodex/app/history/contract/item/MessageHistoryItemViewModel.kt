@@ -1,13 +1,13 @@
 package io.github.stream29.kodex.app.history.contract.item
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
 import kotlin.time.Instant
 
 /** A stored user, assistant, developer, or inter-Agent message. */
-public interface MessageHistoryItemViewModel : HistoryItemViewModel {
-    public val index: Int
+public interface MessageHistoryItemViewModel : WorkGroupChildHistoryItemViewModel {
+    public override val index: Int
     public val state: StateFlow<MessageHistoryItemState>
 
     /**
@@ -28,7 +28,7 @@ public sealed interface MessageHistoryItemState {
      * @throws IllegalArgumentException if [elapsed] or non-null [turnDuration] is negative or infinite.
      */
     public data class Ready(
-        public val event: StableIndexEvent.Steerable,
+        public val event: AgentCommit.Steerable,
         public val elapsed: Duration,
         /** Complete turn duration rendered below a final assistant message. */
         public val turnDuration: Duration? = null,

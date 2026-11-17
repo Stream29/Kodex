@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.Density
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.app.agent.contract.*
@@ -270,7 +270,7 @@ internal class PageTestAgent(
 ) : SidebarTestAgent() {
     override val state = MutableStateFlow<AgentStateValue>(AgentStateValue.AssistantMessage)
     override val running = MutableStateFlow(false)
-    override val pendingSteer = MutableStateFlow<List<StableIndexEvent.Steerable>>(emptyList())
+    override val pendingSteer = MutableStateFlow<List<AgentCommit.Steerable>>(emptyList())
     override val historyAction = MutableStateFlow<AgentHistoryActionState>(AgentHistoryActionState.None)
     override val tokenCount = MutableStateFlow<Long?>(null)
     override val settings = MutableStateFlow(KodexAgentSettings(OpenAiModelId("test-model"), cwd = Path("/opaque/$name")))

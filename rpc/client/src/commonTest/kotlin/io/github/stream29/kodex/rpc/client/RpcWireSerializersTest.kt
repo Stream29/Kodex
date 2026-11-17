@@ -1,10 +1,10 @@
 package io.github.stream29.kodex.rpc.client
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
@@ -53,10 +53,11 @@ val rpcWireSerializersTest by testSuite {
         checkLookup<AgentStateValue>(AgentStateValue.serializer())
         checkLookup<ContentItem>(ContentItem.serializer())
         checkLookup<ResponsesStreamEvent>(ResponsesStreamEvent.serializer())
-        checkLookup<StableIndexEvent.Steerable>(StableIndexEvent.Steerable.serializer())
-        checkLookup<CleanIndexEntry>(CleanIndexEntry.serializer())
-        checkLookup<StableWorkEvent>(StableWorkEvent.serializer())
-        checkLookup<UnstableCleanEvent>(UnstableCleanEvent.serializer())
+        checkLookup<AgentCommit.Steerable>(AgentCommit.Steerable.serializer())
+        checkLookup<AgentCommit.CompletedTool>(AgentCommit.CompletedTool.serializer())
+        checkLookup<IndexCommit>(IndexCommit.serializer())
+        checkLookup<WorkCommit>(WorkCommit.serializer())
+        checkLookup<PendingRecord>(PendingRecord.serializer())
         checkLookup<KodexAuthSource>(KodexAuthSource.serializer())
         checkLookup<CodexRateLimitResetOutcome>(CodexRateLimitResetOutcome.serializer())
     }

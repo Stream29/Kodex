@@ -8,7 +8,7 @@ import kotlin.test.assertEquals
 
 val stablePatchWireTest by testSuite {
     test("patch event preserves structured hunks without a host filesystem") {
-        val event = StablePatchToolEvent(
+        val event = StablePatch(
             callId = "call_browser_patch",
             diff = """
                 *** Begin Patch
@@ -19,7 +19,7 @@ val stablePatchWireTest by testSuite {
             result = StablePatchToolExecutionResult.Failure("fixture"),
         )
         val encoded = Json.encodeToString(event)
-        assertEquals(event, Json.decodeFromString<StablePatchToolEvent>(encoded))
-        assertEquals(event.toResponseHistoryItems(), Json.decodeFromString<StablePatchToolEvent>(encoded).toResponseHistoryItems())
+        assertEquals(event, Json.decodeFromString<StablePatch>(encoded))
+        assertEquals(event.toResponseHistoryItems(), Json.decodeFromString<StablePatch>(encoded).toResponseHistoryItems())
     }
 }

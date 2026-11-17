@@ -6,7 +6,7 @@ import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
@@ -53,7 +53,7 @@ internal class MosaicHistoryItemRenderer(
         CollapsedToolHistoryRow(summary, status, elapsed, onClick)
     }
     @Composable override fun Event(
-        event: StableCleanEvent, elapsed: Duration, onCollapse: (() -> Unit)?, shellSessions: AgentShellSessionRegistry?,
+        event: AgentCommit, elapsed: Duration, onCollapse: (() -> Unit)?, shellSessions: AgentShellSessionRegistry?,
     ) {
         event.render(shellSessions, onCollapse?.let { HistoryExpansionBinding({ true }, it) }, elapsed)
     }

@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.tool.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.openai.ToolSpec
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -12,15 +12,15 @@ import kotlin.coroutines.cancellation.CancellationException
  * shape. [select] keeps the downcast at the contract boundary so tool business
  * logic receives its typed pending model directly.
  */
-public actual fun <Pending : PendingToolEvent> typedTool(
+public actual fun <Pending : PendingToolCall> typedTool(
     spec: ToolSpec,
-    select: (PendingToolEvent) -> Pending?,
-    handler: suspend (Pending) -> StableCleanEvent.CompletedTool,
+    select: (PendingToolCall) -> Pending?,
+    handler: suspend (Pending) -> AgentCommit.CompletedTool,
 ): Tool =
     object : Tool {
         override val spec: ToolSpec = spec
 
-        override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool {
+        override suspend fun handle(pending: PendingToolCall): AgentCommit.CompletedTool {
             currentCoroutineContext().ensureActive()
             val typedPending = requireNotNull(select(pending)) {
                 "Tool $spec cannot handle pending event ${pending::class.simpleName}."

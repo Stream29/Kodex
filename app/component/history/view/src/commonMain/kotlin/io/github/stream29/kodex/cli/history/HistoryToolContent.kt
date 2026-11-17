@@ -3,7 +3,7 @@ package io.github.stream29.kodex.cli.history
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.openai.PlanItemArg
@@ -31,7 +31,7 @@ private fun PlanContent(
 }
 
 @Composable
-public actual fun HistoryCommandContent(event: StableCommandExecutionToolEvent, renderer: HistoryContentRenderer) {
+public actual fun HistoryCommandContent(event: StableCommandExecution, renderer: HistoryContentRenderer) {
     val action = event.action
     val summary = when (action) {
         is StableCommandExecutionAction.ExecCommand -> "Run: ${action.arguments.command}"

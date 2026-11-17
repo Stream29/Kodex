@@ -51,7 +51,7 @@ val offscreenHistoryEventsTest by testSuite {
         test("generic JSON details use monospace and wrap width=$width") { offscreenTest {
             val arguments = JsonObject(mapOf("query" to JsonPrimitive("Unicode 漢字 " + "detail ".repeat(30))))
             val result = JsonArray(listOf(JsonPrimitive(42), JsonPrimitive(false)))
-            val event = StableJsonToolEvent("generic-json", name = "external", arguments = arguments, result = result)
+            val event = StableJsonTool("generic-json", name = "external", arguments = arguments, result = result)
             val scene = OffscreenScene.create(width = width, height = 1800) {
                 HistoryEventContent(event, rememberComposeHistoryContentRenderer())
             }
@@ -349,17 +349,17 @@ val offscreenHistoryEventsTest by testSuite {
     } }
 
     val pending = listOf(
-        Triple(PendingFunctionToolEvent("function", name = "external", arguments = emptyHistoryArguments),
+        Triple(PendingFunctionToolCall("function", name = "external", arguments = emptyHistoryArguments),
             "Running external", "Tool: external"),
-        Triple(PendingCustomToolEvent("custom", name = "external", input = "raw input"),
+        Triple(PendingCustomToolCall("custom", name = "external", input = "raw input"),
             "Running external", "Tool: external"),
-        Triple(PendingCommandExecutionToolEvent("exec", action = PendingCommandExecutionAction.ExecCommand(ExecCommandArguments("pwd", yieldTimeMillis = 10_000))),
+        Triple(PendingCommandExecution("exec", action = PendingCommandExecutionAction.ExecCommand(ExecCommandArguments("pwd", yieldTimeMillis = 10_000))),
             "Running: pwd", "Tool: exec_command"),
-        Triple(PendingCommandExecutionToolEvent("poll", action = PendingCommandExecutionAction.WriteStdin(WriteStdinArguments(77, yieldTimeMillis = 250))),
+        Triple(PendingCommandExecution("poll", action = PendingCommandExecutionAction.WriteStdin(WriteStdinArguments(77, yieldTimeMillis = 250))),
             "Waiting for terminal session 77", "Tool: write_stdin"),
-        Triple(PendingReadMediaToolEvent("media", arguments = ReadMediaToolArguments("/image.png")),
+        Triple(PendingReadMedia("media", arguments = ReadMediaToolArguments("/image.png")),
             "Reading media: /image.png", "Tool: read_media"),
-        Triple(PendingAwaitEventToolEvent("await", arguments = AwaitEventArguments(listOf(3, 5))),
+        Triple(PendingAwait("await", arguments = AwaitEventArguments(listOf(3, 5))),
             "Waiting for events (terminals: 3, 5)", "Tool: await_event"),
         Triple(PendingInvalidToolCall("invalid", invocation = PendingInvalidToolInvocation.Function(
             name = "exec_command", arguments = "{BROKEN"), message = "Invalid"),
@@ -382,7 +382,7 @@ val offscreenHistoryEventsTest by testSuite {
     }
 
     test("JSON fallback keeps lazy sections and suppresses inline media before rendering") { offscreenTest {
-        val event = StableJsonToolEvent("json", name = "external", arguments = emptyHistoryArguments,
+        val event = StableJsonTool("json", name = "external", arguments = emptyHistoryArguments,
             result = Json.parseToJsonElement("""{"nested":{"image_url":"data:image/png;base64,SECRET"}}"""))
         val scene = OffscreenScene.create { HistoryEventContent(event, rememberComposeHistoryContentRenderer()) }
         try {
@@ -398,7 +398,7 @@ val offscreenHistoryEventsTest by testSuite {
     } }
 
     val recorded = listOf(
-        Triple<StableCleanEvent, String, String>(
+        Triple<AgentCommit, String, String>(
             StableImageGenerationCall(ResponseItem.ImageGenerationCall(
                 status = "completed", result = "BASE64SECRET", revisedPrompt = "revised prompt",
             )),
@@ -409,17 +409,17 @@ val offscreenHistoryEventsTest by testSuite {
             "Search first", "hosted_web_search",
         ),
         Triple(
-            StableAwaitEventToolEvent("await", arguments = AwaitEventArguments(listOf(7)),
+            StableAwait("await", arguments = AwaitEventArguments(listOf(7)),
                 result = StableAwaitEventResult.Output(AwaitEventOutput(Instant.fromEpochMilliseconds(0)))),
             "Wait for events", "timestamp: 1970-01-01T00:00:00Z",
         ),
         Triple(
-            StableTextToolEvent("utility", name = "get_context_remaining", arguments = emptyHistoryArguments,
+            StableTextTool("utility", name = "get_context_remaining", arguments = emptyHistoryArguments,
                 result = "Original returned sentence.", success = true),
             "Check remaining context", "Original returned sentence.",
         ),
         Triple(
-            StableReadMediaToolEvent("media", arguments = ReadMediaToolArguments("/image.png", MediaDetail.Original),
+            StableReadMedia("media", arguments = ReadMediaToolArguments("/image.png", MediaDetail.Original),
                 result = StableReadMediaResult.Success(ReadMediaToolOutput("data:image/png;base64,SECRET", MediaDetail.High))),
             "Read media: /image.png", "output_detail: high",
         ),
@@ -450,7 +450,7 @@ val offscreenHistoryEventsTest by testSuite {
             val diff = Patch("", listOf(UpdateFileHunk(path, chunks = listOf(
                 UpdateFileChunk(oldLines = listOf("old α"), newLines = listOf("new 漢字")),
             ))), workdir = "/workspace/目录", environmentId = "环境")
-            val stable = StablePatchToolEvent("styles", diff = diff, result =
+            val stable = StablePatch("styles", diff = diff, result =
                 if (status == "failed") StablePatchToolExecutionResult.Failure("context 不匹配")
                 else StablePatchToolExecutionResult.Success(PatchApplyResult(
                     PatchAffectedPaths(emptyList(), listOf(path), emptyList()))))
@@ -465,7 +465,7 @@ val offscreenHistoryEventsTest by testSuite {
                         CompositionLocalProvider(LocalDensity provides Density(1f, scale)) {
                             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                                 val renderer = rememberComposeHistoryContentRenderer()
-                                if (status == "running") HistoryEventContent(PendingPatchToolEvent("styles", diff = diff), renderer)
+                                if (status == "running") HistoryEventContent(PendingPatch("styles", diff = diff), renderer)
                                 else HistoryEventContent(stable, renderer)
                             }
                         }
@@ -522,7 +522,7 @@ val offscreenHistoryEventsTest by testSuite {
 
     test("patch keeps a bounded first page and explicit show-more retains original line order") { offscreenTest {
         val diff = Patch(patch = "", hunks = listOf(AddFileHunk("new.txt", (0..430).joinToString("\n") { "line $it" })))
-        val event = PendingPatchToolEvent("patch", diff = diff)
+        val event = PendingPatch("patch", diff = diff)
         var buttonColor = androidx.compose.ui.graphics.Color.Unspecified
         val scene = OffscreenScene.create {
             UiTheme {
@@ -580,7 +580,7 @@ val offscreenHistoryEventsTest by testSuite {
             val raw = "  前缀 café " + "columns ".repeat(20)
             val line = "+ $raw"
             val diff = Patch(patch = "", hunks = listOf(AddFileHunk("unicode.txt", raw)))
-            val event = PendingPatchToolEvent("patch", diff = diff)
+            val event = PendingPatch("patch", diff = diff)
             val scene = OffscreenScene.create(width = width, height = 1800) {
                 CompositionLocalProvider(LocalDensity provides Density(1f, scale)) {
                     HistoryEventContent(event, rememberComposeHistoryContentRenderer())
@@ -604,7 +604,7 @@ val offscreenHistoryEventsTest by testSuite {
     test("short patch viewport scrolls to the full wrapped diff and back to its title") { offscreenTest {
         val raw = "  前缀 café " + "columns ".repeat(20)
         val line = "+ $raw"
-        val event = PendingPatchToolEvent("patch-short",
+        val event = PendingPatch("patch-short",
             diff = Patch("", listOf(AddFileHunk("unicode.txt", raw))))
         lateinit var scroll: androidx.compose.foundation.ScrollState
         val scene = OffscreenScene.create(width = 160, height = 240) {

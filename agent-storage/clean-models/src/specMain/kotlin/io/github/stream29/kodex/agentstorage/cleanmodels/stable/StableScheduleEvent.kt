@@ -10,8 +10,7 @@ import kotlinx.serialization.Serializable
  * A fired schedule steered into the Agent.
  *
  * Kept distinct from [StableUserMessage] so UIs can render the trigger; the model sees it as a User message.
- * The schedule itself lives in the `schedules` table. Not a [CompactionRetainedItem]: once acted on, the
- * trigger is covered by the compaction summary.
+ * The trigger persists independently of the schedule definition and is retained across compaction.
  */
 @Serializable
 @SerialName("event_schedule")
@@ -19,8 +18,8 @@ public data class StableScheduleEvent(
     @SerialName("schedule_id")
     public val scheduleId: Long,
     public val description: String,
-) : StableIndexEvent.Steerable {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : CompactionRetainedItem, AgentCommit.Steerable {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.Message(
                 role = MessageRole.User,

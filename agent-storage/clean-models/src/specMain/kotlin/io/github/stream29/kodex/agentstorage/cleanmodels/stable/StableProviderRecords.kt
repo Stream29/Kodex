@@ -10,8 +10,8 @@ import kotlinx.serialization.Serializable
 @SerialName("reasoning")
 public data class StableReasoning(
     public val item: ResponseItem.Reasoning,
-) : StableWorkEvent {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(item)
 }
 
@@ -27,8 +27,8 @@ public data class StableInvalidToolCall(
     public val itemId: ResponseItemId? = null,
     public val invocation: InvalidToolInvocation,
     public val message: String,
-) : StableWorkEvent.CompletedTool {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit, AgentCommit.CompletedTool {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         invocation.toResponseHistoryItems(
             callId = callId,
             itemId = itemId,
@@ -42,8 +42,8 @@ public data class StableInvalidToolCall(
 public data class StableServerToolSearch(
     public val call: ResponseItem.ServerToolSearchCall,
     public val output: ResponseItem.ServerToolSearchOutput,
-) : StableWorkEvent.CompletedTool {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit, AgentCommit.CompletedTool {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(call, output)
 }
 
@@ -52,8 +52,8 @@ public data class StableServerToolSearch(
 @SerialName("hosted_web_search")
 public data class StableWebSearchCall(
     public val item: ResponseItem.WebSearchCall,
-) : StableWorkEvent.CompletedTool {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit, AgentCommit.CompletedTool {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(item)
 }
 
@@ -62,8 +62,8 @@ public data class StableWebSearchCall(
 @SerialName("hosted_image_generation")
 public data class StableImageGenerationCall(
     public val item: ResponseItem.ImageGenerationCall,
-) : StableWorkEvent.CompletedTool {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit, AgentCommit.CompletedTool {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(item)
 }
 
@@ -83,8 +83,8 @@ public data class StableContextCompaction(
     public val encryptedContent: String,
     @SerialName("retained_items")
     public val retainedItems: List<CompactionRetainedItem> = emptyList(),
-) : StableIndexEvent {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : IndexCommit {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         buildList {
             for (item: AgentCommit in retainedItems) {
                 addAll(item.toResponseHistoryItems())

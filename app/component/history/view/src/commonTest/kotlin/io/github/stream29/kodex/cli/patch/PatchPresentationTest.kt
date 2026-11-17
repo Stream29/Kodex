@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.cli.patch
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.kodex.utils.applypatch.AddFileHunk
 import io.github.stream29.kodex.utils.applypatch.DeleteFileHunk
@@ -67,7 +67,7 @@ val patchPresentationTest by testSuite {
     }
 
     test("completed failure retains the structured diff and failure reason") {
-        val presentation = StablePatchToolEvent(
+        val presentation = StablePatch(
             callId = "patch",
             diff = updatePatch(),
             result = StablePatchToolExecutionResult.Failure("context did not match"),
@@ -85,7 +85,7 @@ val patchPresentationTest by testSuite {
     }
 
     test("completed success renders the parsed input diff") {
-        val presentation = StablePatchToolEvent(
+        val presentation = StablePatch(
             callId = "patch",
             diff = updatePatch(),
             result = StablePatchToolExecutionResult.Success(
@@ -108,7 +108,7 @@ val patchPresentationTest by testSuite {
     }
 
     test("completed success renders parsed add delete and rename hunks") {
-        val presentation = StablePatchToolEvent(
+        val presentation = StablePatch(
             callId = "patch",
             diff = Patch(
                 patch = "",

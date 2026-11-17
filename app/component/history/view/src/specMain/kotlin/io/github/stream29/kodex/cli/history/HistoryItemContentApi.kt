@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.cli.history
 
 import androidx.compose.runtime.Composable
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
@@ -24,7 +24,7 @@ public interface HistoryItemRenderer : HistoryContentRenderer {
     )
     /** A non-null collapse callback mounts the event with externally controlled expanded=true. */
     @Composable public fun Event(
-        event: StableCleanEvent, elapsed: Duration, onCollapse: (() -> Unit)?,
+        event: AgentCommit, elapsed: Duration, onCollapse: (() -> Unit)?,
         shellSessions: AgentShellSessionRegistry?,
     )
 }

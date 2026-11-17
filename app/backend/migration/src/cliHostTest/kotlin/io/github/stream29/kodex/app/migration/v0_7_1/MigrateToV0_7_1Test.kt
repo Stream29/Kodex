@@ -4,10 +4,10 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
@@ -127,11 +127,11 @@ public val migrateToV0_7_1Test by testSuite {
                     assertEquals("migration", checkNotNull(storage.getSettingsAt(7)).threadName)
                     assertEquals(Instant.parse("2026-10-25T12:00:07.987654321Z"), storage.getCommitExact(7)?.createdAt)
                     assertEquals(
-                        OpenAiJsonCodec.decodeFromString(CleanIndexEntry.serializer(), Index),
+                        OpenAiJsonCodec.decodeFromString(IndexCommit.serializer(), Index),
                         storage.getCommitAtOrBefore(7, AgentCommitType.IndexTypes)?.commit,
                     )
                     assertEquals(
-                        OpenAiJsonCodec.decodeFromString(StableWorkEvent.serializer(), Work),
+                        OpenAiJsonCodec.decodeFromString(WorkCommit.serializer(), Work),
                         storage.getCommitAtOrBefore(7, AgentCommitType.WorkTypes)?.commit,
                     )
                     assertEquals(
@@ -139,7 +139,7 @@ public val migrateToV0_7_1Test by testSuite {
                         storage.getLlmRequestMetaAtOrNull(7),
                     )
                     assertEquals(
-                        OpenAiJsonCodec.decodeFromString(ListSerializer(UnstableCleanEvent.serializer()), Unstable),
+                        OpenAiJsonCodec.decodeFromString(ListSerializer(PendingRecord.serializer()), Unstable),
                         storage.getUnstableAtOrNull(7),
                     )
                     val newMeta = LlmRequestMeta.Response(totalTokens = 99L, latencyMs = 123L)

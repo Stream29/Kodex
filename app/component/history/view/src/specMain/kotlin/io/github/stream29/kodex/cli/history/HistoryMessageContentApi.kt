@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.cli.history
 
 import androidx.compose.runtime.Composable
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.app.ui.UiProse
 import io.github.stream29.kodex.app.ui.UiText
 import io.github.stream29.kodex.app.ui.UiTextRole
@@ -13,7 +13,7 @@ import io.github.stream29.kodex.app.ui.UiTextRole
  */
 @Composable
 public expect fun HistoryMessageContent(
-    event: StableIndexEvent.Steerable,
+    event: AgentCommit.Steerable,
     heading: @Composable (String) -> Unit = { UiText(it, UiTextRole.Title, maximumLines = 1) },
     body: @Composable (String, supporting: Boolean) -> Unit = { text, supporting ->
         UiProse(text, if (supporting) UiTextRole.Supporting else UiTextRole.Body)

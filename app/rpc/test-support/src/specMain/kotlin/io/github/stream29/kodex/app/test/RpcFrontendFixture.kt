@@ -3,7 +3,7 @@
 package io.github.stream29.kodex.app.test
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
@@ -61,5 +61,5 @@ public expect suspend fun deleteTestDirectory(path: Path)
 
 /** Offline fixture seeding finishes before the RPC backend acquires this Session. */
 public expect suspend fun CoroutineScope.seedTestHistory(
-    home: Path, name: String, events: Map<Int, StableIndexEvent>,
+    home: Path, name: String, events: Map<Int, IndexCommit>,
 ): Int

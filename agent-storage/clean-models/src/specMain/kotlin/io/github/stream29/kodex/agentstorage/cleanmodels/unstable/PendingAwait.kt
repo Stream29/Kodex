@@ -9,13 +9,13 @@ import kotlinx.serialization.Serializable
 /** `await_event` call waiting for user input, a schedule trigger, or watched terminal exit. */
 @Serializable
 @SerialName("await_event")
-public data class PendingAwaitEventToolEvent(
+public data class PendingAwait(
     @SerialName("call_id")
     override val callId: String,
     @SerialName("item_id")
     override val itemId: ResponseItemId? = null,
     public val arguments: AwaitEventArguments,
-) : PendingToolEvent {
+) : PendingToolCall {
     override val toolName: String = "await_event"
     override val toolNamespace: String? = null
 

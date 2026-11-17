@@ -32,7 +32,7 @@ private val specializedToolJson = Json
 
 val stableSpecializedToolEventSerializationTest by testSuite {
     test("round trips read_media and await_event tool events") {
-        val readMedia = StableReadMediaToolEvent(
+        val readMedia = StableReadMedia(
             callId = "call_read_media",
             itemId = ResponseItemId("item_read_media"),
             arguments = ReadMediaToolArguments(
@@ -46,7 +46,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
                 ),
             ),
         )
-        val awaitEvent = StableAwaitEventToolEvent(
+        val awaitEvent = StableAwait(
             callId = "call_await_event",
             itemId = ResponseItemId("item_await_event"),
             arguments = AwaitEventArguments(terminals = listOf(1, 3)),
@@ -54,10 +54,10 @@ val stableSpecializedToolEventSerializationTest by testSuite {
                 AwaitEventOutput(Instant.parse("2026-11-16T00:00:00Z")),
             ),
         )
-        val events: List<StableCleanEvent.CompletedTool> = listOf(readMedia, awaitEvent)
+        val events: List<AgentCommit.CompletedTool> = listOf(readMedia, awaitEvent)
 
         events.forEach(::assertStableToolEventRoundTrip)
-        events.forEach { event -> assertIs<StableWorkEvent>(event) }
+        events.forEach { event -> assertIs<WorkCommit>(event) }
         assertEquals(
             listOf("read_media", "await_event"),
             events.map { event -> event.projectedFunctionName() },
@@ -78,7 +78,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
 
     test("round trips command execution actions") {
         val events = listOf(
-            StableCommandExecutionToolEvent(
+            StableCommandExecution(
                 callId = "call_exec_command",
                 itemId = ResponseItemId("item_exec_command"),
                 action = StableCommandExecutionAction.ExecCommand(
@@ -99,7 +99,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
                     ),
                 ),
             ),
-            StableCommandExecutionToolEvent(
+            StableCommandExecution(
                 callId = "call_write_stdin",
                 itemId = ResponseItemId("item_write_stdin"),
                 action = StableCommandExecutionAction.WriteStdin(
@@ -110,7 +110,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
         )
 
         events.forEach(::assertStableToolEventRoundTrip)
-        events.forEach { event -> assertIs<StableWorkEvent>(event) }
+        events.forEach { event -> assertIs<WorkCommit>(event) }
         assertEquals(
             listOf("exec_command", "write_stdin"),
             events.map { event -> event.projectedFunctionName() },
@@ -125,12 +125,12 @@ val stableSpecializedToolEventSerializationTest by testSuite {
         assertTrue(""""yield_time_ms":250""" in writeFunctionCall.arguments)
 
         assertFailsWith<SerializationException> {
-            specializedToolJson.decodeFromString<StableWorkEvent>(
+            specializedToolJson.decodeFromString<WorkCommit>(
                 """{"type":"command_execution_tool_event","call_id":"call_exec_command","action":{"type":"exec_command","arguments":{"cmd":"./gradlew check"}},"result":{"type":"failure","message":"failed"}}""",
             )
         }
         assertFailsWith<SerializationException> {
-            specializedToolJson.decodeFromString<StableWorkEvent>(
+            specializedToolJson.decodeFromString<WorkCommit>(
                 """{"type":"command_execution_tool_event","call_id":"call_write_stdin","action":{"type":"write_stdin","arguments":{"session_id":42}},"result":{"type":"failure","message":"failed"}}""",
             )
         }
@@ -149,18 +149,18 @@ val stableSpecializedToolEventSerializationTest by testSuite {
         )
 
         assertStableToolEventRoundTrip(event)
-        assertIs<StableIndexEvent>(event)
+        assertIs<IndexCommit>(event)
         assertEquals("update_plan", event.projectedFunctionName())
     }
 }
 
-private fun assertStableToolEventRoundTrip(event: StableCleanEvent.CompletedTool) {
+private fun assertStableToolEventRoundTrip(event: AgentCommit.CompletedTool) {
     val encoded = when (event) {
-        is StableIndexEvent.CompletedTool ->
-            specializedToolJson.encodeToString<StableIndexEvent>(event)
+        is IndexCommit ->
+            specializedToolJson.encodeToString<IndexCommit>(event)
 
-        is StableWorkEvent.CompletedTool ->
-            specializedToolJson.encodeToString<StableWorkEvent>(event)
+        is WorkCommit ->
+            specializedToolJson.encodeToString<WorkCommit>(event)
     }
     val element = specializedToolJson.parseToJsonElement(encoded).jsonObject
     val items = event.toResponseHistoryItems()
@@ -168,11 +168,11 @@ private fun assertStableToolEventRoundTrip(event: StableCleanEvent.CompletedTool
     val output = assertIs<ResponseItem.ToolCallOutput>(items.last())
 
     val decoded = when (event) {
-        is StableIndexEvent.CompletedTool ->
-            specializedToolJson.decodeFromString<StableIndexEvent>(encoded)
+        is IndexCommit ->
+            specializedToolJson.decodeFromString<IndexCommit>(encoded)
 
-        is StableWorkEvent.CompletedTool ->
-            specializedToolJson.decodeFromString<StableWorkEvent>(encoded)
+        is WorkCommit ->
+            specializedToolJson.decodeFromString<WorkCommit>(encoded)
     }
     assertEquals(event, decoded)
     assertEquals(2, items.size)
@@ -182,5 +182,5 @@ private fun assertStableToolEventRoundTrip(event: StableCleanEvent.CompletedTool
     assertTrue("output" !in element)
 }
 
-private fun StableCleanEvent.CompletedTool.projectedFunctionName(): String =
+private fun AgentCommit.CompletedTool.projectedFunctionName(): String =
     assertIs<ResponseItem.FunctionCall>(toResponseHistoryItems().first()).name

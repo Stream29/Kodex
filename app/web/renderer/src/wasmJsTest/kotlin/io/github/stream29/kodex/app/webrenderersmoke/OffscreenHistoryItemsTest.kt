@@ -19,7 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatch
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.item.*
@@ -78,7 +78,7 @@ val offscreenHistoryItemsTest by testSuite {
                 MaterialTheme(colorScheme = scheme) {
                     val renderer = rememberComposeHistoryItemRenderer()
                     renderer.Text("Patch body reference", HistoryTextStyle.Normal)
-                    HistoryEventContent(PendingPatchToolEvent("pending-patch", diff = diff), renderer)
+                    HistoryEventContent(PendingPatch("pending-patch", diff = diff), renderer)
                 }
             }
             try {
@@ -110,7 +110,7 @@ val offscreenHistoryItemsTest by testSuite {
                 val diff = Patch("", listOf(AddFileHunk(path, "  内容 α")))
                 val result = if (failed) StablePatchToolExecutionResult.Failure("fixture failure")
                     else StablePatchToolExecutionResult.Success(PatchApplyResult(PatchAffectedPaths(listOf(path), emptyList(), emptyList())))
-                val event = StablePatchToolEvent("patch-style", diff = diff, result = result)
+                val event = StablePatch("patch-style", diff = diff, result = result)
                 val header = PatchHistoryItemHeader(PatchHistoryItemTarget.SingleFile(filename),
                     if (failed) PatchHistoryItemStatus.Failed else PatchHistoryItemStatus.Completed, 0.milliseconds)
                 val states = MutableStateFlow<PatchHistoryItemState>(PatchHistoryItemState.Collapsed(header))
@@ -297,11 +297,11 @@ val offscreenHistoryItemsTest by testSuite {
             timestamp = Instant.fromEpochMilliseconds(1_000L),
         )
         stored.commit(
-            StableTextToolEvent("demo", name = "demo", arguments = JsonObject(emptyMap()), result = "Full tool output"),
+            StableTextTool("demo", name = "demo", arguments = JsonObject(emptyMap()), result = "Full tool output"),
             timestamp = Instant.fromEpochMilliseconds(2_000L),
         )
         stored.commit(
-            StablePatchToolEvent(
+            StablePatch(
                 "patch", diff = Patch("", listOf(AddFileHunk("new.txt", "line"))),
                 result = StablePatchToolExecutionResult.Failure("cannot apply"),
             ),
@@ -425,7 +425,7 @@ val offscreenHistoryItemsTest by testSuite {
             assertEquals(0, collapses)
             states.value = ToolHistoryItemState.Expanded(
                 header,
-                StableCommandExecutionToolEvent(
+                StableCommandExecution(
                     callId = "pwd",
                     action = StableCommandExecutionAction.ExecCommand(
                         io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments(
@@ -477,7 +477,7 @@ val offscreenHistoryItemsTest by testSuite {
             override val state = states
             override fun expand() {
                 states.value = ToolHistoryItemState.Expanded(
-                    header, StableTextToolEvent("demo", name = "demo", arguments = JsonObject(emptyMap()), result = "Done"),
+                    header, StableTextTool("demo", name = "demo", arguments = JsonObject(emptyMap()), result = "Done"),
                 )
             }
             override fun collapse() { states.value = ToolHistoryItemState.Collapsed(header) }

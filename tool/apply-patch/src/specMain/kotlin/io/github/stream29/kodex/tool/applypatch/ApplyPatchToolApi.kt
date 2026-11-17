@@ -2,8 +2,8 @@
 
 package io.github.stream29.kodex.tool.applypatch
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.utils.applypatch.Patch
@@ -35,5 +35,5 @@ public expect class ApplyPatchTool(
 ) : Tool {
     public override val spec: ToolSpec
     public override fun close()
-    public override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool
+    public override suspend fun handle(pending: PendingToolCall): AgentCommit.CompletedTool
 }

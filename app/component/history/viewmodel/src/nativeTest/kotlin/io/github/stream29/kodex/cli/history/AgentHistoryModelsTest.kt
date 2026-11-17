@@ -8,11 +8,15 @@ import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolCall
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
@@ -28,6 +32,7 @@ import io.github.stream29.kodex.app.history.contract.item.ReasoningHistoryItemVi
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemViewModel
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
@@ -253,6 +258,55 @@ val agentHistoryModelsTest by testSuite {
                 assertNotSame(newestTool, expandedAgain.children[0])
             } finally {
                 model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("await completion and terminal exit stay in the same work run, while schedule splits it") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            try {
+                val runtime = repository.open(repository.create()).runtime
+                val terminal = StableTerminalExitedEvent(37, command = "./fixture", exitCode = 1)
+                val schedule = StableScheduleEvent(8, "next task")
+                runtime.modify { storage ->
+                    storage.initialize(KodexAgentSettings(OpenAiModelId("test")))
+                    storage.commit(userMessage("Start"))
+                    storage.commit(textTool("before"))
+                    storage.commit(
+                        StableAwait("await", null, AwaitEventArguments(listOf(37)), StableAwaitEventResult.Failure("fixture")),
+                    )
+                    storage.commit(terminal)
+                    storage.commit(textTool("after"))
+                    storage.commit(schedule)
+                    storage.commit(textTool("new run"))
+                    storage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("Done"))))
+                }
+                val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+                try {
+                    model.awaitReady(itemCount = 5, hasOlder = false)
+                    val window = model.historyItems.value
+                    assertEquals(7..7, assertIs<WorkGroupHistoryItemViewModel>(window[1]).indexRange)
+                    val scheduleItem = assertIs<MessageHistoryItemViewModel>(window[2])
+                    val scheduleState = awaitState(scheduleItem.state) { it is MessageHistoryItemState.Ready }
+                    assertEquals(schedule, assertIs<MessageHistoryItemState.Ready>(scheduleState).event)
+
+                    val group = assertIs<WorkGroupHistoryItemViewModel>(window[3])
+                    assertEquals(2..5, group.indexRange)
+                    awaitState(group.state) { it is WorkGroupHistoryItemState.Collapsed }
+                    group.expand()
+                    val expanded = awaitState(group.state) { it is WorkGroupHistoryItemState.Expanded }
+                    val children = assertIs<WorkGroupHistoryItemState.Expanded>(expanded).children
+                    assertEquals(listOf(5, 4, 3, 2), children.map { it.index })
+                    val terminalItem = assertIs<MessageHistoryItemViewModel>(children[1])
+                    val terminalState = awaitState(terminalItem.state) { it is MessageHistoryItemState.Ready }
+                    assertEquals(terminal, assertIs<MessageHistoryItemState.Ready>(terminalState).event)
+                    assertIs<ToolHistoryItemViewModel>(children[2])
+                } finally {
+                    model.close()
+                }
+            } finally {
                 repository.cancelAndJoin()
             }
         }
@@ -665,7 +719,7 @@ val agentHistoryModelsTest by testSuite {
 
     test("publishes pending tools independently from stable history") {
         coroutineScope {
-            val pending = PendingCustomToolEvent(
+            val pending = PendingCustomToolCall(
                 callId = "pending-call",
                 name = "pending-tool",
                 input = "input",
@@ -873,8 +927,8 @@ private fun userMessage(text: String): StableUserMessage =
         content = listOf(ContentItem.InputText(text)),
     )
 
-private fun textTool(name: String): StableTextToolEvent =
-    StableTextToolEvent(
+private fun textTool(name: String): StableTextTool =
+    StableTextTool(
         callId = "call-$name",
         name = name,
         arguments = JsonObject(emptyMap()),

@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.rpc
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.app.agent.contract.ComposerDependencies
 import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
 import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
@@ -35,7 +35,7 @@ internal fun createRpcComposerViewModel(
         dependencies = object : ComposerDependencies {
             override val runtime = object : ComposerRuntimePort {
                 override val running: StateFlow<Boolean> = binding.running
-                override val pendingSteer: StateFlow<List<StableIndexEvent.Steerable>> = binding.pendingSteer
+                override val pendingSteer: StateFlow<List<AgentCommit.Steerable>> = binding.pendingSteer
             }
 
             override val submit = ComposerSubmitPort { _, content ->

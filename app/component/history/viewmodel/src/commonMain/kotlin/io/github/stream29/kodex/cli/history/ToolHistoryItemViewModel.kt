@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
@@ -14,15 +14,15 @@ internal class ToolHistoryItemViewModelImpl(
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
 ) : ToolHistoryItemViewModel, ReleasableHistoryItem {
-    private val tool: StableCleanEvent.CompletedTool?
+    private val tool: AgentCommit.CompletedTool?
     private val header: ToolHistoryItemHeader?
     private val mutableState: MutableStateFlow<ToolHistoryItemState>
 
     init {
-        var resolvedTool: StableCleanEvent.CompletedTool? = null
+        var resolvedTool: AgentCommit.CompletedTool? = null
         var resolvedHeader: ToolHistoryItemHeader? = null
         val initialState = try {
-            val completed = descriptor.event as? StableCleanEvent.CompletedTool
+            val completed = descriptor.event as? AgentCommit.CompletedTool
                 ?: error("History item $index is not a completed tool.")
             check(completed.isOrdinaryHistoryTool()) {
                 "History item $index is not an ordinary tool."
@@ -63,4 +63,4 @@ internal class ToolHistoryItemViewModelImpl(
     }
 }
 
-internal fun StableCleanEvent.CompletedTool.isOrdinaryHistoryTool(): Boolean = isOrdinaryHistoryToolEvent
+internal fun AgentCommit.CompletedTool.isOrdinaryHistoryTool(): Boolean = isOrdinaryHistoryToolEvent

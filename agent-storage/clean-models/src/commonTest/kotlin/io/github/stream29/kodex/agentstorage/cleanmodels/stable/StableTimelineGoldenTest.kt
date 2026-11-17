@@ -23,10 +23,10 @@ val stableTimelineGoldenTest by testSuite {
     test("index and retained serializers agree") {
         var retainedIndex = 0
         for (source in indexGoldenInputs) {
-            val event = OpenAiJsonCodec.decodeFromString(CleanIndexEntry.serializer(), source)
-            val canonical = OpenAiJsonCodec.encodeToJsonElement(CleanIndexEntry.serializer(), event)
+            val event = OpenAiJsonCodec.decodeFromString(IndexCommit.serializer(), source)
+            val canonical = OpenAiJsonCodec.encodeToJsonElement(IndexCommit.serializer(), event)
             assertEquals(OpenAiJsonCodec.parseToJsonElement(source), canonical)
-            assertEquals(event, OpenAiJsonCodec.decodeFromJsonElement(CleanIndexEntry.serializer(), canonical))
+            assertEquals(event, OpenAiJsonCodec.decodeFromJsonElement(IndexCommit.serializer(), canonical))
             if (event is CompactionRetainedItem) {
                 assertEquals(canonical, OpenAiJsonCodec.encodeToJsonElement(CompactionRetainedItem.serializer(), event))
                 val projection = OpenAiJsonCodec.encodeToString(
@@ -48,10 +48,10 @@ val stableTimelineGoldenTest by testSuite {
             """{"type":"command_execution_tool_event","call_id":"command","action":{"type":"exec_command","arguments":{"cmd":"echo synthetic","yield_time_ms":10000,"max_output_tokens":10000}},"result":{"type":"failure","message":"Synthetic failure"}}""",
             """{"type":"command_execution_tool_event","call_id":"command","action":{"type":"write_stdin","arguments":{"session_id":42,"chars":"","yield_time_ms":250,"max_output_tokens":10000}},"result":{"type":"output","value":{"chunk_id":"chunk","wall_time_seconds":0.5,"exit_code":0,"original_token_count":1,"output":"OK"}}}""",
         )) {
-            val event = OpenAiJsonCodec.decodeFromString(StableWorkEvent.serializer(), source)
-            val canonical = OpenAiJsonCodec.encodeToJsonElement(StableWorkEvent.serializer(), event)
+            val event = OpenAiJsonCodec.decodeFromString(WorkCommit.serializer(), source)
+            val canonical = OpenAiJsonCodec.encodeToJsonElement(WorkCommit.serializer(), event)
             assertEquals(OpenAiJsonCodec.parseToJsonElement(source), canonical)
-            assertEquals(event, OpenAiJsonCodec.decodeFromJsonElement(StableWorkEvent.serializer(), canonical))
+            assertEquals(event, OpenAiJsonCodec.decodeFromJsonElement(WorkCommit.serializer(), canonical))
         }
     }
 }

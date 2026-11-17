@@ -9,7 +9,7 @@ import kotlinx.serialization.json.JsonElement
 /** Dynamic function call with decoded JSON arguments. */
 @Serializable
 @SerialName("function")
-public data class PendingFunctionToolEvent(
+public data class PendingFunctionToolCall(
     @SerialName("call_id")
     override val callId: String,
     @SerialName("item_id")
@@ -17,7 +17,7 @@ public data class PendingFunctionToolEvent(
     public val name: String,
     public val namespace: String? = null,
     public val arguments: JsonElement,
-) : PendingToolEvent {
+) : PendingToolCall {
     override val toolName: String
         get() = name
     override val toolNamespace: String?
@@ -38,7 +38,7 @@ public data class PendingFunctionToolEvent(
 /** Dynamic custom-tool call with freeform text input. */
 @Serializable
 @SerialName("custom")
-public data class PendingCustomToolEvent(
+public data class PendingCustomToolCall(
     @SerialName("call_id")
     override val callId: String,
     @SerialName("item_id")
@@ -46,7 +46,7 @@ public data class PendingCustomToolEvent(
     public val name: String,
     public val namespace: String? = null,
     public val input: String,
-) : PendingToolEvent {
+) : PendingToolCall {
     override val toolName: String
         get() = name
     override val toolNamespace: String?

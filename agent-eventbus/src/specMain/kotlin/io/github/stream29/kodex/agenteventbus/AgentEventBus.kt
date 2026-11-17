@@ -7,7 +7,7 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 /**
  * Backend-global event delivery bus enumerating all external wakeup paths into an Agent.
  *
- * Implementations hold [KodexSessionRepository], watch active Sessions for `PendingAwaitEventToolEvent`
+ * Implementations hold [KodexSessionRepository], watch active Sessions for `PendingAwait`
  * background terminal completions, and route every submitted event through
  * [KodexSessionRepository.open] (activating unloaded Sessions and renewing residency TTL) into
  * `AgentRuntime.submit*`:

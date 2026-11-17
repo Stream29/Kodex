@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,7 +15,7 @@ internal class MessageHistoryItemViewModelImpl(
 ) : MessageHistoryItemViewModel, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<MessageHistoryItemState> = MutableStateFlow(
         try {
-            val message = descriptor.event as? StableIndexEvent.Steerable
+            val message = descriptor.event as? AgentCommit.Steerable
                 ?: error("History item $index is not a steerable message.")
             MessageHistoryItemState.Ready(
                 event = message,

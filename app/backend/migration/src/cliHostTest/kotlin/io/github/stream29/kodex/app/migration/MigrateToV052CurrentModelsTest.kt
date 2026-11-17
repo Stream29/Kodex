@@ -5,19 +5,19 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecution
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.agentstorage.filesystemlayout.recordPath
 import io.github.stream29.kodex.agentstorage.filesystemlayout.timelineDirectory
 import io.github.stream29.kodex.app.migration.v0_4_7.LegacySettingsFixture
@@ -123,16 +123,16 @@ public val migrateToV052CurrentModelsTest by testSuite(
                 val storage1 = LegacySessionDirectory(session1)
 
                 // Verify 0.3.3 and 0.4.5 outputs are readable alongside 0.5.2
-                assertIs<StablePatchToolEvent>(storage0.work[0])
+                assertIs<StablePatch>(storage0.work[0])
                 assertEquals(
                     TokenCountSnapshot.Legacy(totalTokens = 42L),
                     storage0.tokenCount[0],
                 )
 
                 // Verify migrated work exec_command event and FunctionCall round-trip
-                val execEvent = assertIs<StableCommandExecutionToolEvent>(storage0.work[1])
+                val execEvent = assertIs<StableCommandExecution>(storage0.work[1])
                 assertEquals(
-                    StableCommandExecutionToolEvent(
+                    StableCommandExecution(
                         callId = "call-exec-1",
                         itemId = ResponseItemId("item-exec-1"),
                         action = StableCommandExecutionAction.ExecCommand(
@@ -168,7 +168,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
                 )
 
                 // Verify migrated work write_stdin (empty poll) event
-                val writePollEvent = assertIs<StableCommandExecutionToolEvent>(storage0.work[2])
+                val writePollEvent = assertIs<StableCommandExecution>(storage0.work[2])
                 assertEquals(
                     StableCommandExecutionAction.WriteStdin(
                         WriteStdinArguments(
@@ -182,7 +182,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
                 )
 
                 // Verify negative yield_time_ms is preserved on historical failed work event
-                val negativeExecEvent = assertIs<StableCommandExecutionToolEvent>(storage0.work[3])
+                val negativeExecEvent = assertIs<StableCommandExecution>(storage0.work[3])
                 assertEquals(
                     StableCommandExecutionAction.ExecCommand(
                         ExecCommandArguments(
@@ -205,7 +205,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
                 )
 
                 // Verify archived session 1 was also migrated and can be read by current reader
-                val archivedWriteEvent = assertIs<StableCommandExecutionToolEvent>(storage1.work[0])
+                val archivedWriteEvent = assertIs<StableCommandExecution>(storage1.work[0])
                 assertEquals(
                     StableCommandExecutionAction.WriteStdin(
                         WriteStdinArguments(
@@ -221,7 +221,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
                 // Verify unstable array reads cleanly and pending recovery preserves migrated yields
                 val unstableEvents = storage0.unstable[0]
                 assertEquals(7, unstableEvents.size)
-                val pendingExec = assertIs<PendingCommandExecutionToolEvent>(unstableEvents[0])
+                val pendingExec = assertIs<PendingCommandExecution>(unstableEvents[0])
                 assertEquals(
                     PendingCommandExecutionAction.ExecCommand(
                         ExecCommandArguments(
@@ -232,7 +232,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
                     ),
                     pendingExec.action,
                 )
-                val pendingPoll = assertIs<PendingCommandExecutionToolEvent>(unstableEvents[1])
+                val pendingPoll = assertIs<PendingCommandExecution>(unstableEvents[1])
                 assertEquals(
                     PendingCommandExecutionAction.WriteStdin(
                         WriteStdinArguments(
@@ -244,7 +244,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
                     ),
                     pendingPoll.action,
                 )
-                val pendingWrite = assertIs<PendingCommandExecutionToolEvent>(unstableEvents[2])
+                val pendingWrite = assertIs<PendingCommandExecution>(unstableEvents[2])
                 assertEquals(
                     PendingCommandExecutionAction.WriteStdin(
                         WriteStdinArguments(
@@ -256,17 +256,17 @@ public val migrateToV052CurrentModelsTest by testSuite(
                     ),
                     pendingWrite.action,
                 )
-                val pendingNeg = assertIs<PendingCommandExecutionToolEvent>(unstableEvents[3])
+                val pendingNeg = assertIs<PendingCommandExecution>(unstableEvents[3])
                 assertEquals(
                     -250L,
                     assertIs<PendingCommandExecutionAction.WriteStdin>(pendingNeg.action).arguments.yieldTimeMillis,
                 )
-                val pendingHuge = assertIs<PendingCommandExecutionToolEvent>(unstableEvents[4])
+                val pendingHuge = assertIs<PendingCommandExecution>(unstableEvents[4])
                 assertEquals(
                     900_000L,
                     assertIs<PendingCommandExecutionAction.ExecCommand>(pendingHuge.action).arguments.yieldTimeMillis,
                 )
-                assertIs<PendingFunctionToolEvent>(unstableEvents[5])
+                assertIs<PendingFunctionToolCall>(unstableEvents[5])
                 val pendingInvalid = assertIs<PendingInvalidToolCall>(unstableEvents[6])
                 assertEquals(
                     PendingInvalidToolInvocation.Function(
@@ -277,11 +277,11 @@ public val migrateToV052CurrentModelsTest by testSuite(
                 )
 
                 // Recover pending events to failed work events and persist them through FileSystemAgentStorage
-                val recoveredExec = assertIs<StableCommandExecutionToolEvent>(
-                    (pendingExec as PendingToolEvent).toFailedToolEvent("Interrupted by restart"),
+                val recoveredExec = assertIs<StableCommandExecution>(
+                    (pendingExec as PendingToolCall).toFailedToolEvent("Interrupted by restart"),
                 )
-                val recoveredPoll = assertIs<StableCommandExecutionToolEvent>(
-                    (pendingPoll as PendingToolEvent).toFailedToolEvent("Interrupted by restart"),
+                val recoveredPoll = assertIs<StableCommandExecution>(
+                    (pendingPoll as PendingToolCall).toFailedToolEvent("Interrupted by restart"),
                 )
                 storage0.work[5] = recoveredExec
                 storage0.work[6] = recoveredPoll
@@ -323,11 +323,11 @@ public val migrateToV052CurrentModelsTest by testSuite(
                 unmigratedStorage.unstable[0]
             }
             assertFailsWith<SerializationException> {
-                OpenAiJsonCodec.decodeFromString(StableWorkEvent.serializer(), LegacyWorkWriteEmptyCharsMissingYield)
+                OpenAiJsonCodec.decodeFromString(WorkCommit.serializer(), LegacyWorkWriteEmptyCharsMissingYield)
             }
             assertFailsWith<SerializationException> {
                 OpenAiJsonCodec.decodeFromString(
-                    ListSerializer(UnstableCleanEvent.serializer()),
+                    ListSerializer(PendingRecord.serializer()),
                     LegacyUnstableMultiEventArray,
                 )
             }
@@ -346,7 +346,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
             assertEquals("\"0.5.2\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
 
             val migratedStorage = LegacySessionDirectory(session)
-            val workEvent = assertIs<StableCommandExecutionToolEvent>(migratedStorage.work[0])
+            val workEvent = assertIs<StableCommandExecution>(migratedStorage.work[0])
             assertEquals(
                 10_000L,
                 assertIs<StableCommandExecutionAction.ExecCommand>(workEvent.action).arguments.yieldTimeMillis,
@@ -355,7 +355,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
             assertEquals(
                 10_000L,
                 assertIs<PendingCommandExecutionAction.ExecCommand>(
-                    assertIs<PendingCommandExecutionToolEvent>(unstableList[0]).action,
+                    assertIs<PendingCommandExecution>(unstableList[0]).action,
                 ).arguments.yieldTimeMillis,
             )
         }
@@ -379,10 +379,10 @@ public val migrateToV052CurrentModelsTest by testSuite(
             )
             try {
                 val storage = LegacySessionDirectory(session)
-                val stable = assertIs<StableCommandExecutionToolEvent>(storage.work[0])
+                val stable = assertIs<StableCommandExecution>(storage.work[0])
                 val arguments = assertIs<StableCommandExecutionAction.ExecCommand>(stable.action).arguments
                 assertEquals("echo hello", arguments.command)
-                val pending = assertIs<PendingCommandExecutionToolEvent>(storage.unstable[0][0])
+                val pending = assertIs<PendingCommandExecution>(storage.unstable[0][0])
                 assertEquals("./gradlew check", assertIs<PendingCommandExecutionAction.ExecCommand>(pending.action).arguments.command)
                 assertFalse(migrated)
                 assertEquals(MigratedWorkExecMissingYield, SystemCoroutineFileSystem.readString(recordPath(work, 0)))
@@ -488,7 +488,7 @@ public val migrateToV052CurrentModelsTest by testSuite(
             assertEquals(
                 10_000L,
                 assertIs<StableCommandExecutionAction.ExecCommand>(
-                    assertIs<StableCommandExecutionToolEvent>(storage.work[0]).action,
+                    assertIs<StableCommandExecution>(storage.work[0]).action,
                 ).arguments.yieldTimeMillis,
             )
         }
@@ -549,9 +549,9 @@ private suspend fun deleteRecursively(path: Path) {
 }
 
 private class LegacySessionDirectory(root: Path) {
-    val work = LegacyTimeline(timelineDirectory(root, "work"), StableWorkEvent.serializer())
+    val work = LegacyTimeline(timelineDirectory(root, "work"), WorkCommit.serializer())
     val tokenCount = LegacyTimeline(timelineDirectory(root, "token-count"), TokenCountSnapshot.Legacy.serializer())
-    val unstable = LegacyTimeline(timelineDirectory(root, "unstable"), ListSerializer(UnstableCleanEvent.serializer()))
+    val unstable = LegacyTimeline(timelineDirectory(root, "unstable"), ListSerializer(PendingRecord.serializer()))
 }
 
 private class LegacyTimeline<T>(

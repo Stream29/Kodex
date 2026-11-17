@@ -23,15 +23,15 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 @SerialName("patch_tool_event")
-public data class StablePatchToolEvent(
+public data class StablePatch(
     @SerialName("call_id")
     public val callId: String,
     @SerialName("item_id")
     public val itemId: ResponseItemId? = null,
     public val diff: Patch,
     public val result: StablePatchToolExecutionResult,
-) : StableWorkEvent.CompletedTool {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit, AgentCommit.CompletedTool {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.CustomToolCall(
                 id = itemId,

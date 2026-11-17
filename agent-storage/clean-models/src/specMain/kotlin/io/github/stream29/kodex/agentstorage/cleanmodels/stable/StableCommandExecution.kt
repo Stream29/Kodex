@@ -19,15 +19,15 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 @SerialName("command_execution_tool_event")
-public data class StableCommandExecutionToolEvent(
+public data class StableCommandExecution(
     @SerialName("call_id")
     public val callId: String,
     @SerialName("item_id")
     public val itemId: ResponseItemId? = null,
     public val action: StableCommandExecutionAction,
     public val result: StableCommandExecutionResult,
-) : StableWorkEvent.CompletedTool {
-    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+) : WorkCommit, AgentCommit.CompletedTool {
+    public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             action.toFunctionCall(callId, itemId),
             result.toFunctionOutput(callId),

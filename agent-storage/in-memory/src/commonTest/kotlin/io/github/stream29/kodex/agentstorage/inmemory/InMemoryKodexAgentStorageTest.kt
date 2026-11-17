@@ -11,8 +11,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCom
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.agentstorage.contract.ext.answerAskUser
 import io.github.stream29.kodex.agentstorage.contract.ext.appendCompaction
 import io.github.stream29.kodex.agentstorage.contract.ext.buildCompactionRetainedItems
@@ -60,8 +60,8 @@ private fun assistantMessage(text: String): StableAssistantMessage =
 private fun workEvent(status: String): StableWebSearchCall =
     StableWebSearchCall(ResponseItem.WebSearchCall(status = status))
 
-private fun pendingTool(callId: String): PendingToolEvent =
-    PendingCustomToolEvent(
+private fun pendingTool(callId: String): PendingToolCall =
+    PendingCustomToolCall(
         callId = callId,
         name = "tool-$callId",
         input = "input-$callId",

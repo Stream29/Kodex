@@ -1,17 +1,17 @@
 package io.github.stream29.kodex.app.history.contract.item
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonTool
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
@@ -47,7 +47,7 @@ public sealed interface ToolHistoryItemState {
      */
     public data class Expanded(
         public val header: ToolHistoryItemHeader,
-        public val event: StableCleanEvent.CompletedTool,
+        public val event: AgentCommit.CompletedTool,
     ) : ToolHistoryItemState {
         init {
             require(event.isOrdinaryHistoryToolEvent) {
@@ -140,20 +140,20 @@ public sealed interface CommandExecutionHistoryResult {
 }
 
 /** Exhaustive classification shared by the loader and its expanded-state invariant. */
-public val StableCleanEvent.CompletedTool.isOrdinaryHistoryToolEvent: Boolean
+public val AgentCommit.CompletedTool.isOrdinaryHistoryToolEvent: Boolean
     get() = when (this) {
-        is StablePatchToolEvent,
+        is StablePatch,
         is StablePlanUpdate,
             -> false
 
-        is StableAwaitEventToolEvent,
-        is StableCommandExecutionToolEvent,
-        is StableCustomToolEvent,
+        is StableAwait,
+        is StableCommandExecution,
+        is StableCustomTool,
         is StableImageGenerationCall,
         is StableInvalidToolCall,
-        is StableJsonToolEvent,
-        is StableReadMediaToolEvent,
+        is StableJsonTool,
+        is StableReadMedia,
         is StableServerToolSearch,
-        is StableTextToolEvent,
+        is StableTextTool,
         is StableWebSearchCall -> true
     }

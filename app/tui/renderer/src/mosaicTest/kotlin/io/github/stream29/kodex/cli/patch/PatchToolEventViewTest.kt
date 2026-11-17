@@ -8,7 +8,7 @@ import com.jakewharton.mosaic.testing.MosaicSnapshots
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.kodex.utils.applypatch.AddFileHunk
 import io.github.stream29.kodex.utils.applypatch.Patch
@@ -128,7 +128,7 @@ val patchToolEventViewTest by testSuite {
     }
 
     test("failedPatchUsesARedToolHeaderWithoutStatusText") {
-        val event = StablePatchToolEvent(
+        val event = StablePatch(
             callId = "patch",
             diff = Patch(
                 patch = "",
@@ -160,7 +160,7 @@ val patchToolEventViewTest by testSuite {
     }
 
     test("firstExpansionKeepsMetadataFailureAndMoveContext") {
-        val event = StablePatchToolEvent(
+        val event = StablePatch(
             callId = "patch",
             diff = Patch(
                 patch = "",
@@ -193,7 +193,7 @@ val patchToolEventViewTest by testSuite {
     }
 
     test("stablePatchKeepsElapsedAtTheEndOfItsHeader") {
-        val event = StablePatchToolEvent(
+        val event = StablePatch(
             callId = "patch",
             diff = Patch(
                 patch = "",

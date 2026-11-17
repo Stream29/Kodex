@@ -20,7 +20,7 @@ public data class PendingInvalidToolCall(
     override val itemId: ResponseItemId? = null,
     public val invocation: PendingInvalidToolInvocation,
     public val message: String,
-) : PendingToolEvent {
+) : PendingToolCall {
     override val toolName: String
         get() = when (val invalidInvocation = invocation) {
             is PendingInvalidToolInvocation.Function -> invalidInvocation.name

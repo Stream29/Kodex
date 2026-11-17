@@ -2,8 +2,8 @@ package io.github.stream29.kodex.tool.readmedia
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMedia
 import io.github.stream29.kodex.utils.images.ImageMimeType
 import io.github.stream29.kodex.utils.images.detectImageInfo
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -57,9 +57,9 @@ val readMediaToolClientTest by testSuite {
             val imagePath = Path(root, "image.png")
             SystemCoroutineFileSystem.writeBytes(imagePath, png64x32)
 
-            val completed = assertIs<StableReadMediaToolEvent>(
+            val completed = assertIs<StableReadMedia>(
                 ReadMediaTools.createTool(ReadMediaToolClient(workingDirectoryProvider = { root })).handle(
-                    PendingReadMediaToolEvent(
+                    PendingReadMedia(
                         callId = "media_1",
                         arguments = ReadMediaToolArguments(path = "image.png", detail = MediaDetail.Original),
                     ),
@@ -73,9 +73,9 @@ val readMediaToolClientTest by testSuite {
 
         test("tool returns failure output for missing or blank media path") { root ->
             val tool = ReadMediaTools.createTool(ReadMediaToolClient(workingDirectoryProvider = { root }))
-            val missing = assertIs<StableReadMediaToolEvent>(
+            val missing = assertIs<StableReadMedia>(
                 tool.handle(
-                    PendingReadMediaToolEvent(
+                    PendingReadMedia(
                         callId = "media_missing",
                         arguments = ReadMediaToolArguments(path = "missing.png"),
                     ),
@@ -83,9 +83,9 @@ val readMediaToolClientTest by testSuite {
             )
             assertEquals("media file does not exist: missing.png", assertIs<StableReadMediaResult.Failure>(missing.result).message)
 
-            val blank = assertIs<StableReadMediaToolEvent>(
+            val blank = assertIs<StableReadMedia>(
                 tool.handle(
-                    PendingReadMediaToolEvent(
+                    PendingReadMedia(
                         callId = "media_blank",
                         arguments = ReadMediaToolArguments(path = "   "),
                     ),

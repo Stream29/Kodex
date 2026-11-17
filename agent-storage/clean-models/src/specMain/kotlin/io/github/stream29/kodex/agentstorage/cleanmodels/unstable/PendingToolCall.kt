@@ -11,7 +11,7 @@ import kotlinx.serialization.Serializable
  * Runtime-only input deltas and provider call status are not represented here.
  */
 @Serializable
-public sealed interface PendingToolEvent : UnstableCleanEvent {
+public sealed interface PendingToolCall : PendingRecord {
     public val callId: String
     public val itemId: ResponseItemId?
 

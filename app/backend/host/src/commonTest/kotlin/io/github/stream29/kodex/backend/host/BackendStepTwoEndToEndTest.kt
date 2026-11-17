@@ -2,7 +2,7 @@ package io.github.stream29.kodex.backend.host
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.backend.BackendInstance
 import io.github.stream29.kodex.cli.rpc.RpcServices
@@ -177,16 +177,16 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                 assertFalse("write_stdin" in visibleTools, "Legacy write_stdin must not be exposed: $visibleTools")
 
                 val shellId = step("awaiting shellId") { capturedShellId.await() }
-                step("awaiting parked PendingAwaitEventToolEvent") {
+                step("awaiting parked PendingAwait") {
                     rpc.runtime.getStateFlow(index).first { state ->
                         val pending = (state as? AgentStateValue.ToolPending)?.events.orEmpty()
-                        pending.singleOrNull() is PendingAwaitEventToolEvent
+                        pending.singleOrNull() is PendingAwait
                     }
                     rpc.runtime.getRunningTurnFlow(index).first { !it }
                 }
 
                 val parkedState = assertIs<AgentStateValue.ToolPending>(rpc.runtime.getState(index))
-                val parkedAwait = assertIs<PendingAwaitEventToolEvent>(parkedState.events.single())
+                val parkedAwait = assertIs<PendingAwait>(parkedState.events.single())
                 assertEquals(listOf(shellId), parkedAwait.arguments.terminals)
                 assertTrue(
                     readStopNotifications(home, index).isEmpty(),
@@ -265,7 +265,7 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                 rpc.runtime.submit(index, listOf(ContentItem.InputText("Park until next message")))
                 step("awaiting second parked await_event") {
                     rpc.runtime.getStateFlow(index).first { state ->
-                        (state as? AgentStateValue.ToolPending)?.events?.singleOrNull() is PendingAwaitEventToolEvent
+                        (state as? AgentStateValue.ToolPending)?.events?.singleOrNull() is PendingAwait
                     }
                     rpc.runtime.getRunningTurnFlow(index).first { !it }
                 }

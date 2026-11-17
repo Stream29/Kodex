@@ -7,7 +7,7 @@ import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Box
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.cli.components.LocalTextInputFocusRequester
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
@@ -44,7 +44,7 @@ internal fun boundedComposerRows(availableRows: Int, desiredRows: Int): Int {
 }
 
 internal fun pendingSteerPreviewLines(
-    pending: List<StableIndexEvent.Steerable>,
+    pending: List<AgentCommit.Steerable>,
     columns: Int,
     maximumRows: Int,
 ): List<String> = pendingSteerPreviewContent(pending, maximumRows).map {

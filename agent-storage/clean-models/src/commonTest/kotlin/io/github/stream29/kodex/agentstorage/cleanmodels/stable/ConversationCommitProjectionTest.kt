@@ -57,7 +57,7 @@ val stableCleanEventProjectionTest by testSuite {
 
         assertEquals(
             listOf(user, assistant, developer, agent, reasoning),
-            events.flatMap(StableCleanEvent::toResponseHistoryItems),
+            events.flatMap(AgentCommit::toResponseHistoryItems),
         )
         assertEquals("Done.", (events[1] as StableAssistantMessage).text)
     }
@@ -77,7 +77,7 @@ val stableCleanEventProjectionTest by testSuite {
             result = "base64",
         )
 
-        val events: List<StableWorkEvent.CompletedTool> = listOf(
+        val events: List<AgentCommit.CompletedTool> = listOf(
             StableServerToolSearch(serverSearchCall, serverSearchOutput),
             StableWebSearchCall(webSearch),
             StableImageGenerationCall(imageGeneration),
@@ -90,13 +90,13 @@ val stableCleanEventProjectionTest by testSuite {
                 webSearch,
                 imageGeneration,
             ),
-            events.flatMap(StableCleanEvent::toResponseHistoryItems),
+            events.flatMap(AgentCommit::toResponseHistoryItems),
         )
     }
 
     test("context compaction is a provider-facing index event") {
         val compaction = ResponseItem.Compaction(encryptedContent = "compact")
-        val contextCompaction: StableIndexEvent = StableContextCompaction(
+        val contextCompaction: IndexCommit = StableContextCompaction(
             id = compaction.id,
             encryptedContent = compaction.encryptedContent,
         )

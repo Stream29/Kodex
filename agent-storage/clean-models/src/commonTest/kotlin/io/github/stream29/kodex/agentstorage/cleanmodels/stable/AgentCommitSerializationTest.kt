@@ -3,7 +3,7 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventOutput
@@ -33,6 +33,20 @@ import kotlin.test.assertNotEquals
 import kotlin.time.Instant
 
 val agentCommitSerializationTest by testSuite {
+    test("old terminal payloads stay readable as work commits and queued steer") {
+        val input = """{"type":"event_terminal_exited","session_id":37,"command":"fixture","exit_code":0}"""
+        val terminal = StableTerminalExitedEvent(37, command = "fixture", exitCode = 0)
+        val type = AgentCommitType.EventTerminalExited
+        assertEquals(terminal, type.decodePayloadJson(input))
+        assertEquals(SteerSnapshot(listOf(terminal)), AgentCommitType.Steer.decodePayloadJson("[$input]"))
+        assertEquals("work", type.legacyTimelineName)
+        assertEquals(false, type in AgentCommitType.IndexTypes)
+        assertEquals(true, type in AgentCommitType.WorkTypes)
+        assertEquals(emptySet(), AgentCommitType.IndexTypes.intersect(AgentCommitType.WorkTypes))
+        assertEquals(true, AgentCommitType.EventSchedule in AgentCommitType.CompactionRetainedTypes)
+        assertEquals(false, type in AgentCommitType.CompactionRetainedTypes)
+    }
+
     test("agent settings serialize cwd as a string and use compatibility fallback") {
         val settings = KodexAgentSettings(
             model = OpenAiModelId("test-model"),
@@ -158,7 +172,7 @@ val agentCommitSerializationTest by testSuite {
             StableAssistantMessage(listOf(ContentItem.OutputText("legacy")), phase = null),
             StableContextCompaction(encryptedContent = "compacted"),
             StableReasoning(ResponseItem.Reasoning(ResponseItemId("r1"), emptyList())),
-            StableAwaitEventToolEvent(
+            StableAwait(
                 callId = "call_await",
                 arguments = AwaitEventArguments(terminals = listOf(4)),
                 result = StableAwaitEventResult.Output(AwaitEventOutput(Instant.parse("2026-11-15T10:00:00Z"))),
@@ -169,7 +183,7 @@ val agentCommitSerializationTest by testSuite {
             UnstableSnapshot(
                 listOf(
                     PendingPlanUpdate("c1", null, UpdatePlanArgs("plan", emptyList())),
-                    PendingAwaitEventToolEvent("c2", null, AwaitEventArguments(listOf(4))),
+                    PendingAwait("c2", null, AwaitEventArguments(listOf(4))),
                 ),
             ),
             AskUserSnapshot(

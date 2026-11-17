@@ -2,7 +2,7 @@
 
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.openai.MessagePhase
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.serialization.KSerializer
@@ -30,7 +30,7 @@ public enum class AgentCommitType(
     EventSchedule("event_schedule", "index"),
 
     @SerialName("event_terminal_exited")
-    EventTerminalExited("event_terminal_exited", "index"),
+    EventTerminalExited("event_terminal_exited", "work"),
 
     @SerialName("assistant_message")
     AssistantMessage("assistant_message", "index"),
@@ -123,7 +123,6 @@ public enum class AgentCommitType(
             UserMessage,
             EventAskUser,
             EventSchedule,
-            EventTerminalExited,
             AssistantMessage,
             AssistantMessageCommentary,
             AssistantMessageFinal,
@@ -146,10 +145,12 @@ public enum class AgentCommitType(
         public val CompactionRetainedTypes: Set<AgentCommitType> = setOf(
             UserMessage,
             EventAskUser,
+            EventSchedule,
             PlanUpdate,
         )
 
         public val WorkTypes: Set<AgentCommitType> = setOf(
+            EventTerminalExited,
             Reasoning,
             CommandExecutionToolEvent,
             AwaitEventToolEvent,
@@ -188,6 +189,14 @@ public enum class AgentCommitType(
  */
 @Serializable
 public sealed interface AgentCommit {
+    /** Input that can be delivered to an Agent during a logical turn. */
+    @Serializable
+    public sealed interface Steerable : AgentCommit
+
+    /** Completed tool interactions that can be produced by a tool handler. */
+    @Serializable
+    public sealed interface CompletedTool : AgentCommit
+
     public val commitType: AgentCommitType
         get() = when (this) {
             is StableUserMessage -> AgentCommitType.UserMessage
@@ -204,17 +213,17 @@ public sealed interface AgentCommit {
             is StablePlanUpdate -> AgentCommitType.PlanUpdate
             is StableContextCompaction -> AgentCommitType.ContextCompaction
             is StableReasoning -> AgentCommitType.Reasoning
-            is StableCommandExecutionToolEvent -> AgentCommitType.CommandExecutionToolEvent
-            is StableAwaitEventToolEvent -> AgentCommitType.AwaitEventToolEvent
-            is StablePatchToolEvent -> AgentCommitType.PatchToolEvent
-            is StableReadMediaToolEvent -> AgentCommitType.ReadMediaToolEvent
+            is StableCommandExecution -> AgentCommitType.CommandExecutionToolEvent
+            is StableAwait -> AgentCommitType.AwaitEventToolEvent
+            is StablePatch -> AgentCommitType.PatchToolEvent
+            is StableReadMedia -> AgentCommitType.ReadMediaToolEvent
             is StableInvalidToolCall -> AgentCommitType.InvalidToolCall
             is StableServerToolSearch -> AgentCommitType.ServerToolSearch
             is StableWebSearchCall -> AgentCommitType.HostedWebSearch
             is StableImageGenerationCall -> AgentCommitType.HostedImageGeneration
-            is StableJsonToolEvent -> AgentCommitType.JsonToolEvent
-            is StableTextToolEvent -> AgentCommitType.TextToolEvent
-            is StableCustomToolEvent -> AgentCommitType.CustomToolEvent
+            is StableJsonTool -> AgentCommitType.JsonToolEvent
+            is StableTextTool -> AgentCommitType.TextToolEvent
+            is StableCustomTool -> AgentCommitType.CustomToolEvent
             is KodexAgentSettings -> AgentCommitType.Settings
             is LlmRequestMeta.Legacy -> AgentCommitType.LlmRequestMetaLegacy
             is LlmRequestMeta.Initialization -> AgentCommitType.LlmRequestMetaInitialization
@@ -259,7 +268,7 @@ public data class IndexedAgentCommit(
 @Serializable
 @SerialName("unstable")
 public data class UnstableSnapshot(
-    public val events: List<UnstableCleanEvent>,
+    public val events: List<PendingRecord>,
 ) : AgentCommit
 
 /**
@@ -268,14 +277,14 @@ public data class UnstableSnapshot(
 @Serializable
 @SerialName("steer")
 public data class SteerSnapshot(
-    public val events: List<StableIndexEvent.Steerable>,
+    public val events: List<AgentCommit.Steerable>,
 ) : AgentCommit
 
-private val UnstableEventListSerializer: KSerializer<List<UnstableCleanEvent>> =
-    ListSerializer(UnstableCleanEvent.serializer())
+private val UnstableEventListSerializer: KSerializer<List<PendingRecord>> =
+    ListSerializer(PendingRecord.serializer())
 
-private val SteerableEventListSerializer: KSerializer<List<StableIndexEvent.Steerable>> =
-    ListSerializer(StableIndexEvent.Steerable.serializer())
+private val SteerableEventListSerializer: KSerializer<List<AgentCommit.Steerable>> =
+    ListSerializer(AgentCommit.Steerable.serializer())
 
 private val AskUserEntryListSerializer: KSerializer<List<AskUserEntry>> =
     ListSerializer(AskUserEntry.serializer())
@@ -285,8 +294,8 @@ private val AskUserEntryListSerializer: KSerializer<List<AskUserEntry>> =
  */
 public fun AgentCommit.encodePayloadJson(json: Json = OpenAiJsonCodec): String =
     when (this) {
-        is StableIndexEvent -> json.encodeToString(StableIndexEvent.serializer(), this)
-        is StableWorkEvent -> json.encodeToString(StableWorkEvent.serializer(), this)
+        is IndexCommit -> json.encodeToString(IndexCommit.serializer(), this)
+        is WorkCommit -> json.encodeToString(WorkCommit.serializer(), this)
         is KodexAgentSettings -> json.encodeToString(KodexAgentSettings.serializer(), this)
         is LlmRequestMeta -> json.encodeToString(LlmRequestMeta.serializer(), this)
         is UnstableSnapshot -> json.encodeToString(UnstableEventListSerializer, events)
@@ -302,8 +311,8 @@ public fun AgentCommitType.decodePayloadJson(
     json: Json = OpenAiJsonCodec,
 ): AgentCommit {
     val decoded: AgentCommit = when (this) {
-        in AgentCommitType.IndexTypes -> json.decodeFromString(StableIndexEvent.serializer(), payloadJson)
-        in AgentCommitType.WorkTypes -> json.decodeFromString(StableWorkEvent.serializer(), payloadJson)
+        in AgentCommitType.IndexTypes -> json.decodeFromString(IndexCommit.serializer(), payloadJson)
+        in AgentCommitType.WorkTypes -> json.decodeFromString(WorkCommit.serializer(), payloadJson)
         AgentCommitType.Settings -> json.decodeFromString(KodexAgentSettings.serializer(), payloadJson)
         AgentCommitType.LlmRequestMetaLegacy ->
             json.decodeFromString(LlmRequestMeta.Legacy.serializer(), payloadJson)

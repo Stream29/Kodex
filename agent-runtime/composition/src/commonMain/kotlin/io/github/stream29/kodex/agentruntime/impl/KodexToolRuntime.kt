@@ -3,12 +3,12 @@ package io.github.stream29.kodex.agentruntime.impl
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.ToolName
 import io.github.stream29.kodex.utils.logging.tool
@@ -68,8 +68,8 @@ internal class KodexToolRuntime(
     }
 
     private suspend fun KLogger.handleToolCall(
-        pending: PendingToolEvent,
-        operation: suspend () -> StableCleanEvent.CompletedTool,
+        pending: PendingToolCall,
+        operation: suspend () -> AgentCommit.CompletedTool,
     ) {
         var executionFailure: Exception? = null
         val completed = try {

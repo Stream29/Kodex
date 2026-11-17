@@ -13,12 +13,12 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettin
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
@@ -285,9 +285,9 @@ val compactionSteerTest by testSuite {
                 assertEquals(listOf(user("after tool")), pendingSteer())
                 assertEquals(1, requests.size)
                 assertEquals(listOf(user("initial")), userHistory())
-                val call = assertIs<PendingFunctionToolEvent>(pending.events.single())
+                val call = assertIs<PendingFunctionToolCall>(pending.events.single())
                 state.completeToolCall(
-                    StableTextToolEvent(
+                    StableTextTool(
                         callId = call.callId,
                         itemId = call.itemId,
                         name = call.name,
@@ -314,7 +314,7 @@ val compactionSteerTest by testSuite {
                     storage.commit(
                         UnstableSnapshot(
                             listOf(
-                                PendingFunctionToolEvent(
+                                PendingFunctionToolCall(
                                     name = "test_tool",
                                     arguments = JsonObject(emptyMap()),
                                     callId = "pending",
@@ -441,7 +441,7 @@ val compactionSteerTest by testSuite {
             val releaseWrite = CompletableDeferred<Unit>()
             withSteerRuntime(wrapState = { delegate ->
                 object : AgentState by delegate {
-                    override suspend fun consumeSteer(): List<StableIndexEvent.Steerable> {
+                    override suspend fun consumeSteer(): List<AgentCommit.Steerable> {
                         val consumed = delegate.consumeSteer()
                         claimed.complete(Unit)
                         releaseWrite.await()
@@ -472,7 +472,7 @@ val compactionSteerTest by testSuite {
             val failure = IllegalStateException("write failed")
             withSteerRuntime(wrapState = { delegate ->
                 object : AgentState by delegate {
-                    override suspend fun consumeSteer(): List<StableIndexEvent.Steerable> {
+                    override suspend fun consumeSteer(): List<AgentCommit.Steerable> {
                         val events = delegate.storage.getSteerAt(delegate.storage.latestIndex())
                         (delegate.storage as InMemoryKodexAgentStorage).commit(
                             listOf(events.first(), SteerSnapshot(emptyList())),
@@ -633,12 +633,12 @@ val compactionSteerTest by testSuite {
                         description = "test",
                         parameters = PropertyBuilder().obj { additionalProperties = false },
                     ),
-                    select = { it as? PendingFunctionToolEvent },
+                    select = { it as? PendingFunctionToolCall },
                 ) { pending ->
                     executions += 1
                     handling.complete(Unit)
                     releaseTool.await()
-                    StableTextToolEvent(
+                    StableTextTool(
                         name = pending.name,
                         arguments = pending.arguments,
                         callId = pending.callId,
@@ -736,7 +736,7 @@ private class SteerFixture(
     val requests: List<ResponsesApiRequest>,
     val compactRequests: List<ResponsesApiRequest>,
 ) {
-    suspend fun pendingSteer(): List<StableIndexEvent.Steerable> =
+    suspend fun pendingSteer(): List<AgentCommit.Steerable> =
         storage.getSteerAt(storage.latestIndex())
 
     suspend fun clearSteer() {

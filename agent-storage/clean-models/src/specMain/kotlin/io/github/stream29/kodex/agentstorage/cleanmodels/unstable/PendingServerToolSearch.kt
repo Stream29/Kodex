@@ -9,7 +9,7 @@ import kotlinx.serialization.Serializable
 @SerialName("server_tool_search")
 public data class PendingServerToolSearch(
     public val call: ResponseItem.ServerToolSearchCall,
-) : UnstableCleanEvent {
+) : PendingRecord {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(call)
 }

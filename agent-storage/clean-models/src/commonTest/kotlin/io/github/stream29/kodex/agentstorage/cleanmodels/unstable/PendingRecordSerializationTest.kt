@@ -31,18 +31,18 @@ val pendingToolEventHierarchySerializationTest by testSuite {
                 put("query", "connected drive tools")
             },
         )
-        val event: UnstableCleanEvent = PendingServerToolSearch(call)
+        val event: PendingRecord = PendingServerToolSearch(call)
 
-        val encoded = pendingHierarchyJson.encodeToString<UnstableCleanEvent>(event)
+        val encoded = pendingHierarchyJson.encodeToString<PendingRecord>(event)
         val element = pendingHierarchyJson.parseToJsonElement(encoded).jsonObject
 
         assertEquals(JsonPrimitive("server_tool_search"), element["type"])
-        assertEquals(event, pendingHierarchyJson.decodeFromString<UnstableCleanEvent>(encoded))
+        assertEquals(event, pendingHierarchyJson.decodeFromString<PendingRecord>(encoded))
         assertEquals(listOf(call), event.toResponseHistoryItems())
     }
 
     test("round trips a client pending tool through the unstable root") {
-        val event: UnstableCleanEvent = PendingFunctionToolEvent(
+        val event: PendingRecord = PendingFunctionToolCall(
             callId = "call_function",
             itemId = ResponseItemId("item_function"),
             name = "search",
@@ -51,9 +51,9 @@ val pendingToolEventHierarchySerializationTest by testSuite {
             },
         )
 
-        val encoded = pendingHierarchyJson.encodeToString<UnstableCleanEvent>(event)
+        val encoded = pendingHierarchyJson.encodeToString<PendingRecord>(event)
 
-        assertEquals(event, pendingHierarchyJson.decodeFromString<UnstableCleanEvent>(encoded))
+        assertEquals(event, pendingHierarchyJson.decodeFromString<PendingRecord>(encoded))
         assertEquals(
             event.toResponseHistoryItems(),
             listOf(
@@ -68,8 +68,8 @@ val pendingToolEventHierarchySerializationTest by testSuite {
     }
 
     test("round trips every pending tool event kind") {
-        val events: List<Pair<PendingToolEvent, String>> = listOf(
-            PendingFunctionToolEvent(
+        val events: List<Pair<PendingToolCall, String>> = listOf(
+            PendingFunctionToolCall(
                 callId = "call_function",
                 itemId = ResponseItemId("item_function"),
                 name = "search",
@@ -78,13 +78,13 @@ val pendingToolEventHierarchySerializationTest by testSuite {
                     put("query", "design context")
                 },
             ) to "function",
-            PendingCustomToolEvent(
+            PendingCustomToolCall(
                 callId = "call_custom",
                 itemId = ResponseItemId("item_custom"),
                 name = "custom_tool",
                 input = "freeform input",
             ) to "custom",
-            PendingPatchToolEvent(
+            PendingPatch(
                 callId = "call_apply_patch",
                 itemId = ResponseItemId("item_apply_patch"),
                 diff = """
@@ -102,7 +102,7 @@ val pendingToolEventHierarchySerializationTest by testSuite {
                 ),
                 message = "failed to parse function arguments",
             ) to "invalid_tool_call",
-            PendingReadMediaToolEvent(
+            PendingReadMedia(
                 callId = "call_read_media",
                 itemId = ResponseItemId("item_read_media"),
                 arguments = ReadMediaToolArguments(
@@ -110,12 +110,12 @@ val pendingToolEventHierarchySerializationTest by testSuite {
                     detail = MediaDetail.Original,
                 ),
             ) to "read_media",
-            PendingAwaitEventToolEvent(
+            PendingAwait(
                 callId = "call_await_event",
                 itemId = ResponseItemId("item_await_event"),
                 arguments = AwaitEventArguments(terminals = listOf(2)),
             ) to "await_event",
-            PendingCommandExecutionToolEvent(
+            PendingCommandExecution(
                 callId = "call_command_execution",
                 itemId = ResponseItemId("item_command_execution"),
                 action = PendingCommandExecutionAction.ExecCommand(
@@ -140,13 +140,13 @@ val pendingToolEventHierarchySerializationTest by testSuite {
         )
 
         events.forEach { (event, serialName) ->
-            val encoded = pendingHierarchyJson.encodeToString<PendingToolEvent>(event)
+            val encoded = pendingHierarchyJson.encodeToString<PendingToolCall>(event)
             val element = pendingHierarchyJson.parseToJsonElement(encoded).jsonObject
 
             assertEquals(JsonPrimitive(serialName), element["type"])
             assertEquals(
                 event,
-                pendingHierarchyJson.decodeFromString<PendingToolEvent>(encoded),
+                pendingHierarchyJson.decodeFromString<PendingToolCall>(encoded),
             )
         }
     }
@@ -172,13 +172,13 @@ val pendingToolEventHierarchySerializationTest by testSuite {
         )
 
         calls.forEach { call ->
-            val encoded = pendingHierarchyJson.encodeToString<PendingToolEvent>(call)
+            val encoded = pendingHierarchyJson.encodeToString<PendingToolCall>(call)
             val element = pendingHierarchyJson.parseToJsonElement(encoded).jsonObject
 
             assertEquals(JsonPrimitive("invalid_tool_call"), element["type"])
             assertEquals(
                 call,
-                pendingHierarchyJson.decodeFromString<PendingToolEvent>(encoded),
+                pendingHierarchyJson.decodeFromString<PendingToolCall>(encoded),
             )
         }
     }

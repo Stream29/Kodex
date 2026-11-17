@@ -9,14 +9,13 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettin
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.openai.MessagePhase
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -113,7 +112,7 @@ public interface MutableKodexAgentStorage : KodexAgentStorage {
      *
      * An empty [events] list is a no-op and returns [latestIndex].
      */
-    public suspend fun steer(events: List<StableIndexEvent.Steerable>): Int {
+    public suspend fun steer(events: List<AgentCommit.Steerable>): Int {
         val currentLatest = latestIndex()
         require(currentLatest >= 0) { "Steer updates require an existing state index." }
         if (events.isEmpty()) return currentLatest
@@ -125,11 +124,11 @@ public interface MutableKodexAgentStorage : KodexAgentStorage {
      * Atomically consumes all currently queued [SteerSnapshot] events into the stable timeline.
      */
     @OptIn(ExperimentalUuidApi::class)
-    public suspend fun consumeSteer(): List<StableIndexEvent.Steerable> {
+    public suspend fun consumeSteer(): List<AgentCommit.Steerable> {
         val currentLatest = latestIndex()
         if (currentLatest < 0) return emptyList()
         val pendingTools = getUnstableAtOrNull(currentLatest).orEmpty()
-            .filterIsInstance<PendingToolEvent>()
+            .filterIsInstance<PendingToolCall>()
         require(pendingTools.isEmpty()) {
             "Cannot consume steer while local tool calls are pending."
         }
@@ -242,12 +241,12 @@ public suspend fun KodexAgentStorage.getLlmRequestMetaAtOrNull(index: Int): LlmR
     return getCommitAtOrBefore(index, AgentCommitType.LlmRequestMetaTypes)?.commit as? LlmRequestMeta
 }
 
-public suspend fun KodexAgentStorage.getUnstableAtOrNull(index: Int): List<UnstableCleanEvent>? {
+public suspend fun KodexAgentStorage.getUnstableAtOrNull(index: Int): List<PendingRecord>? {
     require(index >= 0) { "Index $index must be non-negative." }
     return (getCommitAtOrBefore(index, AgentCommitType.UnstableTypes)?.commit as? UnstableSnapshot)?.events
 }
 
-public suspend fun KodexAgentStorage.getSteerAt(index: Int): List<StableIndexEvent.Steerable> {
+public suspend fun KodexAgentStorage.getSteerAt(index: Int): List<AgentCommit.Steerable> {
     require(index >= 0) { "Index $index must be non-negative." }
     return (getCommitAtOrBefore(index, AgentCommitType.SteerTypes)?.commit as? SteerSnapshot)?.events ?: emptyList()
 }

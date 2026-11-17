@@ -9,13 +9,13 @@ import kotlinx.serialization.Serializable
 /** Parsed `apply_patch` call waiting for execution. */
 @Serializable
 @SerialName("apply_patch")
-public data class PendingPatchToolEvent(
+public data class PendingPatch(
     @SerialName("call_id")
     override val callId: String,
     @SerialName("item_id")
     override val itemId: ResponseItemId? = null,
     public val diff: Patch,
-) : PendingToolEvent {
+) : PendingToolCall {
     override val toolName: String = "apply_patch"
     override val toolNamespace: String? = null
 

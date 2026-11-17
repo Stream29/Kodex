@@ -2,13 +2,13 @@
 
 package io.github.stream29.kodex.tool.applypatch
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatch
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.openai.FreeformTool
 import io.github.stream29.kodex.openai.FreeformToolFormat
 import io.github.stream29.kodex.openai.ToolSpec
@@ -36,13 +36,13 @@ public actual class ApplyPatchTool actual constructor(
 
     public actual override fun close(): Unit = Unit
 
-    public actual override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool {
+    public actual override suspend fun handle(pending: PendingToolCall): AgentCommit.CompletedTool {
         currentCoroutineContext().ensureActive()
         return try {
             when (pending) {
-                is PendingFunctionToolEvent -> {
+                is PendingFunctionToolCall -> {
                     val message = "apply_patch received function-call JSON payload"
-                    StableTextToolEvent(
+                    StableTextTool(
                         callId = pending.callId,
                         itemId = pending.itemId,
                         name = pending.name,
@@ -53,7 +53,7 @@ public actual class ApplyPatchTool actual constructor(
                     )
                 }
 
-                is PendingPatchToolEvent -> handlePatch(pending)
+                is PendingPatch -> handlePatch(pending)
 
                 else -> error("apply_patch requires a parsed pending patch event.")
             }.also { currentCoroutineContext().ensureActive() }
@@ -66,11 +66,11 @@ public actual class ApplyPatchTool actual constructor(
     }
 
     private suspend fun handlePatch(
-        pending: PendingPatchToolEvent,
-    ): StableCleanEvent.CompletedTool {
+        pending: PendingPatch,
+    ): AgentCommit.CompletedTool {
         return try {
             val result = client.apply(pending.diff)
-            StablePatchToolEvent(
+            StablePatch(
                 callId = pending.callId,
                 itemId = pending.itemId,
                 diff = pending.diff,
@@ -78,7 +78,7 @@ public actual class ApplyPatchTool actual constructor(
             )
         } catch (error: IllegalArgumentException) {
             val message = error.message ?: "apply_patch failed"
-            StablePatchToolEvent(
+            StablePatch(
                 callId = pending.callId,
                 itemId = pending.itemId,
                 diff = pending.diff,

@@ -3,8 +3,8 @@
 package io.github.stream29.kodex.tool.readmedia
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMedia
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.typedTool
@@ -23,11 +23,11 @@ internal actual object ReadMediaToolImplementation {
     ): Tool =
         typedTool(
             spec = spec,
-            select = { it as? PendingReadMediaToolEvent },
+            select = { it as? PendingReadMedia },
         ) { pending ->
             try {
                 val output = client.read(pending.arguments)
-                StableReadMediaToolEvent(
+                StableReadMedia(
                     callId = pending.callId,
                     itemId = pending.itemId,
                     arguments = pending.arguments,
@@ -35,7 +35,7 @@ internal actual object ReadMediaToolImplementation {
                 )
             } catch (error: ReadMediaToolException) {
                 val message = error.message ?: "read_media failed"
-                StableReadMediaToolEvent(
+                StableReadMedia(
                     callId = pending.callId,
                     itemId = pending.itemId,
                     arguments = pending.arguments,

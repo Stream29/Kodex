@@ -10,38 +10,38 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessa
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonTool
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecution
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMedia
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.cli.history.HistoryTextStyle as TextStyle
@@ -64,7 +64,7 @@ import kotlin.time.Duration
 
 @Composable
 public actual fun HistoryEventContent(
-    event: StableCleanEvent, renderer: HistoryContentRenderer,
+    event: AgentCommit, renderer: HistoryContentRenderer,
     shellSessions: AgentShellSessionRegistry?, elapsed: Duration?,
 ) {
     CompositionLocalProvider(
@@ -91,14 +91,15 @@ public actual fun HistoryEventContent(
             is StableWebSearchCall -> renderHostedWebSearch()
             is StableImageGenerationCall -> renderHostedImageGeneration()
             is StableContextCompaction -> ContextCompactionEvent()
-            is StablePatchToolEvent -> renderer.StablePatch(this)
-            is StableAwaitEventToolEvent -> renderAwaitEvent()
-            is StableCommandExecutionToolEvent -> HistoryCommandContent(this, renderer)
-            is StableJsonToolEvent -> renderJsonTool()
-            is StableTextToolEvent -> renderTextTool()
-            is StableCustomToolEvent -> renderCustomTool()
-            is StableReadMediaToolEvent -> renderReadMedia()
+            is StablePatch -> renderer.StablePatch(this)
+            is StableAwait -> renderAwaitEvent()
+            is StableCommandExecution -> HistoryCommandContent(this, renderer)
+            is StableJsonTool -> renderJsonTool()
+            is StableTextTool -> renderTextTool()
+            is StableCustomTool -> renderCustomTool()
+            is StableReadMedia -> renderReadMedia()
             is StablePlanUpdate -> HistoryPlanContent(this, renderer)
+            else -> throw IllegalArgumentException("Commit ${commitType.wireName} is not a conversation record.")
         } }
     }
 }
@@ -109,10 +110,10 @@ internal val LocalHistoryRenderer = staticCompositionLocalOf<HistoryContentRende
 
 @Composable
 public actual fun HistoryEventContent(
-    event: UnstableCleanEvent, renderer: HistoryContentRenderer, shellSessions: AgentShellSessionRegistry?,
+    event: PendingRecord, renderer: HistoryContentRenderer, shellSessions: AgentShellSessionRegistry?,
 ) {
     CompositionLocalProvider(LocalHistoryRenderer provides renderer) { with(event) { when (this) {
-        is PendingFunctionToolEvent -> ToolEvent(
+        is PendingFunctionToolCall -> ToolEvent(
             summary = functionToolOngoingSummary(name, namespace),
             rawName = qualifiedName(name, namespace),
             status = "running",
@@ -121,7 +122,7 @@ public actual fun HistoryEventContent(
             section("Arguments") { JsonDetail("Arguments", arguments) }
         }
 
-        is PendingCustomToolEvent -> ToolEvent(
+        is PendingCustomToolCall -> ToolEvent(
             summary = customToolOngoingSummary(name, namespace, input),
             rawName = qualifiedName(name, namespace),
             status = "running",
@@ -130,9 +131,9 @@ public actual fun HistoryEventContent(
             section("Input") { Detail("Input", input) }
         }
 
-        is PendingPatchToolEvent -> renderer.PendingPatch(diff)
+        is PendingPatch -> renderer.PendingPatch(diff)
         is PendingPlanUpdate -> HistoryPlanContent(this, renderer)
-        is PendingAwaitEventToolEvent -> ToolEvent(
+        is PendingAwait -> ToolEvent(
             summary = arguments.ongoingToolSummary(),
             rawName = "await_event",
             status = "running",
@@ -141,9 +142,9 @@ public actual fun HistoryEventContent(
             section("Arguments") { arguments.renderDetails() }
         }
 
-        is PendingCommandExecutionToolEvent -> renderCommandExecution(shellSessions)
+        is PendingCommandExecution -> renderCommandExecution(shellSessions)
 
-        is PendingReadMediaToolEvent -> ToolEvent(
+        is PendingReadMedia -> ToolEvent(
             summary = arguments.ongoingToolSummary(),
             rawName = "read_media",
             status = "running",
@@ -245,7 +246,7 @@ private fun ContextCompactionEvent() {
 }
 
 @Composable
-private fun PendingCommandExecutionToolEvent.renderCommandExecution(
+private fun PendingCommandExecution.renderCommandExecution(
     shellSessions: AgentShellSessionRegistry?,
 ) {
     val session = activeAgentShellSession(shellSessions, action.activeSessionId())
@@ -266,7 +267,7 @@ private fun PendingCommandExecutionToolEvent.renderCommandExecution(
 }
 
 @Composable
-private fun StableJsonToolEvent.renderJsonTool() {
+private fun StableJsonTool.renderJsonTool() {
     val toolName = qualifiedName(name, namespace)
     if (isReadOnlyUtility(toolName)) {
         BuiltInToolEvent(functionToolSummary(name, namespace, failed = success == false), toolName, success.completedStatus(), callId) {
@@ -287,7 +288,7 @@ private fun StableJsonToolEvent.renderJsonTool() {
 }
 
 @Composable
-private fun StableTextToolEvent.renderTextTool() {
+private fun StableTextTool.renderTextTool() {
     val toolName = qualifiedName(name, namespace)
     if (isReadOnlyUtility(toolName)) {
         BuiltInToolEvent(functionToolSummary(name, namespace, failed = success == false), toolName, success.completedStatus(), callId) {
@@ -307,7 +308,7 @@ private fun StableTextToolEvent.renderTextTool() {
 }
 
 @Composable
-private fun StableCustomToolEvent.renderCustomTool() {
+private fun StableCustomTool.renderCustomTool() {
     ToolEvent(
         summary = customToolSummary(name, namespace, input, failed = success == false),
         rawName = qualifiedName(name, namespace),
@@ -320,7 +321,7 @@ private fun StableCustomToolEvent.renderCustomTool() {
 }
 
 @Composable
-private fun StableReadMediaToolEvent.renderReadMedia() {
+private fun StableReadMedia.renderReadMedia() {
     BuiltInToolEvent(
         summary = "Read media: ${arguments.path}",
         firstLine = compactToolLine(
@@ -343,7 +344,7 @@ private fun StableReadMediaToolEvent.renderReadMedia() {
 }
 
 @Composable
-private fun StableAwaitEventToolEvent.renderAwaitEvent() {
+private fun StableAwait.renderAwaitEvent() {
     BuiltInToolEvent(
         summary = functionToolSummary("await_event", null, failed = result is StableAwaitEventResult.Failure),
         firstLine = compactToolLine(

@@ -13,14 +13,13 @@ import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.callId
 import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
@@ -143,7 +142,7 @@ private class AgentRuntimeImpl(
                     delegate.resume()
                     val pending = delegate.state.value as? KodexAgentStateValue.ToolPending
                         ?: break
-                    val unsupported = pending.events.filterNot { it is PendingAwaitEventToolEvent }
+                    val unsupported = pending.events.filterNot { it is PendingAwait }
                     if (unsupported.isNotEmpty()) {
                         for (unmatched in unsupported) {
                             val label = unmatched.loggingToolName() ?: unmatched.callId
@@ -155,7 +154,7 @@ private class AgentRuntimeImpl(
                         }
                         continue
                     }
-                    val awaitEvents = pending.events.filterIsInstance<PendingAwaitEventToolEvent>()
+                    val awaitEvents = pending.events.filterIsInstance<PendingAwait>()
                     if (awaitEvents.isEmpty()) {
                         break
                     }
@@ -206,7 +205,7 @@ private class AgentRuntimeImpl(
             }
         }
 
-    override suspend fun submit(events: List<StableIndexEvent.Steerable>) {
+    override suspend fun submit(events: List<AgentCommit.Steerable>) {
         if (events.isEmpty()) return
         delegate.steer(events)
         ensureTurnRunningForSubmittedSteer()
@@ -248,7 +247,7 @@ private class AgentRuntimeImpl(
     }
 
     private suspend fun resolvePendingAwaitEvents(
-        awaitEvents: List<PendingAwaitEventToolEvent>,
+        awaitEvents: List<PendingAwait>,
     ): Boolean {
         val currentLatest = delegate.latestIndex.value
         if (currentLatest >= 0 && delegate.storage.getSteerAt(currentLatest).isNotEmpty()) {
@@ -273,7 +272,7 @@ private class AgentRuntimeImpl(
                     StableAwaitEventResult.Output(AwaitEventOutput(timestamp = timestamp))
                 }
                 completeToolCall(
-                    StableAwaitEventToolEvent(
+                    StableAwait(
                         callId = pending.callId,
                         itemId = pending.itemId,
                         arguments = pending.arguments,
@@ -308,12 +307,12 @@ private class AgentRuntimeImpl(
     }
 
     private suspend fun completeAllAwaitEventsWithTimestamp(
-        awaitEvents: List<PendingAwaitEventToolEvent>,
+        awaitEvents: List<PendingAwait>,
     ) {
         val timestamp = Clock.System.now()
         for (pending in awaitEvents) {
             completeToolCall(
-                StableAwaitEventToolEvent(
+                StableAwait(
                     callId = pending.callId,
                     itemId = pending.itemId,
                     arguments = pending.arguments,
@@ -338,7 +337,7 @@ private class AgentRuntimeImpl(
         val currentState = delegate.state.value
         val wakeable = currentState.canAppendUserMessage ||
             (currentState is KodexAgentStateValue.ToolPending &&
-                currentState.events.all { it is PendingAwaitEventToolEvent })
+                currentState.events.all { it is PendingAwait })
         if (!wakeable) return false
         val index = delegate.latestIndex.value
         return index >= 0 && delegate.storage.getSteerAt(index).isNotEmpty()
@@ -387,7 +386,7 @@ private class AgentRuntimeImpl(
         }
     }
 
-    override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int {
+    override suspend fun completeToolCall(completed: AgentCommit.CompletedTool): Int {
         val pending = delegate.pendingToolFor(completed)
             ?: return delegate.completeToolCall(completed)
         val toolName = pending.loggingToolName()
@@ -446,15 +445,15 @@ private fun KLogger.logClosed(
 }
 
 private fun ResumableAgentLayer.pendingToolFor(
-    completed: StableCleanEvent.CompletedTool,
-): PendingToolEvent? {
+    completed: AgentCommit.CompletedTool,
+): PendingToolCall? {
     val callId = completed.callId ?: return null
     return (state.value as? KodexAgentStateValue.ToolPending)
         ?.events
         ?.firstOrNull { pending -> pending.callId == callId }
 }
 
-internal fun PendingToolEvent.loggingToolName(): String? {
+internal fun PendingToolCall.loggingToolName(): String? {
     val name = toolName ?: return null
     return toolNamespace?.let { namespace -> "$namespace.$name" } ?: name
 }

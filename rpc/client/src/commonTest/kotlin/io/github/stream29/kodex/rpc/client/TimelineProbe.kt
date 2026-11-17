@@ -3,7 +3,7 @@ package io.github.stream29.kodex.rpc.client
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
@@ -88,7 +88,7 @@ internal abstract class StubAgentRuntimeRpc : AgentRuntimeRpc {
     override suspend fun cancelRunningTurn(sessionIndex: Int) = throw UnsupportedOperationException()
 }
 
-internal fun probeCommit(text: String): CleanIndexEntry =
+internal fun probeCommit(text: String): IndexCommit =
     StableUserMessage(listOf(ContentItem.InputText(text)))
 
 internal class TimelineProbeImpl : StubAgentRuntimeRpc() {

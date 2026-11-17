@@ -8,7 +8,7 @@ import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwaitEventToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecProcessSession
@@ -120,8 +120,8 @@ private class RepositoryAgentEventBus(
         ) { stateValue, runningTurn, activeSessions ->
             val awaitEvents = (stateValue as? KodexAgentStateValue.ToolPending)
                 ?.events
-                ?.takeIf { events -> events.all { it is PendingAwaitEventToolEvent } }
-                ?.filterIsInstance<PendingAwaitEventToolEvent>()
+                ?.takeIf { events -> events.all { it is PendingAwait } }
+                ?.filterIsInstance<PendingAwait>()
                 .orEmpty()
             WatchedAwaitSnapshot(
                 awaitEvents = awaitEvents,
@@ -182,13 +182,13 @@ private class RepositoryAgentEventBus(
 }
 
 private data class WatchedAwaitSnapshot(
-    val awaitEvents: List<PendingAwaitEventToolEvent>,
+    val awaitEvents: List<PendingAwait>,
     val parked: Boolean,
     val activeSessions: Map<Int, UnifiedExecProcessSession>,
 )
 
 private data class ExitedWatchedTerminal(
-    val awaitEvents: List<PendingAwaitEventToolEvent>,
+    val awaitEvents: List<PendingAwait>,
     val session: UnifiedExecProcessSession,
     val exitCode: Int,
 )

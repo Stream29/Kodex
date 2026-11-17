@@ -27,7 +27,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
@@ -270,7 +270,7 @@ private class ComposeHistoryItemRenderer(
         }
     }
     @Composable override fun Event(
-        event: StableCleanEvent, elapsed: Duration, onCollapse: (() -> Unit)?, shellSessions: AgentShellSessionRegistry?,
+        event: AgentCommit, elapsed: Duration, onCollapse: (() -> Unit)?, shellSessions: AgentShellSessionRegistry?,
     ) {
         HistoryEventContent(
             event, rememberComposeHistoryContentRenderer(elapsed, onCollapse?.let { true }, onCollapse),

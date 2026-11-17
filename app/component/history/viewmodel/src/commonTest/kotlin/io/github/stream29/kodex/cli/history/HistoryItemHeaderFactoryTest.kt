@@ -3,13 +3,13 @@ package io.github.stream29.kodex.cli.history
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomTool
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonTool
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryResult
@@ -36,7 +36,7 @@ import kotlin.time.Duration.Companion.milliseconds
 val historyItemHeaderFactoryTest by testSuite {
     test("readMediaHeaderUsesBoundedPathAndMapsFailureStatus") {
         val success = assertIs<ToolHistoryItemHeader.Summary>(
-            StableReadMediaToolEvent(
+            StableReadMedia(
                 callId = "media-1",
                 arguments = ReadMediaToolArguments("/tmp/diagram.png"),
                 result = StableReadMediaResult.Success(
@@ -48,7 +48,7 @@ val historyItemHeaderFactoryTest by testSuite {
         assertEquals("completed", success.status)
 
         val failure = assertIs<ToolHistoryItemHeader.Summary>(
-            StableReadMediaToolEvent(
+            StableReadMedia(
                 callId = "media-2",
                 arguments = ReadMediaToolArguments("/tmp/missing.png"),
                 result = StableReadMediaResult.Failure("image file does not exist"),
@@ -60,7 +60,7 @@ val historyItemHeaderFactoryTest by testSuite {
 
     test("migratedFunctionHeaderMapsSuccessAndFailureSummary") {
         fun header(success: Boolean?) = assertIs<ToolHistoryItemHeader.Summary>(
-            StableJsonToolEvent(
+            StableJsonTool(
                 callId = "mcp",
                 name = "inspect",
                 namespace = "filesystem",
@@ -78,7 +78,7 @@ val historyItemHeaderFactoryTest by testSuite {
     }
 
     test("commandHeaderRetainsOnlyBoundedPresentationAndOutcomeDiscriminators") {
-        val event = StableCommandExecutionToolEvent(
+        val event = StableCommandExecution(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
                 ExecCommandArguments(
@@ -137,7 +137,7 @@ val historyItemHeaderFactoryTest by testSuite {
     }
 
     test("customWebHeaderIncludesTheSearchQuery") {
-        val event = StableCustomToolEvent(
+        val event = StableCustomTool(
             callId = "web",
             name = "run",
             namespace = "web",
@@ -153,7 +153,7 @@ val historyItemHeaderFactoryTest by testSuite {
     }
 
     test("patchHeaderUsesBasenameForOneFileAndCountForMultipleFiles") {
-        val single = StablePatchToolEvent(
+        val single = StablePatch(
             callId = "single",
             diff = Patch(
                 patch = "",
@@ -161,7 +161,7 @@ val historyItemHeaderFactoryTest by testSuite {
             ),
             result = StablePatchToolExecutionResult.Failure("not applied"),
         ).toHistoryHeader(1.milliseconds)
-        val multiple = StablePatchToolEvent(
+        val multiple = StablePatch(
             callId = "multiple",
             diff = Patch(
                 patch = "",

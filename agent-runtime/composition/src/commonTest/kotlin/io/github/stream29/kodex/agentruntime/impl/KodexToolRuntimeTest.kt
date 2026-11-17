@@ -12,16 +12,17 @@ import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.toResponseHistoryItems
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitsIn
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
@@ -133,7 +134,7 @@ val kodexToolRuntimeTest by testSuite {
                 assertIs<ResponseItem.FunctionCallOutput>(history[2]).output,
             )
             assertEquals(
-                StableTextToolEvent(
+                StableTextTool(
                     callId = "call_dynamic",
                     name = "dynamic",
                     arguments = JsonObject(emptyMap()),
@@ -142,7 +143,7 @@ val kodexToolRuntimeTest by testSuite {
                 ),
                 storage.getCommitsIn(0..storage.latestIndex(), AgentCommitType.WorkTypes)
                     .map { it.commit }
-                    .filterIsInstance<StableTextToolEvent>()
+                    .filterIsInstance<StableTextTool>()
                     .single(),
             )
             assertEquals(emptyList(), storage.getUnstableAtOrNull(storage.latestIndex()))
@@ -162,7 +163,7 @@ val kodexToolRuntimeTest by testSuite {
                     ),
                 )
 
-                override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
+                override suspend fun handle(pending: PendingToolCall): AgentCommit.CompletedTool =
                     error("must not run")
 
                 override fun close(): Unit = Unit
@@ -197,7 +198,7 @@ val kodexToolRuntimeTest by testSuite {
             RequestOnlyRuntime(state).testToolRuntime(listOf(plainTool)).resume()
 
             val pending = assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
-            assertEquals(listOf("call_namespaced"), pending.events.map(PendingToolEvent::callId))
+            assertEquals(listOf("call_namespaced"), pending.events.map(PendingToolCall::callId))
         }
 
         test("unowned pending calls stop at the state boundary") {
@@ -227,7 +228,7 @@ val kodexToolRuntimeTest by testSuite {
             runtime.resume()
 
             val pending = assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
-            assertEquals(listOf("call_host_only"), pending.events.map(PendingToolEvent::callId))
+            assertEquals(listOf("call_host_only"), pending.events.map(PendingToolCall::callId))
         }
 
         test("a throwing tool logs contextual error, converts to failed completion, and does not block another tool in the same batch") {
@@ -308,7 +309,7 @@ val kodexToolRuntimeTest by testSuite {
             lateinit var state: KodexAgentStateContract
             val tool = RuntimeTestTool("self_complete") { pending ->
                 state.completeToolCall(
-                    StableTextToolEvent(
+                    StableTextTool(
                         callId = pending.callId,
                         itemId = pending.itemId,
                         name = pending.name,
@@ -389,7 +390,7 @@ val kodexToolRuntimeTest by testSuite {
             val layer = object : ResumableAgentLayer, KodexAgentStateContract by state {
                 override suspend fun resume() = RequestOnlyRuntime(state).resume()
 
-                override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int {
+                override suspend fun completeToolCall(completed: AgentCommit.CompletedTool): Int {
                     throw persistenceFailure
                 }
             }
@@ -448,7 +449,7 @@ val kodexToolRuntimeTest by testSuite {
         }
 
         test("direct tool execution preserves handler input and successful output") {
-            val handledCalls = mutableListOf<PendingFunctionToolEvent>()
+            val handledCalls = mutableListOf<PendingFunctionToolCall>()
             val tool = RuntimeTestTool("dynamic") { pending ->
                 handledCalls += pending
                 "original"
@@ -542,7 +543,7 @@ val kodexToolRuntimeTest by testSuite {
                     AgentCommitType.WorkTypes,
                 )
                     .map { it.commit }
-                    .filterIsInstance<StablePatchToolEvent>()
+                    .filterIsInstance<StablePatch>()
                     .single()
                 assertIs<StablePatchToolExecutionResult.Success>(completed.result)
             } finally {
@@ -575,7 +576,7 @@ val kodexToolRuntimeTest by testSuite {
                 AgentCommitType.WorkTypes,
             )
                 .map { it.commit }
-                .filterIsInstance<StableCommandExecutionToolEvent>()
+                .filterIsInstance<StableCommandExecution>()
             assertIs<StableCommandExecutionResult.Output>(completed.single { it.callId == "call_exec" }.result)
             assertIs<StableCommandExecutionResult.Failure>(completed.single { it.callId == "call_failed_exec" }.result)
             assertEquals(KodexAgentStateValue.AssistantMessage, fixture.state.state.value)
@@ -614,7 +615,7 @@ val kodexToolRuntimeTest by testSuite {
                 AgentCommitType.WorkTypes,
             )
                 .map { it.commit }
-            assertTrue(workEvents.filterIsInstance<StableCommandExecutionToolEvent>().isEmpty())
+            assertTrue(workEvents.filterIsInstance<StableCommandExecution>().isEmpty())
             val completed = workEvents.filterIsInstance<StableInvalidToolCall>()
             assertEquals(
                 listOf("call_invalid", "call_exec_missing_yield", "call_retired_search"),
@@ -735,7 +736,7 @@ private data class TestShellSettings(
 
 private class RuntimeTestTool(
     name: String,
-    private val handler: suspend (PendingFunctionToolEvent) -> String = { "done" },
+    private val handler: suspend (PendingFunctionToolCall) -> String = { "done" },
 ) : Tool {
     override val spec: ToolSpec = ResponsesApiTool(
         name = name,
@@ -743,9 +744,9 @@ private class RuntimeTestTool(
         parameters = PropertyBuilder().obj { additionalProperties = false },
     )
 
-    override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool {
-        val functionPending = assertIs<PendingFunctionToolEvent>(pending)
-        return StableTextToolEvent(
+    override suspend fun handle(pending: PendingToolCall): AgentCommit.CompletedTool {
+        val functionPending = assertIs<PendingFunctionToolCall>(pending)
+        return StableTextTool(
             callId = functionPending.callId,
             itemId = functionPending.itemId,
             name = functionPending.name,
@@ -809,8 +810,7 @@ private fun assistantMessage(): ResponseItem.Message =
 
 private suspend fun KodexAgentStorage.stableHistoryItems(): List<ResponseItem.HistoryItem> =
     getCommitsIn(0..latestIndex(), AgentCommitType.CleanEventTypes)
-        .mapNotNull { it.commit as? StableCleanEvent }
-        .flatMap(StableCleanEvent::toResponseHistoryItems)
+        .flatMap { it.commit.toResponseHistoryItems() }
 
 private suspend fun deleteRecursively(path: Path) {
     val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return

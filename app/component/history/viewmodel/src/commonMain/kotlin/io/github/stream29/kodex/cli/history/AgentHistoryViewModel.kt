@@ -2,9 +2,9 @@ package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
@@ -76,14 +76,14 @@ internal class AgentHistoryViewModelImpl(
     )
     private val mutableLoadState =
         MutableStateFlow<AgentHistoryLoadState>(AgentHistoryLoadState.Initializing)
-    private val mutablePendingTools = MutableStateFlow<List<UnstableCleanEvent>>(emptyList())
+    private val mutablePendingTools = MutableStateFlow<List<PendingRecord>>(emptyList())
     private val mutableStreamingItem = MutableStateFlow<HistoryStreamingItem?>(null)
     private val mutableActiveTurnDuration = MutableStateFlow<Duration?>(null)
 
     override val historyItems: StateFlow<HistoryItemWindow> =
         mutableHistoryItems.asStateFlow()
     override val loadState: StateFlow<AgentHistoryLoadState> = mutableLoadState.asStateFlow()
-    override val pendingTools: StateFlow<List<UnstableCleanEvent>> =
+    override val pendingTools: StateFlow<List<PendingRecord>> =
         mutablePendingTools.asStateFlow()
     override val streamingItem: StateFlow<HistoryStreamingItem?> =
         mutableStreamingItem.asStateFlow()
@@ -407,7 +407,7 @@ internal class AgentHistoryViewModelImpl(
             null
         }
         val descriptors = values.map { (index, commit, createdAt) ->
-            val event = commit as StableWorkEvent
+            val event = commit as WorkCommit
             event.toHistoryItemDescriptor(
                 index = index,
                 source = HistoryItemSource.Work,
@@ -765,7 +765,7 @@ internal class AgentHistoryViewModelImpl(
             if (!isCurrent(intent)) return
             val snapshotIndex = agentState.latestIndex.value
             val indexEntry = withContext(Dispatchers.Default) {
-                agentState.storage.getCommitExact(storageIndex, AgentCommitType.IndexTypes)?.commit as? CleanIndexEntry
+                agentState.storage.getCommitExact(storageIndex, AgentCommitType.IndexTypes)?.commit as? IndexCommit
             }
             if (!isCurrent(intent)) return
             checkNotNull(indexEntry) { "The selected History entry is no longer available." }
@@ -911,7 +911,7 @@ internal class AgentHistoryViewModelImpl(
         }
     }
 
-    private suspend fun loadPendingTools(latestIndex: Int): List<UnstableCleanEvent> =
+    private suspend fun loadPendingTools(latestIndex: Int): List<PendingRecord> =
         withContext(Dispatchers.Default) {
             if (latestIndex >= 0) {
                 agentState.storage.getUnstableAtOrNull(latestIndex).orEmpty()
@@ -959,7 +959,7 @@ internal class AgentHistoryViewModelImpl(
         }
     }
 
-    private fun publishPendingTools(pending: List<UnstableCleanEvent>) {
+    private fun publishPendingTools(pending: List<PendingRecord>) {
         if (mutablePendingTools.value == pending) return
         mutablePendingTools.value = pending
     }

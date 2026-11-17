@@ -3,9 +3,8 @@ package io.github.stream29.kodex.agentstate.contract
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
@@ -45,7 +44,7 @@ public sealed interface KodexAgentStateValue {
      * @throws IllegalArgumentException when [events] is empty.
      */
     public data class ToolPending(
-        public val events: List<PendingToolEvent>,
+        public val events: List<PendingToolCall>,
     ) : KodexAgentStateValue {
         init {
             require(events.isNotEmpty()) {
@@ -276,12 +275,12 @@ public interface KodexAgentState : CoroutineScope {
      * @throws IllegalStateException when storage cannot safely admit mutation.
      * @throws CancellationException when admission or writing is cancelled.
      */
-    public suspend fun steer(events: List<StableIndexEvent.Steerable>): Int
+    public suspend fun steer(events: List<AgentCommit.Steerable>): Int
 
     /**
      * Delegates to [MutableKodexAgentStorage.consumeSteer] when
      * [canAppendUserMessage] holds, atomically committing the queued
-     * [StableIndexEvent.Steerable] events and an empty `SteerSnapshot(emptyList())`
+     * [AgentCommit.Steerable] inputs and an empty `SteerSnapshot(emptyList())`
      * while updating [latestIndex] and [state].
      *
      * Returns an empty list without writing when no steer is queued.
@@ -291,7 +290,7 @@ public interface KodexAgentState : CoroutineScope {
      * insertion is not legal in the current state.
      * @throws CancellationException when admission or writing is cancelled.
      */
-    public suspend fun consumeSteer(): List<StableIndexEvent.Steerable>
+    public suspend fun consumeSteer(): List<AgentCommit.Steerable>
 
     /**
      * Appends one user message and updates the settings turn id when it starts
@@ -322,7 +321,7 @@ public interface KodexAgentState : CoroutineScope {
      * pending call id or the unstable snapshot lacks that call.
      * @throws CancellationException when admission or writing is cancelled.
      */
-    public suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int
+    public suspend fun completeToolCall(completed: AgentCommit.CompletedTool): Int
 
     /**
      * Updates model request settings and records a timestamp for the same state

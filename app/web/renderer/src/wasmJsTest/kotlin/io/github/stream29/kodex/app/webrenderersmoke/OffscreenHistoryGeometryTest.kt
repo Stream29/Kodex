@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolCall
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.app.history.contract.*
 import io.github.stream29.kodex.app.ui.compose.*
@@ -172,7 +172,7 @@ val offscreenHistoryGeometryTest by testSuite {
     for (keyboard in listOf(false, true)) {
     test("expanding real newest tool details keeps the bottom edge without changing follow intent keyboard=$keyboard") { historyGeometryModel(2) { model ->
         val input = (1..100).joinToString("\n") { "Tool input line $it" }
-        val pending = MutableStateFlow(listOf(PendingCustomToolEvent("geometry-tool", name = "geometry", input = input)))
+        val pending = MutableStateFlow(listOf(PendingCustomToolCall("geometry-tool", name = "geometry", input = input)))
         val displayed = object : AgentHistoryViewModel by model { override val pendingTools = pending }
         val scene = OffscreenScene.create(width = 480, height = 600) {
             Box(Modifier.height(300.dp)) {

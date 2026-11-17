@@ -10,15 +10,15 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserAnswer
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.decodePayloadJson
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMediaToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingReadMedia
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.app.migration.v0_4_7.SettingsCodec
 import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
@@ -235,7 +235,7 @@ internal fun rewriteLegacyCommitsForAgent(
 
                     "failure" -> {
                         val message = resultObj["message"]?.jsonPrimitive?.contentOrNull ?: "request_user_input failed"
-                        val textEvent = StableTextToolEvent(
+                        val textEvent = StableTextTool(
                             callId = callId,
                             itemId = null,
                             name = "request_user_input",
@@ -372,7 +372,7 @@ private fun convertImageViewCommit(commit: CommitRecord, path: Path): CommitReco
         }
         else -> throw IOException("Unknown image_view_tool_event result type '$resultType' in $path")
     }
-    val converted = StableReadMediaToolEvent(
+    val converted = StableReadMedia(
         callId = callId,
         itemId = itemId,
         arguments = ReadMediaToolArguments(path = mediaPath, detail = detail),
@@ -393,7 +393,7 @@ private fun convertSuggestSubagentCommit(commit: CommitRecord, path: Path): Comm
     return when (val resultType = resultObj.requireString("type", commit, path)) {
         "completed" -> {
             val response = resultObj["response"] ?: resultObj
-            val event = StableJsonToolEvent(
+            val event = StableJsonTool(
                 callId = callId,
                 itemId = null,
                 name = "suggest_subagent_task",
@@ -409,7 +409,7 @@ private fun convertSuggestSubagentCommit(commit: CommitRecord, path: Path): Comm
         }
         "failure" -> {
             val message = resultObj["message"]?.jsonPrimitive?.contentOrNull ?: "suggest_subagent_task failed"
-            val event = StableTextToolEvent(
+            val event = StableTextTool(
                 callId = callId,
                 itemId = null,
                 name = "suggest_subagent_task",
@@ -435,7 +435,7 @@ private fun convertMcpCommit(commit: CommitRecord, path: Path): CommitRecord {
     val args = obj["arguments"] ?: JsonObject(emptyMap())
     val result = obj["result"] ?: JsonObject(emptyMap())
     val isError = (result as? JsonObject)?.get("isError")?.takeIf { it !is JsonNull }?.jsonPrimitive?.booleanOrNull ?: false
-    val event = StableJsonToolEvent(
+    val event = StableJsonTool(
         callId = callId,
         itemId = null,
         name = name,
@@ -459,7 +459,7 @@ private fun convertWebSearchCommit(commit: CommitRecord, path: Path): CommitReco
     return when (val resultType = resultObj.requireString("type", commit, path)) {
         "success" -> {
             val response = resultObj["response"] ?: resultObj
-            val event = StableJsonToolEvent(
+            val event = StableJsonTool(
                 callId = callId,
                 itemId = null,
                 name = "run",
@@ -475,7 +475,7 @@ private fun convertWebSearchCommit(commit: CommitRecord, path: Path): CommitReco
         }
         "failure" -> {
             val message = resultObj["message"]?.jsonPrimitive?.contentOrNull ?: "web.run failed"
-            val event = StableTextToolEvent(
+            val event = StableTextTool(
                 callId = callId,
                 itemId = null,
                 name = "run",
@@ -501,7 +501,7 @@ private fun convertImageGenerationCommit(commit: CommitRecord, path: Path): Comm
         ?: throw IOException("Missing result in image_generation_tool_event at index=${commit.index} in $path")
     return when (val resultType = resultObj.requireString("type", commit, path)) {
         "success" -> {
-            val event = StableJsonToolEvent(
+            val event = StableJsonTool(
                 callId = callId,
                 itemId = null,
                 name = "imagegen",
@@ -517,7 +517,7 @@ private fun convertImageGenerationCommit(commit: CommitRecord, path: Path): Comm
         }
         "failure" -> {
             val message = resultObj["message"]?.jsonPrimitive?.contentOrNull ?: "imagegen failed"
-            val event = StableTextToolEvent(
+            val event = StableTextTool(
                 callId = callId,
                 itemId = null,
                 name = "imagegen",
@@ -541,7 +541,7 @@ private fun convertToolSearchCommit(commit: CommitRecord, path: Path): CommitRec
     val args = obj["arguments"] ?: JsonObject(emptyMap())
     val result = obj["result"] ?: JsonObject(emptyMap())
     val success = (result as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull == "success"
-    val event = StableJsonToolEvent(
+    val event = StableJsonTool(
         callId = callId,
         itemId = null,
         name = "tool_search",
@@ -704,12 +704,12 @@ private fun rewriteCommonUnstableElement(element: JsonElement): Pair<JsonElement
             val argsObj = obj["arguments"] as? JsonObject ?: JsonObject(emptyMap())
             val mediaPath = argsObj["path"]?.jsonPrimitive?.contentOrNull ?: ""
             val detail = parseMediaDetailOrNull(argsObj["detail"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.contentOrNull)
-            val converted = PendingReadMediaToolEvent(
+            val converted = PendingReadMedia(
                 callId = callId,
                 itemId = itemId,
                 arguments = ReadMediaToolArguments(path = mediaPath, detail = detail),
             )
-            OpenAiJsonCodec.encodeToJsonElement(UnstableCleanEvent.serializer(), converted) to true
+            OpenAiJsonCodec.encodeToJsonElement(PendingRecord.serializer(), converted) to true
         }
         "invalid_tool_call" -> {
             val rewritten = rewriteToolSearchInvocationObject(obj)
@@ -740,14 +740,14 @@ private fun rewriteHistoricalUnstableCommit(commit: CommitRecord, path: Path): C
         val obj = commonRewritten as? JsonObject ?: return@map commonRewritten
         val retired = extractRetiredPendingToolInfo(obj) ?: return@map commonRewritten
         changed = true
-        val fallback = PendingFunctionToolEvent(
+        val fallback = PendingFunctionToolCall(
             callId = retired.callId,
             itemId = null,
             name = retired.name,
             namespace = retired.namespace,
             arguments = retired.arguments,
         )
-        OpenAiJsonCodec.encodeToJsonElement(UnstableCleanEvent.serializer(), fallback)
+        OpenAiJsonCodec.encodeToJsonElement(PendingRecord.serializer(), fallback)
     }
     if (!changed) return commit
     return commit.copy(payloadJson = OpenAiJsonCodec.encodeToString(JsonArray.serializer(), JsonArray(updatedElements)))
@@ -805,8 +805,8 @@ private fun applyTailUnstableMigration(
     }
 
     val validKeptUnstableJson = OpenAiJsonCodec.encodeToString(
-        ListSerializer(UnstableCleanEvent.serializer()),
-        keptElements.map { OpenAiJsonCodec.decodeFromJsonElement(UnstableCleanEvent.serializer(), it) },
+        ListSerializer(PendingRecord.serializer()),
+        keptElements.map { OpenAiJsonCodec.decodeFromJsonElement(PendingRecord.serializer(), it) },
     )
 
     val instant = Instant.parse(tailCommit.createdAt)
@@ -838,7 +838,7 @@ private fun applyTailUnstableMigration(
             )
         }
 
-        val interrupted = StableTextToolEvent(
+        val interrupted = StableTextTool(
             callId = retired.callId,
             itemId = null,
             name = retired.name,

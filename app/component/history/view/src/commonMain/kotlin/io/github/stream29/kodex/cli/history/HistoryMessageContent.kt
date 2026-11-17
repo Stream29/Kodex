@@ -8,7 +8,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessa
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
@@ -41,7 +41,7 @@ internal fun HistoryMessageRow(
 
 @Composable
 public actual fun HistoryMessageContent(
-    event: StableIndexEvent.Steerable,
+    event: AgentCommit.Steerable,
     heading: @Composable (String) -> Unit,
     body: @Composable (String, supporting: Boolean) -> Unit,
     assistantBody: @Composable (String) -> Unit,

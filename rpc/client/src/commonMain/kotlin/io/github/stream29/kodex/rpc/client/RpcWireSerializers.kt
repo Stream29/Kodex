@@ -1,11 +1,10 @@
 package io.github.stream29.kodex.rpc.client
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
@@ -52,10 +51,11 @@ public actual val RpcWireSerializers: SerializersModule = SerializersModule {
     contextual(ResponsesStreamEvent::class, ResponsesStreamEvent.serializer())
     contextual(AgentCommit::class, AgentCommit.serializer())
     contextual(LlmRequestMeta::class, LlmRequestMeta.serializer())
-    contextual(StableIndexEvent.Steerable::class, StableIndexEvent.Steerable.serializer())
-    contextual(CleanIndexEntry::class, CleanIndexEntry.serializer())
-    contextual(StableWorkEvent::class, StableWorkEvent.serializer())
-    contextual(UnstableCleanEvent::class, UnstableCleanEvent.serializer())
+    contextual(AgentCommit.Steerable::class, AgentCommit.Steerable.serializer())
+    contextual(AgentCommit.CompletedTool::class, AgentCommit.CompletedTool.serializer())
+    contextual(IndexCommit::class, IndexCommit.serializer())
+    contextual(WorkCommit::class, WorkCommit.serializer())
+    contextual(PendingRecord::class, PendingRecord.serializer())
     contextual(KodexAuthSource::class, KodexAuthSource.serializer())
     contextual(CodexRateLimitResetOutcome::class, CodexRateLimitResetOutcome.serializer())
 }

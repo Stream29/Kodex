@@ -243,7 +243,7 @@ private fun createComposerViewModel(
 
 private class ComposerPorts : ComposerDependencies {
     val running = MutableStateFlow(false)
-    val pendingSteer = MutableStateFlow<List<io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent.Steerable>>(
+    val pendingSteer = MutableStateFlow<List<io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit.Steerable>>(
         emptyList(),
     )
     val requestInputState = MutableStateFlow<ComposerRequestInputPresentation>(

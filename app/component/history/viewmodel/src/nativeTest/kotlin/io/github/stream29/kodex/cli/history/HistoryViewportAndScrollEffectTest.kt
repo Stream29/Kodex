@@ -11,7 +11,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
@@ -632,7 +632,7 @@ val historyViewportAndScrollEffectTest by testSuite {
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 storage.commit(navigationMessage("one"))
-                for (index in 2..20) storage.commit(StableTextToolEvent(
+                for (index in 2..20) storage.commit(StableTextTool(
                     callId = "call-$index", name = "tool-$index",
                     arguments = JsonObject(emptyMap()), result = "done", success = true,
                 ))

@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.tool.plan
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.appendPlanUpdate
@@ -25,7 +25,7 @@ public actual fun KodexAgentState.updatePlanTool(): Tool =
             completed
         } catch (error: IllegalArgumentException) {
             val message = error.message ?: "update_plan failed"
-            StableTextToolEvent(
+            StableTextTool(
                 callId = pending.callId,
                 itemId = pending.itemId,
                 name = PlanTools.Name,

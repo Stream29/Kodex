@@ -9,6 +9,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
@@ -114,9 +115,10 @@ val historyIndexViewModelTest by testSuite {
                         content = listOf(ContentItem.InputText("question\nwith   spaces")),
                     ),
                 )
-                storage.commit(LlmRequestMeta.Response(0L), kotlin.time.Instant.DISTANT_PAST)
+                storage.commit(StableTerminalExitedEvent(37, command = "./fixture", exitCode = 0))
                 latestIndex.value = 3
                 val firstWindow = viewModel.awaitIndexes(listOf(2))
+                assertNull(firstWindow.entryAtOrNull(3))
                 assertEquals(
                     "question with spaces",
                     assertNotNull(firstWindow.entryAtOrNull(2)).summary,

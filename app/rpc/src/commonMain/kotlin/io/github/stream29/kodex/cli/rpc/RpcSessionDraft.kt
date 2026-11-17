@@ -62,7 +62,7 @@ public actual class RpcSessionDraft actual constructor(
         dependencies = object : ComposerDependencies {
             override val runtime = object : ComposerRuntimePort {
                 override val running = MutableStateFlow(false)
-                override val pendingSteer = MutableStateFlow(emptyList<io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent.Steerable>())
+                override val pendingSteer = MutableStateFlow(emptyList<io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit.Steerable>())
             }
             override val submit = ComposerSubmitPort { _, _ ->
                 error("A draft must be submitted through its New Session owner.")

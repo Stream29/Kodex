@@ -8,7 +8,7 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
@@ -342,7 +342,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
 
             assertEquals(2, calls)
             assertEquals(KodexAgentStateValue.AssistantMessage, root.runtime.state.value)
-            val failed = assertIs<StableTextToolEvent>(
+            val failed = assertIs<StableTextTool>(
                 root.storage.getCommitAtOrBefore(root.storage.latestIndex(), AgentCommitType.WorkTypes)?.commit,
             )
             assertEquals("call_host_only", failed.callId)
@@ -382,7 +382,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             pending.await()
             turn.cancelJobAndJoin()
 
-            val failure = assertIs<StableTextToolEvent>(root.storage.getCommitAtOrBefore(3, AgentCommitType.WorkTypes)?.commit)
+            val failure = assertIs<StableTextTool>(root.storage.getCommitAtOrBefore(3, AgentCommitType.WorkTypes)?.commit)
             assertEquals("user interrupt", failure.result)
             assertEquals(false, failure.success)
             assertEquals(emptyList(), root.storage.getUnstableAtOrNull(3))
