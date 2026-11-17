@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.app
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.oshai.kotlinlogging.DirectLoggerFactory
 import io.github.oshai.kotlinlogging.KotlinLoggingConfiguration
 import io.github.oshai.kotlinlogging.Level
 import io.github.stream29.kodex.backend.BackendEndpoint
@@ -29,11 +30,30 @@ import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlin.time.Duration.Companion.seconds
 
 val cliFailureLoggingTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("thin CLI selects the direct logger before disabling console logging") {
+        val previousFactory = KotlinLoggingConfiguration.loggerFactory
+        val previousStartup = KotlinLoggingConfiguration.logStartupMessage
+        val previousLevel = if (previousFactory === DirectLoggerFactory) {
+            KotlinLoggingConfiguration.direct.logLevel
+        } else null
+        try {
+            initializeCliLogging()
+            assertSame(DirectLoggerFactory, KotlinLoggingConfiguration.loggerFactory)
+            assertFalse(KotlinLoggingConfiguration.logStartupMessage)
+            assertEquals(Level.OFF, KotlinLoggingConfiguration.direct.logLevel)
+        } finally {
+            if (previousLevel != null) KotlinLoggingConfiguration.direct.logLevel = previousLevel
+            KotlinLoggingConfiguration.loggerFactory = previousFactory
+            KotlinLoggingConfiguration.logStartupMessage = previousStartup
+        }
+    }
+
     test("initialized TUI and early failure both write the throwable to their process log") {
         // The isolated test process retains its rolling writers until exit.
         val home = Path(SystemTemporaryDirectory, "cli-failure-logging-${Random.nextLong()}")

@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.cli.app
 
 import dev.kauri.framework.openEmbeddedResource
+import io.github.oshai.kotlinlogging.DirectLoggerFactory
 import io.github.oshai.kotlinlogging.KotlinLoggingConfiguration
 import io.github.oshai.kotlinlogging.Level
 import io.github.stream29.kodex.backend.BackendEndpoint
@@ -30,8 +31,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 
 public actual fun main(args: Array<String>) {
-    KotlinLoggingConfiguration.logStartupMessage = false
-    KotlinLoggingConfiguration.direct.logLevel = Level.OFF
+    initializeCliLogging()
     val home = KodexHome
     val result = runBlocking(CliCoroutineExceptionLogger) {
         dispatchCliWithToolRpc(
@@ -43,6 +43,13 @@ public actual fun main(args: Array<String>) {
         }
     }
     if (result != 0) exitKodexProcess(result)
+}
+
+internal fun initializeCliLogging() {
+    KotlinLoggingConfiguration.logStartupMessage = false
+    // macOS defaults to DarwinLoggerFactory, which warns on direct configuration.
+    KotlinLoggingConfiguration.loggerFactory = DirectLoggerFactory
+    KotlinLoggingConfiguration.direct.logLevel = Level.OFF
 }
 
 private suspend fun runLeafCommand(
