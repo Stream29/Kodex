@@ -57,16 +57,19 @@ internal suspend fun migrateToV0_7_2(home: Path, fileSystem: CoroutineFileSystem
         return@withContext
     }
 
-    val mirrorDeltas = linkedMapOf<Long, AgentMirrorDelta>()
+    val mirrorDeltas = linkedMapOf<Long, AgentMirrorDelta<AgentCommitType>>()
     try {
         openSqliteConnection(target).use { connection ->
-            connection.execute("PRAGMA synchronous=NORMAL")
+            // The SQLite commit must be durable before the separate Home version can advance.
+            connection.execute("PRAGMA synchronous=FULL")
             connection.execute("PRAGMA cache_size=-65536")
             validateSourceDatabaseMetadata(connection, target)
             upgradeExistingDatabaseInPlace(connection, target, mirrorDeltas)
             verifyV0_7_2SchemaMetadata(connection)
             verify(connection.query("PRAGMA foreign_key_check").isEmpty(), "Foreign key violation after 0.7.2 migration")
             finalizeRollbackJournal(connection)
+            cleanupWalSidecars(home, fileSystem)
+            applyCommittedMirrorDeltas(home, connection, mirrorDeltas, fileSystem)
         }
     } catch (cancelled: CancellationException) {
         throw cancelled
@@ -75,8 +78,6 @@ internal suspend fun migrateToV0_7_2(home: Path, fileSystem: CoroutineFileSystem
     } catch (failure: SqliteFailure) {
         throw IOException("Failed migrating SQLite database $target to 0.7.2", failure)
     }
-    cleanupWalSidecars(home, fileSystem)
-    applyMirrorDeltas(home, mirrorDeltas, fileSystem)
     cleanupLegacyMirrorTimelines(home, fileSystem)
 }
 
@@ -102,12 +103,12 @@ internal data class CommitRecord(
     val createdAt: String,
 )
 
-private class AgentMirrorDelta {
-    val upsertsByTimeline: MutableMap<String, MutableMap<Int, String>> = linkedMapOf()
+private class AgentMirrorDelta<T> {
+    val upsertsByTimeline: MutableMap<String, MutableMap<Int, T>> = linkedMapOf()
     val deletesByTimeline: MutableMap<String, MutableSet<Int>> = linkedMapOf()
 
-    fun putUpsert(timeline: String, index: Int, jsonText: String) {
-        upsertsByTimeline.getOrPut(timeline) { linkedMapOf() }[index] = jsonText
+    fun putUpsert(timeline: String, index: Int, value: T) {
+        upsertsByTimeline.getOrPut(timeline) { linkedMapOf() }[index] = value
         deletesByTimeline[timeline]?.remove(index)
     }
 
@@ -271,7 +272,7 @@ private suspend fun validateSourceDatabaseMetadata(db: SqliteConnection, path: P
 private suspend fun upgradeExistingDatabaseInPlace(
     db: SqliteConnection,
     sourcePath: Path,
-    mirrorDeltas: MutableMap<Long, AgentMirrorDelta>,
+    mirrorDeltas: MutableMap<Long, AgentMirrorDelta<AgentCommitType>>,
 ) {
     val agentIds = db.query("SELECT agent_id FROM agents ORDER BY agent_id").map { it[0] as Long }
 
@@ -327,7 +328,7 @@ private suspend fun migrateAgentsInPlace(
     db: SqliteConnection,
     agentIds: List<Long>,
     sourcePath: Path,
-    mirrorDeltas: MutableMap<Long, AgentMirrorDelta>,
+    mirrorDeltas: MutableMap<Long, AgentMirrorDelta<AgentCommitType>>,
 ) {
     db.prepare(
         """
@@ -504,7 +505,7 @@ private suspend fun migrateAgentsInPlace(
                                     )
 
                                     val upgradedCommits = upgradeCompactionCommitsForAgent(migratedCommits, sourcePath)
-                                    val delta = AgentMirrorDelta()
+                                    val delta = AgentMirrorDelta<AgentCommitType>()
                                     val presentWorkIndices = HashSet<Int>()
 
                                     for (commit in upgradedCommits) {
@@ -536,7 +537,7 @@ private suspend fun migrateAgentsInPlace(
                                                 delta.putUpsert(
                                                     timeline,
                                                     commit.index.toInt(),
-                                                    encodeMirrorPayload(commitType, commit.payloadJson),
+                                                    commitType,
                                                 )
                                             }
                                         }
@@ -772,10 +773,34 @@ private fun encodeMirrorPayload(commitType: AgentCommitType, payloadJson: String
         else -> payloadJson
     }
 
-private suspend fun applyMirrorDeltas(
+private suspend fun applyCommittedMirrorDeltas(
     home: Path,
-    mirrorDeltas: Map<Long, AgentMirrorDelta>,
+    db: SqliteConnection,
+    mirrorDeltas: Map<Long, AgentMirrorDelta<AgentCommitType>>,
     fileSystem: CoroutineFileSystem,
+) {
+    if (mirrorDeltas.isEmpty() || !fileSystem.exists(Path(home, "sessions"))) return
+    db.prepare(
+        """SELECT payload_json FROM agent_commits WHERE agent_id = ? AND type = ? AND "index" = ?""",
+    ).use { read ->
+        applyMirrorDeltas(home, mirrorDeltas, fileSystem) { agentId, index, type ->
+            read.reset()
+            read.bind(1, agentId)
+            read.bind(2, type.wireName)
+            read.bind(3, index.toLong())
+            if (!read.step()) {
+                throw IOException("Missing committed migration mirror record: agent=$agentId, index=$index")
+            }
+            encodeMirrorPayload(type, read.columns().single() as String)
+        }
+    }
+}
+
+private suspend fun <T> applyMirrorDeltas(
+    home: Path,
+    mirrorDeltas: Map<Long, AgentMirrorDelta<T>>,
+    fileSystem: CoroutineFileSystem,
+    payload: (Long, Int, T) -> String,
 ) {
     if (mirrorDeltas.isEmpty()) return
     val sessionsRoot = Path(home, "sessions")
@@ -794,8 +819,9 @@ private suspend fun applyMirrorDeltas(
             for (idx in deletes) {
                 fileSystem.delete(recordPath(dir, idx), mustExist = false)
             }
-            for ((idx, jsonText) in upserts) {
-                fileSystem.writeString(recordPath(dir, idx), jsonText)
+            for ((idx, value) in upserts) {
+                currentCoroutineContext().ensureActive()
+                fileSystem.writeString(recordPath(dir, idx), payload(agentId, idx, value))
             }
             var maxIdx = -1
             for (child in fileSystem.list(dir)) {
@@ -840,7 +866,7 @@ private suspend fun reconcileMirrorsOnReentry(
                 if (!fileSystem.exists(sessionRoot)) continue
                 selectStmt.reset()
                 selectStmt.bind(1, agentId)
-                val delta = AgentMirrorDelta()
+                val delta = AgentMirrorDelta<String>()
                 while (selectStmt.step()) {
                     val cols = selectStmt.columns()
                     val wireType = cols[0] as String
@@ -856,7 +882,7 @@ private suspend fun reconcileMirrorsOnReentry(
                     }
                 }
                 if (!delta.isEmpty) {
-                    applyMirrorDeltas(home, mapOf(agentId to delta), fileSystem)
+                    applyMirrorDeltas(home, mapOf(agentId to delta), fileSystem) { _, _, json -> json }
                 }
             }
         }
