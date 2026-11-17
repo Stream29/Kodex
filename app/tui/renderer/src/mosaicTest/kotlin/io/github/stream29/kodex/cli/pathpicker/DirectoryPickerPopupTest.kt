@@ -24,8 +24,6 @@ import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerValidatio
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.pathpicker.createDirectoryPickerViewModel
 import io.github.stream29.kodex.cli.components.TuiPopupHost
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,8 +33,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.io.files.Path
-import kotlinx.io.files.SystemTemporaryDirectory
-import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -52,12 +48,12 @@ val directoryPickerPopupTest by testSuite {
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box {
-                    TuiPopupHost(Modifier.width(80).height(24)) {
-                        DirectoryPickerContent(viewModel, MosaicDirectoryPickerRenderer(this), {}, {})
+                    Box {
+                        TuiPopupHost(Modifier.width(80).height(24)) {
+                            DirectoryPickerContent(viewModel, MosaicDirectoryPickerRenderer(this), {}, {})
+                        }
                     }
                 }
-            }
             }
             awaitSnapshotContaining("[alpha/]")
             sendKeyEvent(KeyboardEvent(codepoint = 'a'.code))
@@ -69,6 +65,7 @@ val directoryPickerPopupTest by testSuite {
             assertFalse("[zulu/]" in filtered, filtered)
         }
     }
+
     test("select has initial focus even while directory contents load") {
         val directory = Path("/tmp/directory-picker-default-focus")
         val viewModel = ControlledDirectoryPickerViewModel(directory)
@@ -78,17 +75,17 @@ val directoryPickerPopupTest by testSuite {
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                Box {
-                    TuiPopupHost(modifier = Modifier.width(80).height(24)) {
-                        DirectoryPickerContent(
-                            viewModel = viewModel,
-                            renderer = MosaicDirectoryPickerRenderer(this),
-                            onDismissRequest = { dismissed = true },
-                            onDirectorySelected = { selected = it },
-                        )
+                    Box {
+                        TuiPopupHost(modifier = Modifier.width(80).height(24)) {
+                            DirectoryPickerContent(
+                                viewModel = viewModel,
+                                renderer = MosaicDirectoryPickerRenderer(this),
+                                onDismissRequest = { dismissed = true },
+                                onDirectorySelected = { selected = it },
+                            )
+                        }
                     }
                 }
-            }
             }
 
             awaitSnapshotContaining("Loading directories")
@@ -101,41 +98,36 @@ val directoryPickerPopupTest by testSuite {
     }
 
     test("renders child directories and confirms the current resolved directory") {
-        val unresolvedRoot = temporaryDirectory("directory-picker-popup")
-        SystemCoroutineFileSystem.createDirectories(unresolvedRoot)
-        val root = SystemCoroutineFileSystem.resolve(unresolvedRoot)
+        val root = Path("/fixture/popup")
         val directory = Path(root, "workspace")
         val viewModels = DirectoryPickerViewModels()
         try {
-            SystemCoroutineFileSystem.createDirectories(Path(directory, "child"))
-            SystemCoroutineFileSystem.writeString(Path(directory, "file.txt"), "not selectable")
-            val viewModel = viewModels.create(directory)
+            val viewModel = viewModels.create(directory, setOf(root, directory, Path(directory, "child")))
             var expanded by mutableStateOf(true)
             var selected: Path? = null
 
             runMosaicTest {
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box {
-                        TuiPopupHost(modifier = Modifier.width(80).height(24)) {
-                            if (expanded) {
-                                DirectoryPickerContent(
-                                    viewModel = viewModel,
-                                    renderer = MosaicDirectoryPickerRenderer(this),
-                                    onDismissRequest = { expanded = false },
-                                    onDirectorySelected = { path ->
-                                        selected = path
-                                        expanded = false
-                                    },
-                                )
+                        Box {
+                            TuiPopupHost(modifier = Modifier.width(80).height(24)) {
+                                if (expanded) {
+                                    DirectoryPickerContent(
+                                        viewModel = viewModel,
+                                        renderer = MosaicDirectoryPickerRenderer(this),
+                                        onDismissRequest = { expanded = false },
+                                        onDirectorySelected = { path ->
+                                            selected = path
+                                            expanded = false
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
                 }
-                }
 
                 val snapshot = awaitSnapshotContaining("[child/]")
-                assertTrue("file.txt" !in snapshot, snapshot)
                 assertTrue("[Up]" !in snapshot, snapshot)
                 assertTrue("[Select]" in snapshot, snapshot)
                 assertTrue("[..]" in snapshot, snapshot)
@@ -148,39 +140,37 @@ val directoryPickerPopupTest by testSuite {
                 awaitSnapshotUntil { selected != null }
             }
 
-            assertEquals(SystemCoroutineFileSystem.resolve(directory), selected)
+            assertEquals(directory, selected)
             assertFalse(expanded)
         } finally {
             viewModels.close()
-            deleteRecursively(root)
         }
     }
 
     test("mouse button 8 navigates to the parent and clears the filter") {
-        val unresolvedRoot = temporaryDirectory("directory-picker-button-8")
-        SystemCoroutineFileSystem.createDirectories(unresolvedRoot)
-        val root = SystemCoroutineFileSystem.resolve(unresolvedRoot)
+        val root = Path("/fixture/button8")
         val directory = Path(root, "workspace")
         val viewModels = DirectoryPickerViewModels()
         try {
-            SystemCoroutineFileSystem.createDirectories(Path(directory, "needle"))
-            SystemCoroutineFileSystem.createDirectories(Path(root, "sibling"))
-            val viewModel = viewModels.create(directory)
+            val viewModel = viewModels.create(
+                directory,
+                setOf(root, directory, Path(directory, "needle"), Path(root, "sibling")),
+            )
 
             runMosaicTest {
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box {
-                        TuiPopupHost(modifier = Modifier.width(80).height(24)) {
-                            DirectoryPickerContent(
-                                viewModel = viewModel,
-                                renderer = MosaicDirectoryPickerRenderer(this),
-                                onDismissRequest = {},
-                                onDirectorySelected = {},
-                            )
+                        Box {
+                            TuiPopupHost(modifier = Modifier.width(80).height(24)) {
+                                DirectoryPickerContent(
+                                    viewModel = viewModel,
+                                    renderer = MosaicDirectoryPickerRenderer(this),
+                                    onDismissRequest = {},
+                                    onDirectorySelected = {},
+                                )
+                            }
                         }
                     }
-                }
                 }
 
                 awaitSnapshotContaining("[needle/]")
@@ -192,7 +182,7 @@ val directoryPickerPopupTest by testSuite {
                         y = 12,
                         type = MouseEvent.Type.Press,
                         button = MouseEvent.Button.Button8,
-                    )
+                    ),
                 )
                 val parent = awaitSnapshotContaining("[workspace/]")
                 assertTrue("[sibling/]" in parent, parent)
@@ -200,37 +190,42 @@ val directoryPickerPopupTest by testSuite {
             }
         } finally {
             viewModels.close()
-            deleteRecursively(root)
         }
     }
 
     test("filtering then pressing enter twice opens the first match and selects it") {
-        val unresolvedRoot = temporaryDirectory("directory-picker-filter")
-        SystemCoroutineFileSystem.createDirectories(unresolvedRoot)
-        val root = SystemCoroutineFileSystem.resolve(unresolvedRoot)
+        val root = Path("/fixture/filter")
+        val matchingDirectory = Path(root, "ACodeSpace")
+        val beta = Path(root, "beta")
         val viewModels = DirectoryPickerViewModels()
         try {
-            val matchingDirectory = Path(root, "ACodeSpace")
-            SystemCoroutineFileSystem.createDirectories(Path(matchingDirectory, "inside-acode"))
-            SystemCoroutineFileSystem.createDirectories(Path(root, "beta", "inside-beta"))
-            SystemCoroutineFileSystem.createDirectories(Path(root, "zulu"))
-            val viewModel = viewModels.create(root)
+            val viewModel = viewModels.create(
+                root,
+                setOf(
+                    root,
+                    matchingDirectory,
+                    Path(matchingDirectory, "inside-acode"),
+                    beta,
+                    Path(beta, "inside-beta"),
+                    Path(root, "zulu"),
+                ),
+            )
             var selected: Path? = null
 
             runMosaicTest {
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box {
-                        TuiPopupHost(modifier = Modifier.width(80).height(24)) {
-                            DirectoryPickerContent(
-                                viewModel = viewModel,
-                                renderer = MosaicDirectoryPickerRenderer(this),
-                                onDismissRequest = {},
-                                onDirectorySelected = { directory -> selected = directory },
-                            )
+                        Box {
+                            TuiPopupHost(modifier = Modifier.width(80).height(24)) {
+                                DirectoryPickerContent(
+                                    viewModel = viewModel,
+                                    renderer = MosaicDirectoryPickerRenderer(this),
+                                    onDismissRequest = {},
+                                    onDirectorySelected = { directory -> selected = directory },
+                                )
+                            }
                         }
                     }
-                }
                 }
 
                 awaitSnapshotContaining("[zulu/]")
@@ -257,37 +252,32 @@ val directoryPickerPopupTest by testSuite {
             assertEquals(matchingDirectory, selected)
         } finally {
             viewModels.close()
-            deleteRecursively(root)
         }
     }
 
     test("backspace edits the filter and escape clears it before dismissing") {
-        val unresolvedRoot = temporaryDirectory("directory-picker-filter-escape")
-        SystemCoroutineFileSystem.createDirectories(unresolvedRoot)
-        val root = SystemCoroutineFileSystem.resolve(unresolvedRoot)
+        val root = Path("/fixture/escape")
         val viewModels = DirectoryPickerViewModels()
         try {
-            SystemCoroutineFileSystem.createDirectories(Path(root, "alpha"))
-            SystemCoroutineFileSystem.createDirectories(Path(root, "beta"))
-            val viewModel = viewModels.create(root)
+            val viewModel = viewModels.create(root, setOf(root, Path(root, "alpha"), Path(root, "beta")))
             var expanded by mutableStateOf(true)
 
             runMosaicTest {
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    Box {
-                        TuiPopupHost(modifier = Modifier.width(80).height(24)) {
-                            if (expanded) {
-                                DirectoryPickerContent(
-                                    viewModel = viewModel,
-                                    renderer = MosaicDirectoryPickerRenderer(this),
-                                    onDismissRequest = { expanded = false },
-                                    onDirectorySelected = {},
-                                )
+                        Box {
+                            TuiPopupHost(modifier = Modifier.width(80).height(24)) {
+                                if (expanded) {
+                                    DirectoryPickerContent(
+                                        viewModel = viewModel,
+                                        renderer = MosaicDirectoryPickerRenderer(this),
+                                        onDismissRequest = { expanded = false },
+                                        onDirectorySelected = {},
+                                    )
+                                }
                             }
                         }
                     }
-                }
                 }
 
                 awaitSnapshotContaining("[beta/]")
@@ -311,7 +301,6 @@ val directoryPickerPopupTest by testSuite {
             assertFalse(expanded)
         } finally {
             viewModels.close()
-            deleteRecursively(root)
         }
     }
 }
@@ -319,11 +308,11 @@ val directoryPickerPopupTest by testSuite {
 private class DirectoryPickerViewModels {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    fun create(initialDirectory: Path): DirectoryPickerViewModel =
+    fun create(initialDirectory: Path, directories: Set<Path>): DirectoryPickerViewModel =
         createDirectoryPickerViewModel(
             initialDirectory,
             object : DirectoryPickerDependencies {
-                override val browser: DirectoryPickerBrowser = TestSystemDirectoryPickerBrowser
+                override val browser: DirectoryPickerBrowser = InMemoryDirectoryPickerBrowser(directories)
             },
             scope,
         )
@@ -333,49 +322,31 @@ private class DirectoryPickerViewModels {
     }
 }
 
-private object TestSystemDirectoryPickerBrowser : DirectoryPickerBrowser {
-    override suspend fun validate(directory: Path): DirectoryPickerValidationResult = try {
-        val resolved = SystemCoroutineFileSystem.resolve(directory)
-        if (SystemCoroutineFileSystem.metadataOrNull(resolved)?.isDirectory != true) {
-            DirectoryPickerValidationResult.Failure(DirectoryPickerFailure.NotDirectory(resolved), directory.parent)
+private class InMemoryDirectoryPickerBrowser(
+    private val directories: Set<Path>,
+) : DirectoryPickerBrowser {
+    override suspend fun validate(directory: Path): DirectoryPickerValidationResult =
+        if (directory in directories) {
+            DirectoryPickerValidationResult.Success(directory)
         } else {
-            DirectoryPickerValidationResult.Success(resolved)
+            DirectoryPickerValidationResult.Failure(DirectoryPickerFailure.NotDirectory(directory), directory.parent)
         }
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (failure: Exception) {
-        DirectoryPickerValidationResult.Failure(
-            DirectoryPickerFailure.FileSystem(failure.toString().ifBlank { "Unknown filesystem failure" }),
-            directory.parent,
-        )
-    }
 
     override suspend fun load(directory: Path): DirectoryPickerLoadResult {
-        val resolved = when (val validation = validate(directory)) {
-            is DirectoryPickerValidationResult.Success -> validation.directory
-            is DirectoryPickerValidationResult.Failure ->
-                return DirectoryPickerLoadResult.Failure(validation.failure, validation.parentDirectory)
+        if (directory !in directories) {
+            return DirectoryPickerLoadResult.Failure(DirectoryPickerFailure.NotDirectory(directory), directory.parent)
         }
-        return try {
-            val children = SystemCoroutineFileSystem.list(resolved)
-                .filter { SystemCoroutineFileSystem.metadataOrNull(it)?.isDirectory == true }
-                .sortedWith(compareBy<Path> { it.name.lowercase() }.thenBy(Path::toString))
-            DirectoryPickerLoadResult.Success(
-                DirectoryPickerListing(
-                    directory = resolved,
-                    children = children,
-                    parentDirectory = resolved.parent,
-                    childNames = children.associateWith { it.name },
-                ),
-            )
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            DirectoryPickerLoadResult.Failure(
-                DirectoryPickerFailure.FileSystem(failure.toString().ifBlank { "Unknown filesystem failure" }),
-                directory.parent,
-            )
-        }
+        val children = directories
+            .filter { it.parent == directory }
+            .sortedWith(compareBy<Path> { it.name.lowercase() }.thenBy(Path::toString))
+        return DirectoryPickerLoadResult.Success(
+            DirectoryPickerListing(
+                directory = directory,
+                children = children,
+                parentDirectory = directory.parent,
+                childNames = children.associateWith { it.name },
+            ),
+        )
     }
 }
 
@@ -432,17 +403,4 @@ private suspend fun TestMosaic<String>.awaitSnapshotUntil(predicate: () -> Boole
     }
     assertTrue(predicate(), latest)
     return latest
-}
-
-private fun temporaryDirectory(name: String): Path =
-    Path(SystemTemporaryDirectory, "kodex-$name-${Random.nextLong()}")
-
-private suspend fun deleteRecursively(path: Path) {
-    val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
-    if (metadata.isDirectory) {
-        for (child in SystemCoroutineFileSystem.list(path)) {
-            deleteRecursively(child)
-        }
-    }
-    SystemCoroutineFileSystem.delete(path, mustExist = false)
 }
