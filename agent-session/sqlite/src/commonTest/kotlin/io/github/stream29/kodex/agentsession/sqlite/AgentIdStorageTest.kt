@@ -7,7 +7,13 @@ import io.github.stream29.kodex.agentsession.contract.RunningSubagentsPreventDel
 import io.github.stream29.kodex.agentruntime.contract.submitUserMessage
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.sqlite.initializeSqlitePhaseOneSchema
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -108,14 +114,43 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
                     assertNull(repository.getAgentRecord(transient.agentId))
                     assertFailsWith<IllegalArgumentException> { repository.createChild(transient.agentId) }
 
+                    val creation = StableSubagentCreatedEvent(child.agentId)
+                    val completion = StableSubagentCompletedEvent(child.agentId)
+                    val compaction = StableContextCompaction(encryptedContent = "fixture", retainedItems = listOf(creation))
+                    val (before, spawnAt, packedAt, completedAt, after) = root.runtime.modify { storage ->
+                        listOf(
+                            storage.commit(StableUserMessage(listOf(ContentItem.InputText("before")))),
+                            storage.commit(creation),
+                            storage.commit(compaction),
+                            storage.commit(completion),
+                            storage.commit(StableUserMessage(listOf(ContentItem.InputText("after")))),
+                        )
+                    }
                     val forkId = repository.createFork(12)
                     val fork = repository.open(forkId)
                     assertEquals(94, fork.runtime.agentId)
                     assertEquals("real root", fork.storage.getSettingsAt(0).threadName)
+                    assertNull(fork.storage.getCommitExact(spawnAt, AgentCommitType.IndexTypes))
+                    assertEquals(creation, root.storage.getCommitExact(spawnAt, AgentCommitType.IndexTypes)?.commit)
+                    for (retained in listOf(before, packedAt, completedAt, after)) {
+                        val allTypes = AgentCommitType.IndexTypes + AgentCommitType.WorkTypes
+                        val source = root.storage.getCommitExact(retained, allTypes)
+                        assertTrue(source != null)
+                        assertEquals(source.commit, fork.storage.getCommitExact(retained, allTypes)?.commit)
+                    }
+                    assertEquals(compaction, fork.storage.getCommitExact(packedAt, AgentCommitType.IndexTypes)?.commit)
                     assertEquals(listOf(94, 90, 12), repository.listEntries().map { it.rootAgentId })
                     repository.getEntry(12).archive()
                     assertTrue(repository.getEntry(12).archived)
                     assertFalse(repository.getEntry(90).archived)
+                    repository.closeAndJoin()
+                    val forkIndex = Path(home, "sessions", forkId.toString(), "index")
+                    assertFalse(fs.exists(Path(forkIndex, "$spawnAt.json")))
+                    for (retained in listOf(before, packedAt, after)) assertTrue(fs.exists(Path(forkIndex, "$retained.json")))
+                    assertTrue(fs.exists(Path(home, "sessions", "12", "index", "$spawnAt.json")))
+                    openSqliteConnection(dbPath).use { db ->
+                        assertEquals(listOf(listOf(94L)), db.query("SELECT agent_id FROM agents WHERE session_id = ?", listOf(forkId.toLong())))
+                    }
                 }
                 assertTrue(fs.exists(Path(home, "sessions", "12", "archive.mark")))
                 assertTrue(fs.exists(Path(home, "sessions", "12", "agents", "91", "settings", "latest.json")))

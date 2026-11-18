@@ -246,7 +246,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
             val targetAgent = agents.createRoot(candidate.toInt())
             if (sourceAgent != null) {
                 val emptySteerJson = SteerSnapshot(emptyList()).encodePayloadJson()
-                // A fork must not import the source Agent's armed wait.
+                // A fork imports neither the source Agent's armed wait nor entry points to its children.
                 connection.execute(
                     """INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at)
                         SELECT ?, type, "index", CASE
@@ -259,8 +259,11 @@ public actual class SqliteKodexSessionRepository internal constructor(
                                 ) FROM json_each(payload_json) AS item
                             )
                             ELSE payload_json
-                        END, created_at FROM agent_commits WHERE agent_id = ?""",
-                    listOf(targetAgent.toLong(), AgentCommitType.Steer.wireName, emptySteerJson, sourceAgent.toLong()),
+                        END, created_at FROM agent_commits WHERE agent_id = ? AND type != ?""",
+                    listOf(
+                        targetAgent.toLong(), AgentCommitType.Steer.wireName, emptySteerJson, sourceAgent.toLong(),
+                        AgentCommitType.EventSubagentCreated.wireName,
+                    ),
                 )
                 val snapshot = connection.query(
                     """SELECT type, "index", payload_json FROM agent_commits WHERE agent_id = ? ORDER BY "index", type""",

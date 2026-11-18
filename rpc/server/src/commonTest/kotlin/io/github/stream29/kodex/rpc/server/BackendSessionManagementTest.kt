@@ -7,9 +7,11 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
+import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
@@ -217,6 +219,36 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             assertEquals("[fork] ${boundarySettings.threadName}", current.threadName)
             assertEquals(2, runtime.getLatestIndex(index))
             assertEquals(nonce, source.cacheNonce.value)
+        }
+    }
+
+    test("both Session fork paths drop child creation rows including a source tail") {
+        runtimeFixture { repository, index, _ ->
+            val sqlite = repository as SqliteKodexSessionRepository
+            val management = testSessionManagement(repository)
+            val session = sqlite.open(index)
+            val child = sqlite.createChild(checkNotNull(session.runtime.agentId))
+            val notice = StableSubagentCreatedEvent(child.agentId)
+            session.runtime.appendUserMessage(listOf(ContentItem.InputText("before")))
+            val inside = session.runtime.modify { it.commit(notice) }
+            session.runtime.appendUserMessage(listOf(ContentItem.InputText("after")))
+            val tail = session.runtime.modify { it.commit(notice) }
+            val nonce = session.storage.cacheNonce.value
+            for (fork in listOf(management.forkSession(index), management.forkSessionHistory(index, tail + 1, nonce))) {
+                val target = sqlite.open(fork).storage
+                assertNull(target.getCommitExact(inside, AgentCommitType.IndexTypes))
+                assertNull(target.getCommitExact(tail, AgentCommitType.IndexTypes))
+                for (retained in listOf(inside - 1, tail - 1)) {
+                    val message = session.storage.getCommitExact(retained, AgentCommitType.IndexTypes)
+                    assertNotNull(message)
+                    assertEquals(message.commit, target.getCommitExact(retained, AgentCommitType.IndexTypes)?.commit)
+                }
+                assertTrue(target.getSettingsAt(target.latestIndex()).threadName.startsWith("[fork]"))
+            }
+            assertEquals(notice, session.storage.getCommitExact(inside, AgentCommitType.IndexTypes)?.commit)
+            assertEquals(notice, session.storage.getCommitExact(tail, AgentCommitType.IndexTypes)?.commit)
+            assertEquals(child, sqlite.getAgentRecord(child.agentId))
+            assertEquals(nonce, session.storage.cacheNonce.value)
         }
     }
 
