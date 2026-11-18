@@ -90,6 +90,8 @@ private class OverlayProcess : AgentShellSession {
     override val sessionId = 1
     override val arguments = ExecCommandArguments("test", yieldTimeMillis = 10_000)
     override val completed = MutableStateFlow(false)
+    override val exitCode = MutableStateFlow<Int?>(null)
+    override suspend fun readOutput(offset: ULong, limit: UInt): Nothing = error("Unexpected shell read")
     var closes = 0
     override fun close() { closes++ }
 }

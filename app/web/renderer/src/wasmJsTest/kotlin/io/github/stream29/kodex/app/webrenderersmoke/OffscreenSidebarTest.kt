@@ -409,6 +409,8 @@ val offscreenSidebarTest by testSuite {
 internal class SidebarTestShell(override val sessionId: Int, command: String) : AgentShellSession {
     override val arguments = ExecCommandArguments(command, yieldTimeMillis = 10_000)
     override val completed = MutableStateFlow(false)
+    override val exitCode = MutableStateFlow<Int?>(null)
+    override suspend fun readOutput(offset: ULong, limit: UInt): Nothing = error("Unexpected shell read")
     var closeCount = 0
     override fun close() { closeCount++ }
 }

@@ -24,6 +24,7 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
+import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -68,8 +69,10 @@ public actual class RpcSessionBinding private constructor(
     public actual suspend fun clearPending(): Int = command { services.runtime.clearPending(sessionIndex) }
     public actual suspend fun submitAskUserAnswer(askId: Int, response: RequestUserInputResponse): Unit =
         command { services.runtime.submitAskUserAnswer(sessionIndex, askId, response) }
-    public actual suspend fun closeShellSession(id: Int): Unit =
-        command { services.runtime.closeShellSession(sessionIndex, id) }
+    public actual suspend fun readShellSessionOutput(id: Int, offset: ULong, limit: UInt, registrationNonce: String): StdoutSlice =
+        command { services.runtime.readShellSessionOutput(sessionIndex, id, offset, limit, registrationNonce) }
+    public actual suspend fun closeShellSession(id: Int, registrationNonce: String): Unit =
+        command { services.runtime.closeShellSession(sessionIndex, id, registrationNonce) }
     public actual suspend fun revertHistory(untilExclusive: Int, selectedCacheNonce: Long): Unit =
         command { services.runtime.revertHistory(sessionIndex, untilExclusive, selectedCacheNonce) }
     public actual suspend fun forkHistory(untilExclusive: Int, selectedCacheNonce: Long): Int =

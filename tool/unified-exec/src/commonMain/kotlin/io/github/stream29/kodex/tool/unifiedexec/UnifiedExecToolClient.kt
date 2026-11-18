@@ -30,6 +30,8 @@ import kotlin.random.Random
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 internal const val UnifiedExecWindowsMinimumYieldTimeMillis: Long = 10_000L
 
@@ -188,6 +190,8 @@ internal class ManagedProcessSession(
     override val arguments: ExecCommandArguments,
     internal val session: ProcessSession,
 ) : UnifiedExecProcessSession {
+    @OptIn(ExperimentalUuidApi::class)
+    override val registrationNonce: String = Uuid.random().toString()
     internal var retentionJob: Job? = null
     private val mutableExitCode: MutableStateFlow<Int?> = MutableStateFlow(null)
     override val exitCode: StateFlow<Int?> = mutableExitCode.asStateFlow()

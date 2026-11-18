@@ -55,6 +55,9 @@ public interface UnifiedExecProcessSession : AutoCloseable {
     /** Positive identifier used to address this session. */
     public val sessionId: Int
 
+    /** Identifies this registration when the public numeric ID is reused. Not a process ID. */
+    public val registrationNonce: String
+
     /** Resolved working directory in which this session was started. */
     public val cwd: Path
 

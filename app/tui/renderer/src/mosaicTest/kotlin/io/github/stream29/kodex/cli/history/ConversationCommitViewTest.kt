@@ -733,6 +733,8 @@ private class TestUnifiedExecProcessSession(
     override val arguments: ExecCommandArguments,
 ) : AgentShellSession {
     override val completed: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    override val exitCode = MutableStateFlow<Int?>(null)
+    override suspend fun readOutput(offset: ULong, limit: UInt): Nothing = error("Unexpected shell read")
 
     override fun close() = Unit
 }

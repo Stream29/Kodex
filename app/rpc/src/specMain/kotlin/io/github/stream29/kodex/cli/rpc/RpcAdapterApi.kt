@@ -45,6 +45,7 @@ import io.github.stream29.kodex.rpc.contract.SuspendMutableStateFlow
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.rpc.models.ShellSessionState
+import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -147,7 +148,8 @@ public expect class RpcSessionBinding {
     public suspend fun forcedCompact(): Int
     public suspend fun clearPending(): Int
     public suspend fun submitAskUserAnswer(askId: Int, response: RequestUserInputResponse): Unit
-    public suspend fun closeShellSession(id: Int): Unit
+    public suspend fun readShellSessionOutput(id: Int, offset: ULong, limit: UInt, registrationNonce: String): StdoutSlice
+    public suspend fun closeShellSession(id: Int, registrationNonce: String): Unit
     public suspend fun revertHistory(untilExclusive: Int, selectedCacheNonce: Long): Unit
     public suspend fun forkHistory(untilExclusive: Int, selectedCacheNonce: Long): Int
     public suspend fun readCreatedAt(): Instant?

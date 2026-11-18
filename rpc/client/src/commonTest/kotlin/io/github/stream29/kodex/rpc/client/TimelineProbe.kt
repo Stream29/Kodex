@@ -74,6 +74,7 @@ internal abstract class StubAgentRuntimeRpc : AgentRuntimeRpc {
         shellSessionId: Int,
         offset: ULong,
         limit: UInt,
+        expectedRegistrationNonce: String?,
     ): StdoutSlice = throw UnsupportedOperationException()
     override suspend fun writeShellSessionStdin(
         sessionIndex: Int,
@@ -81,7 +82,7 @@ internal abstract class StubAgentRuntimeRpc : AgentRuntimeRpc {
         chars: String,
         closeInput: Boolean,
     ) = throw UnsupportedOperationException()
-    override suspend fun closeShellSession(sessionIndex: Int, shellSessionId: Int) =
+    override suspend fun closeShellSession(sessionIndex: Int, shellSessionId: Int, expectedRegistrationNonce: String?) =
         throw UnsupportedOperationException()
     override suspend fun getRunningTurn(sessionIndex: Int): Boolean = throw UnsupportedOperationException()
     override fun getRunningTurnFlow(sessionIndex: Int): Flow<Boolean> = throw UnsupportedOperationException()

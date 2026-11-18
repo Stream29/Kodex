@@ -34,6 +34,7 @@ import io.github.stream29.kodex.tool.unifiedexec.KodexHomeEnvironmentVariable
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
+import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
@@ -261,12 +262,14 @@ internal suspend fun executeCliToolCommand(
         is TerminalReadCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
             services.global.keepSessionAlive(agentId)
-            val slice = services.runtime.readShellSessionOutput(
-                sessionIndex = agentId,
-                shellSessionId = command.sessionId,
-                offset = command.offset,
-                limit = command.limit,
-            )
+            val slice = withTerminalRegistration {
+                services.runtime.readShellSessionOutput(
+                    sessionIndex = agentId,
+                    shellSessionId = command.sessionId,
+                    offset = command.offset,
+                    limit = command.limit,
+                )
+            }
             writeStdout(CliToolJson.encodeToString(StdoutSlice.serializer(), slice))
         }
         is TerminalWriteCommand -> {
@@ -297,7 +300,7 @@ internal suspend fun executeCliToolCommand(
         is TerminalKillCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
             services.global.keepSessionAlive(agentId)
-            services.runtime.closeShellSession(agentId, command.sessionId)
+            withTerminalRegistration { services.runtime.closeShellSession(agentId, command.sessionId) }
             writeStdout(
                 CliToolJson.encodeToString(
                     CliTerminalKillOutput.serializer(),
@@ -520,6 +523,12 @@ private suspend fun <T> withConsistentStorageSnapshot(
             delay(10)
         }
     }
+}
+
+internal suspend fun <R> withTerminalRegistration(action: suspend () -> R): R = try {
+    action()
+} catch (_: ShellSessionNotRegistered) {
+    error("Shell session is no longer registered.")
 }
 
 private suspend fun readAskUsers(

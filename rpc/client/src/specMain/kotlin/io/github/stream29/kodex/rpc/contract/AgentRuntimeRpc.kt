@@ -282,7 +282,9 @@ public interface AgentRuntimeRpc {
      *
      * Captures the currently registered process instance in the active backend Session without
      * implicitly activating an inactive Session (`SessionNotActive`) or renewing Session TTL;
-     * unknown or evicted [shellSessionId] fails. Returns immediately from the captured buffer
+     * unknown or evicted [shellSessionId], or a mismatch with [expectedRegistrationNonce],
+     * fails with `ShellSessionNotRegistered`. A null nonce denotes numeric addressing.
+     * Returns immediately from the captured buffer
      * snapshot without waiting for future output or consuming buffered bytes.
      */
     public suspend fun readShellSessionOutput(
@@ -290,6 +292,7 @@ public interface AgentRuntimeRpc {
         shellSessionId: Int,
         offset: ULong = 0uL,
         limit: UInt = UInt.MAX_VALUE,
+        expectedRegistrationNonce: String? = null,
     ): StdoutSlice
 
     /**
@@ -312,7 +315,8 @@ public interface AgentRuntimeRpc {
      * Requests process-tree termination for the currently registered [shellSessionId].
      *
      * Resolve the process in the specified Agent and capture that instance; missing Session or
-     * process fails. IDs identify current registry entries, not permanent identities across
+     * process, or a mismatch with [expectedRegistrationNonce], fails. A null nonce denotes
+     * numeric addressing. IDs identify current registry entries, not permanent identities across
      * removal or owner reconstruction. Does not redirect an accepted operation to another entry.
      *
      * Preserves the original close behavior: leave registration and final output available for
@@ -320,7 +324,11 @@ public interface AgentRuntimeRpc {
      * or output consumption; does not optimistically publish completed=true.
      * Does not close the Kodex Session, stop the Agent or renew TTL.
      */
-    public suspend fun closeShellSession(sessionIndex: Int, shellSessionId: Int): Unit
+    public suspend fun closeShellSession(
+        sessionIndex: Int,
+        shellSessionId: Int,
+        expectedRegistrationNonce: String? = null,
+    ): Unit
 
     /** Reads whether ordinary execution or manual compaction owns the running-turn slot. */
     public suspend fun getRunningTurn(sessionIndex: Int): Boolean

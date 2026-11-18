@@ -209,8 +209,14 @@ val restoreRemoteExceptionTest by testSuite {
         }
     }
 
+    test("shell registration failure has no serialized fields beyond its type") {
+        val failure = ShellSessionNotRegistered()
+        assertEquals("""{"type":"io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered"}""", failure.message)
+        assertFailsWith<ShellSessionNotRegistered> { restoreRemoteException { throw Throwable(failure.message) } }
+    }
+
     test("cancellation with a valid encoded message is never reconstructed") {
-        for (failure in listOf(NoMatchException(), SessionNotActive(), CacheNonceMismatch(), SessionNotFound())) {
+        for (failure in listOf(NoMatchException(), SessionNotActive(), CacheNonceMismatch(), SessionNotFound(), ShellSessionNotRegistered())) {
             val original = CancellationException(failure.message)
             assertSame(original, assertFailsWith<CancellationException> {
                 restoreRemoteException { throw original }

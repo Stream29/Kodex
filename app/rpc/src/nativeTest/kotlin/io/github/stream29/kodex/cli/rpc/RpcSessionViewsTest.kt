@@ -31,6 +31,8 @@ import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.NoMatchException
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
+import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
+import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import io.ktor.http.URLBuilder
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -870,14 +872,18 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
 
     test("shell completion is a projection and completed entries remain until the registry removes them") {
         val arguments = ExecCommandArguments("not executed", yieldTimeMillis = 10_000)
-        val snapshot = MutableStateFlow(mapOf(9 to ShellSessionState(arguments, null)))
+        val snapshot = MutableStateFlow(mapOf(9 to ShellSessionState(arguments, "first")))
         val closed = CompletableDeferred<Unit>()
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 @Suppress("UNCHECKED_CAST")
                 override suspend fun <T> call(call: RpcCall): T = when (call.callableName) {
                     "getShellSessions" -> snapshot.value as T
-                    "closeShellSession" -> { closed.complete(Unit); Unit as T }
+                    "closeShellSession" -> {
+                        assertEquals("first", call.parameters.last())
+                        closed.complete(Unit)
+                        Unit as T
+                    }
                     else -> delegate.call(call)
                 }
                 @Suppress("UNCHECKED_CAST")
@@ -892,11 +898,70 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             shell.close()
             closed.await()
             assertFalse(shell.completed.value)
-            snapshot.value = mapOf(9 to ShellSessionState(arguments, 0))
+            snapshot.value = mapOf(9 to ShellSessionState(arguments, "first", 7))
             shell.completed.first { it }
+            assertEquals(7, shell.exitCode.value)
             assertSame(shell, registry.activeSessions.value[9])
             snapshot.value = emptyMap()
             registry.activeSessions.first { it.isEmpty() }
+            views.release(view)
+        }
+    }
+
+    test("a read from a replaced registration is discarded and cancellation stays in the read scope") {
+        val arguments = ExecCommandArguments("identical command", yieldTimeMillis = 10_000)
+        val snapshot = MutableStateFlow(mapOf(9 to ShellSessionState(arguments, "first")))
+        val started = CompletableDeferred<Unit>()
+        val resume = CompletableDeferred<Unit>()
+        val secondStarted = CompletableDeferred<Unit>()
+        val secondReleased = CompletableDeferred<Unit>()
+        var closeCalls = 0
+        frontend(decorate = { delegate ->
+            object : RpcClient by delegate {
+                @Suppress("UNCHECKED_CAST")
+                override suspend fun <T> call(call: RpcCall): T = when (call.callableName) {
+                    "getShellSessions" -> snapshot.value as T
+                    "readShellSessionOutput" -> {
+                        when (call.parameters.last()) {
+                            "first" -> { started.complete(Unit); resume.await() }
+                            "second" -> {
+                                secondStarted.complete(Unit)
+                                try { awaitCancellation() } finally { secondReleased.complete(Unit) }
+                            }
+                            else -> error("Read did not pass a captured registration")
+                        }
+                        StdoutSlice(byteArrayOf(65), byteArrayOf(), 0uL, 0uL, 1uL, 1uL) as T
+                    }
+                    "closeShellSession" -> { closeCalls++; Unit as T }
+                    else -> delegate.call(call)
+                }
+                @Suppress("UNCHECKED_CAST")
+                override fun <T> callServerStreaming(call: RpcCall): Flow<T> =
+                    if (call.callableName == "getShellSessionsFlow") snapshot as Flow<T>
+                    else delegate.callServerStreaming(call)
+            }
+        }) {
+            val view = views.open(services.global.createSession(home))
+            val registry = requireNotNull(view.rootAgent.value).shellSessions
+            val old = registry.activeSessions.value.getValue(9)
+            coroutineScope {
+                val read = async {
+                    assertFailsWith<ShellSessionNotRegistered> { old.readOutput(0uL, 8u) }
+                }
+                started.await()
+                snapshot.value = mapOf(9 to ShellSessionState(arguments, "second"))
+                val replacement = registry.activeSessions.first { it[9] !== old }.getValue(9)
+                assertFalse(replacement.completed.value)
+                old.close()
+                resume.complete(Unit)
+                read.await()
+                assertFailsWith<ShellSessionNotRegistered> { old.readOutput(0uL, 8u) }
+                val next = launch { replacement.readOutput(0uL, 8u) }
+                secondStarted.await()
+                next.cancelAndJoin()
+                secondReleased.await()
+                assertEquals(0, closeCalls)
+            }
             views.release(view)
         }
     }

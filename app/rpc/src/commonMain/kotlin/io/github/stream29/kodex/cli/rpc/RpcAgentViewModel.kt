@@ -29,9 +29,12 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
+import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
+import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -126,9 +129,9 @@ private class RpcAgentViewModel(
     private fun updateShells(snapshot: Map<Int, ShellSessionState>) {
         val previous = mutableShells.value
         mutableShells.value = snapshot.mapValues { (id, state) ->
-            val handle = (previous[id] as? ShellView)?.takeIf { it.arguments == state.arguments }
-                ?: ShellView(id, state.arguments, state.completed)
-            handle.completion.value = state.completed
+            val handle = (previous[id] as? ShellView)?.takeIf { it.registrationNonce == state.registrationNonce }
+                ?: ShellView(id, state.arguments, state.registrationNonce, state.exitCode)
+            handle.observedExit.value = state.exitCode
             handle
         }
     }
@@ -246,13 +249,41 @@ private class RpcAgentViewModel(
     private inner class ShellView(
         override val sessionId: Int,
         override val arguments: ExecCommandArguments,
-        completed: Boolean,
+        val registrationNonce: String,
+        initialExitCode: Int?,
     ) : AgentShellSession {
-        val completion = MutableStateFlow(completed)
-        override val completed: StateFlow<Boolean> = completion.asStateFlow()
+        val observedExit = MutableStateFlow(initialExitCode)
+        override val exitCode: StateFlow<Int?> = observedExit.asStateFlow()
+        override val completed: StateFlow<Boolean> = exitCode.projectState { it != null }
+
+        private fun isRegistered(): Boolean = mutableShells.value[sessionId] === this &&
+            binding.shellSessions.value[sessionId]?.registrationNonce == registrationNonce
+
+        private suspend fun requireRegistered() {
+            currentCoroutineContext().ensureActive()
+            owner.ensureActive()
+            binding.ensureActive()
+            if (!isRegistered()) throw ShellSessionNotRegistered()
+        }
+
+        override suspend fun readOutput(offset: ULong, limit: UInt): StdoutSlice {
+            requireRegistered()
+            val slice = binding.readShellSessionOutput(sessionId, offset, limit, registrationNonce)
+            requireRegistered()
+            return slice
+        }
+
         override fun close() {
-            if (mutableShells.value[sessionId] !== this) return
-            operate { binding.closeShellSession(sessionId) }
+            if (!isRegistered() || exitCode.value != null) return
+            operate {
+                if (isRegistered() && binding.shellSessions.value[sessionId]?.exitCode == null) {
+                    try {
+                        binding.closeShellSession(sessionId, registrationNonce)
+                    } catch (_: ShellSessionNotRegistered) {
+                        // A menu action raced with removal; never terminate the replacement.
+                    }
+                }
+            }
         }
     }
 }

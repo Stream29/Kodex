@@ -28,9 +28,12 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
+import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
+import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecProcessSession
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin as cancelScopeAndJoin
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.rpcexception.*
+import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import io.github.stream29.kodex.utils.shellclient.renderedBytes
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -42,6 +45,33 @@ import kotlin.test.*
 import kotlin.time.Duration.Companion.seconds
 
 val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("checked shell capture stays on the original object after numeric reuse") {
+        class Process(override val registrationNonce: String) : UnifiedExecProcessSession {
+            override val sessionId = 42
+            override val cwd = Path("/fixture")
+            override val arguments = ExecCommandArguments("same command", yieldTimeMillis = 1_000)
+            override val exitCode = MutableStateFlow<Int?>(null)
+            var touched = 0
+            override suspend fun readOutput(offset: ULong, limit: UInt): StdoutSlice {
+                touched++
+                return StdoutSlice(byteArrayOf(), byteArrayOf(), 0uL, offset, offset, offset)
+            }
+            override suspend fun writeStdin(chars: String, closeInput: Boolean): Nothing = error("Not a read or close")
+            override fun close() { touched++ }
+        }
+        val original = Process("original")
+        val replacement = Process("replacement")
+        val registry = mutableMapOf<Int, UnifiedExecProcessSession>(42 to original)
+        val captured = registry.registeredShell(42, original.registrationNonce)
+        registry[42] = replacement
+        assertFailsWith<ShellSessionNotRegistered> { registry.registeredShell(42, original.registrationNonce) }
+        captured.readOutput(0uL, 64u)
+        captured.close()
+        assertEquals(2, original.touched)
+        assertEquals(0, replacement.touched)
+        assertSame(replacement, registry.registeredShell(42, null))
+    }
+
     test("six concrete services retain real sparse values and frontend cache semantics") {
         runtimeFixture { repository, index, backend ->
             withInMemoryRpc(registerServices = {
@@ -333,24 +363,33 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 assertTrue(initialState.arguments.command.isNotEmpty())
                 assertNull(initialState.exitCode)
                 assertFalse(initialState.completed)
+                assertTrue(initialState.registrationNonce.isNotBlank())
+                assertFailsWith<ShellSessionNotRegistered> {
+                    rpc.closeShellSession(index, id, expectedRegistrationNonce = "replaced-registration")
+                }
+                assertFailsWith<ShellSessionNotRegistered> {
+                    rpc.readShellSessionOutput(index, id, expectedRegistrationNonce = "replaced-registration")
+                }
+                val running = rpc.readShellSessionOutput(index, id, expectedRegistrationNonce = initialState.registrationNonce)
+                assertEquals(0uL, running.offset)
 
                 rpc.writeShellSessionStdin(index, id, "hello\n", closeInput = true)
                 val finalMap = rpc.getShellSessionsFlow(index).first { it[id]?.completed == true }
                 val finalState = finalMap.getValue(id)
                 assertEquals(0, finalState.exitCode)
                 assertTrue(finalState.completed)
+                assertEquals(initialState.registrationNonce, finalState.registrationNonce)
 
                 val slice = rpc.readShellSessionOutput(index, id, offset = 0uL, limit = 4096u)
                 val text = slice.renderedBytes().decodeToString()
                 assertTrue(text.contains("ready"))
                 assertTrue(text.contains("got:hello"))
                 assertTrue(slice.nextOffset > 0uL)
+                assertEquals(slice, rpc.readShellSessionOutput(index, id, offset = 0uL, limit = 4096u))
                 assertTrue(id in rpc.getShellSessions(index))
-                val closeError = assertFails { rpc.closeShellSession(index, id + 999) }
-                assertTrue(closeError.message.orEmpty().contains("Shell session is no longer registered"))
-                val readError = assertFails { rpc.readShellSessionOutput(index, id + 999) }
-                assertTrue(readError.message.orEmpty().contains("Shell session is no longer registered"))
-                val writeError = assertFails { rpc.writeShellSessionStdin(index, id + 999, "hi") }
+                assertFailsWith<ShellSessionNotRegistered> { rpc.closeShellSession(index, -1) }
+                assertFailsWith<ShellSessionNotRegistered> { rpc.readShellSessionOutput(index, -1) }
+                val writeError = assertFails { rpc.writeShellSessionStdin(index, -1, "hi") }
                 assertTrue(writeError.message.orEmpty().contains("Shell session is no longer registered"))
             }
         }

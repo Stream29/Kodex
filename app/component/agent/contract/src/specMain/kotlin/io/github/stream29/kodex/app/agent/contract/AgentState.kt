@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.agent.contract
 
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
+import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -13,7 +14,11 @@ import kotlinx.coroutines.flow.StateFlow
 public interface AgentShellSession : AutoCloseable {
     public val sessionId: Int
     public val arguments: ExecCommandArguments
+    public val exitCode: StateFlow<Int?>
     public val completed: StateFlow<Boolean>
+
+    /** Non-destructively reads this registration, in the caller's scope, without keeping it alive. */
+    public suspend fun readOutput(offset: ULong, limit: UInt): StdoutSlice
 
     /** Explicitly closes this captured process, never a newly selected Agent's process. */
     override fun close(): Unit

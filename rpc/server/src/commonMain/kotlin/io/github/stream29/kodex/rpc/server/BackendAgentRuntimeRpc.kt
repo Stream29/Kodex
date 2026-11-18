@@ -39,6 +39,7 @@ import io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.NoMatchException
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
+import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -326,10 +327,7 @@ internal class BackendAgentRuntimeRpc(
                     combine(
                         sessions.map { (id, shellSession) ->
                             shellSession.exitCode.map { exitCode ->
-                                id to ShellSessionState(
-                                    arguments = shellSession.arguments,
-                                    exitCode = exitCode,
-                                )
+                                id to shellSession.toShellSessionState(exitCode)
                             }
                         },
                     ) { entries -> entries.toMap() }
@@ -342,13 +340,17 @@ internal class BackendAgentRuntimeRpc(
         shellSessionId: Int,
         offset: ULong,
         limit: UInt,
-    ): StdoutSlice =
-        openSession(sessionIndex).let { session ->
-            val shellSession = requireNotNull(session.runtime.unifiedExecToolClient.activeSessions.value[shellSessionId]) {
-                "Shell session is no longer registered."
-            }
-            shellSession.readOutput(offset = offset, limit = limit)
-        }
+        expectedRegistrationNonce: String?,
+    ): StdoutSlice {
+        currentCoroutineContext().ensureActive()
+        val session = openSession(sessionIndex)
+        val shell = session.runtime.unifiedExecToolClient.activeSessions.value
+            .registeredShell(shellSessionId, expectedRegistrationNonce)
+        val output = shell.readOutput(offset = offset, limit = limit)
+        currentCoroutineContext().ensureActive()
+        if (openSession(sessionIndex) !== session) throw SessionNotActive()
+        return output
+    }
 
     override suspend fun writeShellSessionStdin(
         sessionIndex: Int,
@@ -363,11 +365,14 @@ internal class BackendAgentRuntimeRpc(
             shellSession.writeStdin(chars = chars, closeInput = closeInput)
         }
 
-    override suspend fun closeShellSession(sessionIndex: Int, shellSessionId: Int): Unit =
+    override suspend fun closeShellSession(
+        sessionIndex: Int,
+        shellSessionId: Int,
+        expectedRegistrationNonce: String?,
+    ): Unit =
         command(sessionIndex) {
-            requireNotNull(runtime.unifiedExecToolClient.activeSessions.value[shellSessionId]) {
-                "Shell session is no longer registered."
-            }.close()
+            runtime.unifiedExecToolClient.activeSessions.value
+                .registeredShell(shellSessionId, expectedRegistrationNonce).close()
         }
 
     override suspend fun getRunningTurn(sessionIndex: Int): Boolean =
@@ -410,10 +415,22 @@ internal fun <T> KodexAgentSession.observeActive(
     }
 }
 
-private fun UnifiedExecProcessSession.toShellSessionState(): ShellSessionState =
+internal fun Map<Int, UnifiedExecProcessSession>.registeredShell(
+    id: Int,
+    expectedRegistrationNonce: String?,
+): UnifiedExecProcessSession {
+    val shell = this[id] ?: throw ShellSessionNotRegistered()
+    if (expectedRegistrationNonce != null && expectedRegistrationNonce != shell.registrationNonce) {
+        throw ShellSessionNotRegistered()
+    }
+    return shell
+}
+
+private fun UnifiedExecProcessSession.toShellSessionState(code: Int? = exitCode.value): ShellSessionState =
     ShellSessionState(
         arguments = arguments,
-        exitCode = exitCode.value,
+        registrationNonce = registrationNonce,
+        exitCode = code,
     )
 
 private class RuntimeView(val session: KodexAgentSession) {

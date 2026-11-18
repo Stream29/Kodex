@@ -412,6 +412,8 @@ private class FakeShellSession(
     override val arguments: ExecCommandArguments,
 ) : AgentShellSession {
     override val completed = MutableStateFlow(false)
+    override val exitCode = MutableStateFlow<Int?>(null)
+    override suspend fun readOutput(offset: ULong, limit: UInt): Nothing = error("Unexpected shell read")
 
     override fun close() = Unit
 }

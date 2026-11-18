@@ -25,9 +25,10 @@ val shellSessionModelsTest by testSuite {
             maxOutputTokens = 5678,
         )
         val snapshot = linkedMapOf(
-            7 to ShellSessionState(arguments = arguments, exitCode = null),
+            7 to ShellSessionState(arguments = arguments, registrationNonce = "registration-a", exitCode = null),
             Int.MAX_VALUE to ShellSessionState(
                 arguments = ExecCommandArguments(command = "completed fixture", yieldTimeMillis = 10_000),
+                registrationNonce = "registration-b",
                 exitCode = 0,
             ),
         )
@@ -40,6 +41,7 @@ val shellSessionModelsTest by testSuite {
     test("completion changes the value without changing registry membership") {
         val running = ShellSessionState(
             arguments = ExecCommandArguments(command = "fixture", yieldTimeMillis = 10_000),
+            registrationNonce = "registration-a",
             exitCode = null,
         )
         val completed = running.copy(exitCode = 0)
@@ -49,27 +51,31 @@ val shellSessionModelsTest by testSuite {
         assertNotEquals(before, after)
         assertNotEquals(after, emptyMap<Int, ShellSessionState>())
         val fields = json.encodeToJsonElement(ShellSessionState.serializer(), completed).jsonObject
-        assertEquals(setOf("arguments", "exitCode"), fields.keys)
+        assertEquals(setOf("arguments", "registrationNonce", "exitCode"), fields.keys)
         assertTrue(json.decodeFromString<ShellSessionState>(fields.toString()).completed)
+        assertEquals(running.registrationNonce, completed.registrationNonce)
+        assertNotEquals(before, mapOf(1 to running.copy(registrationNonce = "registration-b")))
     }
 
-    test("arguments and yield_time_ms are required while optional exitCode and argument defaults remain available") {
+    test("arguments and registration nonce are required; exitCode can be absent") {
         val decoded = json.decodeFromString<ShellSessionState>(
-            """{"arguments":{"cmd":"fixture","yield_time_ms":10000}}""",
+            """{"arguments":{"cmd":"fixture","yield_time_ms":10000},"registrationNonce":"registration-a"}""",
         )
         assertEquals(
             ShellSessionState(
                 arguments = ExecCommandArguments(command = "fixture", yieldTimeMillis = 10_000),
+                registrationNonce = "registration-a",
             ),
             decoded,
         )
         for (invalid in listOf(
-            """{"arguments":{"cmd":"fixture"}}""",
-            """{"arguments":{"cmd":"fixture","yield_time_ms":null}}""",
-            """{"arguments":{"cmd":"fixture","yield_time_ms":"not-a-number"}}""",
+            """{"arguments":{"cmd":"fixture","yield_time_ms":10000}}""",
+            """{"arguments":{"cmd":"fixture"},"registrationNonce":"registration-a"}""",
+            """{"arguments":{"cmd":"fixture","yield_time_ms":null},"registrationNonce":"registration-a"}""",
+            """{"arguments":{"cmd":"fixture","yield_time_ms":"not-a-number"},"registrationNonce":"registration-a"}""",
             """{}""",
-            """{"arguments":null}""",
-            """{"arguments":{"cmd":"fixture","yield_time_ms":10000},"exitCode":"not-an-int"}""",
+            """{"arguments":null,"registrationNonce":"registration-a"}""",
+            """{"arguments":{"cmd":"fixture","yield_time_ms":10000},"registrationNonce":"registration-a","exitCode":"not-an-int"}""",
         )) {
             assertFailsWith<SerializationException> {
                 json.decodeFromString<ShellSessionState>(invalid)
