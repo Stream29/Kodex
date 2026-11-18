@@ -79,13 +79,18 @@ internal fun renderToolCliInstructions(mode: RequestUserInputMode): String = bui
     when (mode) {
         RequestUserInputMode.AskUser -> {
             appendLine("- `kodex ask (create | list | get)`: Create a non-blocking structured question (`--json` / `--stdin`), then wait for the response with `await_event` and `{\"events\":[{\"type\":\"ask_user_answered\"}]}`.")
+            appendLine("- `kodex ask answer --agent ID ASK_ID --json JSON`: Pass through a user-provided answer; never invent one.")
         }
         RequestUserInputMode.NoQuestion -> {
             appendLine("- User questions are disabled (`NoQuestion` mode): do NOT ask the user questions or invoke external question prompts; proceed autonomously using the best evidence available.")
         }
     }
     appendLine("- `kodex schedule (create | list | delete)`: Manage persisted one-shot (`--delay-seconds` / `--at`) or recurring (`--cron`) schedules.")
+    appendLine("- `kodex session list` and `kodex session spawn [--message TEXT | --stdin]`: Find or create an independent Session. Spawn inherits the calling Session's configuration and directory unless overridden.")
     appendLine("- `kodex agent status --agent \"\$KODEX_AGENT_ID\"`: Read UTC time, Agent configuration, and context-window token budget.")
+    appendLine("- `kodex agent (submit | resume | stop | compact | clear-pending) --agent ID`: Target the Agent explicitly. Successful submit/resume means accepted, not completed.")
+    appendLine("- `kodex session (rename | fork | archive | unarchive | delete) --session ID`: Manage the specified Session. Delete is permanent and does not prompt.")
+    appendLine("Session and Agent operations print one JSON receipt. If a write has an unknown outcome, inspect the target before trying again.")
     appendLine("- `kodex search`: Run web search (`-q <query>`) or full `SearchCommands` payloads (`--json` / `--stdin`).")
     appendLine("- `kodex image`: Generate or edit PNG images (`-p <prompt>`, repeatable `-i <path>`). Use `read_media(path)` to inspect local or generated images.")
     appendLine("- `kodex mcp (list | status | reconnect | enable | disable)` and `kodex <server> <tool> [--json <JSON> | --stdin]`: Manage MCP servers and invoke tools on enabled MCP servers.")

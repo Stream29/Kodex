@@ -20,6 +20,29 @@ The next release changes the terminal entry point: update scripts and aliases fr
 `kodex` to `kodex tui`, and replace `kodex help` with `kodex --help`. Running
 `kodex` without arguments now displays help instead of opening the TUI.
 
+### Sessions and Agents
+
+These commands connect to an already-running backend; they do not start or switch it.
+
+```sh
+kodex session list --include-archived
+kodex session spawn --cwd ./project
+printf '%s\n' 'Run the test suite' | kodex agent submit --agent 12 --stdin
+kodex agent status --agent 12
+```
+
+Use the `root_agent_id` returned by `spawn` for `agent` commands and `session_id`
+for Session management commands. `spawn` optionally submits a first message.
+`submit` and `resume` return when the backend accepts the work, not when it
+finishes. Inside an Agent shell, `spawn` inherits the calling Session's model
+configuration and working directory; explicit options override those values.
+
+Successful calls print `{"ok":true,"result":...}`. Execution failures return a
+nonzero exit code and one JSON error on stdout. If the result is `unknown`, check
+what happened before retrying. `session delete --session ID` is permanent and
+does not ask for confirmation. Run `kodex session --help`, `kodex agent --help`
+and `kodex ask answer --help` for the full argument list.
+
 ## Reimplementation and Abstraction
 
 ### Storage

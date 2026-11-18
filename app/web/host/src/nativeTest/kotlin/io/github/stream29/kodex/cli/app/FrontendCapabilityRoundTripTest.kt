@@ -20,6 +20,9 @@ import io.github.stream29.kodex.rpc.local.withLocalRpcClient
 import io.github.stream29.kodex.rpc.models.*
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
+import io.github.stream29.kodex.utils.processclient.ProcessClient
+import io.github.stream29.kodex.utils.processclient.ProcessCommand
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellType
 import io.github.stream29.kodex.utils.shellclient.default
@@ -34,6 +37,9 @@ import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
 import kotlinx.io.files.SystemPathSeparator
 import kotlinx.io.writeString
+import kotlinx.io.readString
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlinx.serialization.json.*
 import kotlin.random.Random
 import kotlin.test.*
@@ -46,6 +52,12 @@ import kotlin.time.Duration.Companion.seconds
 private val roundTripProcess = Mutex()
 
 val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    val candidate = environmentVariable("KODEX_SESSION_CLI_TEST_BINARY")?.let { Path(it) }
+    if (candidate != null) {
+        test("actual session CLI accepts work and nested exec inherits only the owning Session configuration") {
+            runSessionCliProcessRoundTrip(candidate)
+        }
+    }
     test("hosting an unused grant never renews an idle backend") {
         withRoundTrip(ttlSeconds = 5) { f ->
             f.host { page ->
@@ -333,6 +345,89 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
     }
 }
 
+@OptIn(ExperimentalAtomicApi::class)
+private suspend fun runSessionCliProcessRoundTrip(binary: Path) {
+    require(binary.isAbsolute && SystemFileSystem.metadataOrNull(binary)?.isRegularFile == true)
+    val calls = AtomicInt(0)
+    val shellBinary = "'" + binary.toString().replace("'", "'\\''") + "'"
+    val nestedCommand = """cd Alpha && /bin/sh -c 'exec "${'$'}1" session spawn' sh $shellBinary > ../nested-spawn.json"""
+    withRoundTrip(response = {
+        when (calls.fetchAndAdd(1)) {
+            0 -> flowOf(
+                ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
+                    name = "exec_command",
+                    arguments = buildJsonObject {
+                        put("cmd", nestedCommand)
+                        put("yield_time_ms", 10_000)
+                    }.toString(),
+                    callId = "spawn-fixture-call",
+                )),
+                ResponsesStreamEvent.Completed(Response(id = "nested-spawn", endTurn = false)),
+            )
+            else -> flowOf(
+                ResponsesStreamEvent.OutputItemDone(0, ResponseItem.Message(
+                    role = MessageRole.Assistant,
+                    content = listOf(ContentItem.OutputText("Fixture completed.")),
+                )),
+                ResponsesStreamEvent.Completed(Response(id = "fixture-complete", endTurn = true)),
+            )
+        }
+    }) { fixture ->
+        val process = ProcessClient()
+        try {
+            suspend fun invoke(vararg args: String): JsonObject = coroutineScope {
+                val task = process.start(ProcessCommand(binary.toString(),
+                    args.toList() + listOf("--backend-home", fixture.home.toString()), fixture.launch))
+                try {
+                    task.stdin.close()
+                    val out = async { task.stdout.readFixtureText() }
+                    val err = async { task.stderr.readFixtureText() }
+                    val output = out.await()
+                    assertEquals(0, task.exitCode.await(), "${args.toList()}: ${err.await()}\n$output")
+                    val reply = Json.parseToJsonElement(output).jsonObject
+                    assertTrue(reply.getValue("ok").jsonPrimitive.boolean, reply.toString())
+                    reply.getValue("result").jsonObject
+                } finally {
+                    withContext(NonCancellable) { task.closeAndJoin() }
+                }
+            }
+            val parent = invoke("session", "spawn", "--model", "gpt-6-astra",
+                "--request-user-input-mode", "no_question", "--message", "Run the deterministic fixture.")
+            assertTrue(parent.getValue("submitted").jsonPrimitive.boolean)
+            val parentId = parent.getValue("root_agent_id").jsonPrimitive.int
+            fixture.rpc { rpc ->
+                withTimeout(20.seconds) {
+                    rpc.runtime.getRunningTurnFlow(parentId).first { !it }
+                    while (calls.load() < 2) delay(20)
+                }
+            }
+            val nested = Json.parseToJsonElement(
+                SystemCoroutineFileSystem.readString(Path(fixture.launch, "nested-spawn.json")),
+            ).jsonObject
+            assertTrue(nested.getValue("ok").jsonPrimitive.boolean, nested.toString())
+            val child = nested.getValue("result").jsonObject
+            val childId = child.getValue("root_agent_id").jsonPrimitive.int
+            assertNotEquals(parentId, childId)
+            assertFalse(child.getValue("submitted").jsonPrimitive.boolean)
+            val status = invoke("agent", "status", "--agent", childId.toString())
+            assertEquals(fixture.launch.toString(), status.getValue("cwd").jsonPrimitive.content)
+            assertEquals("gpt-6-astra", status.getValue("model").jsonPrimitive.content)
+            assertEquals("no_question", status.getValue("request_user_input_mode").jsonPrimitive.content)
+            assertEquals(0, status.getValue("latest_index").jsonPrimitive.int)
+            val catalog = invoke("session", "list").getValue("sessions").jsonArray
+            assertEquals(setOf(parentId, childId), catalog.map { it.jsonObject.getValue("session_id").jsonPrimitive.int }.toSet())
+        } finally {
+            process.close()
+        }
+    }
+}
+
+private suspend fun CoroutineRawSource.readFixtureText(): String {
+    val buffer = Buffer()
+    while (readAtMostTo(buffer, 8192) != -1L) check(buffer.size <= 64 * 1024)
+    return buffer.readString()
+}
+
 private class RoundTripFixture(val root: Path, val wire: RoundTripWire, val provider: RoundTripProvider) {
     val home = Path(root, "private-kodex")
     val codex = Path(root, "private-codex")
@@ -492,6 +587,7 @@ private class RoundTripLogin(private val provider: RoundTripProvider) : OpenAiLo
 
 private suspend fun withRoundTrip(
     ttlSeconds: Long = -1,
+    response: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent> = { error("No model turn is authorized by this fixture.") },
     block: suspend CoroutineScope.(RoundTripFixture) -> Unit,
 ) =
     roundTripProcess.withLock {
@@ -537,7 +633,7 @@ private suspend fun withRoundTrip(
                                 contextWindow = 100_000, maxContextWindow = 100_000,
                             ))))
                         }
-                        createResponse { error("No model turn is authorized by this fixture.") }
+                        createResponse(response)
                     }
                     backend = launch {
                         runBackendHost(
