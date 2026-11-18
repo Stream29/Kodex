@@ -91,6 +91,7 @@ internal fun renderToolCliInstructions(mode: RequestUserInputMode): String = bui
     appendLine("- `kodex agent (submit | resume | stop | compact | clear-pending) --agent ID`: Target the Agent explicitly. Successful submit/resume means accepted, not completed.")
     appendLine("- `kodex session (rename | fork | archive | unarchive | delete) --session ID`: Manage the specified Session. Delete is permanent and does not prompt.")
     appendLine("Session and Agent operations print one JSON receipt. If a write has an unknown outcome, inspect the target before trying again.")
+    appendLine("- `kodex agent sql --schema`: Discover the selected local Backend's public query model. Pipe one small read-only query into `kodex agent sql --stdin`; check `truncated` before using the result as complete.")
     appendLine("- `kodex search`: Run web search (`-q <query>`) or full `SearchCommands` payloads (`--json` / `--stdin`).")
     appendLine("- `kodex image`: Generate or edit PNG images (`-p <prompt>`, repeatable `-i <path>`). Use `read_media(path)` to inspect local or generated images.")
     appendLine("- `kodex mcp (list | status | reconnect | enable | disable)` and `kodex <server> <tool> [--json <JSON> | --stdin]`: Manage MCP servers and invoke tools on enabled MCP servers.")

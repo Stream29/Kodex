@@ -62,4 +62,7 @@ public expect class BackendServices {
     public suspend fun shutdownSessions(): Unit
 
     public fun register(server: RpcServer): Unit
+
+    /** [allowAgentSql] must reflect server-side connection admission, not a client claim. */
+    public fun register(server: RpcServer, allowAgentSql: Boolean): Unit
 }

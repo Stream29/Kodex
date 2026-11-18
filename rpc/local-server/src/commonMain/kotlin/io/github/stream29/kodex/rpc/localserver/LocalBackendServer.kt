@@ -52,7 +52,7 @@ public actual suspend fun <R> withLocalBackendServer(
     password: String,
     instanceId: String,
     control: BackendControl,
-    registerServices: RpcServer.() -> Unit,
+    registerServices: RpcServer.(BackendConnectionAdmission) -> Unit,
     browserAccess: LocalBrowserAccess?,
     block: suspend CoroutineScope.(Int) -> R,
 ): R = coroutineScope {
@@ -70,7 +70,7 @@ public actual suspend fun <R> withLocalBackendServer(
             request.headers.getAll(HttpHeaders.Origin)?.singleOrNull()?.let { grants.originAllowed(it) } == true
         fun ApplicationCall.browserHostAllowed(): Boolean =
             request.headers.getAll(HttpHeaders.Host)?.singleOrNull() == "127.0.0.1:${request.local.localPort}"
-        suspend fun DefaultWebSocketServerSession.serveBusiness() {
+        suspend fun DefaultWebSocketServerSession.serveBusiness(admission: BackendConnectionAdmission) {
             val transport = WebSocketRpcTransport(this, coroutineContext)
             try {
                 val admitted = connections.withLock {
@@ -81,7 +81,7 @@ public actual suspend fun <R> withLocalBackendServer(
                     rpcServerConfig { serialization { json { serializersModule = RpcWireSerializers } } },
                     transport,
                 ) {}
-                server.registerServices()
+                server.registerServices(admission)
                 transport.awaitClosed()
             } finally {
                 withContext(NonCancellable) {
@@ -218,7 +218,7 @@ public actual suspend fun <R> withLocalBackendServer(
                     close()
                     return@webSocket
                 }
-                serveBusiness()
+                serveBusiness(BackendConnectionAdmission.LocalCredential)
             }
             if (browserAccess != null) webSocket("/browser/rpc") {
                 if (!call.browserOriginAllowed() || !call.browserHostAllowed()) {
@@ -258,7 +258,7 @@ public actual suspend fun <R> withLocalBackendServer(
                 try {
                     send(Frame.Text(Json.encodeToString(LocalBrowserWelcome.serializer(),
                         LocalBrowserWelcome(LocalBrowserProtocol, instanceId, BackendBusinessProtocol, directory))))
-                    serveBusiness()
+                    serveBusiness(BackendConnectionAdmission.BrowserGrant)
                 } finally {
                     withContext(NonCancellable) { grantPassword?.let { grants.detach(it, peer) } }
                 }

@@ -15,9 +15,12 @@ import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
+import io.github.stream29.kodex.rpc.client.RpcWireSerializers
 import io.github.stream29.kodex.rpc.control.BackendControlClient
 import io.github.stream29.kodex.rpc.local.withLocalRpcClient
 import io.github.stream29.kodex.rpc.models.*
+import io.github.stream29.kodex.rpc.websocket.WebSocketRpcTransport
+import io.github.stream29.kodex.utils.rpcexception.BackendLocalCredentialRequired
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.processclient.ProcessClient
@@ -27,6 +30,15 @@ import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellType
 import io.github.stream29.kodex.utils.shellclient.default
 import io.ktor.http.*
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.plugins.websocket.webSocketSession
+import io.ktor.client.request.header
+import io.ktor.websocket.Frame
+import io.ktor.websocket.readText
+import kotlinx.rpc.krpc.client.InitializedKrpcClient
+import kotlinx.rpc.krpc.rpcClientConfig
+import kotlinx.rpc.krpc.serialization.json.json
 import kotlinx.cinterop.convert
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -56,6 +68,23 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
     if (candidate != null) {
         test("actual session CLI accepts work and nested exec inherits only the owning Session configuration") {
             runSessionCliProcessRoundTrip(candidate)
+        }
+    }
+    test("Agent SQL accepts local credentials but admitted browser grants see neither method") {
+        withRoundTrip { fixture ->
+            fixture.rpc { native ->
+                assertEquals(AgentSqlQueryModelVersion, native.global.getAgentSqlSchema().queryModelVersion)
+                assertNull(native.global.queryAgentSql("SELECT count(*) FROM sessions").error)
+            }
+            fixture.host { page ->
+                page.browserRpc { browser ->
+                    assertTrue(browser.global.getSessionCatalog(true).isEmpty())
+                    assertFailsWith<BackendLocalCredentialRequired> { browser.global.getAgentSqlSchema() }
+                    assertFailsWith<BackendLocalCredentialRequired> { browser.global.queryAgentSql("SELECT 1") }
+                    assertTrue(browser.global.getSessionCatalog(true).isEmpty())
+                }
+                assertEquals(200, page.heartbeat().status)
+            }
         }
     }
     test("hosting an unused grant never renews an idle backend") {
@@ -538,6 +567,33 @@ private class RoundTripPage(
     val info: LocalFrontendBootstrap,
     val wire: RoundTripWire,
 ) {
+    suspend fun browserRpc(block: suspend (RpcServices) -> Unit): Unit = coroutineScope {
+        val http = HttpClient { install(WebSockets) }
+        try {
+            val endpoint = info.endpoint
+            val socket = http.webSocketSession("ws://127.0.0.1:${endpoint.port}/browser/rpc") {
+                header(HttpHeaders.Origin, "http://127.0.0.1:${Url(launchUrl).port}")
+            }
+            socket.send(Frame.Text(Json.encodeToString(LocalBrowserHello.serializer(), LocalBrowserHello(
+                LocalBrowserProtocol, endpoint.instanceId, endpoint.password, endpoint.businessProtocol, info.workingDirectory,
+            ))))
+            val welcome = Json.decodeFromString(LocalBrowserWelcome.serializer(), assertIs<Frame.Text>(socket.incoming.receive()).readText())
+            assertEquals(info.workingDirectory, welcome.workingDirectory)
+            val transport = WebSocketRpcTransport(socket, coroutineContext)
+            try {
+                val client = object : InitializedKrpcClient(
+                    rpcClientConfig { serialization { json { serializersModule = RpcWireSerializers } } },
+                    transport,
+                ) {}
+                block(RpcServices(RestoringRpcClient(client)))
+            } finally {
+                withContext(NonCancellable) { transport.shutdown() }
+            }
+        } finally {
+            http.close()
+        }
+    }
+
     suspend fun heartbeat(
         credential: String = info.endpoint.password,
         origin: String = "http://127.0.0.1:${Url(launchUrl).port}",

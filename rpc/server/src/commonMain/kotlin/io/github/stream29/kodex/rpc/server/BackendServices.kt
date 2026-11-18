@@ -44,6 +44,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.io.files.Path
 import kotlinx.rpc.RpcServer
+import io.github.stream29.kodex.rpc.models.AgentSqlQueryResult
+import io.github.stream29.kodex.rpc.models.AgentSqlSchemaResult
+import io.github.stream29.kodex.utils.rpcexception.BackendLocalCredentialRequired
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Clock
 import kotlin.time.Duration
@@ -248,8 +251,14 @@ public actual class BackendServices internal constructor(
 
     public actual suspend fun shutdownSessions(): Unit = persistence.shutdownSessions()
 
-    public actual fun register(server: RpcServer) {
-        server.registerService(GlobalRpc::class) { global }
+    public actual fun register(server: RpcServer): Unit = register(server, allowAgentSql = false)
+
+    public actual fun register(server: RpcServer, allowAgentSql: Boolean) {
+        val connectionGlobal = if (allowAgentSql) global else object : GlobalRpc by global {
+            override suspend fun queryAgentSql(sql: String): AgentSqlQueryResult = throw BackendLocalCredentialRequired()
+            override suspend fun getAgentSqlSchema(): AgentSqlSchemaResult = throw BackendLocalCredentialRequired()
+        }
+        server.registerService(GlobalRpc::class) { connectionGlobal }
         server.registerService(AgentRuntimeRpc::class) { runtime }
     }
 }

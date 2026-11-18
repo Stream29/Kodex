@@ -23,16 +23,18 @@ internal fun printCliMessage(message: String, error: Boolean) {
 @OptIn(ExperimentalForeignApi::class)
 internal fun readCliStdinText(): String = readCliStdin().readString()
 
-internal fun readCliStdinTextStrict(): String = readCliStdin().readByteArray().decodeToString(throwOnInvalidSequence = true)
+internal fun readCliStdinTextStrict(limit: Int? = null): String =
+    readCliStdin(limit).readByteArray().decodeToString(throwOnInvalidSequence = true)
 
 @OptIn(ExperimentalForeignApi::class)
-private fun readCliStdin(): Buffer = memScoped {
+private fun readCliStdin(limit: Int? = null): Buffer = memScoped {
     val chunkSize = 8192
     val buffer = allocArray<ByteVar>(chunkSize)
     val out = Buffer()
     while (true) {
         val readCount = fread(buffer, 1u, chunkSize.convert(), stdin).toInt()
         if (readCount > 0) {
+            require(limit == null || out.size + readCount <= limit) { "Input exceeds its byte limit." }
             out.write(buffer.readBytes(readCount))
         }
         if (readCount < chunkSize) {

@@ -38,6 +38,7 @@ public class AgentCommand : KodexGroupCommand(
     "agent", "Inspect and control a specific Agent.",
     AgentStatusCommand(), AgentSubmitCommand(), AgentResumeCommand(), AgentStopCommand(),
     AgentCompactCommand(), AgentClearPendingCommand(),
+    AgentSqlCommand(),
     isToolGroup = true,
 )
 

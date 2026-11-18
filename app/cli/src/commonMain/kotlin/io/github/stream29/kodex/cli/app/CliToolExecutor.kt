@@ -28,6 +28,8 @@ import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.local.withLocalRpcClient
 import io.github.stream29.kodex.rpc.models.GeneratedImageArtifact
+import io.github.stream29.kodex.rpc.models.AgentSqlError
+import io.github.stream29.kodex.rpc.models.AgentSqlInputBytes
 import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
 import io.github.stream29.kodex.rpc.models.SessionSpawnRequest
 import io.github.stream29.kodex.rpc.models.SessionSpawnSource
@@ -223,9 +225,12 @@ internal suspend fun dispatchCliWithToolRpc(
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (failure: Exception) {
-                        if (toolLeaf !is SessionAgentOperation) throw failure
+                        if (toolLeaf !is SessionAgentOperation && toolLeaf !is AgentSqlCommand) throw failure
                         exitCode?.let { return@invokeTool it } // A known reply survives connection teardown failure.
                         if (entered) throw failure
+                        if (toolLeaf is AgentSqlCommand) return@invokeTool writeAgentSqlError(
+                            AgentSqlError.UNAVAILABLE, "Could not connect to the selected backend.",
+                        ) { output(it, false) }
                         writeOperationFailure("connection_failed", "Could not connect to the selected backend.",
                             "connect", CliOperationOutcome.Failed, (toolLeaf as? ExplicitAgentOperation)?.agentId,
                             (toolLeaf as? ExplicitSessionOperation)?.sessionId) {
@@ -268,7 +273,11 @@ internal suspend fun executeCliToolCommand(
     command: KodexToolLeafCommand,
     services: RpcServices,
     env: (String) -> String? = ::environmentVariable,
-    readStdin: () -> String = if (command is SessionAgentOperation) ::readCliStdinTextStrict else ::readCliStdinText,
+    readStdin: () -> String = when (command) {
+        is AgentSqlCommand -> { { readCliStdinTextStrict(AgentSqlInputBytes) } }
+        is SessionAgentOperation -> { { readCliStdinTextStrict() } }
+        else -> ::readCliStdinText
+    },
     writeStdout: (String) -> Unit = ::println,
     now: () -> Instant = Clock.System::now,
 ): Int {
@@ -390,6 +399,7 @@ internal suspend fun executeCliToolCommand(
             )
         }
         is SessionAgentOperation -> return executeSessionAgentOperation(command, services, writeStdout, now, env, readStdin)
+        is AgentSqlCommand -> return executeAgentSql(command, services, readStdin, writeStdout)
         is SearchCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
             val commands = command.resolveCommands().resolve(SearchCommands.serializer(), readStdin)

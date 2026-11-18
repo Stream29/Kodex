@@ -7,6 +7,7 @@ import io.github.stream29.kodex.cli.notification.collectNotificationHooks
 import io.github.stream29.kodex.rpc.control.BackendControlClient
 import io.github.stream29.kodex.rpc.localserver.BackendControl
 import io.github.stream29.kodex.rpc.localserver.LocalBrowserAccess
+import io.github.stream29.kodex.rpc.localserver.BackendConnectionAdmission
 import io.github.stream29.kodex.rpc.control.backendControlRequest
 import io.github.stream29.kodex.rpc.localserver.withLocalBackendServer
 import io.github.stream29.kodex.rpc.server.BackendServices
@@ -110,9 +111,9 @@ public actual suspend fun runBackendHost(
                 lifecycle.updateIdleTimeout(ttl(requireNotNull(services).settings.unified.current.backend.daemonTtlSeconds))
             }
         }
-        withLocalBackendServer(password, identity, control, {
+        withLocalBackendServer(password, identity, control, { admission ->
             check(control.ready()) { "The backend is not ready for business requests." }
-            requireNotNull(services).register(this)
+            requireNotNull(services).register(this, allowAgentSql = admission == BackendConnectionAdmission.LocalCredential)
         }, browserAccess) { boundPort ->
             port = boundPort
             val endpoint = BackendEndpoint(identity, processId(), port, password, CurrentKodexApplicationVersion.toString())

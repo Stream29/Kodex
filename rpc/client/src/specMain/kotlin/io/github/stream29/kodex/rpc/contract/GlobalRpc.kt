@@ -6,6 +6,8 @@ import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.rpc.models.SessionSpawnRequest
 import io.github.stream29.kodex.rpc.models.SessionSpawnResult
+import io.github.stream29.kodex.rpc.models.AgentSqlQueryResult
+import io.github.stream29.kodex.rpc.models.AgentSqlSchemaResult
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
@@ -293,6 +295,12 @@ public interface GlobalRpc {
 
     /** Creates an independent root with verified source settings and/or explicit overrides. Never submits work. */
     public suspend fun spawnSession(request: SessionSpawnRequest): SessionSpawnResult
+
+    /** Local-credential connections only. A cancelled caller cancels this read, not the Backend. */
+    public suspend fun queryAgentSql(sql: String): AgentSqlQueryResult
+
+    /** Local-credential connections only. Does not open the DB or occupy the query slot. */
+    public suspend fun getAgentSqlSchema(): AgentSqlSchemaResult
 
     /**
      * Creates and persists an external one-shot (`cron == null`) or recurring 5-field cron schedule

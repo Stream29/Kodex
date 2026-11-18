@@ -43,6 +43,19 @@ what happened before retrying. `session delete --session ID` is permanent and
 does not ask for confirmation. Run `kodex session --help`, `kodex agent --help`
 and `kodex ask answer --help` for the full argument list.
 
+### Read-only SQL
+
+```sh
+kodex agent sql --schema
+printf '%s\n' 'SELECT session_id, thread_name FROM session_catalog LIMIT 20' | kodex agent sql --stdin
+```
+
+SQL uses the selected local backend and does not take an Agent ID. `--schema`
+lists the public relations, indexes, and example queries. Each call accepts one
+read-only statement, with a one-second execution budget and bounded output.
+Check `truncated` before treating a successful result as complete. Browser
+frontend credentials do not grant SQL access.
+
 ## Reimplementation and Abstraction
 
 ### Storage

@@ -50,6 +50,7 @@ internal class BackendGlobalRpc(
     private val checkAdmission: () -> Unit = {},
 ) : GlobalRpc {
     private val operations: CoroutineScope = scope.supervisorChildScope()
+    private val agentSql = home?.let { BackendAgentSql(Path(it, "kodex.db")) }
     private val paths by lazy {
         val roots = settings.contextSettings.value
         BackendPathProvider(
@@ -149,6 +150,17 @@ internal class BackendGlobalRpc(
 
     override suspend fun spawnSession(request: SessionSpawnRequest): SessionSpawnResult =
         sessions.spawnSession(request) { settings.models.value }
+
+    override suspend fun queryAgentSql(sql: String): AgentSqlQueryResult {
+        ensureAdmission()
+        // Unlike accepted writes, this read is owned by the calling RPC job.
+        return checkNotNull(agentSql).query(sql)
+    }
+
+    override suspend fun getAgentSqlSchema(): AgentSqlSchemaResult {
+        ensureAdmission()
+        return checkNotNull(agentSql).schema()
+    }
 
     override suspend fun createSchedule(
         agentId: Int,
