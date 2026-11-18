@@ -23,7 +23,7 @@ import kotlinx.rpc.annotations.Rpc
 /**
  * Runtime and storage capabilities of the root Agent addressed by an existing Session index.
  *
- * Pending steer is persisted in the root Agent's storage via `SteerSnapshot` and observed by
+ * Pending steer is persisted in the target Agent's storage via `SteerSnapshot` and observed by
  * the frontend directly through `AgentStorage` (`getSteerAt(latestIndex)`), while user input
  * submission goes through [submit].
  * Targets are AgentIds, never SessionIds. Access does not implicitly open a target.
@@ -35,6 +35,9 @@ import kotlinx.rpc.annotations.Rpc
 public interface AgentRuntimeRpc {
     /** Starts a new child of the verified calling Agent, without waiting for the child's response. */
     public suspend fun spawnSubagent(request: SubagentSpawnRequest): SubagentSpawnResult
+
+    /** Archives a root's Session or completes a child without stopping its current turn. */
+    public suspend fun completeAgent(agentId: Int, expectedInvocationId: String? = null)
 
     /**
      * Activates or renews only the exact Agent, without unarchiving its Session.

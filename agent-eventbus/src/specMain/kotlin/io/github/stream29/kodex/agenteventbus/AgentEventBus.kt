@@ -15,6 +15,7 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
  * - [submitUserMessage] -> `StableUserMessage`
  * - [submitAskUserAnswer] -> atomic `AskUserSnapshot` + `StableAskUserEvent`
  * - [submitScheduleTrigger] -> `StableScheduleEvent`
+ * - [submitSubagentCompletion] -> `StableSubagentCompletedEvent`
  * - watched terminal exits -> `StableTerminalExitedEvent`
  *
  * Turn state inspection, background turn startup, and `stopEvents` emission remain owned by
@@ -36,6 +37,9 @@ public interface AgentEventBus {
 
     /** Records creation on the captured calling parent without waking or steering it. */
     public suspend fun recordSubagentCreation(parent: KodexAgentSession, childAgentId: Int)
+
+    /** Queues a completion notification for the child’s direct parent through normal steer. */
+    public suspend fun submitSubagentCompletion(parentAgentId: Int, childAgentId: Int)
 
     /**
      * Records first-time [response] for [askId] in [agentId]'s `AskUserSnapshot` timeline and

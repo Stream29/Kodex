@@ -39,6 +39,8 @@ internal abstract class StubAgentRuntimeRpc : AgentRuntimeRpc {
     override suspend fun spawnSubagent(
         request: io.github.stream29.kodex.rpc.models.SubagentSpawnRequest,
     ): io.github.stream29.kodex.rpc.models.SubagentSpawnResult = error("Unexpected spawn in timeline probe")
+    override suspend fun completeAgent(agentId: Int, expectedInvocationId: String?): Unit =
+        error("Unexpected completion in timeline probe")
     override suspend fun getState(sessionIndex: Int): AgentStateValue = throw UnsupportedOperationException()
     override fun getStateFlow(sessionIndex: Int): Flow<AgentStateValue> = throw UnsupportedOperationException()
     override fun currentFlow(sessionIndex: Int, nonce: Long): Flow<ResponsesStreamEvent> =

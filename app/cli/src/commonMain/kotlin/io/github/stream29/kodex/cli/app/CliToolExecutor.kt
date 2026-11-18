@@ -52,6 +52,8 @@ import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.AgentNotActive
 import io.github.stream29.kodex.utils.rpcexception.AgentNotFound
+import io.github.stream29.kodex.utils.rpcexception.AgentCompleted
+import io.github.stream29.kodex.utils.rpcexception.SubagentCompletionNoticeFailed
 import io.github.stream29.kodex.utils.rpcexception.SessionHasRunningSubagents
 import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
@@ -243,7 +245,8 @@ internal suspend fun dispatchCliWithToolRpc(
                             AgentSqlError.UNAVAILABLE, "Could not connect to the selected backend.",
                         ) { output(it, false) }
                         writeOperationFailure("connection_failed", "Could not connect to the selected backend.",
-                            "connect", CliOperationOutcome.Failed, (toolLeaf as? ExplicitAgentOperation)?.agentId,
+                            "connect", CliOperationOutcome.Failed,
+                            (toolLeaf as? ExplicitAgentOperation)?.agentId ?: (toolLeaf as? AgentCompleteCommand)?.agentId,
                             (toolLeaf as? ExplicitSessionOperation)?.sessionId, write = { output(it, false) })
                     }
                 }
@@ -494,7 +497,7 @@ private suspend fun executeSessionAgentOperation(
     command: SessionAgentOperation, services: RpcServices, write: (String) -> Unit, now: () -> Instant,
     env: (String) -> String?, readStdin: () -> String,
 ): Int {
-    var agentId = (command as? ExplicitAgentOperation)?.agentId
+    var agentId = (command as? ExplicitAgentOperation)?.agentId ?: (command as? AgentCompleteCommand)?.agentId
     var sessionId = (command as? ExplicitSessionOperation)?.sessionId
     var parentAgentId: Int? = null
     var phase = "input"
@@ -534,7 +537,7 @@ private suspend fun executeSessionAgentOperation(
             is AgentSpawnCommand -> {
                 val text = command.message.readText(readStdin)
                 if (text.isBlank()) throw OperationRejected("invalid_message", "A nonblank task is required.")
-                val source = readSpawnSource(env)
+                val source = readInvocationSource(env)
                     ?: throw OperationRejected("invalid_source", "Run this command from the calling Agent's tool context.")
                 val directory = command.cwd?.let { raw ->
                     require('\u0000' !in raw)
@@ -578,7 +581,7 @@ private suspend fun executeSessionAgentOperation(
             }
             is SessionSpawnCommand -> {
                 val message = command.message?.readText(readStdin)
-                val source = readSpawnSource(env)
+                val source = readInvocationSource(env)
                 val launch = SystemCoroutineFileSystem.resolve(Path("."))
                 val absoluteOverride = command.cwd?.let { raw ->
                     require('\u0000' !in raw)
@@ -628,6 +631,33 @@ private suspend fun executeSessionAgentOperation(
                 mutationStarted = true
                 services.runtime.cancelRunningTurn(command.agentId)
                 agentReceipt(command.agentId)
+            }
+            is AgentCompleteCommand -> {
+                val source = if (command.agentId == null) {
+                    readInvocationSource(env) ?: throw OperationRejected(
+                        "invalid_source", "Complete requires a calling Agent context or --agent <id>.",
+                    )
+                } else {
+                    null
+                }
+                val target = command.agentId ?: checkNotNull(source).agentId
+                agentId = target
+                if (source == null) activate(target)
+                phase = "complete"
+                mutationStarted = true
+                try {
+                    services.runtime.completeAgent(target, source?.invocationId)
+                } catch (failure: AgentNotActive) {
+                    if (source == null) throw failure
+                    throw OperationRejected("invalid_source", "The calling Agent is not live on the selected backend.")
+                } catch (failure: AgentNotFound) {
+                    if (source == null) throw failure
+                    throw OperationRejected("invalid_source", "The calling Agent is not live on the selected backend.")
+                }
+                buildJsonObject {
+                    put("agent_id", target)
+                    put("completed", true)
+                }
             }
             is SessionRenameCommand -> {
                 val rootId = services.global.getRootAgentId(command.sessionId)
@@ -713,6 +743,11 @@ private suspend fun executeSessionAgentOperation(
         return fail("session_has_running_subagents", "The Session has running subagents and was not deleted.", CliOperationOutcome.Rejected)
     } catch (_: AgentNotActive) {
         return fail("agent_not_active", "The target Agent is no longer active.", CliOperationOutcome.Rejected)
+    } catch (_: AgentCompleted) {
+        return fail("agent_completed", "The completed Agent does not accept new work.", CliOperationOutcome.Rejected)
+    } catch (_: SubagentCompletionNoticeFailed) {
+        phase = "notify"
+        return fail("completion_notice_failed", "Completion was recorded, but notifying the parent failed.", CliOperationOutcome.Failed)
     } catch (_: SessionNotActive) {
         return fail("agent_not_active", "The target Agent is no longer active.", CliOperationOutcome.Rejected)
     } catch (failure: Throwable) {
@@ -764,7 +799,7 @@ private fun CliPayloadInput<String>.readText(readStdin: () -> String): String =
         CliPayloadInput.Stdin -> readStdin()
     }).also { require(it.isNotEmpty()) }
 
-private fun readSpawnSource(env: (String) -> String?): SessionSpawnSource? {
+private fun readInvocationSource(env: (String) -> String?): SessionSpawnSource? {
     val id = env(KodexAgentIdEnvironmentVariable)
     val owner = env(KodexInvocationIdEnvironmentVariable)
     if (id == null && owner == null) return null

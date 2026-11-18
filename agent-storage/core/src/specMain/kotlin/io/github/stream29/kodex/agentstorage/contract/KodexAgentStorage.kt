@@ -10,6 +10,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
@@ -141,6 +142,7 @@ public interface MutableKodexAgentStorage : KodexAgentStorage {
             val isUserTurnInput = event is StableUserMessage ||
                 event is StableAskUserEvent ||
                 event is StableScheduleEvent ||
+                event is StableSubagentCompletedEvent ||
                 event is StableTerminalExitedEvent
             val startsNewTurn = isUserTurnInput && previousMessageStartsNewTurn
             val commits = buildList<AgentCommit> {

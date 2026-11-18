@@ -75,6 +75,16 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertEquals(12, global.getSessionCatalog(true).single { it.isActive }.sessionIndex)
                 assertEquals(90, global.getSessionCatalog(true).single { it.isActive }.rootAgentId)
                 assertFailsWith<AgentNotActive> { runtime.getLatestIndex(12) }
+                runtime.completeAgent(90)
+                assertEquals(listOf(12), global.getSessionCatalog(true).filter { it.archived }.map { it.sessionIndex })
+                assertEquals(listOf(90), global.getSessionCatalog(false).map { it.sessionIndex })
+                global.unarchiveSession(12)
+                global.archiveSession(12)
+                assertEquals(listOf(12), global.getSessionCatalog(true).filter { it.archived }.map { it.sessionIndex })
+                global.unarchiveSession(12)
+                openSqliteConnection(Path(home, "kodex.db")).use { db ->
+                    assertEquals(listOf(listOf(0L)), db.query("SELECT completed FROM agents WHERE agent_id = 90"))
+                }
                 val delivered = async(start = CoroutineStart.UNDISPATCHED) {
                     services.notifications.filterIsInstance<Notification.AskUserCreated>().first()
                 }

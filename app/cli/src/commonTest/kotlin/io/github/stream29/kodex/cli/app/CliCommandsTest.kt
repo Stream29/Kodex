@@ -172,6 +172,7 @@ val cliCommandsTest by testSuite {
             listOf("agent", "submit", "--agent", "0"),
             listOf("agent", "submit", "--agent", "0", "--message", "text", "--stdin"),
             listOf("agent", "resume"), listOf("agent", "stop"),
+            listOf("agent", "complete", "--agent", "-1"),
             listOf("ask", "answer", "1", "--json", "{}"),
             listOf("ask", "answer", "1", "--agent", "0", "--json", "{}", "--stdin"),
             listOf("session", "rename", "--session", "0", "--name", "  "),

@@ -143,6 +143,7 @@ public enum class AgentCommitType(
             UserMessage,
             EventAskUser,
             EventSchedule,
+            EventSubagentCompleted,
             EventTerminalExited,
             AssistantMessage,
             AssistantMessageCommentary,

@@ -172,6 +172,13 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                 val eventBus = AgentEventBus(persistence.sessionRepository)
                 persistence.startScheduleRunner(eventBus)
                 persistence.startAwaitDeadlineRunner()
+                val management = BackendSessionManagement(
+                    repository = persistence.sessionRepository,
+                    newSessionDefaults = { store.settings.value.newSession },
+                    titleSettings = { store.settings.value.sessionTitle },
+                    titleGenerator = createTitleGenerator(api),
+                    checkAdmission = persistence::ensureAdmission,
+                )
                 val runtime = BackendAgentRuntimeRpc(
                     repository = persistence.sessionRepository,
                     eventBus = eventBus,
@@ -187,13 +194,8 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                         record = eventBus::recordSubagentCreation,
                         submit = eventBus::submitUserMessage,
                     ),
-                )
-                val management = BackendSessionManagement(
-                    repository = persistence.sessionRepository,
-                    newSessionDefaults = { store.settings.value.newSession },
-                    titleSettings = { store.settings.value.sessionTitle },
-                    titleGenerator = createTitleGenerator(api),
-                    checkAdmission = persistence::ensureAdmission,
+                    archiveSession = management::archiveSession,
+                    markChildCompleted = { id -> persistence.acquire().first.markChildCompleted(id) },
                 )
                 val service = BackendGlobalRpc(
                     scope = owner,

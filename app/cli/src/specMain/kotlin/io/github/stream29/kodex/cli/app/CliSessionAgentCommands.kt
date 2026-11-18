@@ -37,7 +37,7 @@ public class SessionCommand : KodexGroupCommand(
 public class AgentCommand : KodexGroupCommand(
     "agent", "Inspect and control a specific Agent.",
     AgentSpawnCommand(),
-    AgentStatusCommand(), AgentSubmitCommand(), AgentResumeCommand(), AgentStopCommand(),
+    AgentStatusCommand(), AgentSubmitCommand(), AgentResumeCommand(), AgentStopCommand(), AgentCompleteCommand(),
     AgentCompactCommand(), AgentClearPendingCommand(),
     AgentSqlCommand(),
     isToolGroup = true,
@@ -106,6 +106,11 @@ public class AgentSubmitCommand : ExplicitAgentOperation("submit", "Submit one t
 public class AgentResumeCommand : ExplicitAgentOperation("resume", "Continue without a new message; return on admission.")
 
 public class AgentStopCommand : ExplicitAgentOperation("stop", "Request cancellation of only the currently running turn.")
+
+public class AgentCompleteCommand : SessionAgentOperation("complete", "Complete a child or archive a root Session without stopping it.") {
+    public val agentId: Int? by option("--agent", metavar = "ID", help = "Target Agent ID; omit to complete the calling Agent.")
+        .int().check("Agent ID must be non-negative.") { it >= 0 }
+}
 
 public class AgentCompactCommand : ExplicitAgentOperation("compact", "Compact the Agent's context and return its committed index.")
 

@@ -130,6 +130,59 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
         }
     }
 
+    test("agent complete verifies its implicit caller and does not use caller context for an explicit target") {
+        val root = Path(SystemTemporaryDirectory, "kodex-cli-complete-${Random.nextLong().toULong()}")
+        val fs = SystemCoroutineFileSystem
+        try {
+            fs.createDirectories(root)
+            withBackendServices(
+                root, Path(root, "codex"), Path(root, "agents"),
+                defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
+                createClient = { mockOpenAiClient() },
+            ) { backend ->
+                suspend fun newSession() = assertIs<SessionSpawnResult.Created>(
+                    backend.global.spawnSession(SessionSpawnRequest(root.toString())),
+                )
+                val caller = newSession()
+                val other = newSession()
+                withInMemoryRpc(registerServices = { registerService(AgentRuntimeRpc::class) { backend.runtime } }) { raw ->
+                    val services = RpcServices(RestoringRpcClient(raw))
+                    suspend fun complete(invocation: String?, expectedExit: Int, explicit: Int? = null): CliOperationEnvelope {
+                        val args = listOf("agent", "complete") + (explicit?.let { listOf("--agent", it.toString()) } ?: emptyList())
+                        val lines = mutableListOf<String>()
+                        val exit = dispatchCli(args, { diagnostic, _ -> error(diagnostic) }) {
+                            executeCliToolCommand(assertIs<KodexToolLeafCommand>(it), services, env = { name ->
+                                when (name) {
+                                    KodexAgentIdEnvironmentVariable -> invocation?.let { caller.rootAgentId.toString() }
+                                    KodexInvocationIdEnvironmentVariable -> invocation
+                                    else -> null
+                                }
+                            }, writeStdout = lines::add)
+                        }
+                        assertEquals(expectedExit, exit, lines.toString())
+                        return CliToolJson.decodeFromString(CliOperationEnvelope.serializer(), lines.single())
+                    }
+                    assertEquals("invalid_source", complete(null, 1).error?.code)
+                    assertEquals("invalid_source", complete("stale", 1).error?.code)
+                    assertEquals(2, backend.global.getSessionCatalog(false).size)
+                    assertEquals(other.rootAgentId, checkNotNull(complete("stale", 0, other.rootAgentId).result)
+                        .jsonObject.getValue("agent_id").jsonPrimitive.int)
+                    assertEquals(listOf(caller.sessionId), backend.global.getSessionCatalog(false).map { it.sessionIndex })
+                    assertEquals("true", checkNotNull(complete(caller.invocationId, 0).result)
+                        .jsonObject.getValue("completed").jsonPrimitive.content)
+                    assertTrue(backend.global.getSessionCatalog(false).isEmpty())
+                }
+            }
+        } finally {
+            suspend fun delete(path: Path) {
+                val metadata = fs.metadataOrNull(path) ?: return
+                if (metadata.isDirectory) fs.list(path).forEach { delete(it) }
+                fs.delete(path, mustExist = false)
+            }
+            delete(root)
+        }
+    }
+
     test("spawn preserves raw text, keeps accepted turns alive, and reports a known id on lost submit reply") {
         val root = Path(SystemTemporaryDirectory, "kodex-cli-spawn-${Random.nextLong().toULong()}")
         var loseSubmitReply = false

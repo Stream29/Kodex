@@ -1,11 +1,13 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.kodex.agentruntime.contract.AgentResumeNotAdmittedException
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
+import io.github.stream29.kodex.agentsession.contract.StoredAgent
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
@@ -47,7 +49,9 @@ import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.NoMatchException
 import io.github.stream29.kodex.utils.rpcexception.AgentNotActive
 import io.github.stream29.kodex.utils.rpcexception.AgentNotFound
+import io.github.stream29.kodex.utils.rpcexception.AgentCompleted
 import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
+import io.github.stream29.kodex.utils.rpcexception.SubagentCompletionNoticeFailed
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -77,6 +81,8 @@ internal class BackendAgentRuntimeRpc(
     private val onAskUserCreated: (Notification.AskUserCreated) -> Unit = {},
     private val checkAdmission: () -> Unit = {},
     private val subagentSpawner: BackendSubagentSpawner? = null,
+    private val archiveSession: suspend (Int) -> Unit = { repository.getEntry(it).archive() },
+    private val markChildCompleted: suspend (Int) -> Int? = { error("Subagent persistence is not configured.") },
 ) : AgentRuntimeRpc {
     private val viewsMutex = Mutex()
     private val views = mutableMapOf<KodexAgentSession, RuntimeView>()
@@ -89,6 +95,33 @@ internal class BackendAgentRuntimeRpc(
         SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidSource)
     } catch (_: AgentNotActive) {
         SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidSource)
+    }
+
+    override suspend fun completeAgent(agentId: Int, expectedInvocationId: String?): Unit = command(agentId) {
+        if (expectedInvocationId != null && runtime.invocationId != expectedInvocationId) throw AgentNotActive()
+        val parent = newWorkAdmission.withLock {
+            val record = repository.getAgentRecord(agentId) ?: throw AgentNotFound()
+            if (record.parentAgentId == null) {
+                archiveSession(record.sessionId)
+                null
+            } else {
+                markChildCompleted(agentId)
+            }
+        } ?: return@command
+        try {
+            eventBus.submitSubagentCompletion(parent, agentId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            CompletionLogger.warn(failure) { "Child $agentId is complete, but notifying parent $parent failed." }
+            throw SubagentCompletionNoticeFailed()
+        }
+    }
+
+    private suspend fun requireIncompleteAgent(agentId: Int): StoredAgent {
+        val record = repository.getAgentRecord(agentId) ?: throw AgentNotFound()
+        if (record.completed) throw AgentCompleted()
+        return record
     }
 
     override suspend fun keepAgentAlive(agentId: Int) {
@@ -249,7 +282,10 @@ internal class BackendAgentRuntimeRpc(
             if (expectedInvocationId != null && runtime.invocationId != expectedInvocationId) {
                 throw AgentNotActive()
             }
-            eventBus.submitUserMessage(session, content)
+            newWorkAdmission.withLock {
+                requireIncompleteAgent(sessionIndex)
+                eventBus.submitUserMessage(session, content)
+            }
         }
 
     override suspend fun submitAskUserAnswer(
@@ -311,15 +347,20 @@ internal class BackendAgentRuntimeRpc(
         }
 
     override suspend fun resume(sessionIndex: Int): Unit = command(sessionIndex) {
+        requireIncompleteAgent(sessionIndex)
         exclusive {
             val before = runtime.latestIndex.value
             val acceptedState = runtime.isAcceptedResumeStart(before)
             try {
-                runtime.resume()
+                resumeBeforeCompletion(sessionIndex)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (rejected: ConcurrentAgentRuntimeResumeException) {
                 throw rejected
+            } catch (completed: AgentCompleted) {
+                throw completed
+            } catch (missing: AgentNotFound) {
+                throw missing
             } catch (failure: Throwable) {
                 if (acceptedState) {
                     throw AgentRunFailureReported(failure.message).also { it.addSuppressed(failure) }
@@ -337,10 +378,13 @@ internal class BackendAgentRuntimeRpc(
         val accepted = CompletableDeferred<Boolean>()
         val run = startCommand(sessionIndex, CoroutineStart.DEFAULT) {
             val completed = tryExclusive {
-                runtime.resume { accepted.complete(true) }
+                resumeBeforeCompletion(sessionIndex) { accepted.complete(true) }
                 true
             }
-            if (completed == null) accepted.complete(false)
+            if (completed == null) {
+                requireIncompleteAgent(sessionIndex)
+                accepted.complete(false)
+            }
         }
         run.invokeOnCompletion { failure ->
             when (failure) {
@@ -350,6 +394,31 @@ internal class BackendAgentRuntimeRpc(
             }
         }
         return accepted.await()
+    }
+
+    private suspend fun RuntimeView.resumeBeforeCompletion(agentId: Int, onAccepted: (() -> Unit)? = null) {
+        newWorkAdmission.lock()
+        var locked = true
+        fun release() {
+            locked = false
+            newWorkAdmission.unlock()
+        }
+        try {
+            val record = requireIncompleteAgent(agentId)
+            if (record.parentAgentId == null && onAccepted == null) {
+                // The synchronous root operation retains its existing no-op behavior on an empty history.
+                release()
+                runtime.resume()
+            } else {
+                runtime.resume {
+                    // Completion need not wait for the accepted model turn or stop it.
+                    release()
+                    onAccepted?.invoke()
+                }
+            }
+        } finally {
+            if (locked) release()
+        }
     }
 
     override suspend fun clearPending(sessionIndex: Int): Int =
@@ -497,9 +566,12 @@ private fun UnifiedExecProcessSession.toShellSessionState(code: Int? = exitCode.
         exitCode = code,
     )
 
+private val CompletionLogger = KotlinLogging.logger("SubagentCompletion")
+
 private class RuntimeView(val session: KodexAgentSession) {
     val operations: CoroutineScope = session.supervisorChildScope()
     val runtime: AgentRuntime get() = session.runtime
+    val newWorkAdmission = Mutex()
     private val admission = Mutex()
     private val output = RuntimeOutputProjection()
 

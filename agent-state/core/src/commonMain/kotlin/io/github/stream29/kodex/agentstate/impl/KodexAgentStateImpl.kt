@@ -21,6 +21,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessa
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
@@ -866,6 +867,7 @@ private val StateTransitionCommitTypes: Set<AgentCommitType> = setOf(
     AgentCommitType.AgentMessage,
     AgentCommitType.EventAskUser,
     AgentCommitType.EventSchedule,
+    AgentCommitType.EventSubagentCompleted,
     AgentCommitType.EventTerminalExited,
     AgentCommitType.AssistantMessage,
     AgentCommitType.AssistantMessageCommentary,
@@ -909,6 +911,7 @@ private fun AgentCommit.toAgentStateValueOrNull(): KodexAgentStateValue? =
         is StableAgentMessage,
         is StableAskUserEvent,
         is StableScheduleEvent,
+        is StableSubagentCompletedEvent,
         is StableTerminalExitedEvent,
         -> KodexAgentStateValue.UserMessage
 

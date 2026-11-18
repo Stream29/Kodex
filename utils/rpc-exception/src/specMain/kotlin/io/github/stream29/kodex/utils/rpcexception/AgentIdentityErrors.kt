@@ -10,6 +10,14 @@ public class AgentNotFound : RemoteException()
 @Serializable
 public class AgentNotActive : RemoteException()
 
+/** A completed child does not accept new explicit submit or resume operations. */
+@Serializable
+public class AgentCompleted : RemoteException()
+
+/** Completion was stored, but submitting the parent notification failed. */
+@Serializable
+public class SubagentCompletionNoticeFailed : RemoteException()
+
 /** Deletion was rejected without stopping the Session's running children. */
 @Serializable
 public class SessionHasRunningSubagents : RemoteException()
