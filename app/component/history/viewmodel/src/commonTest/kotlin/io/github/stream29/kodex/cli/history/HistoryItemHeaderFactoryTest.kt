@@ -1,6 +1,8 @@
 package io.github.stream29.kodex.cli.history
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
@@ -11,11 +13,13 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolE
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMediaResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
+import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryResult
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemStatus
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemTarget
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
+import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.tool.readmedia.MediaDetail
@@ -25,12 +29,15 @@ import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecOutput
 import io.github.stream29.kodex.utils.applypatch.Patch
 import io.github.stream29.kodex.utils.applypatch.UpdateFileHunk
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.time.Duration.Companion.milliseconds
 
 val historyItemHeaderFactoryTest by testSuite {
@@ -115,6 +122,55 @@ val historyItemHeaderFactoryTest by testSuite {
             header.result,
         )
         assertEquals(12.milliseconds, header.elapsed)
+    }
+
+    test("materialized command disclosure does not read storage when projected or toggled") {
+        coroutineScope {
+            var reads = 0
+            fun unexpectedRead(): Nothing {
+                reads++
+                error("A materialized command must not read storage")
+            }
+            val storage = object : KodexAgentStorage {
+                override val uri = "test://unreadable"
+                override suspend fun latestIndex() = unexpectedRead()
+                override suspend fun countCommitsIn(range: IntRange, types: Set<AgentCommitType>) = unexpectedRead()
+                override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int) =
+                    unexpectedRead()
+                override suspend fun getLastCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int) =
+                    unexpectedRead()
+            }
+            val context = HistoryItemLoadContext(
+                AgentHistorySource(storage, MutableStateFlow(6), MutableStateFlow(KodexAgentStateValue.ToolCompleted)),
+                this,
+            ) { true }
+            for (name in listOf(null, "Inspect fixture output")) {
+                val event = StableCommandExecution(
+                    callId = "command",
+                    action = StableCommandExecutionAction.ExecCommand(
+                        ExecCommandArguments(command = "printf first\nprintf last", name = name, yieldTimeMillis = 100),
+                    ),
+                    result = StableCommandExecutionResult.Failure("fixture failure"),
+                )
+                val item = ToolHistoryItemViewModelImpl(
+                    6,
+                    event.toHistoryItemDescriptor(6, HistoryItemSource.Work, 1.milliseconds),
+                    context,
+                )
+                val collapsed = assertIs<ToolHistoryItemState.Collapsed>(item.state.value)
+                assertEquals(
+                    CommandExecutionHistoryAction.Run(name.orEmpty()),
+                    assertIs<ToolHistoryItemHeader.CommandExecution>(collapsed.header).action,
+                )
+                item.expand()
+                val expanded = assertIs<ToolHistoryItemState.Expanded>(item.state.value)
+                assertSame(event, expanded.event)
+                assertSame(collapsed.header, expanded.header)
+                item.collapse()
+                assertEquals(collapsed, item.state.value)
+            }
+            assertEquals(0, reads)
+        }
     }
 
     test("serverToolSearchHeaderDoesNotContainBodyInputs") {
