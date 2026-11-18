@@ -2,6 +2,8 @@ package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.*
 import io.github.stream29.kodex.app.agent.contract.*
+import io.github.stream29.kodex.app.application.contract.TerminalOutputItem
+import io.github.stream29.kodex.app.application.contract.TerminalOutputPhase
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.cli.historyindex.HistoryIndexSide
 import kotlinx.coroutines.delay
@@ -88,14 +90,32 @@ public actual fun SidebarShellHoverContent(
 
 @Composable
 public actual fun SidebarShellMenuContent(
-    opening: SidebarShellMenuOpening?, renderer: SidebarShellRenderer, onDismiss: () -> Unit,
+    opening: SidebarShellMenuOpening?, renderer: SidebarShellRenderer,
+    onViewOutput: (() -> Unit)?, canAct: () -> Boolean, onDismiss: () -> Unit,
 ) {
     val current = opening ?: return
     val session = current.interaction.session
     val completed = session.completed.collectAsState().value
     LaunchedEffect(current, completed) { if (completed) onDismiss() }
     if (completed) return
-    renderer.ShellMenu(current, "Close session", onDismiss) {
-        if (!session.completed.value) session.close()
-    }
+    fun canUseMenu(): Boolean = canAct() && current.interaction.isPlaced && !session.completed.value
+    renderer.ShellMenu(
+        current, "Close session", onDismiss,
+        onClose = { if (canUseMenu()) { onDismiss(); session.close() } },
+        onViewOutput = onViewOutput?.let { open -> { if (canUseMenu()) open() } },
+    )
+}
+
+public actual fun terminalOutputItemLabel(item: TerminalOutputItem): String = when (item) {
+    is TerminalOutputItem.Text -> item.text
+    is TerminalOutputItem.BackendOmission -> "… ${item.bytes} bytes omitted by backend …"
+    is TerminalOutputItem.WindowEviction -> "… ${item.items} earlier items removed from this view …"
+}
+
+public actual fun terminalOutputStatus(phase: TerminalOutputPhase, hasOutput: Boolean): String = when (phase) {
+    TerminalOutputPhase.Reading -> if (hasOutput) "Reading output…" else "Waiting for output…"
+    is TerminalOutputPhase.Complete -> if (hasOutput) "Exit code ${phase.exitCode}" else "Exit code ${phase.exitCode} (no output)"
+    TerminalOutputPhase.Removed -> "Terminal no longer registered. See History for the command result."
+    TerminalOutputPhase.SessionInactive -> "Session is inactive. Showing only the last captured output."
+    TerminalOutputPhase.ReadFailed -> "Could not read output. Reopen the inspector to try again."
 }

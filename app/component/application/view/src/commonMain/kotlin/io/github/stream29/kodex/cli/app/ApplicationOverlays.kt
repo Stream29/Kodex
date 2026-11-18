@@ -1,8 +1,10 @@
 package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.*
+import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
+import io.github.stream29.kodex.app.application.contract.TerminalOutputReader
 import io.github.stream29.kodex.cli.historyindex.*
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import kotlinx.coroutines.CoroutineScope
@@ -17,8 +19,10 @@ public actual fun rememberApplicationOverlays(
 ): ApplicationOverlayState {
     val scope = rememberCoroutineScope()
     val state = remember(scope) { ApplicationOverlayStateImpl(scope) }
-    LaunchedEffect(ApplicationChildKey(selectedAgent), left, right, popup) {
-        state.clearSidebar()
+    LaunchedEffect(ApplicationChildKey(selectedAgent)) { state.clearSidebar() }
+    LaunchedEffect(left) { state.clearSide(SessionSidebarSide.Left) }
+    LaunchedEffect(right) { state.clearSide(SessionSidebarSide.Right) }
+    LaunchedEffect(popup) {
         if (popup != ApplicationPopupState.Closed) state.clear()
     }
     return state
@@ -35,6 +39,25 @@ internal class ApplicationOverlayStateImpl(private val scope: CoroutineScope) : 
     override fun openMenu(opening: ApplicationOverlayMenu) {
         clearHover()
         menu = opening
+    }
+    override fun openShellOutput(
+        expected: ApplicationOverlayMenu.Shell, agent: AgentViewModel, placement: SidebarShellOutputPlacement,
+    ): Boolean {
+        if (menu !== expected || !expected.isAvailableFrom(agent)) return false
+        openMenu(ApplicationOverlayMenu.ShellOutput(expected, agent, placement))
+        return true
+    }
+
+    /** Returns false when the original entry is gone (no menu to restore). */
+    override fun backFromShellOutput(expected: ApplicationOverlayMenu.ShellOutput): Boolean {
+        if (menu !== expected) return false
+        val original = expected.original
+        if (!original.isAvailableFrom(expected.agent)) {
+            dismissMenu(expected)
+            return false
+        }
+        openMenu(ApplicationOverlayMenu.Shell(original.side, SidebarShellMenuOpening(original.opening.interaction)))
+        return true
     }
     override fun hoverChanged(candidate: ApplicationOverlayHover, entered: Boolean) {
         if (entered) {
@@ -89,6 +112,14 @@ internal class ApplicationOverlayStateImpl(private val scope: CoroutineScope) : 
     }
 }
 
+private fun ApplicationOverlayMenu.Shell.isAvailableFrom(agent: AgentViewModel): Boolean {
+    val interaction = opening.interaction
+    val session = interaction.session
+    return interaction.isPlaced && !session.completed.value &&
+        agent.lifecycle.value == AgentLifecycleState.Open &&
+        agent.shellSessions.activeSessions.value[session.sessionId] === session
+}
+
 private fun sameRow(first: ApplicationOverlayHover?, second: ApplicationOverlayHover): Boolean =
     first != null && first.side == second.side && first.rowIdentity === second.rowIdentity &&
         (first is ApplicationOverlayHover.Shell && second is ApplicationOverlayHover.Shell ||
@@ -98,7 +129,11 @@ private fun sameRow(first: ApplicationOverlayHover?, second: ApplicationOverlayH
 public actual fun ApplicationSidebarOverlaysContent(
     state: ApplicationOverlayState, selectedAgent: AgentViewModel?,
     shellRenderer: SidebarShellRenderer, indexRenderer: HistoryIndexRenderer,
+    isSideVisible: (SessionSidebarSide) -> Boolean,
+    onShellOutputFallback: () -> Unit,
 ) {
+    val currentAgent by rememberUpdatedState(selectedAgent)
+    val currentVisibility by rememberUpdatedState(isSideVisible)
     when (val hover = state.hover) {
         is ApplicationOverlayHover.Shell -> {
             val sessions = selectedAgent?.shellSessions?.activeSessions?.collectAsState()?.value
@@ -122,9 +157,37 @@ public actual fun ApplicationSidebarOverlaysContent(
     when (val menu = state.menu) {
         is ApplicationOverlayMenu.Shell -> {
             val sessions = selectedAgent?.shellSessions?.activeSessions?.collectAsState()?.value
-            val valid = sessions?.values?.any { it === menu.opening.interaction.session } == true && menu.opening.interaction.isPlaced
+            val shell = menu.opening.interaction.session
+            val valid = sessions?.get(shell.sessionId) === shell && menu.opening.interaction.isPlaced &&
+                isSideVisible(menu.side)
             LaunchedEffect(menu, valid) { if (!valid) state.dismissMenu(menu) }
-            if (valid) SidebarShellMenuContent(menu.opening, shellRenderer) { state.dismissMenu(menu) }
+            if (valid) SidebarShellMenuContent(
+                menu.opening, shellRenderer,
+                onViewOutput = {
+                    val agent = currentAgent
+                    if (agent != null) shellRenderer.captureShellOutputPlacement(menu.opening)?.let {
+                        state.openShellOutput(menu, agent, it)
+                    }
+                },
+                canAct = {
+                    val agent = currentAgent
+                    state.menu === menu && currentVisibility(menu.side) && agent != null && menu.isAvailableFrom(agent)
+                },
+            ) { state.dismissMenu(menu) }
+        }
+        is ApplicationOverlayMenu.ShellOutput -> {
+            val lifecycle by menu.agent.lifecycle.collectAsState()
+            val valid = menu.agent === selectedAgent && isSideVisible(menu.side) && lifecycle == AgentLifecycleState.Open
+            LaunchedEffect(menu, valid) { if (!valid) state.dismissMenu(menu) }
+            if (valid) key(menu) {
+                val reader = remember(menu) { TerminalOutputReader(menu.original.opening.interaction.session, menu.agent.shellSessions) }
+                LaunchedEffect(reader) { reader.observe() }
+                shellRenderer.ShellOutput(menu, reader.state) {
+                    if (state.menu === menu && currentAgent === menu.agent && currentVisibility(menu.side)) {
+                        if (!state.backFromShellOutput(menu)) onShellOutputFallback()
+                    }
+                }
+            }
         }
         is ApplicationOverlayMenu.Index -> {
             val valid = menu.opening.interaction.target.viewModel === selectedAgent?.historyIndex && menu.opening.interaction.isPlaced

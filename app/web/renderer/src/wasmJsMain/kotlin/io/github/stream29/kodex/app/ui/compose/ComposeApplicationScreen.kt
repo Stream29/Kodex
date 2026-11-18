@@ -77,6 +77,8 @@ private fun GraphicalApplication(
     val scope = rememberCoroutineScope()
     var leftExpanded by remember { mutableStateOf(false) }
     var rightExpanded by remember { mutableStateOf(false) }
+    var leftMounted by remember { mutableStateOf(false) }
+    var rightMounted by remember { mutableStateOf(false) }
     val leftPreview = remember { mutableStateOf<Float?>(null) }
     val rightPreview = remember { mutableStateOf<Float?>(null) }
     val leftToggleFocus = remember { FocusRequester() }
@@ -169,6 +171,7 @@ private fun GraphicalApplication(
                     } else 0f
                     Row(Modifier.fillMaxSize()) {
                         if (leftPixels > 0f) {
+                            DisposableEffect(Unit) { leftMounted = true; onDispose { leftMounted = false } }
                             Box(Modifier.width(with(density) { leftPixels.toDp() }).fillMaxHeight()
                                 .semantics { contentDescription = "Left sidebar" }) {
                                 SessionSidebarContent(
@@ -258,6 +261,7 @@ private fun GraphicalApplication(
                             )
                         }
                         if (rightPixels > 0f) {
+                            DisposableEffect(Unit) { rightMounted = true; onDispose { rightMounted = false } }
                             GraphicalSidebarSplitter(
                                 SessionSidebarSide.Right, rightPixels, sideLimit, columnPixels, rightPreview,
                                 enabled = frame.popup == ApplicationPopupState.Closed,
@@ -275,6 +279,7 @@ private fun GraphicalApplication(
             }
             ApplicationSidebarOverlaysContent(
                 overlays, frame.selectedAgent, leftRenderer, rememberComposeHistoryIndexRenderer(),
+                isSideVisible = { side -> if (side == SessionSidebarSide.Left) leftExpanded && leftMounted else rightExpanded && rightMounted },
             )
             ApplicationMenusContent(
                 viewModel, frame.navigation, frame.selectedAgent,

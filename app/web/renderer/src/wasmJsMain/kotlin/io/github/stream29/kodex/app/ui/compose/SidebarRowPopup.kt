@@ -168,6 +168,7 @@ internal fun SidebarMenuPopup(
     actionColors: ButtonColors = ButtonDefaults.textButtonColors(),
     onDismiss: () -> Unit,
     onAction: () -> Unit,
+    afterAction: (@Composable ColumnScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val mayRestore = LocalSidebarFocusRestoreAllowed.current
@@ -198,6 +199,7 @@ internal fun SidebarMenuPopup(
                     modifier = Modifier.fillMaxWidth().focusRequester(actionFocus),
                     colors = actionColors,
                 ) { Text(actionLabel, Modifier.weight(1f)) }
+                afterAction?.invoke(this)
             }
         }
         NavigationBackHandler(rememberNavigationEventState(NavigationEventInfo.None), onBackCompleted = onDismiss)

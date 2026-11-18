@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import com.jakewharton.mosaic.LocalTerminalState
 import com.jakewharton.mosaic.animation.animateIntAsState
 import com.jakewharton.mosaic.focus.FocusRequester
@@ -28,6 +29,7 @@ import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
+import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
@@ -143,6 +145,7 @@ public actual fun SessionTreeCliScreen(
     val contentColumns = displayedSidebarColumns.content
     val contentRows = (rows - SessionTabBarRows).coerceAtLeast(0)
     val currentSelectedAgent by rememberUpdatedState(selectedAgent)
+    val currentApplicationPopup by rememberUpdatedState(popup)
     val composerFocusRequester = remember(selectedAgent) { FocusRequester() }
     val currentComposerFocusRequester by rememberUpdatedState(composerFocusRequester)
     val settingsOwner: AgentSettingsViewModel? =
@@ -531,6 +534,19 @@ public actual fun SessionTreeCliScreen(
                 overlays, selectedAgent,
                 rememberMosaicSidebarOverlayRenderer(contentColumns, contentRows),
                 rememberMosaicIndexOverlayRenderer(contentColumns, contentRows),
+                isSideVisible = { side ->
+                    if (side == SessionSidebarSide.Left) leftSidebarExpanded && leftSidebarColumns > 0
+                    else rightSidebarExpanded && rightSidebarColumns > 0
+                },
+                onShellOutputFallback = {
+                    val owner = currentSelectedAgent
+                    scope.launch {
+                        withFrameNanos { }
+                        if (overlays.menu == null && currentApplicationPopup == ApplicationPopupState.Closed &&
+                            currentSelectedAgent === owner
+                        ) currentComposerFocusRequester.requestFocus()
+                    }
+                },
             )
             SessionSidebarContentMenu(
                 dropdownState = leftSidebarDropdown,

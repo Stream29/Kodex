@@ -15,6 +15,11 @@ public sealed interface ApplicationOverlayMenu {
     public class Shell(
         override val side: SessionSidebarSide, public val opening: SidebarShellMenuOpening,
     ) : Sidebar
+    public class ShellOutput internal constructor(
+        public val original: Shell, public val agent: AgentViewModel, public val placement: SidebarShellOutputPlacement,
+    ) : Sidebar {
+        override val side: SessionSidebarSide get() = original.side
+    }
     public class Index(
         override val side: SessionSidebarSide, public val opening: HistoryIndexMenuOpening,
     ) : Sidebar
@@ -45,6 +50,10 @@ public interface ApplicationOverlayState {
     public val menu: ApplicationOverlayMenu?
     public val hover: ApplicationOverlayHover?
     public fun openMenu(opening: ApplicationOverlayMenu): Unit
+    public fun openShellOutput(
+        expected: ApplicationOverlayMenu.Shell, agent: AgentViewModel, placement: SidebarShellOutputPlacement,
+    ): Boolean
+    public fun backFromShellOutput(expected: ApplicationOverlayMenu.ShellOutput): Boolean
     public fun hoverChanged(candidate: ApplicationOverlayHover, entered: Boolean): Unit
     public fun popupHoverChanged(expected: ApplicationOverlayHover, entered: Boolean): Unit
     public fun dismissMenu(expected: ApplicationOverlayMenu): Boolean
@@ -65,4 +74,6 @@ public expect fun rememberApplicationOverlays(
 public expect fun ApplicationSidebarOverlaysContent(
     state: ApplicationOverlayState, selectedAgent: AgentViewModel?,
     shellRenderer: SidebarShellRenderer, indexRenderer: HistoryIndexRenderer,
+    isSideVisible: (SessionSidebarSide) -> Boolean = { true },
+    onShellOutputFallback: () -> Unit = {},
 ): Unit

@@ -20,10 +20,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
+import io.github.stream29.kodex.app.application.contract.TerminalOutputState
 import io.github.stream29.kodex.app.ui.compose.EditorDropdownMenu as DropdownMenu
 import io.github.stream29.kodex.cli.app.*
 import io.github.stream29.kodex.cli.historyindex.*
 import io.github.stream29.kodex.cli.settings.SidebarContent
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 internal fun rememberComposeSessionSidebarRenderer(
@@ -174,7 +176,9 @@ private class ComposeSessionSidebarRenderer(
         }
     }
 
-    @Composable override fun ShellMenu(opening: SidebarShellMenuOpening, label: String, onDismiss: () -> Unit, onClose: () -> Unit) {
+    @Composable override fun ShellMenu(
+        opening: SidebarShellMenuOpening, label: String, onDismiss: () -> Unit, onClose: () -> Unit, onViewOutput: (() -> Unit)?,
+    ) {
         val origin = opening.interaction as ComposeShellPlacement
         SidebarMenuPopup(
             opening = opening,
@@ -182,10 +186,20 @@ private class ComposeSessionSidebarRenderer(
             restoration = restoration,
             isOriginValid = { origin.isPlaced && !origin.session.completed.value },
             dismissWhenUnplaced = true,
-            actionLabel = label,
-            actionColors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            actionLabel = if (onViewOutput != null) "View output" else label,
+            actionColors = if (onViewOutput != null) ButtonDefaults.textButtonColors()
+                else ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
             onDismiss = onDismiss,
-            onAction = { if (origin.isPlaced && !origin.session.completed.value) { onDismiss(); onClose() } },
+            onAction = onViewOutput ?: onClose,
+            afterAction = if (onViewOutput == null) null else {
+                {
+                    CompactTextButton(
+                        onClick = onClose,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) { Text(label, Modifier.weight(1f)) }
+                }
+            },
         ) {
             Text("Session ${origin.session.sessionId}", style = MaterialTheme.typography.titleSmall)
             SelectionContainer(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
@@ -196,6 +210,25 @@ private class ComposeSessionSidebarRenderer(
                 )
             }
         }
+    }
+
+    override fun captureShellOutputPlacement(opening: SidebarShellMenuOpening): SidebarShellOutputPlacement? {
+        val origin = opening.interaction as ComposeShellPlacement
+        val bounds = origin.bounds?.takeIf { origin.isPlaced } ?: return null
+        return ComposeTerminalOutputPlacement(bounds, origin.point, origin.preferAfter, origin.fallback)
+    }
+
+    @Composable override fun ShellOutput(
+        opening: ApplicationOverlayMenu.ShellOutput, output: StateFlow<TerminalOutputState>, onBack: () -> Unit,
+    ) {
+        val placement = opening.placement as ComposeTerminalOutputPlacement
+        val origin = opening.original.opening.interaction
+        val mayRestore = LocalSidebarFocusRestoreAllowed.current
+        restoration.Track(opening, placement.fallback, mayRestore) {
+            origin.isPlaced && !origin.session.completed.value &&
+                opening.agent.shellSessions.activeSessions.value[origin.session.sessionId] === origin.session
+        }
+        ComposeTerminalOutput(placement, origin.session.arguments.command, output, onBack)
     }
 }
 

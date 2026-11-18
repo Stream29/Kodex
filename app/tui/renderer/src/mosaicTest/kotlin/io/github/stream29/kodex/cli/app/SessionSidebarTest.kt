@@ -3,9 +3,11 @@ package io.github.stream29.kodex.cli.app
 import io.github.stream29.kodex.cli.historyindex.*
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
@@ -30,6 +32,7 @@ import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryKind
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexWindow
+import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.cli.components.LazyListState
 import io.github.stream29.kodex.cli.components.DefaultTuiColorScheme
 import io.github.stream29.kodex.cli.components.TuiDropdownState
@@ -45,7 +48,10 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
+import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import de.infix.testBalloon.framework.core.testSuite
@@ -59,6 +65,75 @@ private const val TestCollapsedButtonColumns: Int = SessionSidebarCollapsedButto
 private const val TestCollapsedButtonRows: Int = SessionSidebarCollapsedButtonRows
 
 val sessionSidebarTest by testSuite {
+    for ((columns, rows) in listOf(30 to 9, 76 to 16)) {
+        test("terminal output dialog follows, pages, and returns to the original menu at ${columns}x$rows") {
+            val fixture = startRpcFrontendFixture(this)
+            try {
+                val real = requireNotNull(fixture.create().rootAgent.value)
+                val session = TestAgentShellSession(7, "long test command " + "argument ".repeat(15))
+                var source = (1..64).joinToString("") { "sample $it 界界 ${"cell".repeat(13)}\n" }.encodeToByteArray()
+                session.read = { offset, limit ->
+                    val start = offset.toInt()
+                    val end = minOf(source.size, start + limit.toInt())
+                    StdoutSlice(source.copyOfRange(start, end), byteArrayOf(), 0u, offset, end.toULong(), source.size.toULong())
+                }
+                val registry = MutableStateFlow<Map<Int, AgentShellSession>>(mapOf(7 to session))
+                val agent = object : AgentViewModel by real {
+                    override val shellSessions = object : AgentShellSessionRegistry { override val activeSessions = registry }
+                }
+                var fallback = 0
+                runMosaicTest {
+                    setContentAndSnapshot {
+                        io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                            val state = rememberApplicationOverlays(
+                                agent, SidebarContent.TerminalSessions, SidebarContent.None, ApplicationPopupState.Closed,
+                            )
+                            val anchor = rememberTuiPopupAnchor()
+                            LaunchedEffect(anchor) {
+                                snapshotFlow { anchor.isPlaced }.first { it }
+                                state.openMenu(ApplicationOverlayMenu.Shell(
+                                    SessionSidebarSide.Left, mosaicShellMenu(ShellSessionMenuRequest(session, anchor, null)),
+                                ))
+                            }
+                            TuiPopupHost(Modifier.width(columns).height(rows)) {
+                                Text("fixture sidebar", Modifier.tuiPopupAnchor(anchor))
+                                ApplicationSidebarOverlaysContent(
+                                    state, agent, rememberMosaicSidebarOverlayRenderer(columns, rows),
+                                    rememberMosaicIndexOverlayRenderer(columns, rows),
+                                    onShellOutputFallback = { fallback++ },
+                                )
+                            }
+                        }
+                    }
+                    awaitSnapshotContaining("View output")
+                    assertEquals(0, session.readCount)
+                    sendKeyEvent(KeyboardEvent(13))
+                    val latest = awaitSnapshotContaining("cell")
+                    assertTrue("Terminal output" in latest)
+                    sendKeyEvent(KeyboardEvent(KeyboardEvent.PageUp))
+                    val paused = awaitSnapshotContaining("[↓]")
+                    assertTrue("Terminal output" in paused)
+                    sendKeyEvent(KeyboardEvent(27))
+                    awaitSnapshotContaining("View output")
+                    val stopped = session.readCount
+                    delay(225)
+                    assertEquals(stopped, session.readCount)
+                    sendKeyEvent(KeyboardEvent(13))
+                    awaitSnapshotContaining("Terminal output")
+                    source += "FINAL🙂\n".encodeToByteArray()
+                    session.exitCode.value = 23
+                    session.completed.value = true
+                    val completed = awaitSnapshotContaining("Exit code 23")
+                    assertTrue("FINAL" in completed, completed)
+                    sendKeyEvent(KeyboardEvent(27))
+                    awaitSnapshotContaining("fixture sidebar")
+                    assertEquals(1, fallback)
+                    assertEquals(0, session.closeCount)
+                }
+            } finally { fixture.closeAndJoin() }
+        }
+    }
+
     test("collapsedButtonLayoutConstantsRemainCompileTimeConstants") {
         assertEquals(3, TestCollapsedButtonColumns)
         assertEquals(1, TestCollapsedButtonRows)
@@ -969,7 +1044,13 @@ private class TestAgentShellSession(
         ExecCommandArguments(command = command, yieldTimeMillis = 10_000)
     override val completed = MutableStateFlow(false)
     override val exitCode = MutableStateFlow<Int?>(null)
-    override suspend fun readOutput(offset: ULong, limit: UInt): Nothing = error("Unexpected shell read")
+    var read: suspend (ULong, UInt) -> StdoutSlice = { _, _ -> error("Unexpected shell read") }
+    var readCount = 0
+        private set
+    override suspend fun readOutput(offset: ULong, limit: UInt): StdoutSlice {
+        readCount++
+        return read(offset, limit)
+    }
     var closeCount: Int = 0
 
     override fun close() {
@@ -1018,7 +1099,7 @@ private suspend fun TestMosaic<String>.awaitSnapshotContaining(expected: String)
         }
         if (expected in latest) return latest
     }
-    assertTrue(expected in latest, latest)
+    assertTrue(expected in latest, "Expected '$expected' in:\n$latest")
     return latest
 }
 

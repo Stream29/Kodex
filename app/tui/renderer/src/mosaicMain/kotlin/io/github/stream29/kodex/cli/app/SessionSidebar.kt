@@ -46,6 +46,7 @@ import com.jakewharton.mosaic.ui.unit.IntSize
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
+import io.github.stream29.kodex.app.application.contract.TerminalOutputState
 import io.github.stream29.kodex.cli.components.EllipsizedText
 import io.github.stream29.kodex.cli.components.LazyColumn
 import io.github.stream29.kodex.cli.components.LazyListState
@@ -73,6 +74,7 @@ import io.github.stream29.kodex.cli.settings.MinimumSidebarWidthColumns
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.utils.terminaltext.takeFirstFittingTerminalWidth
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 public actual fun SessionSidebar(
@@ -773,7 +775,7 @@ private class MosaicSessionSidebarRenderer(
         }
     }
     @Composable override fun ShellMenu(
-        opening: SidebarShellMenuOpening, label: String, onDismiss: () -> Unit, onClose: () -> Unit,
+        opening: SidebarShellMenuOpening, label: String, onDismiss: () -> Unit, onClose: () -> Unit, onViewOutput: (() -> Unit)?,
     ) {
         val origin = opening.interaction as MosaicSidebarShellOrigin
         with(checkNotNull(popupScope)) {
@@ -781,8 +783,24 @@ private class MosaicSessionSidebarRenderer(
                 expanded = true, anchor = origin.anchor, clickPosition = origin.clickPosition,
                 onDismissRequest = onDismiss, backgroundColor = SettingsDialogHomeBackground,
             ) {
-                TuiPopupMenuItem(key = "close-shell-session", onClick = onClose) { Text(label) }
+                if (onViewOutput != null) {
+                    TuiPopupMenuItem(key = "view-shell-output", onClick = onViewOutput, dismissOnClick = false) {
+                        Text("View output")
+                    }
+                }
+                TuiPopupMenuItem(key = "close-shell-session", onClick = onClose, dismissOnClick = false) { Text(label) }
             }
+        }
+    }
+
+    override fun captureShellOutputPlacement(opening: SidebarShellMenuOpening): SidebarShellOutputPlacement? =
+        if (opening.interaction.isPlaced) MosaicTerminalOutputPlacement else null
+
+    @Composable override fun ShellOutput(
+        opening: ApplicationOverlayMenu.ShellOutput, output: StateFlow<TerminalOutputState>, onBack: () -> Unit,
+    ) {
+        with(checkNotNull(popupScope)) {
+            MosaicTerminalOutput(columns, rows, opening.original.opening.interaction.session.arguments.command, output, onBack)
         }
     }
 }

@@ -2,8 +2,12 @@ package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.app.agent.contract.*
+import io.github.stream29.kodex.app.application.contract.TerminalOutputItem
+import io.github.stream29.kodex.app.application.contract.TerminalOutputPhase
+import io.github.stream29.kodex.app.application.contract.TerminalOutputState
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.cli.historyindex.HistoryIndexSide
+import kotlinx.coroutines.flow.StateFlow
 
 /** Placement only; character/pixel sizes remain renderer-local. */
 public enum class SessionSidebarSide { Left, Right }
@@ -21,6 +25,9 @@ public interface SidebarShellRowInteraction : SidebarShellInteraction {
 
 public class SidebarShellMenuOpening(public val interaction: SidebarShellInteraction)
 
+/** Renderer-owned placement captured at the menu-to-output transition. */
+public interface SidebarShellOutputPlacement
+
 public interface SidebarShellRenderer {
     public val canShowHover: Boolean
     @Composable public fun rememberShellInteraction(side: SessionSidebarSide, session: AgentShellSession): SidebarShellRowInteraction
@@ -31,9 +38,13 @@ public interface SidebarShellRenderer {
     @Composable public fun ShellHover(
         interaction: SidebarShellInteraction, title: String, command: String, onHoverChanged: (Boolean) -> Unit,
     )
-    /** Dismiss before invoking the command, matching the original Native menu. */
+    /** View Output replaces the menu; the shared close action dismisses before terminating. */
     @Composable public fun ShellMenu(
-        opening: SidebarShellMenuOpening, label: String, onDismiss: () -> Unit, onClose: () -> Unit,
+        opening: SidebarShellMenuOpening, label: String, onDismiss: () -> Unit, onClose: () -> Unit, onViewOutput: (() -> Unit)?,
+    )
+    public fun captureShellOutputPlacement(opening: SidebarShellMenuOpening): SidebarShellOutputPlacement?
+    @Composable public fun ShellOutput(
+        opening: ApplicationOverlayMenu.ShellOutput, output: StateFlow<TerminalOutputState>, onBack: () -> Unit,
     )
 }
 
@@ -80,5 +91,9 @@ public expect fun SidebarShellHoverContent(
 
 @Composable
 public expect fun SidebarShellMenuContent(
-    opening: SidebarShellMenuOpening?, renderer: SidebarShellRenderer, onDismiss: () -> Unit,
+    opening: SidebarShellMenuOpening?, renderer: SidebarShellRenderer,
+    onViewOutput: (() -> Unit)? = null, canAct: () -> Boolean = { true }, onDismiss: () -> Unit,
 )
+
+public expect fun terminalOutputItemLabel(item: TerminalOutputItem): String
+public expect fun terminalOutputStatus(phase: TerminalOutputPhase, hasOutput: Boolean): String
