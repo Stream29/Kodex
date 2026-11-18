@@ -66,7 +66,7 @@ private val roundTripProcess = Mutex()
 val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment.RealTime }) {
     val candidate = environmentVariable("KODEX_SESSION_CLI_TEST_BINARY")?.let { Path(it) }
     if (candidate != null) {
-        test("actual session CLI accepts work and nested exec inherits only the owning Session configuration") {
+    test("actual session CLI accepts work, preserves nested inheritance, and controls the running Agent") {
             runSessionCliProcessRoundTrip(candidate)
         }
     }
@@ -378,9 +378,11 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
 private suspend fun runSessionCliProcessRoundTrip(binary: Path) {
     require(binary.isAbsolute && SystemFileSystem.metadataOrNull(binary)?.isRegularFile == true)
     val calls = AtomicInt(0)
+    val childEntered = CompletableDeferred<Unit>()
+    val resumeEntered = CompletableDeferred<Unit>()
     val shellBinary = "'" + binary.toString().replace("'", "'\\''") + "'"
     val nestedCommand = """cd Alpha && /bin/sh -c 'exec "${'$'}1" session spawn' sh $shellBinary > ../nested-spawn.json"""
-    withRoundTrip(response = {
+    withRoundTrip(compact = { RemoteCompactionV2Response(ResponseItem.Compaction(encryptedContent = "fixture"), null) }, response = {
         when (calls.fetchAndAdd(1)) {
             0 -> flowOf(
                 ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
@@ -393,13 +395,16 @@ private suspend fun runSessionCliProcessRoundTrip(binary: Path) {
                 )),
                 ResponsesStreamEvent.Completed(Response(id = "nested-spawn", endTurn = false)),
             )
-            else -> flowOf(
+            1 -> flowOf(
                 ResponsesStreamEvent.OutputItemDone(0, ResponseItem.Message(
                     role = MessageRole.Assistant,
                     content = listOf(ContentItem.OutputText("Fixture completed.")),
                 )),
                 ResponsesStreamEvent.Completed(Response(id = "fixture-complete", endTurn = true)),
             )
+            2 -> flow { childEntered.complete(Unit); awaitCancellation() }
+            3 -> flow { resumeEntered.complete(Unit); awaitCancellation() }
+            else -> error("Unexpected model request in the Session CLI fixture.")
         }
     }) { fixture ->
         val process = ProcessClient()
@@ -445,6 +450,24 @@ private suspend fun runSessionCliProcessRoundTrip(binary: Path) {
             assertEquals(0, status.getValue("latest_index").jsonPrimitive.int)
             val catalog = invoke("session", "list").getValue("sessions").jsonArray
             assertEquals(setOf(parentId, childId), catalog.map { it.jsonObject.getValue("session_id").jsonPrimitive.int }.toSet())
+            val target = arrayOf("--agent", childId.toString())
+            assertTrue(invoke("agent", "submit", *target, "--message", "Start test work.").getValue("accepted").jsonPrimitive.boolean)
+            withTimeout(10.seconds) { childEntered.await() }
+            fixture.rpc { rpc -> assertTrue(rpc.runtime.getRunningTurn(childId), "CLI exit must not end accepted work.") }
+            assertTrue(invoke("agent", "submit", *target, "--message", "Steer the running turn.").getValue("accepted").jsonPrimitive.boolean)
+            suspend fun stopAndObserve() {
+                assertEquals(childId, invoke("agent", "stop", *target).getValue("agent_id").jsonPrimitive.int)
+                fixture.rpc { rpc -> withTimeout(10.seconds) { rpc.runtime.getRunningTurnFlow(childId).first { !it } } }
+            }
+            stopAndObserve()
+            assertTrue(invoke("agent", "resume", *target).getValue("accepted").jsonPrimitive.boolean)
+            withTimeout(10.seconds) { resumeEntered.await() }
+            stopAndObserve()
+            val beforeCompact = invoke("agent", "status", *target).getValue("latest_index").jsonPrimitive.int
+            val compacted = invoke("agent", "compact", *target).getValue("latest_index").jsonPrimitive.int
+            assertTrue(compacted > beforeCompact)
+            val cleared = invoke("agent", "clear-pending", *target).getValue("latest_index").jsonPrimitive.int
+            assertTrue(cleared >= compacted)
         } finally {
             process.close()
         }
@@ -644,6 +667,7 @@ private class RoundTripLogin(private val provider: RoundTripProvider) : OpenAiLo
 private suspend fun withRoundTrip(
     ttlSeconds: Long = -1,
     response: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent> = { error("No model turn is authorized by this fixture.") },
+    compact: suspend (ResponsesApiRequest) -> RemoteCompactionV2Response = { error("No compaction is authorized by this fixture.") },
     block: suspend CoroutineScope.(RoundTripFixture) -> Unit,
 ) =
     roundTripProcess.withLock {
@@ -690,6 +714,7 @@ private suspend fun withRoundTrip(
                             ))))
                         }
                         createResponse(response)
+                        createRemoteCompactionV2Response(compact)
                     }
                     backend = launch {
                         runBackendHost(
