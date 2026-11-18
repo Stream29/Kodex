@@ -10,7 +10,10 @@ plugins {
 kotlin {
     compilerOptions.freeCompilerArgs.add("-Xexpect-actual-classes")
     sourceSets.named("specMain").dependencies { api(libs.kotlinx.io.core) }
-    sourceSets.nativeMain.dependencies { implementation(libs.sqliter.driver) }
+    sourceSets.nativeMain.dependencies {
+        implementation(libs.sqliter.driver)
+        implementation(libs.kotlinx.coroutines.core)
+    }
     sourceSets.commonTest.dependencies { implementation(libs.kotlinx.coroutines.test) }
     targets.withType<KotlinNativeTarget>().configureEach {
         val targetName = name

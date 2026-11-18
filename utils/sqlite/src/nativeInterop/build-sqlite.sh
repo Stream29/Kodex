@@ -34,6 +34,9 @@ esac
 "$llvm/llvm-ar" rcs "$out/libkodexsqlite.a" "$out/sqlite.o"
 cat > "$out/bundled.def" <<DEF
 package = io.github.stream29.kodex.utils.sqlite.bundled
+headers = sqlite3.h
+headerFilter = sqlite3.h
+compilerOpts = -I$out/sqlite-amalgamation-3540100
 staticLibraries = libkodexsqlite.a
 libraryPaths = $out
 DEF
