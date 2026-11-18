@@ -163,6 +163,8 @@ val cliCommandsTest by testSuite {
             listOf("schedule", "create", "-d", "ping", "--delay-seconds", "0"),
             listOf("schedule", "create", "-d", "ping", "--cron", "* * * *"),
             listOf("agent", "status"), listOf("agent", "status", "--agent", "-1"),
+            listOf("agent", "status", "--agent", "0/1"),
+            listOf("agent", "status", "--agent", "1", "--url", "http://127.0.0.1:8000"),
             listOf("session", "status"), listOf("agent", "wait"), listOf("agent", "history"),
             listOf("session", "spawn", "--message", "text", "--stdin"),
             listOf("session", "spawn", "--message", ""),
