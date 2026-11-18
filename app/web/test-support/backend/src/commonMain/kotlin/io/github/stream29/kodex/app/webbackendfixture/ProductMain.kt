@@ -44,11 +44,20 @@ public actual fun productMain(): Unit = runBlocking {
     } else {
         Path(temporaryDirectory, "kodex-product-browser-${Random.nextLong()}")
     }
+    val terminalCheck = environmentVariable("KODEX_CHECK_TERMINAL_INSPECTOR") == "1"
     SystemCoroutineFileSystem.createDirectories(home, mustCreate = true)
     SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"0.4.15\"")
+    val frontendSettings = if (terminalCheck) {
+        "frontend:\n  new_line_key: shift_enter\n  sidebars:\n    left: terminal_sessions\n    right: none\n"
+    } else "frontend: {}\n"
     SystemCoroutineFileSystem.writeString(Path(home, "settings.yml"),
-        "backend:\n  daemon_ttl_seconds: $idleTtl\n  new_session:\n    model: test-model\n  session_title:\n    enabled: false\nfrontend: {}\n")
+        "backend:\n  daemon_ttl_seconds: $idleTtl\n  new_session:\n    model: test-model\n  session_title:\n    enabled: false\n$frontendSettings")
     val historyCheck = environmentVariable("KODEX_CHECK_HISTORY") == "1"
+    val terminal = if (terminalCheck) {
+        check(!historyCheck && environmentVariable("KODEX_CHECK_CAPABILITIES") != "1")
+        check(SystemFileSystem.exists(Path(temporaryDirectory, "emit-terminal-inspector")))
+        TerminalInspectorFixture(temporaryDirectory)
+    } else null
     if (historyCheck) seedHistoryProductFixture(home)
     val capabilities = try {
         if (!historyCheck && environmentVariable("KODEX_CHECK_CAPABILITIES") == "1") {
@@ -71,7 +80,7 @@ public actual fun productMain(): Unit = runBlocking {
                         OpenAiModelId("test-model"), "Offline browser verification",
                         contextWindow = 100_000, maxContextWindow = 100_000,
                     )))) }
-                    createResponse { flow {
+                    createResponse { terminal?.firstResponse() ?: flow {
                         val id = ResponseItemId("product-browser-answer-${Random.nextLong()}")
                         val parts = if (historyCheck) historyProductStreamParts() else listOf("test ", "answer — ", "你好")
                         val answer = parts.joinToString("")
