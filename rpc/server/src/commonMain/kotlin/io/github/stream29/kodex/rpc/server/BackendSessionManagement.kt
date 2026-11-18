@@ -14,7 +14,6 @@ import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.openai.ModelInfo
-import io.github.stream29.kodex.openai.availableServiceTiers
 import io.github.stream29.kodex.rpc.models.SessionSpawnRequest
 import io.github.stream29.kodex.rpc.models.SessionSpawnResult
 import io.github.stream29.kodex.rpc.models.SessionSpawnRejection
@@ -24,8 +23,6 @@ import io.github.stream29.kodex.utils.rpcexception.AgentNotFound
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
 import io.github.stream29.kodex.utils.rpcexception.SessionHasRunningSubagents
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -108,33 +105,15 @@ internal class BackendSessionManagement(
             val model = request.model ?: inherited?.model ?: defaults.model
             val effort = request.reasoningEffort ?: inherited?.reasoning?.effort ?: defaults.reasoningEffort
             val tier = request.serviceTier ?: inherited?.serviceTier ?: defaults.serviceTier
-            val catalog = models()
-            val info = catalog.firstOrNull { it.slug == model }
-            if ((request.model != null && catalog.isNotEmpty() && info == null) ||
-                (info != null && info.supportedReasoningLevels.isNotEmpty() &&
-                    info.supportedReasoningLevels.none { it.effort == effort }) ||
-                (info != null && tier !in info.availableServiceTiers())
-            ) return@withLock SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidConfiguration)
+            if (!supportsSpawnConfiguration(models(), model, request.model != null, effort, tier)) {
+                return@withLock SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidConfiguration)
+            }
             val initial = KodexAgentSettings(
                 model = model, reasoning = Reasoning(effort = effort), serviceTier = tier, cwd = cwd,
                 requestUserInputMode = request.requestUserInputMode ?: inherited?.requestUserInputMode ?: defaults.requestUserInputMode,
             )
             val (id, created) = create(initial, attachAutoTitle = true) { "Session $it" }
             SessionSpawnResult.Created(id, checkNotNull(created.runtime.agentId), created.runtime.invocationId)
-        }
-    }
-
-    private suspend fun resolveSpawnDirectory(value: String): Path? {
-        if (value.isBlank() || '\u0000' in value) return null
-        return try {
-            val path = Path(value)
-            if (!path.isAbsolute) return null
-            val resolved = SystemCoroutineFileSystem.resolve(path)
-            resolved.takeIf { SystemCoroutineFileSystem.metadataOrNull(it)?.isDirectory == true }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            null
         }
     }
 

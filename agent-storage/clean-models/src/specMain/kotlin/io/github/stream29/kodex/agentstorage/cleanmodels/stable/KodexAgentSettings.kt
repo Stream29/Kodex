@@ -67,7 +67,18 @@ public data class KodexAgentSettings(
     public val serviceTier: ServiceTier = ServiceTier.Default,
     public val promptCacheKey: String? = null,
     public val text: TextControls = TextControls(),
+    public val subagentCreationMode: SubagentCreationMode = SubagentCreationMode.AutoApprove,
 ) : AgentCommit
+
+/** The policy of the Agent whose live invocation is requesting a child. */
+@Serializable
+public enum class SubagentCreationMode {
+    @SerialName("reject")
+    Reject,
+
+    @SerialName("auto_approve")
+    AutoApprove,
+}
 
 /** Returns the provider-facing request-window identity for this snapshot. */
 public fun KodexAgentSettings.codexRequestWindowId(threadId: String): String =
