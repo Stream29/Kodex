@@ -52,7 +52,9 @@ import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.io.files.Path
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -224,8 +226,10 @@ internal suspend fun dispatchCliWithToolRpc(
                         }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
-                    } catch (failure: Exception) {
+                    } catch (failure: Throwable) {
                         if (toolLeaf !is SessionAgentOperation && toolLeaf !is AgentSqlCommand) throw failure
+                        if (failure is Error) throw failure
+                        currentCoroutineContext().ensureActive()
                         exitCode?.let { return@invokeTool it } // A known reply survives connection teardown failure.
                         if (entered) throw failure
                         if (toolLeaf is AgentSqlCommand) return@invokeTool writeAgentSqlError(
@@ -649,7 +653,10 @@ private suspend fun executeSessionAgentOperation(
         return fail("target_not_found", "The target does not exist.", CliOperationOutcome.Rejected)
     } catch (_: SessionNotActive) {
         return fail("agent_not_active", "The target Agent is no longer active.", CliOperationOutcome.Rejected)
-    } catch (_: Exception) {
+    } catch (failure: Throwable) {
+        // kRPC on Native represents an untyped remote failure as a bare Throwable, not an Exception.
+        if (failure is Error) throw failure
+        currentCoroutineContext().ensureActive()
         return when {
             phase == "input" -> fail("invalid_input", "Input must be valid, nonempty UTF-8 in the required format.", CliOperationOutcome.Rejected)
             mutationStarted -> fail("result_unknown", "The selected backend did not confirm the operation. Do not replay it blindly.", CliOperationOutcome.Unknown)

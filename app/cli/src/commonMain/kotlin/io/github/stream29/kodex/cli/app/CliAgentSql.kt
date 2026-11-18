@@ -4,6 +4,8 @@ import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.rpc.models.*
 import io.github.stream29.kodex.utils.rpcexception.BackendLocalCredentialRequired
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 internal suspend fun executeAgentSql(
     command: AgentSqlCommand, services: RpcServices, readStdin: () -> String, write: (String) -> Unit,
@@ -20,23 +22,25 @@ internal suspend fun executeAgentSql(
             return writeAgentSqlError(AgentSqlError.INVALID_INPUT, "Expected a nonempty UTF-8 SQL statement up to 64 KiB.", write)
         }
     } else null
-    return try {
+    val (body, status) = try {
         if (sql == null) {
             val schema = services.global.getAgentSqlSchema()
-            write(AgentSqlResultJson.encodeToString(AgentSqlSchemaResult.serializer(), schema))
-            0
+            AgentSqlResultJson.encodeToString(AgentSqlSchemaResult.serializer(), schema) to 0
         } else {
             val answer = services.global.queryAgentSql(sql)
-            write(AgentSqlResultJson.encodeToString(AgentSqlQueryResult.serializer(), answer))
-            if (answer.error == null) 0 else 1
+            AgentSqlResultJson.encodeToString(AgentSqlQueryResult.serializer(), answer) to if (answer.error == null) 0 else 1
         }
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: BackendLocalCredentialRequired) {
-        writeAgentSqlError(AgentSqlError.DENIED, "Agent SQL requires the local backend credential.", write)
-    } catch (_: Exception) {
-        writeAgentSqlError(AgentSqlError.UNAVAILABLE, "The selected backend did not return an SQL result.", write)
+        return writeAgentSqlError(AgentSqlError.DENIED, "Agent SQL requires the local backend credential.", write)
+    } catch (failure: Throwable) {
+        if (failure is Error) throw failure
+        currentCoroutineContext().ensureActive()
+        return writeAgentSqlError(AgentSqlError.UNAVAILABLE, "The selected backend did not return an SQL result.", write)
     }
+    write(body)
+    return status
 }
 
 internal fun writeAgentSqlError(code: AgentSqlError, message: String, write: (String) -> Unit): Int {

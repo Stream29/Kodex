@@ -25,6 +25,9 @@ import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
+import io.github.stream29.kodex.rpc.models.AgentSqlError
+import io.github.stream29.kodex.rpc.models.AgentSqlQueryResult
+import io.github.stream29.kodex.rpc.models.AgentSqlResultJson
 import io.github.stream29.kodex.rpc.server.defaultBackendSettings
 import io.github.stream29.kodex.rpc.server.withBackendServices
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
@@ -164,6 +167,23 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                 assertEquals("true", cli(listOf("session", "delete", "--session", "$fork"), "", 0).result("deleted"))
                 assertEquals("false", cli(listOf("session", "delete", "--session", "$fork"), "", 0).result("deleted"))
                 assertTrue(backend.global.getSessionCatalog(true).any { it.sessionIndex == target })
+                val sqlOutput = mutableListOf<String>()
+                withInMemoryRpc(registerServices = {
+                    registerService(GlobalRpc::class) {
+                        object : GlobalRpc by backend.global {
+                            override suspend fun queryAgentSql(sql: String): AgentSqlQueryResult = error("Fixture SQL diagnostic")
+                        }
+                    }
+                }) { raw ->
+                    val exit = dispatchCli(listOf("agent", "sql", "--stdin"), { message, _ -> error(message) }) { leaf ->
+                        executeCliToolCommand(assertIs<KodexToolLeafCommand>(leaf), RpcServices(RestoringRpcClient(raw)),
+                            readStdin = { "SELECT 1" }, writeStdout = sqlOutput::add)
+                    }
+                    assertEquals(1, exit)
+                }
+                val output = sqlOutput.single()
+                assertEquals(AgentSqlError.UNAVAILABLE, AgentSqlResultJson.decodeFromString(AgentSqlQueryResult.serializer(), output).error?.code)
+                assertFalse(output.contains("Fixture SQL diagnostic"))
             }
         } finally {
             suspend fun delete(path: Path) {
