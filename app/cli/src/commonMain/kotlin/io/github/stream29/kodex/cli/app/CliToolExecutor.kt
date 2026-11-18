@@ -34,6 +34,7 @@ import io.github.stream29.kodex.tool.unifiedexec.KodexHomeEnvironmentVariable
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
+import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
 import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlin.time.Clock
@@ -47,6 +48,8 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 
 @Serializable
 internal data class CliTerminalSummary(
@@ -192,15 +195,30 @@ internal suspend fun dispatchCliWithToolRpc(
             }
         },
         execute = { leaf ->
-            executeLeaf(leaf) { toolLeaf ->
+            executeLeaf(leaf) invokeTool@{ toolLeaf ->
                 val target = toolLeaf.backend.resolve()
                 val current = preopened
                 if (current != null && current.first == target) {
                     executeTool(toolLeaf, current.second)
                 } else {
-                    val (resolvedHome, endpoint) = resolveToolBackend(target, defaultHome, env, discover, connect)
-                    openServices(resolvedHome, endpoint) { services ->
-                        executeTool(toolLeaf, services)
+                    var entered = false
+                    var exitCode: Int? = null
+                    try {
+                        val (resolvedHome, endpoint) = resolveToolBackend(target, defaultHome, env, discover, connect)
+                        openServices(resolvedHome, endpoint) { services ->
+                            entered = true
+                            executeTool(toolLeaf, services).also { exitCode = it }
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        if (toolLeaf !is SessionAgentOperation) throw failure
+                        exitCode?.let { return@invokeTool it } // A known reply survives connection teardown failure.
+                        if (entered) throw failure
+                        writeOperationFailure("connection_failed", "Could not connect to the selected backend.",
+                            "connect", CliOperationOutcome.Failed, (toolLeaf as? ExplicitAgentOperation)?.agentId) {
+                            output(it, false)
+                        }
                     }
                 }
             }
@@ -359,57 +377,7 @@ internal suspend fun executeCliToolCommand(
                 ),
             )
         }
-        is SessionStatusCommand -> {
-            val agentId = resolveTargetAgentId(command.agent, env)
-            services.global.keepSessionAlive(agentId)
-            val (latestIndex, settings, tokenMeta) = readSessionStatusSnapshot(services.runtime, agentId)
-            val running = services.runtime.getRunningTurn(agentId)
-            val modelInfo = services.global.getModels().firstOrNull { it.slug == settings.model }
-            val contextWindow = modelInfo?.effectiveContextWindow()?.let { effectiveWindow ->
-                if (tokenMeta != null) {
-                    val status = modelInfo.contextWindowTokenStatus(
-                        activeContextTokens = tokenMeta.totalTokens,
-                        configuredAutoCompactionTokenLimit = settings.autoCompactionTokenLimit,
-                    )
-                    val budgetLimit = status.autoCompactionTokenLimit ?: effectiveWindow
-                    val remaining = status.tokensUntilCompaction
-                    val percent = if (budgetLimit > 0L && remaining != null) {
-                        ((remaining * 100L) / budgetLimit).toInt().coerceIn(0, 100)
-                    } else {
-                        null
-                    }
-                    CliContextWindowSummary(
-                        effectiveWindowTokens = effectiveWindow,
-                        usedTokens = tokenMeta.totalTokens,
-                        remainingTokens = remaining,
-                        remainingPercent = percent,
-                    )
-                } else {
-                    val autoLimit = modelInfo.resolvedAutoCompactionTokenLimit(settings.autoCompactionTokenLimit)
-                    val initialRemaining = if (autoLimit != null) minOf(autoLimit, effectiveWindow) else effectiveWindow
-                    CliContextWindowSummary(
-                        effectiveWindowTokens = effectiveWindow,
-                        usedTokens = null,
-                        remainingTokens = initialRemaining,
-                        remainingPercent = 100,
-                    )
-                }
-            }
-            val statusOutput = CliSessionStatusOutput(
-                agentId = agentId,
-                threadName = settings.threadName,
-                cwd = settings.cwd.toString(),
-                model = settings.model,
-                reasoningEffort = settings.reasoning.effort,
-                serviceTier = settings.serviceTier,
-                requestUserInputMode = settings.requestUserInputMode,
-                running = running,
-                latestIndex = latestIndex,
-                now = now().toString(),
-                contextWindow = contextWindow,
-            )
-            writeStdout(CliToolJson.encodeToString(CliSessionStatusOutput.serializer(), statusOutput))
-        }
+        is SessionAgentOperation -> return executeSessionAgentQuery(command, services, writeStdout, now)
         is SearchCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
             val commands = command.resolveCommands().resolve(SearchCommands.serializer(), readStdin)
@@ -476,6 +444,78 @@ internal suspend fun executeCliToolCommand(
     return 0
 }
 
+private fun writeOperationFailure(
+    code: String, message: String, phase: String, outcome: CliOperationOutcome, agentId: Int? = null,
+    write: (String) -> Unit,
+): Int {
+    val failure = CliOperationFailure(code, message, phase, outcome, agentId = agentId)
+    write(CliToolJson.encodeToString(CliOperationEnvelope.serializer(), CliOperationEnvelope(ok = false, error = failure)))
+    return 1
+}
+
+private suspend fun executeSessionAgentQuery(
+    command: SessionAgentOperation, services: RpcServices, write: (String) -> Unit, now: () -> Instant,
+): Int {
+    val agentId = (command as? ExplicitAgentOperation)?.agentId
+    val phase = if (command is SessionListCommand) "list" else "status"
+    val result: JsonElement = try {
+        when (command) {
+            is SessionListCommand -> {
+                val rows = services.global.getSessionCatalog(command.includeArchived).map { entry ->
+                    // This catalog enumerates root Sessions only; a root is addressed by its entry index.
+                    CliSessionCatalogRow(
+                        entry.sessionIndex, entry.sessionIndex, entry.threadName, entry.archived, entry.running,
+                        entry.isActive, entry.createdAt?.toString(), entry.updatedAt?.toString(),
+                    )
+                }
+                CliToolJson.encodeToJsonElement(CliSessionCatalogOutput.serializer(), CliSessionCatalogOutput(rows))
+            }
+            is AgentStatusCommand -> CliToolJson.encodeToJsonElement(
+                CliAgentStatusOutput.serializer(), readAgentStatus(services, command.agentId, now),
+            )
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: SessionNotFound) {
+        return writeOperationFailure("agent_not_found", "The target Agent does not exist.",
+            phase, CliOperationOutcome.Rejected, agentId, write)
+    } catch (_: Exception) {
+        return writeOperationFailure("query_failed", "The selected backend did not return the requested snapshot.",
+            phase, CliOperationOutcome.Failed, agentId, write)
+    }
+    write(CliToolJson.encodeToString(CliOperationEnvelope.serializer(), CliOperationEnvelope(ok = true, result = result)))
+    return 0
+}
+
+private suspend fun readAgentStatus(services: RpcServices, agentId: Int, now: () -> Instant): CliAgentStatusOutput {
+    services.global.keepSessionAlive(agentId)
+    val (latestIndex, settings, tokenMeta) = readAgentStatusSnapshot(services.runtime, agentId)
+    val running = services.runtime.getRunningTurn(agentId)
+    val modelInfo = services.global.getModels().firstOrNull { it.slug == settings.model }
+    val contextWindow = modelInfo?.effectiveContextWindow()?.let { effectiveWindow ->
+        if (tokenMeta != null) {
+            val status = modelInfo.contextWindowTokenStatus(
+                activeContextTokens = tokenMeta.totalTokens,
+                configuredAutoCompactionTokenLimit = settings.autoCompactionTokenLimit,
+            )
+            val budgetLimit = status.autoCompactionTokenLimit ?: effectiveWindow
+            val remaining = status.tokensUntilCompaction
+            val percent = if (budgetLimit > 0L && remaining != null) {
+                ((remaining * 100L) / budgetLimit).toInt().coerceIn(0, 100)
+            } else null
+            CliContextWindowSummary(effectiveWindow, tokenMeta.totalTokens, remaining, percent)
+        } else {
+            val autoLimit = modelInfo.resolvedAutoCompactionTokenLimit(settings.autoCompactionTokenLimit)
+            val initialRemaining = if (autoLimit != null) minOf(autoLimit, effectiveWindow) else effectiveWindow
+            CliContextWindowSummary(effectiveWindow, remainingTokens = initialRemaining, remainingPercent = 100)
+        }
+    }
+    return CliAgentStatusOutput(
+        agentId, settings.threadName, settings.cwd.toString(), settings.model, settings.reasoning.effort,
+        settings.serviceTier, settings.requestUserInputMode, running, latestIndex, now().toString(), contextWindow,
+    )
+}
+
 private fun <T> CliPayloadInput<T>.resolve(
     serializer: KSerializer<T>,
     readStdin: () -> String,
@@ -539,7 +579,7 @@ private suspend fun readAskUsers(
     return commit?.entries ?: emptyList()
 }
 
-private suspend fun readSessionStatusSnapshot(
+private suspend fun readAgentStatusSnapshot(
     runtime: AgentRuntimeRpc,
     sessionIndex: Int,
 ): Triple<Int, KodexAgentSettings, LlmRequestMeta?> =

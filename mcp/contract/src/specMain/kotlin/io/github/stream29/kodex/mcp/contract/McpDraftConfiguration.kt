@@ -18,6 +18,7 @@ public val ReservedMcpServerNames: Set<String> = setOf(
     "ask",
     "schedule",
     "session",
+    "agent",
     "search",
     "image",
     "mcp",

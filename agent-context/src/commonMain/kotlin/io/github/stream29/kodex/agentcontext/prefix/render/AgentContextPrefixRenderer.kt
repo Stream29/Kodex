@@ -85,7 +85,7 @@ internal fun renderToolCliInstructions(mode: RequestUserInputMode): String = bui
         }
     }
     appendLine("- `kodex schedule (create | list | delete)`: Manage persisted one-shot (`--delay-seconds` / `--at`) or recurring (`--cron`) schedules.")
-    appendLine("- `kodex session status`: Read current ISO-8601 UTC time, session configuration, and context-window token budget.")
+    appendLine("- `kodex agent status --agent \"\$KODEX_AGENT_ID\"`: Read UTC time, Agent configuration, and context-window token budget.")
     appendLine("- `kodex search`: Run web search (`-q <query>`) or full `SearchCommands` payloads (`--json` / `--stdin`).")
     appendLine("- `kodex image`: Generate or edit PNG images (`-p <prompt>`, repeatable `-i <path>`). Use `read_media(path)` to inspect local or generated images.")
     appendLine("- `kodex mcp (list | status | reconnect | enable | disable)` and `kodex <server> <tool> [--json <JSON> | --stdin]`: Manage MCP servers and invoke tools on enabled MCP servers.")

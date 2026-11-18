@@ -87,7 +87,7 @@ val cliCommandsTest by testSuite {
             listOf("terminal"), listOf("terminal", "read"), listOf("terminal", "write"),
             listOf("ask"), listOf("ask", "create"),
             listOf("schedule"), listOf("schedule", "create"),
-            listOf("session"), listOf("session", "status"),
+            listOf("session"), listOf("session", "list"), listOf("agent"), listOf("agent", "status"),
             listOf("search"), listOf("image"),
             listOf("mcp"), listOf("mcp", "status"),
             listOf("tool"), listOf("tool", "list"),
@@ -99,6 +99,7 @@ val cliCommandsTest by testSuite {
             listOf("ask"),
             listOf("schedule"),
             listOf("session"),
+            listOf("agent"),
             listOf("mcp"),
             listOf("tool"),
         )
@@ -157,6 +158,8 @@ val cliCommandsTest by testSuite {
             listOf("schedule", "create", "-d", "ping"),
             listOf("schedule", "create", "-d", "ping", "--delay-seconds", "0"),
             listOf("schedule", "create", "-d", "ping", "--cron", "* * * *"),
+            listOf("agent", "status"), listOf("agent", "status", "--agent", "-1"),
+            listOf("session", "status"), listOf("agent", "wait"), listOf("agent", "history"),
             listOf("search"),
             listOf("search", "--domain", "kotlinlang.org"),
             listOf("search", "-q", "kotlin", "--stdin"),
@@ -166,7 +169,7 @@ val cliCommandsTest by testSuite {
                 listOf("tui", "--backend-url", badUrl),
                 listOf("web", "--backend-url", badUrl),
                 listOf("host", "--origin", "http://localhost:18795", "--backend-url", badUrl),
-                listOf("session", "status", "--backend-url", badUrl),
+                listOf("session", "list", "--backend-url", badUrl),
             )
         }
         for (arguments in cases) {

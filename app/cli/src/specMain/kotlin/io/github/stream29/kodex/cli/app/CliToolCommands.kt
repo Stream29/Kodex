@@ -183,18 +183,6 @@ public class ScheduleDeleteCommand : KodexToolLeafCommand(
     public val scheduleId: Long by argument("schedule-id", help = "Schedule ID to delete.").long()
 }
 
-public class SessionCommand : KodexGroupCommand(
-    "session",
-    "Inspect Agent session state and context-window budget.",
-    SessionStatusCommand(),
-    isToolGroup = true,
-)
-
-public class SessionStatusCommand : KodexAgentToolCommand(
-    "status",
-    "Print JSON with current ISO-8601 time, Agent session metadata, and remaining context-window budget.",
-)
-
 public class SearchCommand : KodexAgentToolCommand(
     "search",
     "Execute web search or page inspection commands via the backend.",

@@ -56,9 +56,9 @@ public enum class BackendControlCommand(
     Reload("reload", "Reload backend settings from disk."),
 }
 
-/** JSON output emitted on stdout by `kodex session status`. */
+/** Result payload returned by `kodex agent status --agent ID`. */
 @Serializable
-public data class CliSessionStatusOutput(
+public data class CliAgentStatusOutput(
     @SerialName("agent_id")
     public val agentId: Int,
     @SerialName("thread_name")
@@ -79,7 +79,7 @@ public data class CliSessionStatusOutput(
     public val contextWindow: CliContextWindowSummary? = null,
 )
 
-/** Context-window token budget snapshot included in [CliSessionStatusOutput]. */
+/** Context-window token budget snapshot included in [CliAgentStatusOutput]. */
 @Serializable
 public data class CliContextWindowSummary(
     @SerialName("effective_window_tokens")
@@ -236,6 +236,7 @@ public class KodexCommand(
     AskCommand(),
     ScheduleCommand(),
     SessionCommand(),
+    AgentCommand(),
     SearchCommand(),
     ImageCommand(),
     McpCommand(),

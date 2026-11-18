@@ -42,9 +42,28 @@ import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.schema.json.StringPropertyDefinition
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 
 val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("Session queries print one sanitized failure receipt even before the RPC opens") {
+        val replies = mutableListOf<String>()
+        val exit = dispatchCliWithToolRpc(
+            arguments = listOf("agent", "status", "--agent", "7"),
+            defaultHome = Path(SystemTemporaryDirectory, "unused"),
+            output = { value, error -> assertFalse(error); replies += value },
+            env = { null },
+            discover = { error("fixture-only upstream details") },
+            openServices = { _, _, _ -> error("Must not open a failed discovery") },
+        ) { leaf, invoke -> invoke(assertIs<KodexToolLeafCommand>(leaf)) }
+        assertEquals(1, exit)
+        val output = replies.single()
+        assertFalse("fixture-only" in output)
+        val envelope = CliToolJson.decodeFromString(CliOperationEnvelope.serializer(), output)
+        assertFalse(envelope.ok)
+        assertEquals("connect", envelope.error?.phase)
+        assertEquals(7, envelope.error?.agentId)
+    }
     test("resolveToolBackend fails fast without auto-starting a backend when none is running") {
         val home = Path(SystemTemporaryDirectory, "kodex-cli-no-backend-${Random.nextLong()}")
         val error = assertFailsWith<IllegalStateException> {
@@ -242,9 +261,31 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                         return stdout
                     }
 
-                    // 1. `kodex session status` via KODEX_AGENT_ID
-                    val statusJson = runCli(listOf("session", "status")).single()
-                    val status = CliToolJson.decodeFromString(CliSessionStatusOutput.serializer(), statusJson)
+                    suspend fun query(args: List<String>): CliOperationEnvelope =
+                        CliToolJson.decodeFromString(CliOperationEnvelope.serializer(), runCli(args).single()).also {
+                            assertTrue(it.ok)
+                        }
+
+                    val archived = services.global.createSession(root)
+                    services.global.archiveSession(archived)
+                    val expectedCatalog = services.global.getSessionCatalog(includeArchived = true)
+                    val list = CliToolJson.decodeFromJsonElement(
+                        CliSessionCatalogOutput.serializer(), checkNotNull(query(listOf("session", "list")).result),
+                    ).sessions
+                    assertEquals(listOf(sessionId), list.map { it.sessionId })
+                    val fullList = CliToolJson.decodeFromJsonElement(
+                        CliSessionCatalogOutput.serializer(),
+                        checkNotNull(query(listOf("session", "list", "--include-archived")).result),
+                    ).sessions
+                    assertEquals(expectedCatalog.map { it.sessionIndex }, fullList.map { it.sessionId })
+                    assertEquals(expectedCatalog.map { it.isActive to it.running }, fullList.map { it.isActive to it.running })
+                    assertTrue(fullList.all { it.sessionId == it.rootAgentId })
+                    assertTrue(fullList.single { it.sessionId == archived }.archived)
+
+                    val status = CliToolJson.decodeFromJsonElement(
+                        CliAgentStatusOutput.serializer(),
+                        checkNotNull(query(listOf("agent", "status", "--agent", sessionId.toString())).result),
+                    )
                     assertEquals(sessionId, status.agentId)
                     assertEquals(OpenAiModelId("gpt-6-astra"), status.model)
                     assertEquals("2099-01-01T00:00:00Z", status.now)
@@ -300,7 +341,9 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                     assertTrue(toolLines.any { it.startsWith("kodex terminal list\t") })
                     assertTrue(toolLines.any { it.startsWith("kodex ask create\t") })
                     assertTrue(toolLines.any { it.startsWith("kodex schedule create\t") })
-                    assertTrue(toolLines.any { it.startsWith("kodex session status\t") })
+                    assertTrue(toolLines.any { it.startsWith("kodex session list\t") })
+                    assertTrue(toolLines.any { it.startsWith("kodex agent status\t") })
+                    assertTrue(toolLines.none { it.startsWith("kodex session status\t") })
                     assertTrue(toolLines.any { it.startsWith("kodex search\t") })
                     assertTrue(toolLines.any { it.startsWith("kodex image\t") })
                     assertTrue(toolLines.any { it.startsWith("kodex mcp list\t") })
