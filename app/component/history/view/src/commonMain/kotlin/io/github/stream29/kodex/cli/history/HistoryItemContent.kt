@@ -115,9 +115,7 @@ private fun ToolCollapsed(
 }
 
 private fun ToolHistoryItemHeader.CommandExecution.summary(): String = when (val action = action) {
-    is CommandExecutionHistoryAction.Run -> action.command.takeIf(String::isNotBlank)?.let { command ->
-        if (result == CommandExecutionHistoryResult.Failure) "Failed to run: $command" else "Run: $command"
-    } ?: if (result == CommandExecutionHistoryResult.Failure) "Failed to run" else "Run"
+    is CommandExecutionHistoryAction.Run -> action.intentName.ifEmpty { UnnamedCommandHistoryTitle }
     is CommandExecutionHistoryAction.Interact -> "Write to terminal"
     is CommandExecutionHistoryAction.Wait -> "Poll terminal output"
 }

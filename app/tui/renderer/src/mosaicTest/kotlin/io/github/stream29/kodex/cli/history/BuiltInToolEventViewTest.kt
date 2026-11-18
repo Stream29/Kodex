@@ -60,17 +60,18 @@ val builtInToolEventViewTest by testSuite {
         )
     }
 
-    test("commandFullTitleKeepsLongMultilineInputAtNarrowWidths") {
+    test("expanded command details keep long multiline input at narrow widths") {
         val command = "first\n  " + "x".repeat(290) + "\nlast"
         runMosaicTest {
             val text = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    ExpandedEvent(commandEvent(ExecCommandArguments(command, yieldTimeMillis = 10_000)), 20)
+                    ExpandedEvent(commandEvent(ExecCommandArguments(command, name = "Inspect source", yieldTimeMillis = 10_000)), 20)
                 }
             }
-            assertTrue(text.startsWith("v Run: first\n  "))
-            assertTrue("last\nexec_command" in text)
-            assertEquals(290, text.substringBefore("exec_command").count { it == 'x' })
+            assertTrue(text.startsWith("v Inspect source\n"))
+            assertTrue("cmd:\nfirst\n  " in text)
+            assertTrue("last\noutput" in text)
+            assertEquals(290, text.substringAfter("cmd:").substringBefore("\noutput").count { it == 'x' })
             assertFalse("..." in text)
             assertFalse("Command:" in text)
         }

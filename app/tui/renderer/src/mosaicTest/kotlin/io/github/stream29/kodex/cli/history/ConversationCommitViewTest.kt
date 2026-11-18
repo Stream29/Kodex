@@ -295,11 +295,11 @@ val cleanEventViewTest by testSuite {
         }
     }
 
-    test("commandToolSummarizesItsCommandAndDefersTheFunctionName") {
+    test("command disclosure shows intent and keeps the raw command in details") {
         val event = StableCommandExecution(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
-                ExecCommandArguments(command = "pwd", yieldTimeMillis = 10_000),
+                ExecCommandArguments(command = "pwd", name = "确认工作目录 🧪", yieldTimeMillis = 10_000),
             ),
             result = StableCommandExecutionResult.Output(
                 UnifiedExecOutput(
@@ -318,13 +318,14 @@ val cleanEventViewTest by testSuite {
                 Box(Modifier.width(60)) { event.render() }
             }
             }
-            assertEquals("> Run: pwd", collapsed)
+            assertEquals("> 确认工作目录 🧪", collapsed)
             assertFalse("exec_command" in collapsed)
+            assertFalse("pwd" in collapsed)
 
             val expanded = clickFirstRow()
             assertTrue("\nexec_command; yield_time_ms=10000\n" in expanded)
             assertFalse("> Arguments" in expanded)
-            assertFalse("Command: pwd" in expanded)
+            assertTrue("\ncmd:\npwd\n" in expanded)
             assertTrue("output(exit_code=0; wall_time=0.1s;" in expanded)
             assertTrue("/workspace" in expanded)
         }
@@ -334,7 +335,7 @@ val cleanEventViewTest by testSuite {
         val event = StableCommandExecution(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
-                ExecCommandArguments(command = "A你B".repeat(30), yieldTimeMillis = 10_000),
+                ExecCommandArguments(command = "pwd", name = "A你B".repeat(30), yieldTimeMillis = 10_000),
             ),
             result = StableCommandExecutionResult.Output(
                 UnifiedExecOutput(
@@ -354,17 +355,19 @@ val cleanEventViewTest by testSuite {
                 Box(Modifier.width(width)) { event.render() }
             }
             }
-            assertEquals("> Run: ${"A你B".repeat(30)}", collapsed)
+            assertEquals("> ${"A你B".repeat(30)}", collapsed)
 
             width = 42
-            assertEquals("> Run: ${"A你B".repeat(8)}...", awaitSnapshot())
+            val narrow = awaitSnapshot()
+            assertTrue(narrow.startsWith("> ${"A你B".repeat(8)}"))
+            assertTrue(narrow.endsWith("..."))
         }
     }
 
     test("recordedCommandDoesNotObserveLiveProcessCompletionOrRegistryRemoval") {
         val session = TestUnifiedExecProcessSession(
             sessionId = 7,
-            arguments = ExecCommandArguments(command = "sleep 5", yieldTimeMillis = 10_000),
+            arguments = ExecCommandArguments(command = "sleep 5", name = "Check background exit", yieldTimeMillis = 10_000),
         )
         val event = StableCommandExecution(
             callId = "command",
@@ -386,7 +389,7 @@ val cleanEventViewTest by testSuite {
 
         runMosaicTest {
             assertEquals(
-                "> Run: sleep 5",
+                "> Check background exit",
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     Box(Modifier.width(width)) { event.render(registry) }
@@ -396,7 +399,7 @@ val cleanEventViewTest by testSuite {
 
             session.completed.value = true
             width = 81 // Request a draw without relying on a forbidden live-state subscription.
-            assertEquals("> Run: sleep 5", awaitSnapshot())
+            assertEquals("> Check background exit", awaitSnapshot())
 
             val expanded = clickFirstRow()
             assertTrue("output(wall_time=0.1s; original_token_count=0):" in expanded)
@@ -427,7 +430,7 @@ val cleanEventViewTest by testSuite {
 
         runMosaicTest {
             assertEquals(
-                "> Run: sleep 5",
+                "> Run a command",
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     Box(Modifier.width(60)) { event.render() }

@@ -41,9 +41,9 @@ val offscreenHistoryItemsTest by testSuite {
     for (grouped in listOf(false, true)) {
         test("terminal exit stays a single row and reveals the full command, grouped=$grouped") { offscreenTest {
             val code = if (grouped) 23 else 0
-            val summary = "Terminal #37 exit $code"
             val command = "first\n" + "x".repeat(120) + "\nlast"
-            val name = "long name ".repeat(22).trimEnd()
+            val name = if (grouped) "检查作业 🧪 " + "long name".repeat(20) else ""
+            val summary = if (grouped) "Exit $code · $name" else "Terminal #37 exit $code"
             val child = object : MessageHistoryItemViewModel {
                 override val index = 4
                 override val state = MutableStateFlow(
@@ -74,7 +74,7 @@ val offscreenHistoryItemsTest by testSuite {
                 assertFalse(scene.hasText(name))
                 assertFalse(scene.hasText(command))
                 scene.clickDescription(summary)
-                scene.settle { scene.hasText(command) && scene.hasText(name) }
+                scene.settle { scene.hasText(command) && (!grouped || scene.hasText(name)) }
                 assertFalse(scene.hasDescription("History tool: $summary"))
                 scene.clickDescription(summary)
                 scene.settle { !scene.hasText(command) && !scene.hasText(name) }
@@ -458,12 +458,12 @@ val offscreenHistoryItemsTest by testSuite {
         try {
             scene.settle { scene.hasDescription("History entry 42") && scene.hasText("Error") }
             val header = ToolHistoryItemHeader.CommandExecution(
-                CommandExecutionHistoryAction.Run("pwd"), CommandExecutionHistoryResult.Failure, 1.milliseconds,
+                CommandExecutionHistoryAction.Run("Check cwd"), CommandExecutionHistoryResult.Failure, 1.milliseconds,
             )
             states.value = ToolHistoryItemState.Collapsed(header)
-            scene.settle { scene.hasDescription("Expand History item: Failed to run: pwd") }
+            scene.settle { scene.hasDescription("Expand History item: Check cwd") }
             assertFalse(scene.hasText("Error"))
-            scene.clickDescription("Expand History item: Failed to run: pwd")
+            scene.clickDescription("Expand History item: Check cwd")
             assertEquals(1, expands)
             assertEquals(0, collapses)
             states.value = ToolHistoryItemState.Expanded(
@@ -473,14 +473,15 @@ val offscreenHistoryItemsTest by testSuite {
                     action = StableCommandExecutionAction.ExecCommand(
                         io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments(
                             command = "pwd",
+                            name = "Check cwd",
                             yieldTimeMillis = 10_000,
                         ),
                     ),
                     result = StableCommandExecutionResult.Failure("permission denied"),
                 ),
             )
-            scene.settle { scene.hasDescription("History tool: Run: pwd") && scene.hasText("error: permission denied") }
-            scene.clickDescription("History tool: Run: pwd")
+            scene.settle { scene.hasDescription("History tool: Check cwd") && scene.hasText("error: permission denied") }
+            scene.clickDescription("History tool: Check cwd")
             assertEquals(1, expands)
             assertEquals(1, collapses)
             scene.frame()

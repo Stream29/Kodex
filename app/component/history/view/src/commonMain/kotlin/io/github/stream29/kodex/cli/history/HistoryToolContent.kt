@@ -10,7 +10,13 @@ import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecDefaultMaxOutputTokens
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
+import io.github.stream29.kodex.tool.unifiedexec.commandIntentDisplayName
 import kotlin.time.Duration
+
+internal const val UnnamedCommandHistoryTitle = "Run a command"
+
+internal fun ExecCommandArguments.commandHistoryTitle(): String =
+    name.commandIntentDisplayName().ifEmpty { UnnamedCommandHistoryTitle }
 
 @Composable
 public actual fun HistoryPlanContent(event: StablePlanUpdate, renderer: HistoryContentRenderer) {
@@ -34,7 +40,7 @@ private fun PlanContent(
 public actual fun HistoryCommandContent(event: StableCommandExecution, renderer: HistoryContentRenderer) {
     val action = event.action
     val summary = when (action) {
-        is StableCommandExecutionAction.ExecCommand -> "Run: ${action.arguments.command}"
+        is StableCommandExecutionAction.ExecCommand -> action.arguments.commandHistoryTitle()
         is StableCommandExecutionAction.WriteStdin -> if (action.arguments.chars.isEmpty()) "Poll terminal output" else "Write to terminal"
     }
     val firstLine = when (action) {
@@ -52,6 +58,10 @@ public actual fun HistoryCommandContent(event: StableCommandExecution, renderer:
     }
     renderer.Tool(summary, null, status, event.callId, HistoryTextStyle.Normal, summary) { details ->
         details.RecordedMetadata(firstLine, HistoryTextStyle.Normal)
+        if (action is StableCommandExecutionAction.ExecCommand) {
+            details.RecordedMetadata("cmd:", HistoryTextStyle.Normal)
+            details.Text(action.arguments.command, HistoryTextStyle.Normal)
+        }
         if (action is StableCommandExecutionAction.WriteStdin && action.arguments.chars.isNotEmpty()) {
             details.Text("chars: ${action.arguments.chars}", HistoryTextStyle.Normal)
         }

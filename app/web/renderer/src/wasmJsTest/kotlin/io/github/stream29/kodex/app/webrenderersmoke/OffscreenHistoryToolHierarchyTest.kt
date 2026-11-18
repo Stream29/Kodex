@@ -41,15 +41,15 @@ val offscreenHistoryToolHierarchyTest by testSuite {
         test("collapsed command stays one visual line and expanded command remains complete width=$width failed=$failed") { offscreenTest {
             val preview = "printf " + "long-command-".repeat(12)
             val command = "$preview\nprintf 'second line'"
-            val summary = "${if (failed) "Failed to run" else "Run"}: $preview"
+            val summary = "检查命令 🧪 " + "long-intent-".repeat(12)
             val event = StableCommandExecution(
                 "one-line", action = StableCommandExecutionAction.ExecCommand(
-                    ExecCommandArguments(command, yieldTimeMillis = 1000)),
+                    ExecCommandArguments(command, name = summary, yieldTimeMillis = 1000)),
                 result = if (failed) StableCommandExecutionResult.Failure("fixture error")
                 else StableCommandExecutionResult.Output(UnifiedExecOutput("chunk", 0.0, 0, originalTokenCount = 1, output = "ok")),
             )
             val header = ToolHistoryItemHeader.CommandExecution(
-                CommandExecutionHistoryAction.Run(preview),
+                CommandExecutionHistoryAction.Run(summary),
                 if (failed) CommandExecutionHistoryResult.Failure else CommandExecutionHistoryResult.Output(0, null),
                 0.milliseconds,
             )
@@ -66,12 +66,12 @@ val offscreenHistoryToolHierarchyTest by testSuite {
             try {
                 scene.settle { scene.hasDescription("Expand History item: $summary") }
                 assertEquals(1, scene.hierarchyLayout(summary).lineCount)
+                assertFalse(scene.hasText(command))
                 scene.clickDescription("Expand History item: $summary")
-                val full = "Run: $command"
-                scene.settle { scene.hasDescription("History tool: $full") }
-                assertEquals(full, scene.hierarchyLayout(full).layoutInput.text.text)
-                assertTrue(scene.hierarchyLayout(full).lineCount > 1)
-                scene.clickDescription("History tool: $full")
+                scene.settle { scene.hasDescription("History tool: $summary") && scene.hasText(command) }
+                assertEquals(command, scene.hierarchyLayout(command).layoutInput.text.text)
+                assertTrue(scene.hierarchyLayout(command).lineCount > 1)
+                scene.clickDescription("History tool: $summary")
                 scene.settle { scene.hasDescription("Expand History item: $summary") }
                 assertEquals(1, scene.hierarchyLayout(summary).lineCount)
             } finally { scene.close() }
@@ -80,10 +80,10 @@ val offscreenHistoryToolHierarchyTest by testSuite {
     for (width in listOf(180, 360)) {
         test("running command stays one visual line when collapsed width=$width") { offscreenTest {
             val command = "printf " + "long-command-".repeat(12)
-            val summary = "Running: $command"
+            val summary = "等待命令 🧪 " + "long-intent-".repeat(12)
             val event = PendingCommandExecution(
                 "running-one-line", action = PendingCommandExecutionAction.ExecCommand(
-                    ExecCommandArguments(command, yieldTimeMillis = 1000)),
+                    ExecCommandArguments(command, name = summary, yieldTimeMillis = 1000)),
             )
             val scene = OffscreenScene.create(width = width, height = 1000) {
                 MaterialTheme { HistoryEventContent(event, rememberComposeHistoryItemRenderer()) }
@@ -149,7 +149,7 @@ val offscreenHistoryToolHierarchyTest by testSuite {
             val event = StableCommandExecution(
                 "command-hierarchy",
                 action = StableCommandExecutionAction.ExecCommand(
-                    ExecCommandArguments("printf hello", workdir = "/fixture", yieldTimeMillis = 10_000)),
+                    ExecCommandArguments("printf hello", name = "Print greeting", workdir = "/fixture", yieldTimeMillis = 10_000)),
                 result = StableCommandExecutionResult.Output(
                     UnifiedExecOutput("fake", 0.0, exitCode = 0, originalTokenCount = 2, output = "raw\n  output")),
             )
@@ -160,8 +160,8 @@ val offscreenHistoryToolHierarchyTest by testSuite {
                 }
             }
             try {
-                scene.settle { scene.hasDescription("History tool: Run: printf hello") }
-                scene.clickDescription("History tool: Run: printf hello")
+                scene.settle { scene.hasDescription("History tool: Print greeting") }
+                scene.clickDescription("History tool: Print greeting")
                 val metadata = "exec_command; cwd=/fixture; yield_time_ms=10000"
                 val outputHeader = "output(exit_code=0; wall_time=0.0s; original_token_count=2):"
                 scene.settle { scene.hasText(metadata) && scene.hasText("raw\n  output") }

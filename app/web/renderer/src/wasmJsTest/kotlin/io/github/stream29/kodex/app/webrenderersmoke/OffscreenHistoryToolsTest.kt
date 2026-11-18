@@ -126,9 +126,9 @@ val offscreenHistoryToolsTest by testSuite {
                     }
                 }
                 try {
-                    scene.settle { scene.hasDescription("History tool: Run: fixture-command") &&
+                    scene.settle { scene.hasDescription("History tool: Run a command") &&
                         scene.hasDescription("History tool: Poll terminal output") }
-                    scene.clickDescription("History tool: Run: fixture-command")
+                    scene.clickDescription("History tool: Run a command")
                     scene.clickDescription("History tool: Poll terminal output")
                     scene.settle { scene.hasText(output) && scene.hasText(pollOutput) }
                     fun layout(value: String): TextLayoutResult {
@@ -191,23 +191,24 @@ val offscreenHistoryToolsTest by testSuite {
         val output = "  output\n[output truncated]\n"
         val event = StableCommandExecution(
             "recorded", action = StableCommandExecutionAction.ExecCommand(ExecCommandArguments(
-                command, workdir = "/repo", yieldTimeMillis = 10_000, maxOutputTokens = 42,
+                command, name = "Read multiline input", workdir = "/repo", yieldTimeMillis = 10_000, maxOutputTokens = 42,
             )),
             result = StableCommandExecutionResult.Output(UnifiedExecOutput("private-chunk", 0.0, exitCode = 0, originalTokenCount = 0, output = output)),
         )
         val scene = OffscreenScene.create { HistoryCommandContent(event, rememberComposeHistoryContentRenderer()) }
         try {
-            scene.settle { scene.hasDescription("History tool: Run: $command") }
+            scene.settle { scene.hasDescription("History tool: Read multiline input") }
+            assertFalse(scene.hasText(command))
             assertFalse(scene.hasText(output))
             val before = scene.frame()
-            scene.clickDescription("History tool: Run: $command")
+            scene.clickDescription("History tool: Read multiline input")
             scene.settle { scene.hasText(output) }
-            assertTrue(scene.hasText("Run: $command"))
+            assertTrue(scene.hasText(command))
             assertTrue(scene.hasText("exec_command; cwd=/repo; yield_time_ms=10000; max_output_tokens=42"))
             assertTrue(scene.hasText("output(exit_code=0; wall_time=0.0s; original_token_count=0):"))
             assertFalse(scene.hasText("private-chunk"))
             assertFalse(before.contentEquals(scene.frame()))
-            scene.clickDescription("History tool: Run: $command")
+            scene.clickDescription("History tool: Read multiline input")
             scene.settle { !scene.hasText(output) }
         } finally { scene.close() }
     } }

@@ -100,8 +100,9 @@ public sealed interface ToolHistoryItemHeader {
 }
 
 public sealed interface CommandExecutionHistoryAction {
+    /** Single-line display name from this call only; empty for an unnamed historical call. */
     public data class Run(
-        public val command: String,
+        public val intentName: String,
     ) : CommandExecutionHistoryAction
 
     /** @throws IllegalArgumentException if [sessionId] is negative. */

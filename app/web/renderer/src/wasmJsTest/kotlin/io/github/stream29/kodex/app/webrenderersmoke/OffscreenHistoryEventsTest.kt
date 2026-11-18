@@ -263,7 +263,8 @@ val offscreenHistoryEventsTest by testSuite {
                 }
             }
             try {
-                scene.settle { scene.hasDescription("History tool: Model emitted an invalid tool call") }
+                val title = if (kind == 0) "Run a command" else "Model emitted an invalid tool call"
+                scene.settle { scene.hasDescription("History tool: $title") }
                 scene.key(Key.Tab)
                 scene.key(Key.Enter)
                 scene.settle { scene.hasText(errorText) && scene.hasText(expectedInput) }
@@ -355,7 +356,7 @@ val offscreenHistoryEventsTest by testSuite {
         Triple(PendingCustomToolCall("custom", name = "external", input = "raw input"),
             "Running external", "Tool: external"),
         Triple(PendingCommandExecution("exec", action = PendingCommandExecutionAction.ExecCommand(ExecCommandArguments("pwd", yieldTimeMillis = 10_000))),
-            "Running: pwd", "Tool: exec_command"),
+            "Run a command", "Tool: exec_command"),
         Triple(PendingCommandExecution("poll", action = PendingCommandExecutionAction.WriteStdin(WriteStdinArguments(77, yieldTimeMillis = 250))),
             "Waiting for terminal session 77", "Tool: write_stdin"),
         Triple(PendingReadMedia("media", arguments = ReadMediaToolArguments("/image.png")),
@@ -368,7 +369,7 @@ val offscreenHistoryEventsTest by testSuite {
             "Waiting for events (terminals: 3, 5)", "Tool: await_event"),
         Triple(PendingInvalidToolCall("invalid", invocation = PendingInvalidToolInvocation.Function(
             name = "exec_command", arguments = "{BROKEN"), message = "Invalid"),
-            "Model emitted an invalid tool call", "error: Invalid"),
+            "Run a command", "error: Invalid"),
         Triple(PendingServerToolSearch(ResponseItem.ServerToolSearchCall(arguments = emptyHistoryArguments)),
             "Searching cloud tools", "Tool: server_tool_search"),
     )

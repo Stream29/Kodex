@@ -55,7 +55,7 @@ val agentHistoryEntryInteractionTest by testSuite {
         test("terminal exit is a one-line disclosure, grouped=$grouped") {
             val code = if (grouped) 23 else 0
             val child = FakeMessage(4, MessageHistoryItemState.Ready(
-                StableTerminalExitedEvent(37, "background ".repeat(10), "first\n${"x".repeat(96)}\nlast", code),
+                StableTerminalExitedEvent(37, if (grouped) "检查作业" else null, "first\n${"x".repeat(96)}\nlast", code),
                 Duration.ZERO,
             ))
             val item = if (grouped) FakeWorkGroup(4..4, listOf(child)) else child
@@ -68,25 +68,31 @@ val agentHistoryEntryInteractionTest by testSuite {
                     }
                 }
                 val line = if (grouped) 1 else 0
+                val title = if (grouped) "Exit $code · 检查作业" else "Terminal #37 exit $code"
+                suspend fun waitUntil(predicate: (String) -> Boolean): String = kotlinx.coroutines.withTimeout(5_000) {
+                    var draw: String
+                    do { draw = awaitSnapshot() } while (!predicate(draw))
+                    draw
+                }
                 if (grouped) {
                     assertFalse("Terminal" in snapshot)
                     sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
                     awaitSnapshot()
                     sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Release))
-                    snapshot = awaitSnapshot()
+                    snapshot = waitUntil { title in it }
                 }
-                assertEquals("> Terminal #37 exit $code", snapshot.lines().filter(String::isNotBlank)[line].trimEnd())
+                assertEquals("> $title", snapshot.lines().filter(String::isNotBlank)[line].trimEnd())
                 assertEquals(line + 1, snapshot.lines().count(String::isNotBlank))
                 sendMouseEvent(MouseEvent(1, line, MouseEvent.Type.Press, MouseEvent.Button.Left))
                 awaitSnapshot()
                 sendMouseEvent(MouseEvent(1, line, MouseEvent.Type.Release))
-                val expanded = awaitSnapshot()
-                assertTrue("first" in expanded && "last" in expanded && "background" in expanded, expanded)
-                assertEquals(97, expanded.count { it == 'x' }) // command plus the x in "exit"
+                val expanded = waitUntil { "first" in it && "last" in it }
+                assertTrue("first" in expanded && "last" in expanded, expanded)
+                assertEquals(97, expanded.count { it == 'x' }) // command plus the x in the title
                 sendMouseEvent(MouseEvent(1, line, MouseEvent.Type.Press, MouseEvent.Button.Left))
                 awaitSnapshot()
                 sendMouseEvent(MouseEvent(1, line, MouseEvent.Type.Release))
-                assertEquals(snapshot, awaitSnapshot())
+                assertEquals(snapshot, waitUntil { it == snapshot })
             }
         }
     }

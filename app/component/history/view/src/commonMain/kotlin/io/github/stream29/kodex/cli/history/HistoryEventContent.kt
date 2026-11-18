@@ -55,6 +55,7 @@ import io.github.stream29.kodex.tool.readmedia.MediaDetail
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
+import io.github.stream29.kodex.tool.unifiedexec.commandIntentDisplayName
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -85,7 +86,9 @@ public actual fun HistoryEventContent(
                     assistantBody = { renderer.AssistantText(it) },
                 )
             is StableTerminalExitedEvent -> renderer.TerminalExit(
-                summary = "Terminal #$sessionId exit $exitCode",
+                summary = name.commandIntentDisplayName().let { title ->
+                    if (title.isEmpty()) "Terminal #$sessionId exit $exitCode" else "Exit $exitCode · $title"
+                },
                 status = if (exitCode == 0) "completed" else "failed",
                 expansionKey = this,
             ) {
@@ -181,7 +184,7 @@ public actual fun HistoryEventContent(
 private fun StableInvalidToolCall.renderInvalidToolCall() {
     if (isRedesignedInternalCall(invocation.displayName())) {
         BuiltInToolEvent(
-            summary = "Model emitted an invalid tool call",
+            summary = invalidToolTitle(invocation.displayName(), invocation is InvalidToolInvocation.Function),
             firstLine = invocation.displayName(),
             status = "failed",
             expansionKey = callId,
@@ -375,7 +378,7 @@ private fun StableAwait.renderAwaitEvent() {
 private fun PendingInvalidToolCall.renderInvalidToolCall() {
     if (isRedesignedInternalCall(invocation.displayName())) {
         BuiltInToolEvent(
-            summary = "Model emitted an invalid tool call",
+            summary = invalidToolTitle(invocation.displayName(), invocation is PendingInvalidToolInvocation.Function),
             firstLine = invocation.displayName(),
             status = "failed",
             expansionKey = callId,
@@ -399,6 +402,9 @@ private fun PendingInvalidToolCall.renderInvalidToolCall() {
         section("Error") { DetailRecordedError("Error", message, TextStyle.Dim) }
     }
 }
+
+private fun invalidToolTitle(displayName: String, function: Boolean): String =
+    if (function && displayName == "exec_command") UnnamedCommandHistoryTitle else "Model emitted an invalid tool call"
 
 @Composable
 internal fun ToolEvent(
@@ -631,9 +637,8 @@ internal fun functionToolOngoingSummary(
     namespace: String?,
 ): String = when (qualifiedName(name, namespace)) {
     "await_event" -> "Waiting for events"
-    "exec_command",
-    "shell.run",
-        -> "Running a command"
+    "exec_command" -> UnnamedCommandHistoryTitle
+    "shell.run" -> "Running a command"
 
     "write_stdin" -> "Interacting with a terminal session"
     "read_media" -> "Reading media"
@@ -680,15 +685,9 @@ internal fun customToolOngoingSummary(
 private fun PendingCommandExecutionAction.ongoingToolSummary(
     sourceArguments: ExecCommandArguments? = null,
 ): String = when (this) {
-    is PendingCommandExecutionAction.ExecCommand -> arguments.ongoingToolSummary()
+    is PendingCommandExecutionAction.ExecCommand -> arguments.commandHistoryTitle()
     is PendingCommandExecutionAction.WriteStdin -> arguments.ongoingToolSummary(sourceArguments)
 }
-
-private fun ExecCommandArguments.ongoingToolSummary(): String =
-    command.singleLineSummary()
-        .takeIf(String::isNotBlank)
-        ?.let { command -> "Running: $command" }
-        ?: "Running a command"
 
 private fun WriteStdinArguments.ongoingToolSummary(
     sourceArguments: ExecCommandArguments? = null,

@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.history
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
@@ -27,6 +28,7 @@ import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
 import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.WebSearchAction
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
+import io.github.stream29.kodex.tool.unifiedexec.commandIntentDisplayName
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration
 
@@ -49,7 +51,7 @@ internal fun AgentCommit.CompletedTool.toHistoryHeader(
     is StableCommandExecution -> ToolHistoryItemHeader.CommandExecution(
         action = when (val action = action) {
             is StableCommandExecutionAction.ExecCommand ->
-                CommandExecutionHistoryAction.Run(action.arguments.command.historyPreview())
+                CommandExecutionHistoryAction.Run(action.arguments.name.commandIntentDisplayName())
 
             is StableCommandExecutionAction.WriteStdin ->
                 if (action.arguments.chars.isEmpty()) {
@@ -91,7 +93,12 @@ internal fun AgentCommit.CompletedTool.toHistoryHeader(
 
 private fun AgentCommit.CompletedTool.historyToolSummary(failed: Boolean): String = when (this) {
     is StableAwait -> functionToolSummary("await_event", null, failed)
-    is StableInvalidToolCall -> "Model emitted an invalid tool call"
+    is StableInvalidToolCall -> when (val call = invocation) {
+        is InvalidToolInvocation.Function -> if (call.name == "exec_command" && call.namespace == null) {
+            functionToolSummary(call.name, call.namespace, failed = false)
+        } else "Model emitted an invalid tool call"
+        is InvalidToolInvocation.Custom -> "Model emitted an invalid tool call"
+    }
     is StableServerToolSearch -> functionToolSummary("server_tool_search", null, failed)
     is StableWebSearchCall ->
         item.action?.historySummary(failed) ?: if (failed) "Failed to search the web" else "Search the web"

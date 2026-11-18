@@ -30,7 +30,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 import kotlin.time.Duration.Companion.milliseconds
 
 val historyItemHeaderFactoryTest by testSuite {
@@ -77,12 +77,13 @@ val historyItemHeaderFactoryTest by testSuite {
         assertEquals("Failed to run filesystem.inspect", header(success = false).summary)
     }
 
-    test("commandHeaderRetainsOnlyBoundedPresentationAndOutcomeDiscriminators") {
+    test("command header retains only its own intent name and outcome discriminators") {
         val event = StableCommandExecution(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
                 ExecCommandArguments(
                     command = "printf first\n" + "x".repeat(300),
+                    name = "  读取\n测试日志 🧪  ",
                     yieldTimeMillis = 10_000,
                 ),
             ),
@@ -102,9 +103,13 @@ val historyItemHeaderFactoryTest by testSuite {
             event.toHistoryHeader(12.milliseconds),
         )
         val action = assertIs<CommandExecutionHistoryAction.Run>(header.action)
-        assertTrue(action.command.startsWith("printf first x"))
-        assertTrue(action.command.endsWith("..."))
-        assertTrue(action.command.length <= 240)
+        assertEquals("读取 测试日志 🧪", action.intentName)
+        assertFalse("printf" in header.toString())
+        assertFalse("large output" in header.toString())
+        val unnamed = event.copy(action = StableCommandExecutionAction.ExecCommand(
+            ExecCommandArguments(command = "do not use this as the title", yieldTimeMillis = 100),
+        )).toHistoryHeader(12.milliseconds)
+        assertEquals(CommandExecutionHistoryAction.Run(""), assertIs<ToolHistoryItemHeader.CommandExecution>(unnamed).action)
         assertEquals(
             CommandExecutionHistoryResult.Output(exitCode = 0, sessionId = 7),
             header.result,
