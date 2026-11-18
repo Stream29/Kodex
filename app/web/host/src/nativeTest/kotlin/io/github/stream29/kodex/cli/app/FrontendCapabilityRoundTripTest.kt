@@ -37,6 +37,7 @@ import kotlinx.io.writeString
 import kotlinx.serialization.json.*
 import kotlin.random.Random
 import kotlin.test.*
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 // runBackendHost owns process-wide cwd/signals/logging. Run this suite in an isolated test
@@ -45,11 +46,10 @@ import kotlin.time.Duration.Companion.seconds
 private val roundTripProcess = Mutex()
 
 val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("frontend owner never renews an idle backend and closes safely after its expiry") {
+    test("hosting an unused grant never renews an idle backend") {
         withRoundTrip(ttlSeconds = 5) { f ->
             f.host { page ->
-                assertEquals(FrontendCapabilityStatus.Ready, page.info.host.capabilities.directoryBrowsing)
-                assertEquals(FrontendCapabilityStatus.Ready, page.info.host.capabilities.contextPathEvaluation)
+                assertEquals(LocalFrontendBootstrapProtocol, page.info.protocol)
                 withTimeout(15.seconds) {
                     while (BackendInstance.discover(f.home) != null) delay(50)
                 }
@@ -121,48 +121,46 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
         }
     }
 
-    test("typed host HTTP authenticates exact owner and Origin and isolates independent leases") {
+    test("reload shares one grant and different hosts revoke only their own admission") {
         withRoundTrip { f ->
             f.host { page ->
                 val second = f.bootstrap(page.launchUrl)
-                val probe = LocalFrontendHostRequest.RenewOwner
-                for ((credential, owner) in listOf(
-                    f.endpoint.password to page.info.host.owner,
-                    page.info.endpoint.password to page.info.host.owner,
-                    page.info.host.credential to second.info.host.owner,
-                    second.info.host.credential to page.info.host.owner,
-                )) {
-                    assertEquals(401, page.raw(probe, credential = credential, owner = owner).status)
+                assertEquals(page.info.endpoint.password, second.info.endpoint.password)
+                assertEquals(401, page.heartbeat(credential = f.endpoint.password).status)
+                assertEquals(403, page.heartbeat(origin = "http://127.0.0.1:1").status)
+                assertEquals(200, second.heartbeat().status)
+                lateinit var nested: RoundTripPage
+                f.host { independent ->
+                    nested = independent
+                    assertNotEquals(page.info.endpoint.password, independent.info.endpoint.password)
+                    assertEquals(401, independent.heartbeat(credential = page.info.endpoint.password).status)
+                    assertEquals(200, independent.heartbeat().status)
                 }
-                assertEquals(403, page.raw(probe, origin = "http://127.0.0.1:1").status)
-                assertEquals(403, page.raw(probe, authority = "localhost:${Url(page.info.host.baseUrl).port}").status)
-                assertIs<LocalFrontendHostReply.OwnerRenewed>(page.call(probe))
-                assertIs<LocalFrontendHostReply.OwnerClosed>(page.call(LocalFrontendHostRequest.CloseOwner))
-                assertEquals(401, page.raw(LocalFrontendHostRequest.RenewOwner).status)
-                assertIs<LocalFrontendHostReply.OwnerRenewed>(second.call(LocalFrontendHostRequest.RenewOwner))
-                assertIs<LocalFrontendHostReply.OwnerClosed>(second.call(LocalFrontendHostRequest.CloseOwner))
+                assertEquals(403, nested.heartbeat().status)
+                assertEquals(200, page.heartbeat().status)
                 assertTrue(frontendBackendReady(f.endpoint), "Closing a frontend must not stop the backend.")
             }
         }
     }
 
-    test("expired owner HTTP is rejected without renewing the backend") {
+    test("a frozen page grant expires and a later bootstrap cannot revive it") {
         withRoundTrip { f ->
             f.host { page ->
-                // The HTTP composition intentionally has no fake clock; exercise the real finite lease.
-                delay(page.info.host.leaseMillis + 100)
-                assertEquals(401, page.raw(LocalFrontendHostRequest.RenewOwner).status)
-                assertEquals(401, page.raw(LocalFrontendHostRequest.CloseOwner).status)
+                delay(60.seconds + 200.milliseconds)
+                assertEquals(403, page.heartbeat().status)
+                val stale = f.bootstrap(page.launchUrl)
+                assertEquals(page.info.endpoint.password, stale.info.endpoint.password)
+                assertEquals(403, stale.heartbeat().status)
                 assertTrue(frontendBackendReady(f.endpoint))
             }
         }
     }
 
     for (source in KodexAuthSource.entries) {
-        test("OpenAI $source backend callback accepted save survives owner close and RPC cancellation") {
+        test("OpenAI $source backend callback accepted save survives frontend RPC cancellation") {
             withRoundTrip { f ->
                 f.wire.requireOpenAiPortsFree()
-                f.host { page ->
+                f.host { _ ->
                     f.rpc(bound = true) { rpc ->
                         val old = rpc.global.getSettings()
                         val other = KodexAuthSource.entries.single { it != source }
@@ -171,7 +169,6 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
                         f.authorize(authorization)
                         try {
                             withTimeout(10.seconds) { f.login.entered.await() }
-                            assertIs<LocalFrontendHostReply.OwnerClosed>(page.call(LocalFrontendHostRequest.CloseOwner))
                             waiter.cancelAndJoin()
                             assertFalse(f.login.exchangeCancelled.isCompleted)
                             assertFalse(SystemFileSystem.exists(f.authPath(source)))
@@ -207,7 +204,7 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
     test("dropping pending observation and exact cancellation release listeners without exchange") {
         withRoundTrip { f ->
             f.wire.requireOpenAiPortsFree()
-            f.host { page ->
+            f.host { _ ->
                 f.rpc(bound = true) { rpc ->
                     val target = OAuthTarget.OpenAi(KodexAuthSource.Kodex)
                     val (abandoned, observer) = observeRoundTripOAuth(rpc.global.startOAuthLogin(target))
@@ -228,9 +225,9 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
         }
     }
 
-    test("MCP production discovery registration and token exchange persist after accepted owner disposal") {
+    test("MCP production discovery registration and token exchange persist after frontend disposal") {
         withRoundTrip { f ->
-            f.host { page ->
+            f.host { _ ->
                 val redirect = f.wire.spareRedirect()
                 f.rpc(bound = true) { rpc ->
                     val old = rpc.global.getSettings()
@@ -252,7 +249,6 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
                     f.authorize(authorization)
                     try {
                         withTimeout(10.seconds) { f.provider.tokenEntered.await() }
-                        assertIs<LocalFrontendHostReply.OwnerClosed>(page.call(LocalFrontendHostRequest.CloseOwner))
                         waiter.cancelAndJoin()
                     } finally {
                         f.provider.releaseToken.complete(Unit)
@@ -307,10 +303,8 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
                         assertEquals(FrontendErrorAdmission.Admitted, rpc.global.reportFrontendError("roundtrip-error"))
                         f.awaitFile(started)
                         assertFalse(SystemFileSystem.exists(input))
-                        assertIs<LocalFrontendHostReply.OwnerClosed>(page.call(LocalFrontendHostRequest.CloseOwner))
-                        assertEquals(401, page.raw(LocalFrontendHostRequest.RenewOwner).status)
                     }
-                    // The original frontend's owner and RPC connection are both gone.
+                    // The original business connection is gone.
                     SystemCoroutineFileSystem.writeString(release, "release")
                     f.awaitFile(input)
                     f.awaitFile(marker)
@@ -323,7 +317,7 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
                     assertEquals("roundtrip-error", notification.getValue("message").jsonPrimitive.content)
                     val replacement = f.bootstrap(page.launchUrl)
                     delay(250)
-                    assertIs<LocalFrontendHostReply.OwnerClosed>(replacement.call(LocalFrontendHostRequest.CloseOwner))
+                    assertEquals(200, replacement.heartbeat().status)
                     assertEquals("x", SystemCoroutineFileSystem.readString(marker).trim())
                     for (wrong in listOf(f.launch, f.foreignCwd)) {
                         assertFalse(SystemFileSystem.exists(Path(wrong, "roundtrip-hook-input")))
@@ -351,11 +345,11 @@ private class RoundTripFixture(val root: Path, val wire: RoundTripWire, val prov
     suspend fun <R> rpc(bound: Boolean = false, block: suspend CoroutineScope.(RpcServices) -> R): R =
         withLocalRpcClient(home, endpoint) { block(RpcServices(RestoringRpcClient(if (bound) it.bindOperation() else it))) }
 
-    suspend fun <R> host(block: suspend CoroutineScope.(RoundTripPage) -> R): R = withFrontendHostListener(
+    suspend fun <R> host(block: suspend CoroutineScope.(RoundTripPage) -> R): R = withLocalFrontendHost(
         endpoint, launch.toString(),
         openResource = { if (it == "index.html") Buffer().apply { writeString("<!doctype html>") } else null },
         newSecret = ::randomBackendPassword,
-    ) { launchUrl, _ -> block(bootstrap(launchUrl)) }
+    ) { launchUrl -> block(bootstrap(launchUrl)) }
 
     suspend fun bootstrap(launchUrl: String): RoundTripPage {
         val url = Url(launchUrl)
@@ -369,9 +363,6 @@ private class RoundTripFixture(val root: Path, val wire: RoundTripWire, val prov
         val info = LocalFrontendHostJson.decodeFromString(LocalFrontendBootstrap.serializer(), response.body)
         assertEquals(endpoint.instanceId, info.endpoint.instanceId)
         assertEquals(launch.toString(), info.workingDirectory)
-        assertEquals(launch.toString(), info.host.launchDirectory)
-        assertEquals(FrontendCapabilityStatus.Ready, info.host.capabilities.directoryBrowsing)
-        assertEquals(FrontendCapabilityStatus.Ready, info.host.capabilities.contextPathEvaluation)
         return RoundTripPage(launchUrl, info, wire)
     }
 
@@ -452,30 +443,18 @@ private class RoundTripPage(
     val info: LocalFrontendBootstrap,
     val wire: RoundTripWire,
 ) {
-    suspend fun raw(
-        request: LocalFrontendHostRequest,
-        credential: String = info.host.credential,
-        owner: LocalFrontendOwner = info.host.owner,
-        origin: String = info.host.origin,
-        authority: String = Url(info.host.baseUrl).let { "${it.host}:${it.port}" },
+    suspend fun heartbeat(
+        credential: String = info.endpoint.password,
+        origin: String = "http://127.0.0.1:${Url(launchUrl).port}",
     ): RoundTripHttpReply = wire.request(
-        info.host.baseUrl, "POST", LocalFrontendHostPath, origin, authority,
-        LocalFrontendHostJson.encodeToString(LocalFrontendHostCall.serializer(), LocalFrontendHostCall(
-            LocalFrontendHostProtocol, info.host.hostInstanceId, credential, owner, request,
-        )),
+        "http://127.0.0.1:${info.endpoint.port}", "POST", "/heartbeat", origin,
+        extraHeaders = listOf(
+            "Authorization" to "Bearer $credential",
+            "X-Kodex-Instance" to info.endpoint.instanceId,
+            "X-Kodex-Protocol" to BackendBusinessProtocol,
+            "X-Kodex-Browser-Protocol" to LocalBrowserProtocol.toString(),
+        ),
     )
-
-    suspend fun call(request: LocalFrontendHostRequest): LocalFrontendHostReply {
-        val response = raw(request)
-        assertEquals(200, response.status)
-        assertEquals("no-store", response.headers["cache-control"])
-        assertFalse(response.body.contains(info.host.credential))
-        val result = LocalFrontendHostJson.decodeFromString(LocalFrontendHostResult.serializer(), response.body)
-        assertEquals(LocalFrontendHostProtocol, result.protocol)
-        assertEquals(info.host.hostInstanceId, result.hostInstanceId)
-        assertEquals(info.host.owner.value, result.owner.value)
-        return result.reply
-    }
 }
 
 private class RoundTripLogin(private val provider: RoundTripProvider) : OpenAiLoginClient {

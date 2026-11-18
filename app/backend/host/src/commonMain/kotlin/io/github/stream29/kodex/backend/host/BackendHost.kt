@@ -38,7 +38,6 @@ public actual suspend fun runBackendHost(
     agentsHome: Path,
     createClient: (OpenAiAuthStore) -> OpenAiClient,
     createLoginClient: () -> OpenAiLoginClient,
-    browserOrigins: Set<String>,
 ): Unit = coroutineScope {
     suspend fun resolveDirectory(requested: String?): String {
         require(requested == null || '\u0000' !in requested) { "The browser working directory contains NUL." }
@@ -50,7 +49,7 @@ public actual suspend fun runBackendHost(
         }
         return resolved.toString()
     }
-    val browserAccess = LocalBrowserAccess(browserOrigins, ::resolveDirectory)
+    val browserAccess = LocalBrowserAccess(::resolveDirectory)
     val hostJob = currentCoroutineContext().job
     val instance = BackendInstance.acquire(home)
     val lifecycle = createBackendLifecycle()

@@ -13,6 +13,7 @@
         (() => {
             let ticket = null;
             if (/^\/web\/[0-9a-f]{64}\/$/.test(location.pathname)) {
+                // Persist only the per-host launch ticket for same-tab reloads, never the RPC grant.
                 const key = 'kodex.frontend-capability:' + location.pathname;
                 const fragment = location.hash.slice(1);
                 const valid = value => /^[0-9a-f]{64}$/.test(value || '');

@@ -7,8 +7,6 @@ import io.github.oshai.kotlinlogging.KotlinLoggingConfiguration
 import io.github.oshai.kotlinlogging.Level
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.backend.BackendInstance
-import io.github.stream29.kodex.backend.LocalFrontendHostJson
-import io.github.stream29.kodex.backend.LocalFrontendPairingOffer
 import io.github.stream29.kodex.backend.host.runBackendHost
 import io.github.stream29.kodex.backend.randomBackendPassword
 import io.github.stream29.kodex.rpc.control.backendControlRequest
@@ -31,7 +29,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertSame
-import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlin.time.Duration.Companion.seconds
 
@@ -167,7 +164,7 @@ val cliFailureLoggingTest by testSuite(compartment = { TestCompartment.RealTime 
         }
     }
 
-    test("web automatic and --origin manual pairing connect to target backend Home clean up frontend resources and keep backend running") {
+    test("web connects to the target backend Home without a frontend record and leaves backend running") {
         val root = Path(SystemTemporaryDirectory, "kodex-cli-web-target-${Random.nextLong()}")
         val frontendHome = Path(root, "frontend-home")
         val backendHome = Path(root, "backend-home")
@@ -213,7 +210,6 @@ val cliFailureLoggingTest by testSuite(compartment = { TestCompartment.RealTime 
                     assertEquals(SystemCoroutineFileSystem.resolve(backendHome), resolvedHome)
                     assertEquals(targetEndpoint.instanceId, connectedEndpoint.instanceId)
 
-                    // 1. Automatic `kodex web --backend-url ... --backend-home ...`
                     withLocalFrontendHost(
                         connectedEndpoint,
                         resolvedLaunch,
@@ -225,39 +221,9 @@ val cliFailureLoggingTest by testSuite(compartment = { TestCompartment.RealTime 
                     }
                     assertEquals("ready", backendControlRequest(targetEndpoint, "status")["phase"]?.jsonPrimitive?.content)
 
-                    // 2. Manual pairing `kodex web --origin ... --backend-url ... --backend-home ...` (and `kodex host --origin ...`)
-                    val origin = "http://localhost:18795"
-                    val printed = mutableListOf<String>()
-                    var capturedRecord: Path? = null
-                    val exitCode = runWebPairingFrontend(
-                        home = frontendHome,
-                        endpoint = connectedEndpoint,
-                        cwd = resolvedLaunch,
-                        origin = origin,
-                        output = { printed += it },
-                    ) { offer, recordPath ->
-                        capturedRecord = recordPath
-                        assertTrue(SystemCoroutineFileSystem.exists(recordPath))
-                        assertTrue(recordPath.toString().startsWith(frontendHome.toString()))
-                        assertFalse(SystemCoroutineFileSystem.exists(Path(backendHome, ".locks", "frontend")))
-                        val decoded = LocalFrontendHostJson.decodeFromString(
-                            LocalFrontendPairingOffer.serializer(),
-                            SystemCoroutineFileSystem.readString(recordPath),
-                        )
-                        assertEquals(origin, decoded.origin)
-                        assertEquals(targetEndpoint.instanceId, decoded.backendInstanceId)
-                        assertEquals(resolvedLaunch, decoded.workingDirectory)
-                        assertFalse(SystemCoroutineFileSystem.readString(recordPath).contains(targetEndpoint.password))
-                        assertEquals(offer.hostInstanceId, decoded.hostInstanceId)
-                        0
-                    }
-                    assertEquals(0, exitCode)
-                    assertEquals(2, printed.size)
-                    assertContains(printed[0], assertNotNull(capturedRecord).toString())
-                    assertContains(printed[1], origin)
-                    assertFalse(SystemCoroutineFileSystem.exists(assertNotNull(capturedRecord)))
                     assertFalse(SystemCoroutineFileSystem.exists(Path(frontendHome, ".locks", "backend")))
-                    assertEquals("ready", backendControlRequest(targetEndpoint, "status")["phase"]?.jsonPrimitive?.content)
+                    assertFalse(SystemCoroutineFileSystem.exists(Path(frontendHome, ".locks", "frontend")))
+                    assertFalse(SystemCoroutineFileSystem.exists(Path(backendHome, ".locks", "frontend")))
                 } finally {
                     withContext(NonCancellable) {
                         if (backendJob.isActive && liveEndpoint != null) {

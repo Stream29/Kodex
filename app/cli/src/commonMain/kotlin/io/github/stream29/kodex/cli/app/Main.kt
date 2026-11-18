@@ -6,9 +6,6 @@ import io.github.oshai.kotlinlogging.KotlinLoggingConfiguration
 import io.github.oshai.kotlinlogging.Level
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.backend.BackendInstance
-import io.github.stream29.kodex.backend.LocalFrontendHostJson
-import io.github.stream29.kodex.backend.LocalFrontendHostMaxFrameBytes
-import io.github.stream29.kodex.backend.LocalFrontendPairingOffer
 import io.github.stream29.kodex.backend.backendProcessAlive
 import io.github.stream29.kodex.backend.backendStopSignalReceived
 import io.github.stream29.kodex.backend.exitKodexProcess
@@ -21,13 +18,9 @@ import io.github.stream29.kodex.rpc.control.backendControlRequest
 import io.github.stream29.kodex.rpc.local.withLocalRpcClient
 import io.github.stream29.kodex.utils.kodexhome.KodexHome
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.writeBytes
 import io.github.stream29.kodex.utils.osenvironment.processId
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 
 public actual fun main(args: Array<String>) {
@@ -73,25 +66,15 @@ private suspend fun runLeafCommand(
             is WebCommand -> {
                 val cwd = SystemCoroutineFileSystem.resolve(Path("."))
                 val (_, endpoint) = resolveFrontendBackend(home, command.backend.resolve())
-                val origin = command.origin
-                if (origin == null) {
-                    withLocalFrontendHost(
-                        endpoint, cwd.toString(), ::openEmbeddedResource, ::randomBackendPassword,
-                    ) { url ->
-                        installBackendSignals()
-                        result = runLocalWebFrontend(
-                            url, window = false,
-                            stopRequested = ::backendStopSignalReceived, engine = LocalAppEngine.Default,
-                        )
-                    }
-                } else {
-                    result = runWebPairingFrontend(home, endpoint, cwd.toString(), origin)
+                withLocalFrontendHost(
+                    endpoint, cwd.toString(), ::openEmbeddedResource, ::randomBackendPassword,
+                ) { url ->
+                    installBackendSignals()
+                    result = runLocalWebFrontend(
+                        url, window = false,
+                        stopRequested = ::backendStopSignalReceived, engine = LocalAppEngine.Default,
+                    )
                 }
-            }
-            is FrontendHostCommand -> {
-                val cwd = SystemCoroutineFileSystem.resolve(Path("."))
-                val (_, endpoint) = resolveFrontendBackend(home, command.backend.resolve())
-                result = runWebPairingFrontend(home, endpoint, cwd.toString(), command.origin)
             }
             is AppCommand -> {
                 val engine = resolveLocalAppEngine(
@@ -113,9 +96,7 @@ private suspend fun runLeafCommand(
                     )
                 }
             }
-            is BackendStartCommand -> runBackendHost(
-                home, browserOrigins = command.browserOrigins.toSet(),
-            )
+            is BackendStartCommand -> runBackendHost(home)
             is BackendControlCliCommand -> {
                 try {
                     val endpoint = BackendInstance.discover(home)
@@ -160,51 +141,4 @@ internal suspend fun resolveFrontendBackend(
     val rawHome = target.backendHome
     val backendHome = if (rawHome == null) home else resolveExistingOrCandidatePath(Path(rawHome))
     return backendHome to connect(backendHome, target.port)
-}
-
-internal suspend fun runWebPairingFrontend(
-    home: Path,
-    endpoint: BackendEndpoint,
-    cwd: String,
-    origin: String,
-    newSecret: () -> String = ::randomBackendPassword,
-    output: (String) -> Unit = ::println,
-    awaitStop: suspend (LocalFrontendPairingOffer, Path) -> Int = { _, _ ->
-        installBackendSignals()
-        while (!backendStopSignalReceived()) delay(100)
-        130
-    },
-): Int = withLocalFrontendPairingHost(
-    endpoint, cwd, origin, newSecret,
-) { offer ->
-    val directory = Path(home, ".locks", "frontend")
-    val record = Path(directory, "pairing-${offer.hostInstanceId}.json")
-    SystemCoroutineFileSystem.createDirectories(directory)
-    val bytes = LocalFrontendHostJson.encodeToString(
-        LocalFrontendPairingOffer.serializer(), offer,
-    ).encodeToByteArray()
-    check(bytes.size <= LocalFrontendHostMaxFrameBytes) { "Scoped pairing offer exceeds the host limit." }
-    var ownsRecord = false
-    var primary: Throwable? = null
-    try {
-        SystemCoroutineFileSystem.useSink(record, mustCreate = true) { sink ->
-            ownsRecord = true
-            SystemCoroutineFileSystem.protectPrivateFile(record)
-            sink.writeBytes(bytes)
-            sink.flush()
-        }
-        output("Select this scoped pairing record within 60 seconds: $record")
-        output("Trusted frontend Origin: $origin. Keep this frontend server running; Ctrl+C closes its resources, not backend work.")
-        awaitStop(offer, record)
-    } catch (failure: Throwable) {
-        primary = failure
-        throw failure
-    } finally {
-        if (ownsRecord) withContext(NonCancellable) {
-            try { SystemCoroutineFileSystem.delete(record, mustExist = false) }
-            catch (cleanup: Throwable) {
-                if (primary == null) throw cleanup else primary.addSuppressed(cleanup)
-            }
-        }
-    }
 }

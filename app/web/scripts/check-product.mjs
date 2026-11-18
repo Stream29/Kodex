@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { freshPairingOffer, probeCapabilities, secretMarkers } from "./check-capabilities.mjs";
+import { probeCapabilities, secretMarkers } from "./check-capabilities.mjs";
 import { sensitiveResponseScanner } from "./sensitive-response-scanner.mjs";
 
 const require = createRequire(resolve(process.argv[2]));
@@ -12,7 +12,6 @@ const WebSocket = require("ws");
 const output = resolve(process.argv[3]);
 const record = process.env.KODEX_BROWSER_RECORD ?? "";
 const capabilityCheck = process.env.KODEX_CHECK_CAPABILITIES === "1";
-const automaticCheck = capabilityCheck && process.env.KODEX_CAPABILITY_ENTRY === "automatic";
 const fixtureTemporary = capabilityCheck ? join(process.env.KODEX_CAPABILITY_SANDBOX, "tmp") : "/tmp";
 assert.equal(dirname(dirname(dirname(dirname(record)))), fixtureTemporary);
 assert.match(record.slice(fixtureTemporary.length), /^\/kodex-product-browser--?\d+\/\.locks\/backend\/connection\.json$/,
@@ -23,7 +22,6 @@ assert.ok(Number.isInteger(privateRecord.port) && privateRecord.port > 0 && priv
 assert.equal(typeof privateRecord.password, "string");
 assert.ok(privateRecord.password.length >= 32);
 assert.equal(process.env.KODEX_CHECK_HISTORY, undefined, "History uses its own unchanged strict driver.");
-const url = "http://127.0.0.1:18795/";
 await mkdir(output, { recursive: true });
 const profile = await mkdtemp(join(capabilityCheck ? process.env.KODEX_CAPABILITY_SANDBOX : output, "owned-chrome-"));
 const chrome = spawn(process.env.CHROME_BIN ?? "/usr/bin/google-chrome", [
@@ -49,11 +47,11 @@ const fonts = new Set();
 const enabledAccessibility = [];
 const measurements = {};
 const capabilityMethods = [
-  "listDirectories", "validateDirectory", "evaluateContextPaths", "startOAuthLogin", "awaitOAuthLogin",
+  "listDirectories", "validateDirectory", "evaluateContextPaths", "startOAuthLogin",
   "forcedCompact", "reportFrontendError",
 ];
 const rpcEvidence = Object.fromEntries(capabilityMethods.map(name => [name, 0]));
-const hostEvidence = {};
+let retiredRouteRequests = 0;
 let capturedLaunchBase = false;
 const sensitiveRequests = new Map();
 const responseScanner = sensitiveResponseScanner(send, scanSensitive, safeNetworkPath);
@@ -78,7 +76,7 @@ function safeNetworkPath(value) {
 function isSensitiveHttp(value) {
   try {
     const path = new URL(value).pathname;
-    return path.endsWith("/bootstrap") || ["/frontend-host", "/frontend-pair"].includes(path);
+    return path.endsWith("/bootstrap");
   } catch { return false; }
 }
 function readRpcEvidence(value, depth = 0) {
@@ -482,57 +480,9 @@ async function checkRuntimeCascade(label) {
     if (!visit(document)) throw new Error('Composer missing after runtime menu dismissal');
   })()`);
 }
-async function importRecord() {
-  const offer = capabilityCheck ? await freshPairingOffer() : process.env.KODEX_BROWSER_PAIRING_FILE;
-  assert.equal(offer, record.replace(".locks/backend/connection.json", "frontend-pairing.private"),
-    "Only the task fixture's scoped pairing file may enter Wasm.");
-  assert.equal((await stat(offer)).mode & 0o777, 0o600);
-  assert.ok(!((await readFile(offer, "utf8")).includes(privateRecord.password)));
-  await selectRecord(offer);
-  await waitText("Backend: Connected");
-  await wait(editor, inputs => inputs.length === 1 && inputs[0].active, "shared root mounted");
-}
-async function selectRecord(file) {
-  await send("Page.setInterceptFileChooserDialog", { enabled: true });
-  const mark = events.length;
-  await click("Choose scoped pairing record");
-  const event = await wait(() => events.slice(mark).find(e => e.method === "Page.fileChooserOpened"), Boolean, "file chooser");
-  await send("DOM.setFileInputFiles", { backendNodeId: event.params.backendDOMNodeId ?? event.params.backendNodeId, files: [file] });
-}
-async function checkConnectionEntry() {
-  await button("Choose scoped pairing record");
-  await send("Emulation.setDeviceMetricsOverride", { width: 320, height: 240, deviceScaleFactor: 1, mobile: false });
-  await waitText("Trust this Web package");
-  const invalid = join(profile, "invalid-record.json");
-  const oversized = join(profile, "oversized-record.json");
-  await writeFile(invalid, "{invalid", { mode: 0o600 });
-  await writeFile(oversized, " ".repeat(65537), { mode: 0o600 });
-  for (const file of [invalid, oversized]) {
-    const before = sockets.length;
-    await selectRecord(file);
-    await waitText("Could not read a valid scoped pairing record.");
-    assert.equal(sockets.length, before, "Rejected records must not start transport.");
-    await click("Dismiss message");
-    await wait(tree, nodes => !text(nodes).includes("Could not read a valid scoped pairing record."), "message dismissal");
-  }
-  await send("Page.setInterceptFileChooserDialog", { enabled: true });
-  const mark = events.length;
-  await click("Choose scoped pairing record");
-  await wait(() => events.slice(mark).find(e => e.method === "Page.fileChooserOpened"), Boolean, "cancelled chooser");
-  // Exercise the real DOM cancellation handler; this is not a native OS-picker test.
-  await evaluate("document.querySelector('input[type=file]').dispatchEvent(new Event('cancel'))");
-  await wait(tree, nodes => nodes.some(node => node.role?.value === "button" &&
-    node.name?.value === "Choose scoped pairing record" &&
-    !node.properties?.some(p => p.name === "disabled" && p.value.value)), "chooser enabled after cancellation");
-  assert.ok(!text(await tree()).includes("Could not read a valid scoped pairing record."));
-  await writeFile(join(output, "connection-320x240.png"),
-    Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64"));
-  await send("Emulation.clearDeviceMetricsOverride");
-  measurements.connectionEntry = { malformedRejected: true, oversizedRejected: true, domCancelReenables: true };
-}
 async function checkAutomaticEntry() {
   const launchFile = process.env.KODEX_BROWSER_LAUNCH_FILE;
-  if (!launchFile) return;
+  assert.ok(launchFile, "Automatic production entry is required.");
   assert.equal(launchFile, record.replace(".locks/backend/connection.json", "frontend-launch.private"));
   assert.equal((await stat(launchFile)).mode & 0o777, 0o600);
   const privateUrl = await readFile(launchFile, "utf8");
@@ -738,19 +688,13 @@ try {
       if (message.method.startsWith("Network.") || message.method === "Runtime.consoleAPICalled") {
         const frame = ["Network.webSocketFrameSent", "Network.webSocketFrameReceived"].includes(message.method);
         // BackendSettings already transports embedded MCP credentials for the trusted CAS adapter.
-        // They remain forbidden in the new host/pairing bridge, DOM and console, like all tokens.
+        // They remain forbidden in the bootstrap, DOM and console, like all tokens.
         scanSensitive(message.params, frame && businessSocketIds.has(message.params.requestId));
       }
       if (message.method === "Network.webSocketFrameSent") readRpcEvidence(message.params.response?.payloadData);
-      if (message.method === "Network.requestWillBeSent" && message.params.request.url.endsWith("/frontend-host")) {
-        try {
-          const request = JSON.parse(message.params.request.postData).request;
-          const type = request.type;
-          if (["reserve_callback", "bind_callback", "await_callback", "open_registered_authorization",
-            "close_callback", "observe_error", "renew_owner", "close_owner"].includes(type)) {
-            hostEvidence[type] = (hostEvidence[type] ?? 0) + 1;
-          }
-        } catch {}
+      if (message.method === "Network.requestWillBeSent" &&
+          ["/frontend-host", "/frontend-pair"].includes(safeNetworkPath(message.params.request.url))) {
+        retiredRouteRequests++;
       }
       if (message.method === "Fetch.requestPaused") responseScanner.observe(message.params);
       if (message.method === "Network.responseReceived" && message.params.response.status === 200 &&
@@ -764,8 +708,8 @@ try {
   for (const domain of ["Runtime", "Network", "Accessibility", "Page", "Performance"]) await send(`${domain}.enable`);
   await send("Network.enable", { maxPostDataSize: 65_536 });
   await send("Fetch.enable", { patterns: [
-    "http://127.0.0.1:*/web/*/bootstrap", "http://127.0.0.1:*/frontend-host", "http://127.0.0.1:*/frontend-pair",
-  ].map(urlPattern => ({ urlPattern, requestStage: "Response" })) });
+    { urlPattern: "http://127.0.0.1:*/web/*/bootstrap", requestStage: "Response" },
+  ] });
   await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
     const NativeSocket = globalThis.WebSocket;
     const owned = new Set();
@@ -786,42 +730,18 @@ try {
     }});
   })()` });
   await checkAutomaticEntry();
-  if (process.env.KODEX_INVALID_ORIGIN_URL) {
-    assert.equal(process.env.KODEX_INVALID_ORIGIN_URL, "http://[::1]:18795/");
-    await send("Page.navigate", { url: process.env.KODEX_INVALID_ORIGIN_URL });
-    await waitText("Serve this package from an HTTP loopback origin");
-    assert.ok(!text(await tree()).includes("Choose scoped pairing record"));
-    measurements.invalidOriginRejected = true;
-  }
   const navigationStarted = Date.now();
-  if (automaticCheck) {
-    assert.ok(process.env.KODEX_BROWSER_LAUNCH_FILE, "Automatic production entry is required.");
-    // checkAutomaticEntry disconnected deliberately; reload uses only its scoped tab capability.
-    await send("Page.reload");
-    await waitText("Backend: Connected");
-    await wait(editor, inputs => inputs.length === 1 && inputs[0].active, "automatic root restored");
-  } else {
-    await send("Page.navigate", { url });
-    await checkConnectionEntry();
-    await importRecord();
-    if (capabilityCheck) {
-      const beforeReload = sockets.length;
-      await send("Page.reload");
-      await button("Choose scoped pairing record");
-      await delay(500);
-      assert.equal(sockets.length, beforeReload, "Manual reload must not reuse a consumed pairing ticket.");
-      assert.equal(await evaluate("localStorage.length + sessionStorage.length"), 0);
-      await importRecord();
-      measurements.manualEntry = { reloadRequiresExplicitPairing: true, freshOfferReconnectsRealSharedRoot: true };
-    }
-  }
+  // checkAutomaticEntry disconnected deliberately; reload uses only its scoped tab capability.
+  await send("Page.reload");
+  await waitText("Backend: Connected");
+  await wait(editor, inputs => inputs.length === 1 && inputs[0].active, "automatic root restored");
   await checkRuntimeCascade("new-session");
   await replaceNamedEditor("Message", "paired draft 你好");
   measurements.pairedNewSessionDraft = (await editor()).find(input => input.label === "Message");
   await writeFile(join(output, "paired-new-session-1280x1000.png"),
     Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64"));
   await replaceNamedEditor("Message", "");
-  measurements.navigationToSharedRootIncludingExplicitImportMilliseconds = Date.now() - navigationStarted;
+  measurements.reloadToSharedRootMilliseconds = Date.now() - navigationStarted;
   assert.ok(sockets.every(value => value === `ws://127.0.0.1:${privateRecord.port}/browser/rpc`));
   assert.ok(fonts.has("noto_sans_sc.ttf") && fonts.has("noto_sans_math.ttf"));
   await send("Input.insertText", { text: "abcd" });
@@ -840,7 +760,7 @@ try {
   assert.ok(requests.every(value => !value.includes(privateRecord.password)));
   assert.equal(await evaluate("location.hash + location.search"), "");
   assert.equal(await evaluate("localStorage.length"), 0);
-  assert.equal(await evaluate("sessionStorage.length"), automaticCheck ? 1 : 0);
+  assert.equal(await evaluate("sessionStorage.length"), 1);
 
   const opened = sockets.length;
   const mark = events.length;
@@ -925,16 +845,14 @@ try {
   await writeFile(join(output, "paired-agent-1280x1000.png"),
     Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64"));
   await writeFile(join(output, "ui-coverage.json"), JSON.stringify({
-    connectionEntry: measurements.connectionEntry, automaticEntry: measurements.automaticEntry,
-    invalidOriginRejected: measurements.invalidOriginRejected, rootEntries: measurements.rootEntries,
+    automaticEntry: measurements.automaticEntry, rootEntries: measurements.rootEntries,
     rootDeleteAxFocused: measurements.rootDeleteAxFocused, narrowAgentEditor: measurements.narrowAgentEditor,
     pairedAgentDraft: measurements.pairedAgentDraft,
     pairedNewSessionDraft: measurements.pairedNewSessionDraft,
     runningSpinners: measurements.runningSpinners,
   }, null, 2));
   await pointer(disconnect);
-  if (automaticCheck) await waitText("Local Kodex session disconnected");
-  else await button("Choose scoped pairing record");
+  await waitText("Local Kodex session disconnected");
   await wait(editor, inputs => inputs.length === 0, "disconnect unmounts the shared application editors");
   await delay(500);
   const heartbeatCount = requests.filter(value => value.endsWith("/heartbeat")).length;
@@ -942,23 +860,13 @@ try {
   assert.equal(requests.filter(value => value.endsWith("/heartbeat")).length, heartbeatCount,
     "Disconnect must cancel the frontend-owned renewal task.");
   assert.equal((await status()).phase, "ready", "Disconnect is not backend Stop.");
-  const reloadRequests = requests.length;
-  const reloadSockets = sockets.length;
   await send("Page.reload");
-  if (automaticCheck) {
-    await waitText("Backend: Connected");
-    await click("Disconnect");
-    await waitText("Local Kodex session disconnected");
-  } else {
-    await button("Choose scoped pairing record");
-  }
-  await delay(500);
-  if (!automaticCheck) {
-    assert.equal(sockets.length, reloadSockets);
-    assert.ok(requests.slice(reloadRequests).every(value => !value.endsWith("/heartbeat")));
-  }
+  await waitText("Backend: Connected");
+  await click("Disconnect");
+  await waitText("Local Kodex session disconnected");
   assert.equal(await evaluate("localStorage.length"), 0);
-  assert.equal(await evaluate("sessionStorage.length"), automaticCheck ? 1 : 0);
+  assert.equal(await evaluate("sessionStorage.length"), 1);
+  assert.equal(retiredRouteRequests, 0, "Retired frontend routes must receive no browser traffic.");
   await wait(() => sensitiveRequests.size + responseScanner.pendingCount, value => value === 0,
     "all credential-bearing HTTP responses finish their strict scan");
   await responseScanner.drain();
@@ -969,26 +877,22 @@ try {
   assert.ok(sensitiveBodyResponses > 0);
   assert.equal(responseScanner.counts.bodies, sensitiveBodyResponses,
     "Every body-bearing sensitive HTTP response must have been inspected before resuming unchanged.");
-  assert.ok(enabledAccessibility.every(Boolean), "Ready companion controls must be accessibility-enabled.");
+  assert.ok(enabledAccessibility.every(Boolean), "Connected backend controls must be accessibility-enabled.");
   if (capabilityCheck) {
     assert.ok(capabilityMethods.every(name => rpcEvidence[name] > 0), "Functional UI must use the actual typed business RPCs.");
     assert.equal(capturedLaunchBase, true, "Directory/Context requests must carry the immutable admitted launch base.");
-    for (const type of ["reserve_callback", "bind_callback", "await_callback", "open_registered_authorization", "observe_error"]) {
-      assert.equal(hostEvidence[type] ?? 0, 0, "Retired frontend effects must not traverse the Native bridge.");
-    }
   }
   await writeFile(join(output, "product-result.json"), JSON.stringify({
     browser, sockets: sockets.length, fonts: [...fonts], errors,
-    realProductionHost: true, exactInstanceRecovery: true, scopedPairingOnly: !automaticCheck,
-    disconnectCancelsRenewalWithoutStoppingBackend: true, reloadRequiresExplicitImport: !automaticCheck,
-    automaticReloadUsesScopedCapability: automaticCheck,
+    realProductionHost: true, exactInstanceRecovery: true,
+    disconnectCancelsRenewalWithoutStoppingBackend: true, automaticReloadUsesScopedCapability: true,
     managementAndOpenAiSecretsAbsentFromAllPageTraffic: true,
     mcpCredentialsConfinedToExistingAuthenticatedBusinessRpc: true,
     securityResponseReadsComplete: true, securityResponseCounts: responseScanner.counts,
-    typedRpcEvidence: rpcEvidence, nativeBridgeOperations: hostEvidence, capturedLaunchBase,
+    typedRpcEvidence: rpcEvidence, retiredRouteRequests, capturedLaunchBase,
     gaps: ["Frontend ObserveError runner has no deterministic page-originated error trigger.",
       "Relative directory input cannot currently be entered through the page picker; launch-base query is checked, not relative resolution.",
-      "Not full cancellation/denial/lease-expiry, accepted-owner-disposal or cross-platform acceptance."],
+      "Not full cancellation/denial/grant expiry, host shutdown or cross-platform acceptance."],
     capabilityFunctions: capabilityCheck ? measurements : "Not exercised; run check-capabilities.mjs",
   }, null, 2));
   console.log("PASS Web UI regression: scoped entry/heartbeat/RPC, cursor, stream, recovery and disconnect/reload; see explicit capability coverage/gaps");
@@ -1014,7 +918,7 @@ try {
     directoryRestoreClick: measurements.directoryRestoreClick,
     probeLocations: capabilityCheck ? [...String(failure.stack ?? "").matchAll(/check-(?:product|capabilities)\.mjs:\d+:\d+/g)]
       .map(match => match[0]).slice(0, 8) : undefined,
-    capabilityMethods: capabilityCheck ? { rpc: rpcEvidence, host: hostEvidence } : undefined,
+    capabilityMethods: capabilityCheck ? { rpc: rpcEvidence, retiredRouteRequests } : undefined,
     securityReadFailures: responseScanner.failures,
     events: events.slice(-100).map(event => ({
       method: event.method,

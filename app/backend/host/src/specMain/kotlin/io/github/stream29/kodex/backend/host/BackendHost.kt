@@ -19,7 +19,6 @@ public expect suspend fun runBackendHost(
     createClient: (OpenAiAuthStore) -> OpenAiClient = { io.github.stream29.kodex.openai.client.OpenAiClient(it) },
     createLoginClient: () -> OpenAiLoginClient = { io.github.stream29.kodex.openai.client.OpenAiLoginClient() },
     /** Explicit origins for manual private-record import. Empty leaves that cross-origin path disabled. */
-    browserOrigins: Set<String> = emptySet(),
 )
 
 /** Bootstrapping has lifecycle rights; established frontends never call this to replace an instance. */

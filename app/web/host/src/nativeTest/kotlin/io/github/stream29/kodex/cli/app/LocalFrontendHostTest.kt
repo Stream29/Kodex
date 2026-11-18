@@ -68,109 +68,21 @@ val localFrontendHostTest by testSuite(compartment = { TestCompartment.RealTime 
             assertEquals(fixture.grants.value.map { it.password }.toSet(), fixture.revocations.value.map { it.password }.toSet())
         }
     }
-    test("companion dispatch requires its own credential and exact opaque owner before any operation") {
+    test("retired pairing and owner routes never respond with CORS or grant data") {
         withFixture { fixture ->
             fixture.host { url ->
                 val address = HostAddress(url)
-                val bootstrap = fixture.wire.request(
-                    address, "POST", address.bootstrap, address.bootstrapHeaders, ticketBody(),
-                )
-                val info = LocalFrontendHostJson.decodeFromString(
-                    LocalFrontendBootstrap.serializer(), bootstrap.body.decodeToString(),
-                )
-                val host = info.host
-                fun body(credential: String = host.credential, owner: LocalFrontendOwner = host.owner) =
-                    LocalFrontendHostJson.encodeToString(
-                        LocalFrontendHostCall.serializer(), LocalFrontendHostCall(
-                            LocalFrontendHostProtocol, host.hostInstanceId, credential, owner,
-                            LocalFrontendHostRequest.RenewOwner,
-                        ),
-                    ).encodeToByteArray()
-                for (invalid in listOf(
-                    body(ManagementPassword), body(info.endpoint.password),
-                    body(owner = LocalFrontendOwner("another-owner")),
-                )) {
-                    val reply = fixture.wire.request(
-                        address, "POST", LocalFrontendHostPath, address.bootstrapHeaders, invalid,
-                    )
-                    assertEquals(401, reply.status)
-                    reply.assertPrivateHeaders()
+                val untrusted = address.bootstrapHeaders.filterNot { it.first == "Origin" } +
+                    ("Origin" to "http://localhost:18795")
+                for (path in listOf("/frontend-host", "/frontend-pair")) {
+                    for (method in listOf("OPTIONS", "POST")) {
+                        val denied = fixture.wire.request(address, method, path, untrusted, ticketBody())
+                        assertEquals(404, denied.status)
+                        assertNull(denied.header("access-control-allow-origin"))
+                        assertFalse(denied.body.decodeToString().contains(BrowserPassword))
+                    }
                 }
-                val accepted = fixture.wire.request(
-                    address, "POST", LocalFrontendHostPath, address.bootstrapHeaders, body(),
-                )
-                assertEquals(200, accepted.status)
-                val reply = LocalFrontendHostJson.decodeFromString(
-                    LocalFrontendHostResult.serializer(), accepted.body.decodeToString(),
-                )
-                assertEquals(host.owner.value, reply.owner.value)
-                assertEquals(
-                    LocalFrontendHostOwnerLeaseMillis,
-                    assertIs<LocalFrontendHostReply.OwnerRenewed>(reply.reply).leaseMillis,
-                )
-                assertFalse(accepted.body.decodeToString().contains(host.credential))
-                val oversized = fixture.wire.request(
-                    address, "POST", LocalFrontendHostPath, address.bootstrapHeaders,
-                    ByteArray(LocalFrontendHostMaxFrameBytes + 1) { ' '.code.toByte() },
-                )
-                assertEquals(400, oversized.status)
-            }
-        }
-    }
-    test("manual scoped pairing accepts only explicitly trusted Origin and one use of its offer") {
-        withFixture { fixture ->
-            val staticOrigin = "http://localhost:18795"
-            withFrontendHostListener(
-                fixture.endpoint, fixture.directory, fixture.resources::open, fixture.secrets(), staticOrigin,
-                acquireResources = { _, _ -> FixtureCompanionResources() },
-            ) { _, nullable ->
-                val offer = requireNotNull(nullable)
-                val address = HostAddress("${offer.baseUrl}/web/${offer.hostInstanceId}/")
-                val headers = listOf(
-                    "Host" to address.authority, "Origin" to staticOrigin,
-                    "Content-Type" to "application/json", "Sec-Fetch-Site" to "cross-site",
-                )
-                fun pairingBody(origin: String = staticOrigin) = LocalFrontendHostJson.encodeToString(
-                    LocalFrontendPairingRequest.serializer(), LocalFrontendPairingRequest(
-                        LocalFrontendPairingProtocol, offer.ticket, origin, offer.workingDirectory,
-                    ),
-                ).encodeToByteArray()
-                val preflight = fixture.wire.request(
-                    address, "OPTIONS", LocalFrontendPairingPath,
-                    listOf(
-                        "Host" to address.authority, "Origin" to staticOrigin,
-                        "Access-Control-Request-Method" to "POST",
-                        "Access-Control-Request-Headers" to "content-type",
-                    ),
-                )
-                assertEquals(204, preflight.status)
-                assertEquals(staticOrigin, preflight.header("access-control-allow-origin"))
-                val wrong = fixture.wire.request(
-                    address, "POST", LocalFrontendPairingPath,
-                    headers.filterNot { it.first == "Origin" } + ("Origin" to "http://localhost:18796"),
-                    pairingBody(),
-                )
-                assertEquals(403, wrong.status)
-                assertNull(wrong.header("access-control-allow-origin"))
-                assertEquals(401, fixture.wire.request(
-                    address, "POST", LocalFrontendPairingPath, headers, pairingBody("http://localhost:18796"),
-                ).status)
-                val first = fixture.wire.request(
-                    address, "POST", LocalFrontendPairingPath, headers, pairingBody(),
-                )
-                assertEquals(200, first.status)
-                assertEquals(staticOrigin, first.header("access-control-allow-origin"))
-                val info = LocalFrontendHostJson.decodeFromString(
-                    LocalFrontendBootstrap.serializer(), first.body.decodeToString(),
-                )
-                assertEquals(staticOrigin, info.host.origin)
-                assertEquals(offer.hostInstanceId, info.host.hostInstanceId)
-                assertEquals(fixture.canonicalDirectory, info.workingDirectory)
-                assertFalse(first.body.decodeToString().contains(ManagementPassword))
-                assertEquals(401, fixture.wire.request(
-                    address, "POST", LocalFrontendPairingPath, headers, pairingBody(),
-                ).status, "A lost successful reply cannot consume the offer a second time.")
-                assertTrue(fixture.resources.lookups.value.isEmpty(), "Manual companion never serves a second website.")
+                assertEquals(1, fixture.grants.value.size)
             }
             assertEquals(fixture.grants.value.map { it.password }.toSet(), fixture.revocations.value.map { it.password }.toSet())
         }
@@ -193,14 +105,14 @@ val localFrontendHostTest by testSuite(compartment = { TestCompartment.RealTime 
                     assertEquals(Instance, info.endpoint.instanceId)
                     assertEquals(fixture.endpoint.port, info.endpoint.port)
                     assertEquals(BackendBusinessProtocol, info.endpoint.businessProtocol)
-                    assertNotEquals(BrowserPassword, info.endpoint.password)
+                    assertEquals(BrowserPassword, info.endpoint.password)
                     assertNotEquals(ManagementPassword, info.endpoint.password)
-                    assertNotEquals(info.endpoint.password, info.host.credential)
-                    assertEquals(address.origin, info.host.origin)
-                    assertEquals(Instance, info.host.backendInstanceId)
                     assertEquals(fixture.canonicalDirectory, info.workingDirectory)
                     assertFalse(reply.body.decodeToString().contains(ManagementPassword))
+                    assertEquals(setOf("protocol", "endpoint", "workingDirectory"),
+                        Json.parseToJsonElement(reply.body.decodeToString()).jsonObject.keys)
                 }
+                assertEquals(1, fixture.grants.value.size, "Refresh never re-registers or renews the grant.")
                 42
             }
             assertEquals(42, result)
@@ -631,10 +543,7 @@ private class Fixture(val home: Path, val wire: Wire, val registration: Registra
         }
     }
     suspend fun <R> host(block: suspend CoroutineScope.(String) -> R): R =
-        withFrontendHostListener(
-            endpoint, directory, resources::open, secrets(),
-            acquireResources = { _, _ -> FixtureCompanionResources() },
-        ) { url, _ -> block(url) }
+        withLocalFrontendHost(endpoint, directory, resources::open, secrets(), block)
     suspend fun assertRevoked(address: HostAddress) {
         assertEquals(grants.value.size, calls.value.count { it == "status" })
         assertEquals(grants.value.size, calls.value.count { it == "grant" })
@@ -648,13 +557,6 @@ private class Fixture(val home: Path, val wire: Wire, val registration: Registra
         assertEquals(200, wire.request(HostAddress("http://127.0.0.1:${endpoint.port}/web/unused/"),
             "GET", "/fixture/alive").status, "Frontend cleanup must leave the fake backend alive.")
     }
-}
-
-private class FixtureCompanionResources : FrontendCompanionResources {
-    override val capabilities = FrontendHostCapabilities(
-        FrontendCapabilityStatus.Ready, FrontendCapabilityStatus.Ready,
-    )
-    override suspend fun closeAndJoin() {}
 }
 
 @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)

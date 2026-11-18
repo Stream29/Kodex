@@ -34,8 +34,6 @@ function controllerRequest(action, args = {}) {
   });
 }
 
-export async function freshPairingOffer() { return controllerRequest("pair"); }
-
 /** All interactions target the shipped Wasm and its shared ViewModels, never a fixture renderer. */
 export async function probeCapabilities(h) {
   const { click, button, tree, text, wait, waitText, key, editor, evaluate, send, measurements } = h;
@@ -408,10 +406,10 @@ async function stopChild(child) {
   }
 }
 
-async function runEntry(entry, options) {
+async function runEntry(options) {
   const sandbox = await realpath(await mkdtemp("/tmp/kodex-capabilities-"));
   await chmod(sandbox, 0o700);
-  let fixture, fixtureClosed, driver, driverClosed, driverStatus, provider, assets;
+  let fixture, fixtureClosed, driver, driverClosed, driverStatus, provider;
   let guardReady = false, primary;
   interruptOwnedChildren = () => {
     if (driver?.exitCode === null && driver?.signalCode === null) driver.kill("SIGTERM");
@@ -440,26 +438,9 @@ async function runEntry(entry, options) {
       KODEX_CAPABILITY_LAUNCH_DIRECTORY: cwd,
       KODEX_CAPABILITY_MCP_REDIRECT: `http://127.0.0.1:${mcpPort}/callback`,
       KODEX_BROWSER_FIXTURE_WEBSITE: options.website,
-      KODEX_BROWSER_FIXTURE_PAIRING_ORIGIN: "http://127.0.0.1:18795",
       KODEX_BROWSER_FIXTURE_TTL_SECONDS: "600",
       KODEX_BROWSER_FIXTURE_DELAY_MS: "5000", KODEX_CHECK_RUNNING_SPINNERS: "1",
     };
-    assets = createServer((req, res) => {
-      Promise.resolve().then(async () => {
-        assert.equal(req.headers.host, "127.0.0.1:18795");
-        const requested = new URL(req.url, "http://127.0.0.1:18795");
-        assert.equal(requested.search, "");
-        const relative = requested.pathname === "/" ? "index.html" : decodeURIComponent(requested.pathname.slice(1));
-        const path = await realpath(resolve(options.website, relative));
-        assert.ok(path.startsWith(options.website + sep));
-        const bytes = await readFile(path);
-        const type = path.endsWith(".wasm") ? "application/wasm" : path.endsWith(".js") || path.endsWith(".mjs") ?
-          "application/javascript" : path.endsWith(".html") ? "text/html" : path.endsWith(".ttf") ? "font/ttf" : "application/octet-stream";
-        res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store" }); res.end(bytes);
-      }).catch(() => { res.writeHead(404); res.end(); });
-    });
-    try { await listen(assets, 18795); }
-    catch { throw new Error("BLOCKED: static port 18795 is occupied; do not stop its owner."); }
     fixture = spawn(options.fixture, [], { cwd, env: isolatedEnv, stdio: ["pipe", "pipe", "pipe"] });
     let fixtureOutput = "";
     fixture.stdout.on("data", bytes => { fixtureOutput = (fixtureOutput + bytes).slice(-65_536); });
@@ -480,7 +461,6 @@ async function runEntry(entry, options) {
     const launchFile = await waitOwned(async () => fixtureOutput.match(/PRODUCT_FRONTEND_READY ([^\n]+)/)?.[1],
       Boolean, "Automatic frontend readiness failed");
     assert.equal(launchFile, join(home, "frontend-launch.private"));
-  let pairingSerial = Promise.resolve();
     let ownOpenAiCallbackCompleted = false;
     async function privateAction(message) {
       switch (message.action) {
@@ -488,20 +468,6 @@ async function runEntry(entry, options) {
           if (ownOpenAiCallbackCompleted) await waitForOpenAiPortsAfterOwnCallback();
           else await requireOpenAiPortsFree();
           return true;
-        case "pair": {
-          let offer;
-          pairingSerial = pairingSerial.then(async () => {
-            fixtureOutput = fixtureOutput.replace(/PRODUCT_PAIRING_READY [^\n]+\n/g, "");
-            fixture.stdin.write("pair\n");
-            offer = await waitOwned(async () => fixtureOutput.match(/PRODUCT_PAIRING_READY ([^\n]+)/)?.[1],
-              Boolean, "Scoped pairing not ready");
-            assert.equal(offer, join(home, "frontend-pairing.private"));
-            const parsed = JSON.parse(await readPrivate(offer));
-            assert.ok(!JSON.stringify(parsed).includes(privateRecord.password));
-          });
-          await pairingSerial;
-          return offer;
-        }
         case "authorize": {
           const captured = message.url;
           assert.ok(typeof captured === "string" && captured.length <= 16_384);
@@ -603,10 +569,10 @@ async function runEntry(entry, options) {
       }
     }
     driver = spawn(process.execPath, [join(here, "owned-product-group.mjs"), process.execPath,
-      join(here, "check-product.mjs"), options.dependencies, join(options.output, entry)], {
+      join(here, "check-product.mjs"), options.dependencies, join(options.output, "automatic")], {
       cwd, env: {
         ...isolatedEnv, CHROME_BIN: options.chrome, KODEX_BROWSER_RECORD: recordPath, KODEX_BROWSER_LAUNCH_FILE: launchFile,
-        KODEX_CAPABILITY_ENTRY: entry, KODEX_CAPABILITY_SANDBOX: sandbox, KODEX_CAPABILITY_LAUNCH_DIRECTORY: launch,
+        KODEX_CAPABILITY_SANDBOX: sandbox, KODEX_CAPABILITY_LAUNCH_DIRECTORY: launch,
         KODEX_CAPABILITY_STOP_COMMAND: stopCommand, KODEX_CAPABILITY_ERROR_COMMAND: errorCommand,
       }, detached: true, stdio: ["ignore", "ignore", "pipe", "ipc"],
     });
@@ -639,11 +605,11 @@ async function runEntry(entry, options) {
       new Promise((_, fail) => { deadline = setTimeout(() => fail(new Error("Bounded production capability probe exceeded 8 minutes")), 480_000); }),
     ]).finally(() => clearTimeout(deadline));
     assert.ok(guardReady && closed.signal === "SIGKILL" && driverStatus?.signal === null && driverStatus?.code === 0,
-      `Production ${entry} probe or owned-group cleanup failed; inspect only the redacted task result.`);
+      "Production automatic probe or owned-group cleanup failed; inspect only the redacted task result.");
     fixture.stdin.end("\n");
     await Promise.race([fixtureClosed, delay(15_000)]);
     assert.ok(fixture.exitCode === 0, "Fixture graceful resource cleanup failed.");
-    console.log(`PASS ${entry}: production Wasm/backend capabilities, manual authorization and page-originated error Hook.`);
+    console.log("PASS automatic entry: production Wasm/backend capabilities, provider authorization and page-originated error Hook.");
   } catch (failure) {
     primary = failure;
     throw failure;
@@ -666,7 +632,6 @@ async function runEntry(entry, options) {
       }
     });
     await cleanup(() => stopChild(fixture));
-    await cleanup(() => close(assets));
     await cleanup(() => close(provider?.server));
     if (driverClean && (!fixture?.pid || fixture.exitCode !== null || fixture.signalCode !== null)) {
       await cleanup(() => rm(sandbox, { recursive: true, force: true }));
@@ -696,17 +661,14 @@ async function main() {
   await mkdir(options.output, { recursive: true, mode: 0o700 });
   // Preflight both fixed ports without reuse or interference. Actual production bind still must ACK.
   await requireOpenAiPortsFree();
-  for (const entry of ["automatic", "manual"]) {
-    assert.equal(stopping, false, "Parent stopped this owned validation window.");
-    await runEntry(entry, options);
-    if (entry === "automatic") await waitForOpenAiPortsAfterOwnCallback();
-  }
+  assert.equal(stopping, false, "Parent stopped this owned validation window.");
+  await runEntry(options);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch(failure => {
     // Fetch/CDP/launcher errors can carry a state-bearing URL. Never print the raw error or stack.
-    console.error(/^BLOCKED: (callback port (1455|1457)|static port 18795) is occupied; do not stop its owner\.$/.test(failure.message) ?
+    console.error(/^BLOCKED: callback port (1455|1457) is occupied; do not stop its owner\.$/.test(failure.message) ?
       failure.message : "BLOCKED/FAIL capability probe: ports/resources/build or strict functional assertion; sensitive diagnostics suppressed.");
     process.exitCode = 1;
   });

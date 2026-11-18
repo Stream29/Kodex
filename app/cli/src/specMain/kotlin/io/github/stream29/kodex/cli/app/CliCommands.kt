@@ -15,7 +15,6 @@ import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.int
-import io.github.stream29.kodex.backend.canonicalLocalBrowserOrigin
 import io.github.stream29.kodex.mcp.contract.ReservedMcpServerNames
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -92,10 +91,6 @@ public data class CliContextWindowSummary(
     @SerialName("remaining_percent")
     public val remainingPercent: Int? = null,
 )
-
-/** Migration notice emitted to stderr when legacy `kodex host --origin` is invoked. */
-public const val HostCommandMigrationNotice: String =
-    "Note: 'kodex host --origin' has moved to 'kodex web --origin'; forwarding to 'kodex web --origin'."
 
 /** Strict JSON codec shared by CLI option/stdin payload decoding and JSON stdout formatting. */
 public expect val CliToolJson: Json
@@ -236,7 +231,6 @@ public class KodexCommand(
     TuiCommand(),
     WebCommand(),
     AppCommand(),
-    FrontendHostCommand(),
     BackendCommand(),
     TerminalCommand(),
     AskCommand(),
@@ -262,13 +256,8 @@ public class TuiCommand : KodexLeafCommand("tui", "Open the terminal user interf
 
 public class WebCommand : KodexLeafCommand(
     "web",
-    "Serve the local frontend and open the system browser, or pair an independently served website.",
+    "Serve the local frontend and open the system browser.",
 ) {
-    public val origin: String? by option(
-        "--origin",
-        metavar = "ORIGIN",
-        help = "Trust this exact loopback HTTP static frontend Origin for one scoped pairing.",
-    ).convert { canonicalLocalBrowserOrigin(it) }
     public val backend: FrontendBackendOptions by FrontendBackendOptions()
     override fun validate() {
         backend.resolve()
@@ -289,21 +278,6 @@ public class AppCommand : KodexLeafCommand("app", "Open the local frontend in an
     }
 }
 
-public class FrontendHostCommand : KodexLeafCommand(
-    "host",
-    "Deprecated: use 'kodex web --origin'. Run a local frontend server to pair an independently served website.",
-) {
-    public val origin: String by option(
-        "--origin",
-        metavar = "ORIGIN",
-        help = "Trust this exact loopback HTTP static frontend Origin for one scoped pairing.",
-    ).convert { canonicalLocalBrowserOrigin(it) }.required()
-    public val backend: FrontendBackendOptions by FrontendBackendOptions()
-    override fun validate() {
-        backend.resolve()
-    }
-}
-
 public class BackendCommand : KodexGroupCommand(
     "backend",
     "Manage the independent local backend.",
@@ -311,13 +285,7 @@ public class BackendCommand : KodexGroupCommand(
     *BackendControlCommand.entries.map(::BackendControlCliCommand).toTypedArray(),
 )
 
-public class BackendStartCommand : KodexLeafCommand("start", "Run the backend in the foreground.") {
-    public val browserOrigins: List<String> by option(
-        "--web-origin",
-        metavar = "ORIGIN",
-        help = "Allow a loopback HTTP origin for manual browser access. Repeat to allow multiple origins; disabled by default.",
-    ).convert { canonicalLocalBrowserOrigin(it) }.multiple()
-}
+public class BackendStartCommand : KodexLeafCommand("start", "Run the backend in the foreground.")
 
 public class BackendControlCliCommand(
     public val control: BackendControlCommand,

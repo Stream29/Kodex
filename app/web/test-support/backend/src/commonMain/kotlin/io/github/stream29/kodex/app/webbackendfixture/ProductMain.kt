@@ -5,11 +5,8 @@ import io.github.stream29.kodex.backend.BackendInstance
 import io.github.stream29.kodex.backend.randomBackendPassword
 import io.github.stream29.kodex.backend.host.runBackendHost
 import io.github.stream29.kodex.cli.app.withLocalFrontendHost
-import io.github.stream29.kodex.cli.app.withLocalFrontendPairingHost
 import io.github.stream29.kodex.cli.app.LocalAppEngine
 import io.github.stream29.kodex.cli.app.runLocalWebFrontend
-import io.github.stream29.kodex.backend.LocalFrontendHostJson
-import io.github.stream29.kodex.backend.LocalFrontendPairingOffer
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.control.BackendControlClient
@@ -65,7 +62,6 @@ public actual fun productMain(): Unit = runBlocking {
     fun startBackend() = launch {
         runBackendHost(
             home, Path(home, "codex"), Path(home, "agents"),
-            browserOrigins = if (historyCheck) setOf("http://127.0.0.1:18795") else emptySet(),
             createClient = {
                 mockOpenAiClient {
                     if (capabilities != null) {
@@ -97,25 +93,6 @@ public actual fun productMain(): Unit = runBlocking {
     }
     var backend = startBackend()
     var frontend: Job? = null
-    var pairing: Job? = null
-    suspend fun startPairing() {
-        val origin = environmentVariable("KODEX_BROWSER_FIXTURE_PAIRING_ORIGIN") ?: return
-        check(!historyCheck) { "History mode retains its original admission." }
-        pairing?.cancelAndJoin()
-        val offerFile = Path(home, "frontend-pairing.private")
-        SystemFileSystem.delete(offerFile, mustExist = false)
-        pairing = launch {
-            val endpoint = checkNotNull(BackendInstance.discover(home))
-            withLocalFrontendPairingHost(endpoint, launchDirectory.toString(), origin, ::randomBackendPassword) { offer ->
-                SystemCoroutineFileSystem.writePrivateString(
-                    offerFile, LocalFrontendHostJson.encodeToString(LocalFrontendPairingOffer.serializer(), offer),
-                    mustCreate = true,
-                )
-                println("PRODUCT_PAIRING_READY $offerFile")
-                awaitCancellation()
-            }
-        }
-    }
     suspend fun stopBackend() {
         withContext(NonCancellable) {
             BackendInstance.discover(home)?.let { runCatching { backendControlRequest(it, "stop") } }
@@ -153,12 +130,10 @@ public actual fun productMain(): Unit = runBlocking {
                 }
             }
         }
-        // Pairing is explicit and renewable on stdin; no management record is sent to Wasm.
         while (true) {
             when (withContext(Dispatchers.IO) { readlnOrNull() }) {
-                "pair" -> if (historyCheck) break else startPairing()
                 "restart" -> {
-                    check(frontend == null && pairing == null) { "Restart the fixture without its optional frontend hosts." }
+                    check(frontend == null) { "Restart the fixture without its optional frontend host." }
                     stopBackend()
                     backend = startBackend()
                     reportReady()
@@ -169,7 +144,6 @@ public actual fun productMain(): Unit = runBlocking {
     } finally {
         withContext(NonCancellable) {
             frontend?.cancelAndJoin()
-            pairing?.cancelAndJoin()
             stopBackend()
             deleteTestDirectory(home)
         }

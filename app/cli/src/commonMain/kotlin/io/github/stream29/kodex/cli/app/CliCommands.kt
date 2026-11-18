@@ -95,9 +95,6 @@ private suspend fun parseAndExecuteCli(
     }
 
     val leaf = checkNotNull(selected) { "No CLI leaf command selected." }
-    if (leaf is FrontendHostCommand) {
-        output(HostCommandMigrationNotice, true)
-    }
     return execute(leaf)
 }
 

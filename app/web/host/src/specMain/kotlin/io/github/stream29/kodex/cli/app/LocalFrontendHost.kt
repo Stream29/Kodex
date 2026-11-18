@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.backend.BackendEndpoint
-import io.github.stream29.kodex.backend.LocalFrontendPairingOffer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.io.Source
 
@@ -15,15 +14,6 @@ public expect suspend fun <R> withLocalFrontendHost(
     openResource: (String) -> Source?,
     newSecret: () -> String,
     block: suspend CoroutineScope.(privateLaunchUrl: String) -> R,
-): R
-
-/** Foreground scoped companion for an explicitly trusted static loopback Origin. */
-public expect suspend fun <R> withLocalFrontendPairingHost(
-    endpoint: BackendEndpoint,
-    directory: String,
-    origin: String,
-    newSecret: () -> String,
-    block: suspend CoroutineScope.(LocalFrontendPairingOffer) -> R,
 ): R
 
 /** Available local application window engines; Chrome is supported only on Linux. */

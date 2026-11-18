@@ -277,12 +277,19 @@ try {
     assert.match(help, /^\s+tui\s+/m);
     assert.match(help, /^\s+web\s+/m);
     assert.match(help, /^\s+app\s+/m);
+    assert.doesNotMatch(help, /^\s+host\s+/m);
+    for (const args of [
+        ["web", "--origin=http://127.0.0.1:18795"],
+        ["backend", "start", "--web-origin=http://127.0.0.1:18795"],
+    ]) assert.match(await command(args, firstProject, 1), /Error:/);
+    assert.equal(await stat(recordPath).catch(() => null), null, "Retired options must fail before starting a backend");
+    checks.manualOptionsRejectedBeforeBackendStartup = true;
     checks.copiedExecutableWithoutAdjacentAssets = true;
     const first = await launch(firstProject);
     assert.doesNotMatch(await readFile(`/proc/${first.current.pid}/maps`, "utf8"), /libgtk|libwebkit|libgobject/);
     checks.independentBackendBootstrapped = true;
     checks.backendDoesNotLoadGuiLibraries = true;
-    assert.match(await command(["app"], firstProject, 1), /Cannot initialize GTK display/);
+    assert.match(await command(["app", "--engine=system"], firstProject, 1), /Cannot initialize GTK display/);
     assert.equal((await status(first.current)).phase, "ready");
     checks.noDisplayAppFailurePreservesBackend = true;
     chrome = spawnOwned(process.env.CHROME_BIN ?? "/usr/bin/google-chrome", [
@@ -369,6 +376,8 @@ try {
         });
         assert.equal(bootstrap.status, 200);
         const info = await bootstrap.json();
+        assert.deepEqual(Object.keys(info).sort(), ["endpoint", "protocol", "workingDirectory"]);
+        assert.equal(info.protocol, 3);
         assert.notEqual(info.endpoint.password, entry.current.password);
         const denied = await privateFetch(`http://127.0.0.1:${entry.current.port}/control/status`, {
             headers: { Authorization: `Bearer ${info.endpoint.password}`, "X-Kodex-Instance": entry.current.instanceId },

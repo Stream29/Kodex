@@ -22,6 +22,7 @@ import kotlin.time.Duration.Companion.seconds
 private const val Origin = "http://127.0.0.1:18795"
 private const val Instance = "local-browser-server-test"
 private val Secret = "private-local-test-password-".repeat(3)
+private val BrowserSecret = "b".repeat(64)
 
 val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("server teardown closes live business connections before stopping the engine") {
@@ -41,7 +42,7 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
         } finally { http.close() }
     }
     test("Native grant allows only scoped business access and revocation closes its transport") {
-        withServer(origins = emptySet()) { harness ->
+        withServer(grantDefault = false) { harness ->
             val endpoint = BackendEndpoint(Instance, 123, harness.port, Secret, "test")
             val credential = "a".repeat(64)
             val grant = LocalBrowserGrant(LocalBrowserGrantProtocol, Origin, credential, "/project")
@@ -56,7 +57,7 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
                 "directory" to encodeHello(password = credential, directory = "/project"),
                 "instance" to encodeHello(password = credential, instance = "replacement", directory = "/canonical/project"),
                 "protocol" to encodeHello(password = credential, business = "other", directory = "/canonical/project"),
-                "master" to encodeHello(directory = "/canonical/project"),
+                "master" to encodeHello(password = Secret, directory = "/canonical/project"),
             )) {
                 val rejected = harness.browser()
                 rejected.send(hello)
@@ -83,7 +84,7 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
         }
     }
     test("Native grant registration rejects browser Origin before admission or directory work") {
-        withServer(origins = emptySet()) { harness ->
+        withServer(grantDefault = false) { harness ->
             val response = harness.http.post(harness.httpUrl("/control/browser/grant")) {
                 nativeCredentials()
                 header(HttpHeaders.Origin, Origin)
@@ -114,14 +115,14 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
         withServer { harness ->
             val socket = harness.browser()
             try {
-                socket.send(Frame.Text(encodeHello(directory = "/project")))
+                socket.send(Frame.Text(encodeHello(directory = "/canonical/project")))
                 val frame = assertIs<Frame.Text>(withTimeout(5.seconds) { socket.incoming.receive() })
                 val welcome = Json.decodeFromString(LocalBrowserWelcome.serializer(), frame.readText())
                 assertEquals(Instance, welcome.instanceId)
                 assertEquals(BackendBusinessProtocol, welcome.businessProtocol)
                 assertEquals("/canonical/project", welcome.workingDirectory)
                 withTimeout(5.seconds) { harness.registered.first { it == 1 } }
-                assertEquals(1, harness.directoryChecks.value)
+                assertEquals(0, harness.directoryChecks.value, "Directory was resolved at grant registration.")
                 assertEquals(0, harness.control.renewals.value, "An open socket is not a renewal.")
             } finally { socket.close() }
         }
@@ -159,7 +160,7 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
             socket.send(Frame.Text(encodeHello(directory = "/denied")))
             assertEquals(CloseReason.Codes.VIOLATED_POLICY.code,
                 withTimeout(5.seconds) { socket.closeReason.await() }?.code)
-            assertEquals(1, harness.directoryChecks.value)
+            assertEquals(0, harness.directoryChecks.value)
             assertEquals(0, harness.registered.value + harness.control.renewals.value)
         }
     }
@@ -184,16 +185,16 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
                     harness.assertNoBrowserWork()
                     for ((index, peer) in pending.withIndex()) {
                         val welcome = Json.decodeFromString(LocalBrowserWelcome.serializer(),
-                            peer.hello(encodeHello(directory = "/project")))
+                            peer.hello(encodeHello(directory = "/canonical/project")))
                         assertEquals("/canonical/project", welcome.workingDirectory)
                         withTimeout(3.seconds) { harness.registered.first { it == index + 1 } }
                     }
                     // Sixteen live RPCs must not consume the unauthenticated-hello semaphore.
                     val recovered = Json.decodeFromString(LocalBrowserWelcome.serializer(),
-                        wire.browser().hello(encodeHello(directory = "/project")))
+                        wire.browser().hello(encodeHello(directory = "/canonical/project")))
                     assertEquals("/canonical/project", recovered.workingDirectory)
                     withTimeout(3.seconds) { harness.registered.first { it == 17 } }
-                    assertEquals(17, harness.directoryChecks.value)
+                    assertEquals(0, harness.directoryChecks.value)
                     assertEquals(0, harness.control.renewals.value)
                 }
             }
@@ -212,11 +213,11 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
                         pending.first().rejectHello(encodeHello(password = Secret + "-wrong")))
                     harness.assertNoBrowserWork()
                     val welcome = Json.decodeFromString(LocalBrowserWelcome.serializer(),
-                        wire.browser().hello(encodeHello(directory = "/project")))
+                        wire.browser().hello(encodeHello(directory = "/canonical/project")))
                     assertEquals("/canonical/project", welcome.workingDirectory)
                     withTimeout(3.seconds) { harness.registered.first { it == 1 } }
                     pending.drop(1).forEachIndexed { index, peer -> peer.ping("still-pending-$index") }
-                    assertEquals(1, harness.directoryChecks.value)
+                    assertEquals(0, harness.directoryChecks.value)
                     assertEquals(0, harness.control.renewals.value)
                 }
             }
@@ -236,7 +237,9 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
             val native = harness.http.post(harness.httpUrl("/heartbeat")) { nativeCredentials() }
             assertEquals(HttpStatusCode.OK, native.status)
             val browser = harness.http.post(harness.httpUrl("/heartbeat")) {
-                nativeCredentials()
+                header(HttpHeaders.Authorization, "Bearer $BrowserSecret")
+                header("X-Kodex-Instance", Instance)
+                header("X-Kodex-Protocol", BackendBusinessProtocol)
                 header(HttpHeaders.Origin, Origin)
                 header("X-Kodex-Browser-Protocol", LocalBrowserProtocol)
             }
@@ -244,6 +247,12 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
             assertEquals(Origin, browser.headers[HttpHeaders.AccessControlAllowOrigin])
             assertFalse(browser.bodyAsText().contains(Secret))
             assertEquals(2, harness.control.renewals.value)
+            val managementPassword = harness.http.post(harness.httpUrl("/heartbeat")) {
+                nativeCredentials()
+                header(HttpHeaders.Origin, Origin)
+                header("X-Kodex-Browser-Protocol", LocalBrowserProtocol)
+            }
+            assertEquals(HttpStatusCode.Unauthorized, managementPassword.status)
             val rejected = harness.http.post(harness.httpUrl("/heartbeat")) {
                 nativeCredentials()
                 header(HttpHeaders.Origin, "http://127.0.0.1:18794")
@@ -274,7 +283,7 @@ private fun HttpRequestBuilder.nativeCredentials() {
 }
 
 private fun encodeHello(
-    protocol: Int = LocalBrowserProtocol, instance: String = Instance, password: String = Secret,
+    protocol: Int = LocalBrowserProtocol, instance: String = Instance, password: String = BrowserSecret,
     business: String = BackendBusinessProtocol, directory: String? = null,
 ): String = Json.encodeToString(LocalBrowserHello.serializer(),
     LocalBrowserHello(protocol, instance, password, business, directory))
@@ -310,11 +319,11 @@ private class Harness(
     }
 }
 
-private suspend fun withServer(enabled: Boolean = true, origins: Set<String> = setOf(Origin), block: suspend (Harness) -> Unit) {
+private suspend fun withServer(enabled: Boolean = true, grantDefault: Boolean = true, block: suspend (Harness) -> Unit) {
     val control = Control()
     val registered = MutableStateFlow(0)
     val directoryChecks = MutableStateFlow(0)
-    val access = if (!enabled) null else LocalBrowserAccess(origins) { requested ->
+    val access = if (!enabled) null else LocalBrowserAccess { requested ->
         directoryChecks.update { it + 1 }
         check(requested != "/denied") { "Directory unavailable." }
         if (requested == "/project") "/canonical/project" else "/backend/home"
@@ -322,6 +331,13 @@ private suspend fun withServer(enabled: Boolean = true, origins: Set<String> = s
     val http = HttpClient { install(WebSockets) }
     try {
         withLocalBackendServer(Secret, Instance, control, { registered.update { it + 1 } }, access) { port ->
+            if (enabled && grantDefault) {
+                backendRegisterBrowser(
+                    BackendEndpoint(Instance, 123, port, Secret, "test"),
+                    LocalBrowserGrant(LocalBrowserGrantProtocol, Origin, BrowserSecret, "/project"),
+                )
+                directoryChecks.value = 0
+            }
             withTimeout(15.seconds) { block(Harness(http, port, control, registered, directoryChecks)) }
         }
     } finally { http.close() }

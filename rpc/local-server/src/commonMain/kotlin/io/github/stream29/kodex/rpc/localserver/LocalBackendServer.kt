@@ -67,9 +67,7 @@ public actual suspend fun <R> withLocalBackendServer(
         install(WebSockets) { maxFrameSize = 16L * 1024 * 1024 }
         val pendingBrowserHellos = Semaphore(16)
         suspend fun ApplicationCall.browserOriginAllowed(): Boolean =
-            request.headers.getAll(HttpHeaders.Origin)?.singleOrNull()?.let {
-                it in browserAccess?.allowedOrigins.orEmpty() || grants.originAllowed(it)
-            } == true
+            request.headers.getAll(HttpHeaders.Origin)?.singleOrNull()?.let { grants.originAllowed(it) } == true
         fun ApplicationCall.browserHostAllowed(): Boolean =
             request.headers.getAll(HttpHeaders.Host)?.singleOrNull() == "127.0.0.1:${request.local.localPort}"
         suspend fun DefaultWebSocketServerSession.serveBusiness() {
@@ -200,9 +198,8 @@ public actual suspend fun <R> withLocalBackendServer(
                             call.respondText("""{"error":"instance_or_protocol_mismatch"}""", status = HttpStatusCode.Conflict)
                             return@post
                         }
-                        val manual = origin in browserAccess?.allowedOrigins.orEmpty() && credential == password
                         val scoped = credential != null && credential != password && grants.renew(credential, origin)
-                        if ((!manual && !scoped) || call.request.headers["X-Kodex-Instance"] != instanceId) {
+                        if (!scoped) {
                             call.respondText("""{"error":"unauthorized"}""", status = HttpStatusCode.Unauthorized)
                             return@post
                         }
@@ -247,15 +244,9 @@ public actual suspend fun <R> withLocalBackendServer(
                             !control.ready()
                         ) return@withTimeoutOrNull null
                         val origin = call.request.headers[HttpHeaders.Origin]!!
-                        if (hello.password != password) {
-                            val directory = grants.attach(hello.password, origin, hello.workingDirectory, peer)
-                            if (directory != null) grantPassword = hello.password
-                            return@withTimeoutOrNull directory
-                        }
-                        if (origin !in browserAccess.allowedOrigins) return@withTimeoutOrNull null
-                        try { browserAccess.resolveDirectory(hello.workingDirectory) }
-                        catch (cancelled: CancellationException) { throw cancelled }
-                        catch (_: Exception) { null }
+                        if (hello.password == password) return@withTimeoutOrNull null
+                        grants.attach(hello.password, origin, hello.workingDirectory, peer)
+                            ?.also { grantPassword = hello.password }
                     }
                 } finally { pendingBrowserHellos.release() }
                 if (directory == null || !control.ready()) {

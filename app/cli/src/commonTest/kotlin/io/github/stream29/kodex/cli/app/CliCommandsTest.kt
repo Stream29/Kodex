@@ -17,14 +17,14 @@ import kotlin.test.assertTrue
 import kotlin.test.fail
 
 val cliCommandsTest by testSuite {
-    test("host help calls the pairing service a frontend server") {
+    test("web help advertises the normal launch path without a pairing option") {
         val messages = mutableListOf<String>()
-        assertEquals(0, dispatchCli(listOf("host", "--help"), { message, error ->
+        assertEquals(0, dispatchCli(listOf("web", "--help"), { message, error ->
             assertFalse(error)
             messages += message
         }) { fail("Help must not start a frontend server") })
-        assertContains(messages.single(), "frontend server")
-        assertFalse(messages.single().contains("companion", ignoreCase = true))
+        assertContains(messages.single(), "--backend-url")
+        assertFalse(messages.single().contains("--origin"))
     }
 
     test("app accepts only the explicit Chrome and system engine options") {
@@ -61,13 +61,12 @@ val cliCommandsTest by testSuite {
         })
         assertEquals(0, dispatchCli(
             listOf(
-                "web", "--origin=http://127.0.0.1:18795",
+                "web",
                 "--backend-url=http://localhost:18082", "--backend-home", "/tmp/kodex-web-other",
             ),
             { _, _ -> fail("Unexpected output") },
         ) { leaf ->
             val web = assertIs<WebCommand>(leaf)
-            assertEquals("http://127.0.0.1:18795", web.origin)
             assertEquals(CliBackendTarget(18082, "/tmp/kodex-web-other"), web.backend.resolve())
             0
         })
@@ -80,31 +79,10 @@ val cliCommandsTest by testSuite {
         }
     }
 
-    test("legacy host command emits migration notice on stderr and yields FrontendHostCommand") {
-        val notices = mutableListOf<Pair<String, Boolean>>()
-        var actions = 0
-        val code = dispatchCli(
-            listOf(
-                "host", "--origin=http://127.0.0.1:18795",
-                "--backend-url", "http://localhost:18080", "--backend-home=/tmp/kodex-host-other",
-            ),
-            { message, error -> notices += message to error },
-        ) { leaf ->
-            actions++
-            val host = assertIs<FrontendHostCommand>(leaf)
-            assertEquals("http://127.0.0.1:18795", host.origin)
-            assertEquals(CliBackendTarget(18080, "/tmp/kodex-host-other"), host.backend.resolve())
-            23
-        }
-        assertEquals(23, code)
-        assertEquals(1, actions)
-        assertEquals(listOf(HostCommandMigrationNotice to true), notices)
-    }
-
     test("help at every level and empty groups never enter runtime or query MCP domains") {
         val paths = listOf(
             emptyList(),
-            listOf("tui"), listOf("web"), listOf("app"), listOf("host"),
+            listOf("tui"), listOf("web"), listOf("app"),
             listOf("backend"), listOf("backend", "start"), listOf("backend", "status"),
             listOf("terminal"), listOf("terminal", "read"), listOf("terminal", "write"),
             listOf("ask"), listOf("ask", "create"),
@@ -123,7 +101,6 @@ val cliCommandsTest by testSuite {
             listOf("session"),
             listOf("mcp"),
             listOf("tool"),
-            listOf("backend", "start", "--web-origin", "bad", "--help"),
         )
         for (arguments in cases) {
             val messages = mutableListOf<String>()
@@ -156,6 +133,7 @@ val cliCommandsTest by testSuite {
             listOf("tui", "--backend-home", "/tmp/only-home"),
             listOf("tui", "--backend-url", "http://127.0.0.1:8080", "--backend-home", "   "),
             listOf("web", "extra"), listOf("web", "--backend-home", "/tmp/only-home"),
+            listOf("web", "--origin=http://127.0.0.1:18795"),
             listOf("web", "--origin", "http://localhost:18795", "--backend-home", "/tmp/only-home"),
             listOf("web", "--origin", "http://remote.test"),
             listOf("web", "--origin", "http://localhost/path"),
@@ -165,6 +143,7 @@ val cliCommandsTest by testSuite {
             listOf("host", "--origin", "http://localhost:18795", "--backend-home", "/tmp/only-home"),
             listOf("backend", "unknown"), listOf("backend", "--web-origin=http://localhost", "start"),
             listOf("backend", "start", "--web-origin"), listOf("backend", "start", "--web-origin="),
+            listOf("backend", "start", "--web-origin=http://127.0.0.1:18795"),
             listOf("backend", "start", "--unknown"), listOf("backend", "start", "extra"),
             listOf("backend", "start", "--web-origin", "--unknown"),
             listOf("backend", "start", "--web-origin=http://remote.test:8080"),
@@ -276,14 +255,9 @@ val cliCommandsTest by testSuite {
         assertEquals(listOf("kotlin"), assertNotNull(invokedSearch).queries)
     }
 
-    test("framework handles repeated and equals options before canonical deduplication") {
-        val arguments = listOf(
-            "backend", "start", "--web-origin", "http://127.0.0.1:8080",
-            "--web-origin=http://localhost:80", "--web-origin", "http://localhost",
-        )
-        assertEquals(0, dispatchCli(arguments, { _, _ -> fail("Unexpected output") }) { leaf ->
-            val start = assertIs<BackendStartCommand>(leaf)
-            assertEquals(setOf("http://127.0.0.1:8080", "http://localhost"), start.browserOrigins.toSet())
+    test("backend start still selects its leaf without any browser setup options") {
+        assertEquals(0, dispatchCli(listOf("backend", "start"), { _, _ -> fail("Unexpected output") }) { leaf ->
+            assertIs<BackendStartCommand>(leaf)
             0
         })
     }

@@ -52,9 +52,7 @@ val cliFailureBoundaryTest by testSuite {
             listOf("tui"),
             listOf("tui", "--backend-url", "http://127.0.0.1:18080"),
             listOf("web"),
-            listOf("web", "--origin", "http://localhost:18795"),
             listOf("app"),
-            listOf("host", "--origin", "http://localhost:18795"),
             listOf("backend", "start"), listOf("backend", "status"), listOf("backend", "stop"),
             listOf("backend", "reload"),
         )
@@ -68,11 +66,7 @@ val cliFailureBoundaryTest by testSuite {
                     throw failure
                 }
             }
-            if (arguments.first() == "host") {
-                assertEquals(listOf(HostCommandMigrationNotice to true), parserOutput, arguments.toString())
-            } else {
-                assertEquals(emptyList(), parserOutput, arguments.toString())
-            }
+            assertEquals(emptyList(), parserOutput, arguments.toString())
             assertEquals(1, code, arguments.toString())
             assertSame(failure, reported, arguments.toString())
             val prefix = if (arguments == listOf("backend", "start")) "Unable to run Kodex [pid=42]: "
