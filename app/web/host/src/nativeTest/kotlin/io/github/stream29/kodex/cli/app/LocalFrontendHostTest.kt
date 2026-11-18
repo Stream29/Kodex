@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.app
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.backend.*
+import io.github.stream29.kodex.rpc.control.BackendControlClient
 import io.ktor.http.*
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.*
@@ -39,6 +40,53 @@ private const val Instance = "isolated-web-host-test"
 private const val LargeSize = 256L * 1024 * 1024
 
 val localFrontendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("control client decodes the admission directory and accepts a revoke response") {
+        withFixture { fixture ->
+            val grant = admissionGrant(fixture)
+            BackendControlClient().use { client ->
+                assertEquals(fixture.canonicalDirectory, client.registerBrowser(fixture.endpoint, grant))
+                client.revokeBrowser(fixture.endpoint, grant)
+            }
+            assertEquals(grant.key(), fixture.grants.value.single().key())
+            assertEquals(grant.key(), fixture.revocations.value.single().key())
+        }
+    }
+    test("control client keeps malformed and rejected admission responses distinct") {
+        for ((reply, diagnostic) in listOf(
+            AdmissionReply("{", HttpStatusCode.OK) to "Invalid browser admission response.",
+            AdmissionReply("[]", HttpStatusCode.OK) to "Invalid browser admission response.",
+            AdmissionReply("{", HttpStatusCode.Forbidden) to "Backend browser admission rejected (403).",
+        )) {
+            withFixture(admissionReply = reply) { fixture ->
+                BackendControlClient().use { client ->
+                    val failure = assertFailsWith<IllegalStateException> {
+                        client.registerBrowser(fixture.endpoint, admissionGrant(fixture))
+                    }
+                    assertEquals(diagnostic, failure.message)
+                }
+            }
+        }
+    }
+    test("control client propagates cancellation while receiving an admission reply") {
+        withFixture(Registration.PendingBody) { fixture ->
+            BackendControlClient().use { client ->
+                coroutineScope {
+                    val diagnostic = CompletableDeferred<Throwable>()
+                    val request = launch {
+                        try {
+                            client.registerBrowser(fixture.endpoint, admissionGrant(fixture))
+                        } catch (failure: Exception) {
+                            diagnostic.complete(failure)
+                            throw failure
+                        }
+                    }
+                    withTimeout(5.seconds) { fixture.partialReply.await() }
+                    request.cancelAndJoin()
+                    assertIs<CancellationException>(withTimeout(5.seconds) { diagnostic.await() })
+                }
+            }
+        }
+    }
     test("listener release check rejects a still-live listener") {
         withFixture { fixture ->
             val address = HostAddress("http://127.0.0.1:${fixture.endpoint.port}/web/probe/")
@@ -522,7 +570,15 @@ private class Resources {
     }
 }
 
-private enum class Registration { Ready, LostReply, Pending }
+private enum class Registration { Ready, LostReply, Pending, PendingBody }
+
+private data class AdmissionReply(val body: String, val status: HttpStatusCode)
+
+private fun admissionGrant(fixture: Fixture) = LocalBrowserGrant(
+    LocalBrowserGrantProtocol, "http://127.0.0.1:18795", BrowserPassword, fixture.directory,
+)
+
+private fun LocalBrowserGrant.key() = listOf(protocol.toString(), origin, password, workingDirectory)
 
 private class Fixture(val home: Path, val wire: Wire, val registration: Registration) {
     lateinit var endpoint: BackendEndpoint
@@ -534,6 +590,7 @@ private class Fixture(val home: Path, val wire: Wire, val registration: Registra
     val revocations = MutableStateFlow<List<LocalBrowserGrant>>(emptyList())
     val accepted = CompletableDeferred<LocalBrowserGrant>()
     val allowReply = CompletableDeferred<Unit>()
+    val partialReply = CompletableDeferred<Unit>()
     fun secrets(): () -> String {
         val initial = listOf(HostId, Ticket, BrowserPassword).iterator()
         var serial = 0
@@ -551,7 +608,6 @@ private class Fixture(val home: Path, val wire: Wire, val registration: Registra
         val grant = grants.value.first()
         assertEquals(listOf(LocalBrowserGrantProtocol, address.origin, BrowserPassword, directory),
             listOf(grant.protocol, grant.origin, grant.password, grant.workingDirectory))
-        fun LocalBrowserGrant.key() = listOf(protocol.toString(), origin, password, workingDirectory)
         assertEquals(grants.value.map { it.key() }.toSet(), revocations.value.map { it.key() }.toSet())
         wire.assertListenerReleased(address)
         assertEquals(200, wire.request(HostAddress("http://127.0.0.1:${endpoint.port}/web/unused/"),
@@ -560,7 +616,11 @@ private class Fixture(val home: Path, val wire: Wire, val registration: Registra
 }
 
 @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
-private suspend fun withFixture(registration: Registration = Registration.Ready, block: suspend (Fixture) -> Unit) {
+private suspend fun withFixture(
+    registration: Registration = Registration.Ready,
+    admissionReply: AdmissionReply? = null,
+    block: suspend (Fixture) -> Unit,
+) {
     val home = Path(SystemTemporaryDirectory, "kodex-web-host-test-${Random.nextLong().toULong()}")
     SystemFileSystem.createDirectories(home, mustCreate = true)
     val wire = Wire()
@@ -582,9 +642,24 @@ private suspend fun withFixture(registration: Registration = Registration.Ready,
                 val grant = Json.decodeFromString(LocalBrowserGrant.serializer(), call.receiveText())
                 fixture.grants.update { it + grant }
                 fixture.accepted.complete(grant)
+                if (admissionReply != null) {
+                    call.respondText(admissionReply.body, ContentType.Application.Json, admissionReply.status)
+                    return@post
+                }
+                val body = buildJsonObject { put("working_directory", fixture.canonicalDirectory) }.toString()
                 when (fixture.registration) {
                     Registration.Ready -> Unit
                     Registration.Pending -> fixture.allowReply.await()
+                    Registration.PendingBody -> {
+                        call.respondBytesWriter(ContentType.Application.Json) {
+                            writeStringUtf8("{")
+                            flush()
+                            fixture.partialReply.complete(Unit)
+                            fixture.allowReply.await()
+                            writeStringUtf8(body.drop(1))
+                        }
+                        return@post
+                    }
                     Registration.LostReply -> {
                         call.respondBytesWriter(ContentType.Application.Json) {
                             writeStringUtf8("{")
@@ -594,8 +669,7 @@ private suspend fun withFixture(registration: Registration = Registration.Ready,
                         return@post
                     }
                 }
-                call.respondText(buildJsonObject { put("working_directory", fixture.canonicalDirectory) }.toString(),
-                    ContentType.Application.Json)
+                call.respondText(body, ContentType.Application.Json)
             }
             post("/control/browser/revoke") {
                 call.assertManagement(fixture, "revoke")

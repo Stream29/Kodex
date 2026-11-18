@@ -79,7 +79,9 @@ public actual class BackendControlClient actual constructor() : AutoCloseable {
         }
         check(response.status.value in 200..299) { "Backend browser admission rejected (${response.status.value})." }
         return try {
-            Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val body = response.bodyAsText()
+            // Avoid the thread-local Json.Default on resumption in optimized Kotlin/Native builds.
+            Json {}.parseToJsonElement(body).jsonObject
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
