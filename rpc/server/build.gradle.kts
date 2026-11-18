@@ -20,6 +20,7 @@ kotlin {
             api(project(":utils-rpc-exception"))
             implementation(project(":app-rpc-protocol"))
             implementation(project(":agent-eventbus"))
+            implementation(project(":agent-context"))
             implementation(project(":agent-schedule-contract"))
             implementation(project(":agent-session-contract"))
             implementation(project(":agent-state-contract"))

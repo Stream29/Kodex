@@ -7,6 +7,7 @@ import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
@@ -40,6 +41,10 @@ private class RepositoryAgentEventBus(
 
     override suspend fun submitUserMessage(session: KodexAgentSession, content: List<ContentItem>) {
         if (content.isNotEmpty()) session.runtime.submitUserMessage(content)
+    }
+
+    override suspend fun recordSubagentCreation(parent: KodexAgentSession, childAgentId: Int) {
+        parent.runtime.modify { it.commit(StableSubagentCreatedEvent(childAgentId)) }
     }
 
     override suspend fun submitAskUserAnswer(

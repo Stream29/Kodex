@@ -36,6 +36,7 @@ public class SessionCommand : KodexGroupCommand(
 
 public class AgentCommand : KodexGroupCommand(
     "agent", "Inspect and control a specific Agent.",
+    AgentSpawnCommand(),
     AgentStatusCommand(), AgentSubmitCommand(), AgentResumeCommand(), AgentStopCommand(),
     AgentCompactCommand(), AgentClearPendingCommand(),
     AgentSqlCommand(),
@@ -57,6 +58,25 @@ public sealed class ExplicitAgentOperation(name: String, summary: String) : Sess
 public class AgentStatusCommand : ExplicitAgentOperation(
     "status", "Read UTC time, Agent state, and remaining context-window budget.",
 )
+
+public class AgentSpawnCommand : SessionAgentOperation("spawn", "Delegate one task as a new child of the calling Agent.") {
+    public val cwd: String? by option("--cwd", metavar = "DIR", help = "Initial directory, relative to this CLI process if needed.")
+    public val model: OpenAiModelId? by option("--model", metavar = "MODEL", help = "Override the calling Agent's model.")
+        .convert { require(it.isNotBlank()) { "Model must not be blank." }; OpenAiModelId(it) }
+    public val reasoningEffort: ReasoningEffort? by option("--reasoning-effort", metavar = "EFFORT", help = "Override the calling Agent's reasoning effort.")
+        .convert {
+            require(it.isNotBlank()) { "Reasoning effort must not be blank." }
+            CliToolJson.decodeFromJsonElement(ReasoningEffortSerializer, JsonPrimitive(it))
+        }
+    public val message: CliPayloadInput<String> by textOperationInput("--message", "Self-contained task text.").required()
+
+    override fun validate() {
+        if (cwd?.isBlank() == true) throw UsageError("Working directory must not be blank.", paramName = "--cwd")
+        if ((message as? CliPayloadInput.Inline)?.value?.isBlank() == true) {
+            throw UsageError("Task text must not be blank.", paramName = "--message")
+        }
+    }
+}
 
 public class SessionSpawnCommand : SessionAgentOperation("spawn", "Create an independent Session, optionally submitting its first message.") {
     public val cwd: String? by option("--cwd", metavar = "DIR", help = "Initial working directory, relative to this CLI process if needed.")
@@ -156,6 +176,7 @@ public data class CliOperationFailure(
     public val outcome: CliOperationOutcome,
     @SerialName("session_id") public val sessionId: Int? = null,
     @SerialName("agent_id") public val agentId: Int? = null,
+    @SerialName("parent_agent_id") public val parentAgentId: Int? = null,
 )
 
 @Serializable

@@ -12,6 +12,8 @@ import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.GeneratedImageArtifact
 import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
 import io.github.stream29.kodex.rpc.models.ShellSessionState
+import io.github.stream29.kodex.rpc.models.SubagentSpawnRequest
+import io.github.stream29.kodex.rpc.models.SubagentSpawnResult
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
@@ -31,6 +33,9 @@ import kotlinx.rpc.annotations.Rpc
  */
 @Rpc
 public interface AgentRuntimeRpc {
+    /** Starts a new child of the verified calling Agent, without waiting for the child's response. */
+    public suspend fun spawnSubagent(request: SubagentSpawnRequest): SubagentSpawnResult
+
     /**
      * Activates or renews only the exact Agent, without unarchiving its Session.
      * Running turns renew their own deadline; ordinary reads and subscriptions do not.

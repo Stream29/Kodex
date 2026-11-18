@@ -24,7 +24,7 @@ public expect class SqliteKodexSessionRepository : KodexSessionRepository, Corou
     override suspend fun getAgentRecord(agentId: Int): StoredAgent?
     override suspend fun openAgent(agentId: Int): KodexAgentSession?
     /** Allocates an empty child in the persisted parent's Session without opening it. */
-    public suspend fun createChild(parentAgentId: Int): StoredAgent
+    public suspend fun createChild(parentAgentId: Int, expectedOwner: KodexAgentSession? = null): StoredAgent
     /** Deletes only an uninitialized child with no commits or children, after failed creation. */
     public suspend fun discardUninitializedChild(agentId: Int): Boolean
     /** Marks an existing child completed; returns its direct parent only if the marker changed. */

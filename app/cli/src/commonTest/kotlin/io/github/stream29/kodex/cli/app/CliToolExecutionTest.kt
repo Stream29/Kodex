@@ -28,6 +28,11 @@ import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.models.AgentSqlError
 import io.github.stream29.kodex.rpc.models.AgentSqlQueryResult
 import io.github.stream29.kodex.rpc.models.AgentSqlResultJson
+import io.github.stream29.kodex.rpc.models.SessionSpawnRequest
+import io.github.stream29.kodex.rpc.models.SessionSpawnResult
+import io.github.stream29.kodex.rpc.models.SubagentSpawnRequest
+import io.github.stream29.kodex.rpc.models.SubagentSpawnResult
+import io.github.stream29.kodex.rpc.models.SubagentSpawnStage
 import io.github.stream29.kodex.rpc.server.defaultBackendSettings
 import io.github.stream29.kodex.rpc.server.withBackendServices
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
@@ -36,6 +41,7 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.KodexAgentIdEnvironmentVariable
 import io.github.stream29.kodex.tool.unifiedexec.KodexHomeEnvironmentVariable
+import io.github.stream29.kodex.tool.unifiedexec.KodexInvocationIdEnvironmentVariable
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlin.random.Random
 import kotlinx.serialization.json.jsonObject
@@ -62,6 +68,68 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.int
 
 val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("agent spawn transports the caller, persists a child, and distinguishes a known partial result") {
+        val root = Path(SystemTemporaryDirectory, "kodex-cli-subagent-${Random.nextLong().toULong()}")
+        val fs = SystemCoroutineFileSystem
+        try {
+            fs.createDirectories(root)
+            withBackendServices(
+                root, Path(root, "codex"), Path(root, "agents"),
+                defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
+                createClient = { mockOpenAiClient { createResponse { flow { awaitCancellation() } } } },
+            ) { backend ->
+                val response = backend.global.spawnSession(SessionSpawnRequest(root.toString()))
+                val created = assertIs<SessionSpawnResult.Created>(response, response.toString())
+                val runtime = object : AgentRuntimeRpc by backend.runtime {
+                    override suspend fun spawnSubagent(request: SubagentSpawnRequest): SubagentSpawnResult {
+                        val answer = backend.runtime.spawnSubagent(request)
+                        // Simulate a known partial reply at the transport boundary, on a real allocated ID.
+                        if (request.message != "partial fixture" || answer !is SubagentSpawnResult.Created) return answer
+                        return SubagentSpawnResult.Partial(answer.sessionId, answer.parentAgentId, answer.agentId, SubagentSpawnStage.Submit)
+                    }
+                }
+                withInMemoryRpc(registerServices = { registerService(AgentRuntimeRpc::class) { runtime } }) { raw ->
+                    val services = RpcServices(RestoringRpcClient(raw))
+                    suspend fun spawn(text: String, invocation: String?, expectedExit: Int): CliOperationEnvelope {
+                        val lines = mutableListOf<String>()
+                        val exit = dispatchCli(listOf("agent", "spawn", "--stdin"), { diagnostic, _ -> error(diagnostic) }) {
+                            executeCliToolCommand(assertIs<KodexToolLeafCommand>(it), services, env = { name ->
+                                when (name) {
+                                    KodexAgentIdEnvironmentVariable -> created.rootAgentId.toString()
+                                    KodexInvocationIdEnvironmentVariable -> invocation
+                                    else -> null
+                                }
+                            }, readStdin = { text }, writeStdout = lines::add)
+                        }
+                        assertEquals(expectedExit, exit, lines.toString())
+                        return CliToolJson.decodeFromString(CliOperationEnvelope.serializer(), lines.single())
+                    }
+                    assertEquals("invalid_source", spawn("task", null, 1).error?.code)
+                    assertEquals("invalid_source", spawn("task", "stale", 1).error?.code)
+                    val receipt = checkNotNull(spawn("valid fixture", created.invocationId, 0).result).jsonObject
+                    assertEquals(created.sessionId, receipt.getValue("session_id").jsonPrimitive.int)
+                    assertEquals(created.rootAgentId, receipt.getValue("parent_agent_id").jsonPrimitive.int)
+                    val id = receipt.getValue("agent_id").jsonPrimitive.int
+                    assertTrue(id != created.rootAgentId)
+                    withTimeout(10_000) { backend.runtime.getRunningTurnFlow(id).first { it } }
+                    val partial = checkNotNull(spawn("partial fixture", created.invocationId, 1).error)
+                    assertEquals("subagent_partial", partial.code)
+                    assertEquals("submit", partial.phase)
+                    assertEquals(created.sessionId, partial.sessionId)
+                    assertEquals(created.rootAgentId, partial.parentAgentId)
+                    assertTrue(checkNotNull(partial.agentId) > id)
+                }
+            }
+        } finally {
+            suspend fun delete(path: Path) {
+                val metadata = fs.metadataOrNull(path) ?: return
+                if (metadata.isDirectory) fs.list(path).forEach { delete(it) }
+                fs.delete(path, mustExist = false)
+            }
+            delete(root)
+        }
+    }
+
     test("spawn preserves raw text, keeps accepted turns alive, and reports a known id on lost submit reply") {
         val root = Path(SystemTemporaryDirectory, "kodex-cli-spawn-${Random.nextLong().toULong()}")
         var loseSubmitReply = false

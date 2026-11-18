@@ -29,6 +29,9 @@ import io.github.stream29.kodex.rpc.models.GeneratedImageArtifact
 import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.ShellSessionState
+import io.github.stream29.kodex.rpc.models.SubagentSpawnRejection
+import io.github.stream29.kodex.rpc.models.SubagentSpawnRequest
+import io.github.stream29.kodex.rpc.models.SubagentSpawnResult
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenerationToolClient
 import io.github.stream29.kodex.tool.imagegeneration.imageArtifactDirectory
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
@@ -73,9 +76,20 @@ internal class BackendAgentRuntimeRpc(
     private val home: Path? = null,
     private val onAskUserCreated: (Notification.AskUserCreated) -> Unit = {},
     private val checkAdmission: () -> Unit = {},
+    private val subagentSpawner: BackendSubagentSpawner? = null,
 ) : AgentRuntimeRpc {
     private val viewsMutex = Mutex()
     private val views = mutableMapOf<KodexAgentSession, RuntimeView>()
+
+    override suspend fun spawnSubagent(request: SubagentSpawnRequest): SubagentSpawnResult = try {
+        command(request.source.agentId) {
+            checkNotNull(subagentSpawner) { "Subagent persistence is not configured." }.spawn(session, request)
+        }
+    } catch (_: AgentNotFound) {
+        SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidSource)
+    } catch (_: AgentNotActive) {
+        SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidSource)
+    }
 
     override suspend fun keepAgentAlive(agentId: Int) {
         checkAdmission()

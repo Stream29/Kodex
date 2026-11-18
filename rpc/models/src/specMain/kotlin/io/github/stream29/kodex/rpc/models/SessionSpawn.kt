@@ -6,7 +6,7 @@ import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import kotlinx.serialization.Serializable
 
-/** A claimed invocation must match a live root owner on the backend accepting the request. */
+/** A claimed invocation must match a live Agent owner on the backend accepting the request. */
 @Serializable
 public data class SessionSpawnSource(public val agentId: Int, public val invocationId: String)
 

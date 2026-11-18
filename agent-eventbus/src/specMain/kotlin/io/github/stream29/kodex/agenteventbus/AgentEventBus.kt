@@ -10,7 +10,7 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
  *
  * Implementations hold [KodexSessionRepository], watch active Sessions for `PendingAwait`
  * background terminal completions, and route every submitted event through
- * [KodexSessionRepository.open] (activating unloaded Sessions and renewing residency TTL) into
+ * [KodexSessionRepository.openAgent] (activating unloaded Agents and renewing residency TTL) into
  * `AgentRuntime.submit*`:
  * - [submitUserMessage] -> `StableUserMessage`
  * - [submitAskUserAnswer] -> atomic `AskUserSnapshot` + `StableAskUserEvent`
@@ -33,6 +33,9 @@ public interface AgentEventBus {
 
     /** Delivers to a previously verified owner without re-resolving a reusable numeric id. */
     public suspend fun submitUserMessage(session: KodexAgentSession, content: List<ContentItem>)
+
+    /** Records creation on the captured calling parent without waking or steering it. */
+    public suspend fun recordSubagentCreation(parent: KodexAgentSession, childAgentId: Int)
 
     /**
      * Records first-time [response] for [askId] in [agentId]'s `AskUserSnapshot` timeline and

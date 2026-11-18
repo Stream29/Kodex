@@ -138,7 +138,10 @@ public actual class SqliteKodexSessionRepository internal constructor(
         agents.get(agentId)
     }
 
-    public actual suspend fun createChild(parentAgentId: Int): StoredAgent = lifecycleMutex.withLock {
+    public actual suspend fun createChild(parentAgentId: Int, expectedOwner: KodexAgentSession?): StoredAgent = lifecycleMutex.withLock {
+        if (expectedOwner != null && residency.activeSessionOrNullLocked(parentAgentId) !== expectedOwner) {
+            throw AgentResumeNotAdmittedException()
+        }
         withDbLock {
             requireOpen()
             val child = connection.transaction { agents.createChild(parentAgentId) }
@@ -149,7 +152,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
     }
 
     public actual suspend fun discardUninitializedChild(agentId: Int): Boolean = lifecycleMutex.withLock {
-        withDbLock {
+        val discarded = withDbLock {
             requireOpen()
             val sessionId = connection.transaction { agents.discardUninitializedChild(agentId) }
                 ?: return@withDbLock false
@@ -157,6 +160,8 @@ public actual class SqliteKodexSessionRepository internal constructor(
             mirror.enqueue { deleteRecursively(fileSystem, target) }
             true
         }
+        if (discarded) residency.closeLocked(agentId)
+        discarded
     }
 
     public actual suspend fun markChildCompleted(agentId: Int): Int? = withDbLock {

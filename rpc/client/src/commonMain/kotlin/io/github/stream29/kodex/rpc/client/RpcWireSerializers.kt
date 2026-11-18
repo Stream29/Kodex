@@ -13,6 +13,7 @@ import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.Notification
+import io.github.stream29.kodex.rpc.models.SubagentSpawnResult
 import io.github.stream29.kodex.rpc.models.FrontendErrorAdmission
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
@@ -35,6 +36,7 @@ public actual val RpcWireSerializers: SerializersModule = SerializersModule {
     contextual(SettingsAuthenticationState::class, SettingsAuthenticationState.serializer())
     contextual(SettingsAccountUsageState::class, SettingsAccountUsageState.serializer())
     contextual(Notification::class, Notification.serializer())
+    contextual(SubagentSpawnResult::class, SubagentSpawnResult.serializer())
     contextual(OAuthTarget::class, OAuthTarget.serializer())
     contextual(OAuthAuthorization::class, OAuthAuthorization.serializer())
     contextual(DirectoryQuery::class, DirectoryQuery.serializer())

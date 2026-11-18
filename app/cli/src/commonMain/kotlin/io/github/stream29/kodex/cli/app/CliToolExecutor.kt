@@ -35,6 +35,10 @@ import io.github.stream29.kodex.rpc.models.SessionSpawnRequest
 import io.github.stream29.kodex.rpc.models.SessionSpawnSource
 import io.github.stream29.kodex.rpc.models.SessionSpawnResult
 import io.github.stream29.kodex.rpc.models.SessionSpawnRejection
+import io.github.stream29.kodex.rpc.models.SubagentSpawnRejection
+import io.github.stream29.kodex.rpc.models.SubagentSpawnRequest
+import io.github.stream29.kodex.rpc.models.SubagentSpawnResult
+import io.github.stream29.kodex.rpc.models.SubagentSpawnStage
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.KodexAgentIdEnvironmentVariable
@@ -240,9 +244,7 @@ internal suspend fun dispatchCliWithToolRpc(
                         ) { output(it, false) }
                         writeOperationFailure("connection_failed", "Could not connect to the selected backend.",
                             "connect", CliOperationOutcome.Failed, (toolLeaf as? ExplicitAgentOperation)?.agentId,
-                            (toolLeaf as? ExplicitSessionOperation)?.sessionId) {
-                            output(it, false)
-                        }
+                            (toolLeaf as? ExplicitSessionOperation)?.sessionId, write = { output(it, false) })
                     }
                 }
             }
@@ -477,8 +479,11 @@ private fun writeOperationFailure(
     code: String, message: String, phase: String, outcome: CliOperationOutcome, agentId: Int? = null,
     sessionId: Int? = null,
     write: (String) -> Unit,
+    parentAgentId: Int? = null,
 ): Int {
-    val failure = CliOperationFailure(code, message, phase, outcome, sessionId = sessionId, agentId = agentId)
+    val failure = CliOperationFailure(
+        code, message, phase, outcome, sessionId = sessionId, agentId = agentId, parentAgentId = parentAgentId,
+    )
     write(CliToolJson.encodeToString(CliOperationEnvelope.serializer(), CliOperationEnvelope(ok = false, error = failure)))
     return 1
 }
@@ -491,6 +496,7 @@ private suspend fun executeSessionAgentOperation(
 ): Int {
     var agentId = (command as? ExplicitAgentOperation)?.agentId
     var sessionId = (command as? ExplicitSessionOperation)?.sessionId
+    var parentAgentId: Int? = null
     var phase = "input"
     var mutationStarted = false
     suspend fun activate(id: Int) {
@@ -508,7 +514,7 @@ private suspend fun executeSessionAgentOperation(
         if (accepted) put("accepted", true)
     }
     fun fail(code: String, message: String, outcome: CliOperationOutcome): Int =
-        writeOperationFailure(code, message, phase, outcome, agentId, sessionId, write)
+        writeOperationFailure(code, message, phase, outcome, agentId, sessionId, write, parentAgentId)
     val result: JsonElement = try {
         when (command) {
             is SessionListCommand -> {
@@ -524,6 +530,51 @@ private suspend fun executeSessionAgentOperation(
             is AgentStatusCommand -> {
                 phase = "status"
                 CliToolJson.encodeToJsonElement(CliAgentStatusOutput.serializer(), readAgentStatus(services, command.agentId, now))
+            }
+            is AgentSpawnCommand -> {
+                val text = command.message.readText(readStdin)
+                if (text.isBlank()) throw OperationRejected("invalid_message", "A nonblank task is required.")
+                val source = readSpawnSource(env)
+                    ?: throw OperationRejected("invalid_source", "Run this command from the calling Agent's tool context.")
+                val directory = command.cwd?.let { raw ->
+                    require('\u0000' !in raw)
+                    val path = Path(raw)
+                    if (path.isAbsolute) path else Path(SystemCoroutineFileSystem.resolve(Path(".")), raw)
+                }
+                phase = "spawn"
+                mutationStarted = true
+                when (val reply = services.runtime.spawnSubagent(
+                    SubagentSpawnRequest(source, text, command.model, command.reasoningEffort, directory?.toString()),
+                )) {
+                    is SubagentSpawnResult.Created -> buildJsonObject {
+                        put("session_id", reply.sessionId)
+                        put("parent_agent_id", reply.parentAgentId)
+                        put("agent_id", reply.agentId)
+                        put("submitted", true)
+                    }
+                    is SubagentSpawnResult.Rejected -> throw when (reply.reason) {
+                        SubagentSpawnRejection.InvalidSource ->
+                            OperationRejected("invalid_source", "The calling Agent is not live on the selected backend.")
+                        SubagentSpawnRejection.CreationRejected ->
+                            OperationRejected("creation_rejected", "The calling Agent's settings do not allow creating children.")
+                        SubagentSpawnRejection.InvalidDirectory ->
+                            OperationRejected("invalid_directory", "The child's working directory is not a valid directory.")
+                        SubagentSpawnRejection.InvalidConfiguration ->
+                            OperationRejected("invalid_configuration", "The selected model does not support the requested configuration.")
+                        SubagentSpawnRejection.InvalidMessage ->
+                            OperationRejected("invalid_message", "A nonblank task is required.")
+                    }
+                    is SubagentSpawnResult.Partial -> {
+                        sessionId = reply.sessionId
+                        parentAgentId = reply.parentAgentId
+                        agentId = reply.agentId
+                        phase = when (reply.stage) {
+                            SubagentSpawnStage.Record -> "record"
+                            SubagentSpawnStage.Submit -> "submit"
+                        }
+                        return fail("subagent_partial", "The child exists, but the operation did not finish. Do not replay spawn.", CliOperationOutcome.Failed)
+                    }
+                }
             }
             is SessionSpawnCommand -> {
                 val message = command.message?.readText(readStdin)

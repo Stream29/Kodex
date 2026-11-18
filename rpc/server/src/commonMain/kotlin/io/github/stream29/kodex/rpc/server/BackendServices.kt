@@ -179,6 +179,14 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                     home = home,
                     onAskUserCreated = persistence::emitNotification,
                     checkAdmission = persistence::ensureAdmission,
+                    subagentSpawner = BackendSubagentSpawner(
+                        repository = persistence.sessionRepository,
+                        models = { global.models.value },
+                        allocate = { id, owner -> persistence.acquire().first.createChild(id, owner) },
+                        discardUninitialized = { id -> persistence.acquire().first.discardUninitializedChild(id) },
+                        record = eventBus::recordSubagentCreation,
+                        submit = eventBus::submitUserMessage,
+                    ),
                 )
                 val management = BackendSessionManagement(
                     repository = persistence.sessionRepository,
