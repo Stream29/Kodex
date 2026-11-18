@@ -92,7 +92,7 @@ internal val frontendBootstrapTransportTest by testSuite {
         const result = {
             protocol: mode === 'old' ? 2 : 3,
             workingDirectory: '/project',
-            endpoint: {instanceId: 'direct-test', port: 1234, password: 'c'.repeat(64), businessProtocol: '0.5.9'}
+            endpoint: {instanceId: 'direct-test', port: 1234, password: 'c'.repeat(64), businessProtocol: '0.7.3'}
         };
         if (mode === 'extra') result.host = {};
         return new Response(JSON.stringify(result));

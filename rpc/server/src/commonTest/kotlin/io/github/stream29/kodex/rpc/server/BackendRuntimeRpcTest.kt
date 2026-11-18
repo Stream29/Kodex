@@ -7,6 +7,8 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
+import io.github.stream29.kodex.agentstorage.sqlite.initializeSqlitePhaseOneSchema
+import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
@@ -170,17 +172,17 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 val rpc = RestoringRpcClient(raw).withService<AgentRuntimeRpc>()
                 val started = CompletableDeferred<Unit>()
                 val subscription = async {
-                    assertFailsWith<SessionNotActive> {
+                    assertFailsWith<AgentNotActive> {
                         rpc.getLatestIndexFlow(index).onEach { started.complete(Unit) }.collect()
                     }
                 }
                 started.await()
                 repository.delete(index)
                 subscription.await()
-                assertFailsWith<SessionNotActive> { rpc.getLatestIndex(index) }
+                assertFailsWith<AgentNotFound> { rpc.getLatestIndex(index) }
                 val replacement = repository.create()
                 repository.open(replacement)
-                assertEquals(-1, rpc.getLatestIndex(replacement))
+                assertEquals(-1, rpc.getLatestIndex(repository.getRootAgentId(replacement)))
             }
         }
     }
@@ -608,7 +610,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
             stopped.await()
             job.await().join()
             assertTrue(job.await().isCancelled)
-            assertFailsWith<SessionNotActive> { rpc.getLatestIndex(index) }
+            assertFailsWith<AgentNotFound> { rpc.getLatestIndex(index) }
         }
     }
 
@@ -703,10 +705,17 @@ internal suspend fun runtimeFixture(
     val root = Path(SystemTemporaryDirectory, "kodex-rpc-runtime-${Random.nextLong()}")
     val repoOwner = CoroutineScope(coroutineContext + SupervisorJob())
     try {
+        // Existing runtime cases exercise the first root imported from a pre-cutover Home.
+        SystemCoroutineFileSystem.createDirectories(root)
+        openSqliteConnection(Path(root, "kodex.db")).use { db ->
+            initializeSqlitePhaseOneSchema(db)
+            db.execute("INSERT INTO sessions(session_id) VALUES(0)")
+            db.execute("INSERT INTO agents(agent_id, session_id) VALUES(0, 0)")
+        }
         val repository = repoOwner.SqliteKodexSessionRepository(root, testKodexAgentDependencies(client))
         try {
             val eventBus = AgentEventBus(repository)
-            val index = repository.create()
+            val index = 0
             val session = repository.open(index)
             session.runtime.modify {
                 it.initialize(KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = "Session $index"))

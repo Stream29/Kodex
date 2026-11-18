@@ -7,6 +7,8 @@ import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
+import io.github.stream29.kodex.agentstorage.sqlite.initializeSqlitePhaseOneSchema
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
@@ -21,6 +23,8 @@ import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.contract.*
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.models.*
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.rpcexception.*
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
@@ -34,8 +38,63 @@ import kotlin.random.Random
 import kotlin.test.*
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("AgentId RPC resolves actual owners and preserves unrelated same-numbered Sessions") {
+        withServices { services, _ ->
+            val home = services.settings.contextSettings.value.kodexHome
+            SystemCoroutineFileSystem.createDirectories(home)
+            openSqliteConnection(Path(home, "kodex.db")).use { db ->
+                initializeSqlitePhaseOneSchema(db)
+                db.execute("INSERT INTO sessions(session_id) VALUES(12), (90)")
+                db.execute("INSERT INTO agents(agent_id, session_id, parent_agent_id) VALUES(90, 12, NULL), (12, 90, NULL), (91, 12, 90)")
+                for ((id, title) in listOf(90L to "Owner of Session 12", 12L to "Unrelated owner", 91L to "The child")) {
+                    db.execute(
+                        """INSERT INTO agent_commits VALUES(?, 'settings', 0, ?, '2026-11-18T00:00:00Z')""",
+                        listOf(id, KodexAgentSettings(
+                            model = OpenAiModelId("test-model"), threadName = title,
+                            requestUserInputMode = RequestUserInputMode.AskUser,
+                        ).encodePayloadJson()),
+                    )
+                }
+            }
+            withInMemoryRpc(services::register) { raw ->
+                val client = RestoringRpcClient(raw)
+                val global = client.withService<GlobalRpc>()
+                val runtime = client.withService<AgentRuntimeRpc>()
+                assertEquals(90, global.getRootAgentId(12))
+                assertEquals(12, global.getRootAgentId(90))
+                assertFailsWith<SessionNotFound> { global.getRootAgentId(91) }
+                assertFailsWith<AgentNotFound> { runtime.keepAgentAlive(999) }
+                assertFailsWith<AgentNotActive> { runtime.getLatestIndex(90) }
+                assertFalse(global.getSessionCatalog(true).any { it.isActive })
+                runtime.keepAgentAlive(91)
+                assertFalse(global.getSessionCatalog(true).any { it.isActive })
+                runtime.keepAgentAlive(90)
+                assertEquals(12, global.getSessionCatalog(true).single { it.isActive }.sessionIndex)
+                assertEquals(90, global.getSessionCatalog(true).single { it.isActive }.rootAgentId)
+                assertFailsWith<AgentNotActive> { runtime.getLatestIndex(12) }
+                val delivered = async(start = CoroutineStart.UNDISPATCHED) {
+                    services.notifications.filterIsInstance<Notification.AskUserCreated>().first()
+                }
+                runtime.createAskUser(91, RequestUserInputArgs(listOf(RequestUserInputQuestion(
+                    id = "choice", header = "Choice", question = "Choose a value",
+                ))))
+                val ask = withTimeout(5.seconds) { delivered.await() }
+                assertEquals(12, ask.sessionIndex)
+                assertEquals(91, ask.agentId)
+                val trigger = Instant.parse("2031-01-01T00:00:00Z")
+                global.createSchedule(91, trigger, null, "child schedule")
+                val unrelated = global.createSchedule(12, trigger, null, "unrelated schedule")
+                assertTrue(global.deleteSession(12))
+                assertTrue(global.listSchedules(91).isEmpty())
+                assertEquals(listOf(unrelated), global.listSchedules(12))
+                assertFailsWith<AgentNotFound> { runtime.getLatestIndex(91) }
+                assertEquals(12, global.getRootAgentId(90))
+            }
+        }
+    }
     test("real JSON path RPCs use captured backend base and actual built-ins without acquiring a Session") {
         withServices { services, _ ->
             val roots = services.settings.contextSettings.value
@@ -93,7 +152,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val runtime = client.withService<AgentRuntimeRpc>()
                 val staleFrontend = global.getSettings()
                 val firstCwd = Path("/fixture/旧目录 with spaces")
-                val first = global.createSession(firstCwd)
+                val first = global.getRootAgentId(global.createSession(firstCwd))
                 val firstNonce = runtime.getCacheNonce(first)
                 val original = runtime.getLastCommitsIn(first, firstNonce, 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings
                 val defaults = KodexNewSessionSettings(
@@ -109,14 +168,15 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 ))
                 assertNotEquals(defaults, staleFrontend.newSession)
                 val cwd = Path("/fixture/新目录 with spaces")
-                val second = global.createSession(cwd)
+                val secondSession = global.createSession(cwd)
+                val second = global.getRootAgentId(secondSession)
                 val current = runtime.getLastCommitsIn(second, runtime.getCacheNonce(second), 0, 0, AgentCommitType.SettingsTypes, 1).single().commit as KodexAgentSettings
                 assertEquals(defaults.model, current.model)
                 assertEquals(defaults.reasoningEffort, current.reasoning.effort)
                 assertEquals(defaults.serviceTier, current.serviceTier)
                 assertEquals(defaults.requestUserInputMode, current.requestUserInputMode)
                 assertEquals(cwd, current.cwd)
-                assertEquals("Session $second", current.threadName)
+                assertEquals("Session $secondSession", current.threadName)
                 assertNotEquals(original.turnId, current.turnId)
                 assertNotEquals(original.windowId, current.windowId)
                 assertEquals(0, services.runtime.getLatestIndex(second))
@@ -143,7 +203,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertTrue(coroutineContext[Job]!!.isActive)
                 // Unknown RPC failures do not promise a concrete Exception type on Native.
                 assertTrue(runCatching { global.createSession(Path(".")) }.isFailure)
-                assertTrue(runCatching { global.keepSessionAlive(index) }.isFailure)
+                assertTrue(runCatching { global.getRootAgentId(index) }.isFailure)
                 assertTrue(runCatching { global.compareAndSetSettings(before, before.copy(daemonTtlSeconds = -1)) }.isFailure)
                 assertTrue(runCatching { global.compareAndSetFrontendSettings(front, front.copy(newLineKey = io.github.stream29.kodex.cli.settings.NewLineKey.Enter)) }.isFailure)
                 assertTrue(runCatching { global.validateDirectory(DirectoryQuery(".", ".")) }.isFailure)
@@ -168,11 +228,12 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertFalse(global.compareAndSetSettings(settings, settings))
                 assertEquals(emptyList(), global.getSessionCatalog(false))
                 val index = global.createSession(Path("."))
-                global.keepSessionAlive(index)
-                assertEquals(0, runtime.getLatestIndex(index))
+                val agentId = global.getRootAgentId(index)
+                runtime.keepAgentAlive(agentId)
+                assertEquals(0, runtime.getLatestIndex(agentId))
                 assertTrue(global.getSessionCatalog(false).single().isActive)
-                val nonce = runtime.getCacheNonce(index)
-                assertEquals(nonce, runtime.getCacheNonceFlow(index).first())
+                val nonce = runtime.getCacheNonce(agentId)
+                assertEquals(nonce, runtime.getCacheNonceFlow(agentId).first())
                 for (types in listOf(
                     AgentCommitType.IndexTypes,
                     AgentCommitType.WorkTypes,
@@ -180,7 +241,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                     AgentCommitType.LlmRequestMetaTypes,
                     AgentCommitType.UnstableTypes,
                 )) {
-                    runtime.getFirstCommitsIn(index, nonce, 0, 1, types)
+                    runtime.getFirstCommitsIn(agentId, nonce, 0, 1, types)
                 }
                 global.archiveSession(index)
                 assertTrue(global.getSessionCatalog(false).isEmpty())
@@ -191,8 +252,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertTrue(global.deleteSession(copy))
                 assertTrue(global.deleteSession(index))
                 assertFalse(global.deleteSession(index))
-                assertFailsWith<SessionNotFound> { global.keepSessionAlive(index) }
-                assertFailsWith<SessionNotActive> { runtime.getLatestIndex(index) }
+                assertFailsWith<SessionNotFound> { global.getRootAgentId(index) }
+                assertFailsWith<AgentNotFound> { runtime.getLatestIndex(agentId) }
             }
         }
     }
@@ -213,13 +274,14 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val settingsFile = Path(home, "settings.yml")
                 assertTrue(fs.readString(settingsFile).contains("123"))
                 val index = global.createSession(Path("."))
+                val agentId = global.getRootAgentId(index)
                 openSqliteConnection(Path(home, "kodex.db"), readOnly = true).use { db ->
                     assertEquals(listOf(listOf(index.toLong())), db.query("SELECT session_id FROM sessions"))
-                    runtime.submit(index, listOf(ContentItem.InputText("SQLite mutation")))
-                    runtime.getRunningTurnFlow(index).first { !it }
+                    runtime.submit(agentId, listOf(ContentItem.InputText("SQLite mutation")))
+                    runtime.getRunningTurnFlow(agentId).first { !it }
                     val committedRow = db.query(
                         """SELECT "index", payload_json FROM agent_commits WHERE agent_id = ? AND type = 'user_message'""",
-                        listOf(index.toLong()),
+                        listOf(agentId.toLong()),
                     ).single()
                     val state = committedRow[0] as Long
                     val payload = committedRow[1] as String
@@ -277,13 +339,15 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
                 val index = global.createSession(Path("."))
+                val agentId = global.getRootAgentId(index)
                 val event = async(start = CoroutineStart.UNDISPATCHED) { services.notifications.first() }
                 services.notificationSubscriptionCount.first { it > 0 }
-                runtime.submit(index, listOf(ContentItem.InputText("question")))
+                runtime.submit(agentId, listOf(ContentItem.InputText("question")))
                 val stop = assertIs<Notification.Stop.AssistantMessage>(event.await())
                 assertEquals(index, stop.sessionIndex)
+                assertEquals(agentId, stop.agentId)
                 assertEquals("answer", stop.message.content.filterIsInstance<ContentItem.OutputText>().single().text)
-                runtime.getRunningTurnFlow(index).first { !it }
+                runtime.getRunningTurnFlow(agentId).first { !it }
             }
         }
     }
@@ -294,7 +358,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val client = RestoringRpcClient(raw)
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
-                val index = global.createSession(Path("."))
+                val sessionId = global.createSession(Path("."))
+                val index = global.getRootAgentId(sessionId)
                 val event = async(start = CoroutineStart.UNDISPATCHED) { services.notifications.first() }
                 services.notificationSubscriptionCount.first { it > 0 }
 
@@ -307,7 +372,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                     createdAt = now,
                 )
                 val stop = assertIs<Notification.Stop.AssistantMessage>(event.await())
-                assertEquals(index, stop.sessionIndex)
+                assertEquals(sessionId, stop.sessionIndex)
+                assertEquals(index, stop.agentId)
                 runtime.getRunningTurnFlow(index).first { !it }
                 withTimeout(5.seconds) {
                     while (services.schedules.list(index).isNotEmpty()) delay(10)
@@ -352,7 +418,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val client = RestoringRpcClient(raw)
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
-                val index = global.createSession(Path("."))
+                val sessionId = global.createSession(Path("."))
+                val index = global.getRootAgentId(sessionId)
                 val event = async(start = CoroutineStart.UNDISPATCHED) { services.notifications.first() }
                 services.notificationSubscriptionCount.first { it > 0 }
 
@@ -392,7 +459,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 gateArmed = true
 
                 val stop = assertIs<Notification.Stop.AssistantMessage>(event.await())
-                assertEquals(index, stop.sessionIndex)
+                assertEquals(sessionId, stop.sessionIndex)
+                assertEquals(index, stop.agentId)
                 assertEquals(1, injectedFailures)
                 withTimeout(5.seconds) {
                     while (services.schedules.list(index).isNotEmpty()) delay(10)

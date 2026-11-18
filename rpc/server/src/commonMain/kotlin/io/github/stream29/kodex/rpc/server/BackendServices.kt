@@ -265,10 +265,10 @@ public actual class BackendServices internal constructor(
 
 /** Projects [IndexedAgentStopEvent]s emitted by a Session repository into RPC [Notification]s. */
 internal fun Flow<IndexedAgentStopEvent>.toNotifications(): Flow<Notification> =
-    map { (entryIndex, stopEvent) ->
+    map { (entryIndex, stopEvent, agentId) ->
         when (stopEvent) {
-            is AgentStopEvent.AssistantMessage -> Notification.Stop.AssistantMessage(entryIndex, stopEvent.message)
-            is AgentStopEvent.UnhandledError -> Notification.Stop.UnhandledError(entryIndex, stopEvent.message)
+            is AgentStopEvent.AssistantMessage -> Notification.Stop.AssistantMessage(entryIndex, stopEvent.message, agentId)
+            is AgentStopEvent.UnhandledError -> Notification.Stop.UnhandledError(entryIndex, stopEvent.message, agentId)
         }
     }
 
@@ -334,6 +334,15 @@ internal class LazySqliteBackendPersistence(
 
         override suspend fun getEntry(entryIndex: Int): KodexSessionEntry =
             acquire().first.getEntry(entryIndex)
+
+        override suspend fun getRootAgentId(entryIndex: Int): Int = acquire().first.getRootAgentId(entryIndex)
+
+        override suspend fun getAgentRecord(agentId: Int): StoredAgent? = acquire().first.getAgentRecord(agentId)
+
+        override suspend fun openAgent(agentId: Int): KodexAgentSession? {
+            val sessions = acquire().first
+            return sessions.openAgent(agentId).also { lazyOpenSessions.value = sessions.openSessions.value }
+        }
 
         override suspend fun create(): Int {
             val sessions = acquire().first
@@ -538,7 +547,7 @@ internal class LazySqliteBackendPersistence(
                             true
                         } catch (deliveryFailure: Throwable) {
                             val targetMissing = runCatching {
-                                record.agentId !in sessions.list()
+                                sessions.getAgentRecord(record.agentId) == null
                             }.getOrDefault(false)
                             if (targetMissing) {
                                 BackendLogger.warn(deliveryFailure) {

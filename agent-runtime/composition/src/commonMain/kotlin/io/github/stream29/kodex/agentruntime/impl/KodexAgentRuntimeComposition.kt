@@ -68,6 +68,7 @@ internal interface ResumableAgentLayer : KodexAgentState {
 @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
 public actual fun KodexAgentState.buildMasterAgentRuntime(
     dependencies: KodexAgentDependencies,
+    admitTurn: suspend (() -> Unit) -> Unit,
 ): AgentRuntime {
     val sessionLogger = RuntimeLogger.session(storage.uri)
     return try {
@@ -104,6 +105,7 @@ public actual fun KodexAgentState.buildMasterAgentRuntime(
                 logger = logger,
                 clock = dependencies.clock,
                 invocationId = invocationId,
+                admitTurn = admitTurn,
             )
         } catch (failure: Throwable) {
             logger.error(failure) { "Agent runtime failed to open." }
@@ -131,6 +133,7 @@ private class AgentRuntimeImpl(
     private val logger: KLogger,
     private val clock: Clock,
     override val invocationId: String,
+    private val admitTurn: suspend (() -> Unit) -> Unit,
 ) : AgentRuntime, KodexAgentState by delegate {
     private val runningTurnSlot: MutableStateFlow<Job?> = MutableStateFlow(null)
     private val needsSubmittedSteerDrain: AtomicBoolean = AtomicBoolean(false)
@@ -447,11 +450,13 @@ private class AgentRuntimeImpl(
 
     private suspend fun <T> withRunningTurn(block: suspend () -> T): T {
         val turn = currentCoroutineContext().job
-        if (!runningTurnSlot.compareAndSet(null, turn)) {
-            logger.warn { "Rejected concurrent Agent execution." }
-            throw ConcurrentAgentRuntimeResumeException()
-        }
         try {
+            admitTurn {
+                if (!runningTurnSlot.compareAndSet(null, turn)) {
+                    logger.warn { "Rejected concurrent Agent execution." }
+                    throw ConcurrentAgentRuntimeResumeException()
+                }
+            }
             return block()
         } finally {
             runningTurnSlot.compareAndSet(turn, null)

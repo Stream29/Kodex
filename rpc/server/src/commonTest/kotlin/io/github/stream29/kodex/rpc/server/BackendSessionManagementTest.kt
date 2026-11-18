@@ -60,7 +60,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             assertNotEquals(previous.windowId, fresh.windowId)
             assertNotEquals(previous.turnId, fresh.turnId)
             assertEquals(0, runtime.getLatestIndex(copied.rootAgentId))
-            assertFailsWith<SessionNotActive> {
+            assertFailsWith<AgentNotActive> {
                 runtime.submit(copied.rootAgentId, listOf(ContentItem.InputText("wrong owner")), source.invocationId)
             }
             assertEquals(0, runtime.getLatestIndex(copied.rootAgentId))
@@ -68,7 +68,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             val request = SessionSpawnRequest(directory.toString(), source = SessionSpawnSource(source.rootAgentId, "other-backend"))
             assertEquals(SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidSource), management.spawnSession(request) { emptyList() })
             repository.closeSession(source.sessionId)
-            management.keepSessionAlive(source.sessionId)
+            repository.open(source.sessionId)
             assertEquals(SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidSource),
                 management.spawnSession(request.copy(source = SessionSpawnSource(source.rootAgentId, source.invocationId))) { emptyList() })
             assertEquals(unchanged, repository.list())
@@ -94,7 +94,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             assertNull(row.updatedAt)
             assertFalse(row.isActive)
             assertFalse(row.running)
-            assertFailsWith<SessionNotActive> { runtime.getLatestIndex(index) }
+            assertFailsWith<AgentNotActive> { runtime.getLatestIndex(row.rootAgentId) }
         }
     }
 
@@ -202,7 +202,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             val nonce = source.cacheNonce.value
             val fork = management.forkSessionHistory(index, 2, nonce)
             assertFalse(management.getSessionCatalog(false).single { it.sessionIndex == fork }.isActive)
-            management.keepSessionAlive(fork)
+            repository.open(fork)
             val target = repository.openSessions.value.getValue(fork).storage
             assertEquals(
                 source.getCommitExact(1, AgentCommitType.IndexTypes)?.commit,
@@ -246,7 +246,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             assertTrue(entries.none { it.isActive })
             assertTrue(entries.single { it.sessionIndex == index }.archived)
             assertFalse(entries.single { it.sessionIndex == fork }.archived)
-            management.keepSessionAlive(fork)
+            repository.open(fork)
             assertNotNull(repository.openSessions.value.getValue(fork).storage.getCommitExact(1, AgentCommitType.IndexTypes))
         }
     }

@@ -1,16 +1,29 @@
 package io.github.stream29.kodex.agentsession.sqlite
 
 import de.infix.testBalloon.framework.core.testSuite
+import de.infix.testBalloon.framework.core.TestCompartment
 import io.github.stream29.kodex.agentsession.contract.StoredAgent
+import io.github.stream29.kodex.agentsession.contract.RunningSubagentsPreventDeletion
+import io.github.stream29.kodex.agentruntime.contract.submitUserMessage
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.sqlite.initializeSqlitePhaseOneSchema
 import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.coroutines.use
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
@@ -18,16 +31,50 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 private val fs = SystemCoroutineFileSystem
 
-val agentIdStorageTest by testSuite {
+val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) {
     testFixture {
         val home = Path(SystemTemporaryDirectory, "kodex-agent-id-${Random.nextLong().toULong()}")
         fs.createDirectories(home, mustCreate = true)
         home
     } closeWith { deleteTree(this) } asParameterForEach {
+        test("concurrent Agent opens share an owner; root close and running-child delete do not stop it") { home ->
+            val running = CompletableDeferred<Unit>()
+            val client = mockOpenAiClient {
+                createResponse { flow { running.complete(Unit); awaitCancellation() } }
+            }
+            testKodexAgentDependencies(client).use { dependencies ->
+                SqliteKodexSessionRepository(home, dependencies).use { repository ->
+                    val sessionId = repository.create()
+                    val root = repository.open(sessionId)
+                    val rootId = checkNotNull(root.runtime.agentId)
+                    val childId = repository.createChild(rootId).agentId
+                    val owners = coroutineScope { List(4) { async { repository.openAgent(childId) } }.awaitAll() }
+                    val child = checkNotNull(owners.first())
+                    owners.forEach { assertSame(child, it) }
+                    assertEquals(sessionId, child.sessionId)
+                    assertSame(root, repository.openAgent(rootId))
+                    child.runtime.modify { it.initialize(settings("child")) }
+                    child.runtime.submitUserMessage(listOf(ContentItem.InputText("Keep this child running")))
+                    withTimeout(5.seconds) { running.await() }
+                    val turn = checkNotNull(child.runtime.runningTurn.value)
+                    assertFailsWith<RunningSubagentsPreventDeletion> { repository.delete(sessionId) }
+                    assertEquals(childId, repository.getAgentRecord(childId)?.agentId)
+                    repository.closeSession(sessionId)
+                    assertSame(child, repository.openSessions.value[childId])
+                    assertTrue(turn.isActive)
+                    turn.cancelAndJoin()
+                    repository.delete(sessionId)
+                    assertNull(repository.openAgent(childId))
+                    assertTrue(repository.openSessions.value.isEmpty())
+                }
+            }
+        }
         test("root lookup, fork, archive and child relations are independent of same-numbered Sessions") { home ->
             val dbPath = Path(home, "kodex.db")
             openSqliteConnection(dbPath).use { db ->

@@ -179,8 +179,8 @@ private suspend fun withNotificationRpc(
                 global.getModelsFlow().first()
                 val index = global.createSession(root)
                 val probeIndex = global.createSession(root)
-                global.keepSessionAlive(index)
-                global.keepSessionAlive(probeIndex)
+                runtime.keepAgentAlive(global.getRootAgentId(index))
+                runtime.keepAgentAlive(global.getRootAgentId(probeIndex))
                 val ready = CompletableDeferred<Unit>()
                 val selected = backend.notifications
                     .onEach { notification ->

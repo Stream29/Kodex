@@ -169,14 +169,15 @@ internal class BackendGlobalRpc(
         description: String,
     ): ScheduleRecord = inBackend {
         val repository = checkNotNull(schedules) { "ScheduleRepository is not configured on BackendGlobalRpc." }
-        sessions.ensureSessionExists(agentId)
-        repository.create(
-            agentId = agentId,
-            triggerAt = triggerAt,
-            cron = cron,
-            description = description,
-            createdAt = Clock.System.now(),
-        )
+        sessions.withPersistedAgent(agentId) {
+            repository.create(
+                agentId = agentId,
+                triggerAt = triggerAt,
+                cron = cron,
+                description = description,
+                createdAt = Clock.System.now(),
+            )
+        }
     }
 
     override suspend fun listSchedules(agentId: Int): List<ScheduleRecord> = inBackend {
@@ -221,7 +222,7 @@ internal class BackendGlobalRpc(
         raw.materializeImageBlocks(mediaRoot = mediaRoot, serverName = serverName)
     }
 
-    override suspend fun keepSessionAlive(sessionIndex: Int): Unit = sessions.keepSessionAlive(sessionIndex)
+    override suspend fun getRootAgentId(sessionIndex: Int): Int = sessions.getRootAgentId(sessionIndex)
     override suspend fun archiveSession(sessionIndex: Int): Unit = sessions.archiveSession(sessionIndex)
     override suspend fun unarchiveSession(sessionIndex: Int): Unit = sessions.unarchiveSession(sessionIndex)
     override suspend fun forkSession(sessionIndex: Int): Int = sessions.forkSession(sessionIndex)

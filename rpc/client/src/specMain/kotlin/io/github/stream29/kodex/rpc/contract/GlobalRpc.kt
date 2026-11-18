@@ -338,30 +338,8 @@ public interface GlobalRpc {
         arguments: JsonObject = JsonObject(emptyMap()),
     ): CallToolResult
 
-    /**
-     * Activates an existing Session and renews its backend retention deadline.
-     * Returns after activation is ready, without holding a long-lived keep-alive call.
-     *
-     * The frontend calls periodically while it needs to keep the Session resident. Missing
-     * persisted Sessions fail with SessionNotFound instead of being created; the frontend
-     * stops automatic keep-alive/re-subscription of that missing binding. This does not
-     * classify storage or permission failures as absence. Does not unarchive, navigate or grant
-     * exclusive access. This is the frontend's TTL-renewal command; the backend also renews the same
-     * deadline while runningTurn remains occupied, independently of frontend observation.
-     * Ordinary reads, writes, subscriptions, pending steer and shell sessions do not renew it.
-     * Access requiring a live Session fails with SessionNotActive rather than implicitly
-     * activating it. Success is not a permanent lease.
-     *
-     * Stopping calls does not revoke an already renewed deadline; there is no closeSession RPC.
-     * TTL expiry determines deactivation: pending steer, registered shell sessions and unread
-     * output do not veto expiry. Running work stays resident through backend turn keepalive,
-     * not an additional retention predicate. Shutdown must still preserve write consistency
-     * and resource cleanup. Session-bound subscription upstreams end with SessionNotActive;
-     * frontends must activate again before re-subscribing. This requires lifecycle adaptation,
-     * not automatic SharedFlow completion. TTL and renewal intervals are integration policy,
-     * not per-call lease parameters.
-     */
-    public suspend fun keepSessionAlive(sessionIndex: Int): Unit
+    /** Finds the Session's persisted root AgentId without activating it; a missing Session fails with SessionNotFound. */
+    public suspend fun getRootAgentId(sessionIndex: Int): Int
 
     /**
      * Archives an existing persisted Session without stopping work or closing its shared owner.

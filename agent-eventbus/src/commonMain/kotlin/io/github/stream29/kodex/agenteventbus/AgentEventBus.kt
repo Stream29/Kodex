@@ -35,7 +35,7 @@ private class RepositoryAgentEventBus(
         content: List<ContentItem>,
     ) {
         if (content.isEmpty()) return
-        submitUserMessage(repository.open(agentId), content)
+        submitUserMessage(requireAgent(agentId), content)
     }
 
     override suspend fun submitUserMessage(session: KodexAgentSession, content: List<ContentItem>) {
@@ -47,7 +47,7 @@ private class RepositoryAgentEventBus(
         askId: Int,
         response: RequestUserInputResponse,
     ) {
-        repository.open(agentId).runtime.submitAskUserAnswer(askId, response)
+        requireAgent(agentId).runtime.submitAskUserAnswer(askId, response)
     }
 
     override suspend fun submitScheduleTrigger(
@@ -55,7 +55,7 @@ private class RepositoryAgentEventBus(
         scheduleId: Long,
         description: String,
     ) {
-        repository.open(agentId).runtime.submit(
+        requireAgent(agentId).runtime.submit(
             listOf(
                 StableScheduleEvent(
                     scheduleId = scheduleId,
@@ -64,6 +64,9 @@ private class RepositoryAgentEventBus(
             ),
         )
     }
+
+    private suspend fun requireAgent(agentId: Int): KodexAgentSession =
+        requireNotNull(repository.openAgent(agentId)) { "Agent $agentId does not exist." }
 
     fun attachWatchedTerminalExitObserver() {
         val watchers = mutableMapOf<Int, Pair<KodexAgentSession, Job>>()

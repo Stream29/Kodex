@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.sessioncatalog.contract
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Required
 import kotlin.time.Instant
 
 /**
@@ -37,11 +38,14 @@ public data class SessionCatalogEntry(
      * This snapshot is not a keepalive or permission for later live access.
      */
     public val isActive: Boolean = false,
+    /** Persisted root AgentId; distinct from the directory key [sessionIndex]. */
+    @Required public val rootAgentId: Int = sessionIndex,
 ) {
     init {
         require(sessionIndex >= 0) {
             "A Session catalog index must not be negative."
         }
+        require(rootAgentId >= 0) { "A root Agent ID must not be negative." }
         require(threadName == null || threadName.isNotBlank()) {
             "A Session catalog thread name must be null or non-blank."
         }

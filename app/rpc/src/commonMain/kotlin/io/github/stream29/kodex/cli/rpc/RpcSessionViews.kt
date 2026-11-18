@@ -15,6 +15,8 @@ import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.rpc.local.BackendConnectionLost
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
+import io.github.stream29.kodex.utils.rpcexception.AgentNotActive
+import io.github.stream29.kodex.utils.rpcexception.AgentNotFound
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -129,16 +131,16 @@ public actual class RpcSessionViews actual constructor(
         val targets = mutex.withLock {
             owner.ensureActive()
             views.values.filter { it.status.value != SessionViewStatus.Closed }
-                .map { it.sessionIndex to it.binding.value }
+                .mapNotNull { it.binding.value }
         }
-        targets.forEach { (index, binding) ->
-            try { replacement.global.keepSessionAlive(index) }
+        targets.forEach { binding ->
+            try { replacement.runtime.keepAgentAlive(binding.agentId) }
             catch (failure: Throwable) {
                 currentCoroutineContext().ensureActive()
                 if (!isConnected()) throw failure
                 // Business failures belong to the captured Session owner. A bad tab
                 // does not prevent healthy tabs/global subscriptions reconnecting.
-                binding?.failRecovery(failure)
+                binding.failRecovery(failure)
             }
         }
     }
@@ -198,6 +200,7 @@ public actual class RpcSessionView internal actual constructor(
     internal suspend fun awaitReady() { initial.await(); owner.ensureActive() }
 
     private suspend fun coordinate() {
+        var boundAgentId: Int? = null
         while (true) {
             currentCoroutineContext().ensureActive()
             mutableStatus.value = SessionViewStatus.Loading
@@ -211,13 +214,14 @@ public actual class RpcSessionView internal actual constructor(
             var failure: Throwable? = null
             try {
                 val next = withContext(bindingScope.coroutineContext) {
-                    services.global.keepSessionAlive(sessionIndex)
+                    val agentId = boundAgentId ?: services.global.getRootAgentId(sessionIndex).also { boundAgentId = it }
+                    services.runtime.keepAgentAlive(agentId)
                     if (!initial.isCompleted) services.global.unarchiveSession(sessionIndex)
                     bindingScope.launch {
                         while (true) {
                             delay(20_000)
                             if (connectionAvailable()) {
-                                try { services.global.keepSessionAlive(sessionIndex) }
+                                try { services.runtime.keepAgentAlive(agentId) }
                                 catch (failure: Throwable) {
                                     currentCoroutineContext().ensureActive()
                                     if (connectionAvailable()) throw failure
@@ -225,7 +229,7 @@ public actual class RpcSessionView internal actual constructor(
                             }
                         }
                     }
-                    val result = RpcSessionBinding.create(sessionIndex, services, bindingScope) { error ->
+                    val result = RpcSessionBinding.create(sessionIndex, services, bindingScope, agentId = agentId) { error ->
                         failed.complete(error)
                     }
                     // Returning from withContext must not wait for the long-lived observers:
@@ -259,12 +263,12 @@ public actual class RpcSessionView internal actual constructor(
                 withContext(NonCancellable) { bindingJob.cancelAndJoin() }
             }
             when (val reason = requireNotNull(failure).remoteReason()) {
-                is SessionNotActive -> delay(50)
+                is AgentNotActive, is SessionNotActive -> delay(50)
                 is BackendConnectionLost -> {
                     mutableStatus.value = SessionViewStatus.Loading
                     do { delay(50) } while (!connectionAvailable())
                 }
-                is SessionNotFound -> {
+                is AgentNotFound, is SessionNotFound -> {
                     mutableStatus.value = SessionViewStatus.Missing
                     initial.completeExceptionally(reason)
                     awaitCancellation()

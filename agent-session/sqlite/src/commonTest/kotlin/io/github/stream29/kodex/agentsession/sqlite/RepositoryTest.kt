@@ -383,9 +383,10 @@ val sqliteRepositoryTest by testSuite {
                         val index = repository.create()
                         val first = repository.open(index)
                         first.runtime.modify { it.initialize(settings("ttl-sqlite")) }
-                        assertTrue(index in repository.openSessions.value)
+                        val agentId = repository.getRootAgentId(index)
+                        assertTrue(agentId in repository.openSessions.value)
                         withTimeout(5000.milliseconds) {
-                            while (index in repository.openSessions.value) {
+                            while (agentId in repository.openSessions.value) {
                                 delay(10.milliseconds)
                             }
                             first.coroutineContext[Job]?.join()

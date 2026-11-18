@@ -63,7 +63,7 @@ val sqliteScheduleRepositoryTest by testSuite {
             connection.execute("CREATE TABLE sessions (session_id INTEGER PRIMARY KEY)")
             connection.execute("CREATE TABLE agents (agent_id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL)")
             connection.execute("INSERT INTO sessions (session_id) VALUES (10), (20)")
-            connection.execute("INSERT INTO agents (agent_id, session_id) VALUES (10, 10), (11, 10), (20, 20)")
+            connection.execute("INSERT INTO agents (agent_id, session_id) VALUES (20, 10), (11, 10), (10, 20)")
 
             val mutex = Mutex()
             val repo = SqliteScheduleRepository(connection, mutex)
@@ -72,9 +72,9 @@ val sqliteScheduleRepositoryTest by testSuite {
             val t2 = Instant.parse("2026-11-15T10:02:00Z")
             val t3 = Instant.parse("2026-11-15T10:03:00Z")
 
-            repo.create(agentId = 10, triggerAt = t1, cron = null, description = "root", createdAt = created)
+            repo.create(agentId = 20, triggerAt = t1, cron = null, description = "root", createdAt = created)
             repo.create(agentId = 11, triggerAt = t2, cron = null, description = "child", createdAt = created)
-            val survivor = repo.create(agentId = 20, triggerAt = t3, cron = null, description = "other-session", createdAt = created)
+            val survivor = repo.create(agentId = 10, triggerAt = t3, cron = null, description = "other-session", createdAt = created)
             assertEquals(t1, repo.nextTriggerAt.value)
 
             connection.transaction {
@@ -83,9 +83,9 @@ val sqliteScheduleRepositoryTest by testSuite {
                 connection.execute("DELETE FROM sessions WHERE session_id = 10")
             }
 
-            assertTrue(repo.list(10).isEmpty())
+            assertTrue(repo.list(20).isEmpty())
             assertTrue(repo.list(11).isEmpty())
-            assertEquals(listOf(survivor), repo.list(20))
+            assertEquals(listOf(survivor), repo.list(10))
             assertEquals(t3, repo.nextTriggerAt.value)
         }
     }

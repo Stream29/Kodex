@@ -12,6 +12,7 @@ import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.contract.ScopedObservableAgentStorage
 import io.github.stream29.kodex.agentsession.contract.SessionResidencyTable
+import io.github.stream29.kodex.agentsession.contract.StoredAgent
 import io.github.stream29.kodex.agentsession.contract.pendingDeadline
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
@@ -161,11 +162,25 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         index
     }
 
+    actual override suspend fun getAgentRecord(agentId: Int): StoredAgent? = entriesMutex.withLock {
+        requireOpen()
+        sessions[agentId]?.let { StoredAgent(agentId, agentId, null, false) }
+    }
+
+    actual override suspend fun openAgent(agentId: Int): KodexAgentSession? = entriesMutex.withLock {
+        requireOpen()
+        if (agentId in sessions) openRootLocked(agentId) else null
+    }
+
     actual override suspend fun open(entryIndex: Int): KodexAgentSession = entriesMutex.withLock {
+        openRootLocked(entryIndex)
+    }
+
+    private suspend fun openRootLocked(entryIndex: Int): KodexAgentSession {
         requireOpen()
         require(entryIndex >= 0) { "Session entry index must be non-negative." }
         val root = requireSession(entryIndex)
-        residency.reuseOrCleanupLocked(entryIndex)?.let { return@withLock it }
+        residency.reuseOrCleanupLocked(entryIndex)?.let { return it }
         val storageScope = CoroutineScope(coroutineContext.minusKey(Job) + SupervisorJob())
         val sessionScope = supervisorChildScope()
         val storage = ScopedObservableAgentStorage(
@@ -174,7 +189,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
             initialLatestIndex = root.storage.latestIndex(),
             closedMessage = "AgentSession timeline is closed.",
         )
-        try {
+        return try {
             val runtime = sessionScope.KodexAgentState(
                 client = dependencies.client,
                 storage = storage,
@@ -188,6 +203,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
             }
             val session = InMemoryKodexAgentSession(
                 scope = sessionScope,
+                sessionId = entryIndex,
                 storage = storage,
                 runtime = runtime,
             )
@@ -246,6 +262,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
 
 private class InMemoryKodexAgentSession(
     scope: CoroutineScope,
+    override val sessionId: Int,
     override val storage: MutableObservableKodexAgentStorage,
     override val runtime: AgentRuntime,
 ) : KodexAgentSession, CoroutineScope by scope

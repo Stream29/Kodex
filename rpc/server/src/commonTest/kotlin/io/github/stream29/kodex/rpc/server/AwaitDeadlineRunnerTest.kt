@@ -33,6 +33,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
@@ -82,8 +83,10 @@ val awaitDeadlineRunnerTest by testSuite(
                     val agentId = try {
                         val repository = first.acquire().first
                         first.startAwaitDeadlineRunner()
-                        val id = repository.create()
-                        val runtime = repository.open(id).runtime
+                        val sessionId = repository.create()
+                        val rootId = repository.getRootAgentId(sessionId)
+                        val id = repository.createChild(rootId).agentId
+                        val runtime = checkNotNull(repository.openAgent(id)).runtime
                         runtime.modify { it.initialize(KodexAgentSettings(OpenAiModelId("test-model"))) }
                         runtime.appendUserMessage(listOf(ContentItem.InputText("wait")))
                         runtime.resume()
@@ -160,8 +163,9 @@ val awaitDeadlineRunnerTest by testSuite(
                     try {
                         val (repository) = backend.acquire()
                         backend.startAwaitDeadlineRunner()
-                        val ids = List(2) { repository.create() }
-                        val sessions = ids.map { id ->
+                        val sessionIds = List(2) { repository.create() }
+                        val ids = sessionIds.map { repository.getRootAgentId(it) }
+                        val sessions = sessionIds.map { id ->
                             repository.open(id).also { session ->
                                 session.runtime.modify { it.initialize(KodexAgentSettings(OpenAiModelId("test-model"))) }
                                 session.runtime.appendUserMessage(listOf(ContentItem.InputText("wait")))
@@ -169,9 +173,9 @@ val awaitDeadlineRunnerTest by testSuite(
                             }
                         }
                         val original = repository.pendingAwaitDeadlines.value
-                        val fork = repository.createFork(ids[1])
-                        assertNull(repository.pendingAwaitDeadlines.value[fork])
-                        repository.getEntry(ids[1]).archive()
+                        val fork = repository.createFork(sessionIds[1])
+                        assertNull(repository.pendingAwaitDeadlines.value[repository.getRootAgentId(fork)])
+                        repository.getEntry(sessionIds[1]).archive()
                         assertEquals(original.getValue(ids[1]), repository.pendingAwaitDeadlines.value[ids[1]])
                         val steered = sessions[0].runtime
                         steered.submitUserMessage(listOf(ContentItem.InputText("wake before timeout")))
@@ -193,11 +197,13 @@ val awaitDeadlineRunnerTest by testSuite(
                         }
                         assertEquals(before, requests)
                         assertEquals(afterClear, cleared.latestIndex.value)
-                        repository.delete(ids[1])
+                        repository.delete(sessionIds[1])
                         val nestedFork = repository.createFork(fork)
-                        assertEquals(ids[1], nestedFork)
-                        assertNull(repository.pendingAwaitDeadlines.value[nestedFork])
-                        assertNull(repository.openForAwaitDeadline(nestedFork, original.getValue(ids[1])))
+                        assertEquals(sessionIds[1], nestedFork)
+                        val nestedRoot = repository.getRootAgentId(nestedFork)
+                        assertNotEquals(ids[1], nestedRoot)
+                        assertNull(repository.pendingAwaitDeadlines.value[nestedRoot])
+                        assertNull(repository.openForAwaitDeadline(nestedRoot, original.getValue(ids[1])))
                     } finally {
                         backend.closeAndDrain()
                     }

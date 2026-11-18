@@ -144,7 +144,7 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                     defaults, defaults.copy(newSession = defaults.newSession.copy(model = model)),
                 ))
                 index = rpc.global.createSession(home)
-                rpc.global.keepSessionAlive(index)
+                rpc.runtime.keepAgentAlive(rpc.global.getRootAgentId(index))
                 rpc.runtime.submit(index, listOf(ContentItem.InputText("offline fixture")))
                 withTimeout(10.seconds) { started.await() }
             }
@@ -153,7 +153,7 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
             assertEquals("ready", backendControlRequest(endpoint, "status")["phase"]?.jsonPrimitive?.content)
             withLocalRpcClient(home, endpoint) { connection ->
                 val rpc = RpcServices(RestoringRpcClient(connection))
-                rpc.global.keepSessionAlive(index)
+                rpc.runtime.keepAgentAlive(rpc.global.getRootAgentId(index))
                 assertTrue(rpc.runtime.getRunningTurn(index))
                 rpc.runtime.cancelRunningTurn(index)
                 withTimeout(10.seconds) { cancelled.await() }
@@ -199,7 +199,7 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                     defaults, defaults.copy(newSession = defaults.newSession.copy(model = model)),
                 ))
                 val index = rpc.global.createSession(home)
-                rpc.global.keepSessionAlive(index)
+                rpc.runtime.keepAgentAlive(rpc.global.getRootAgentId(index))
                 rpc.runtime.submit(index, listOf(ContentItem.InputText("offline fixture")))
                 withTimeout(10.seconds) { entered.await() }
             }
@@ -238,7 +238,7 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                     defaults, defaults.copy(newSession = defaults.newSession.copy(model = model)),
                 ))
                 val index = rpc.global.createSession(home)
-                rpc.global.keepSessionAlive(index)
+                rpc.runtime.keepAgentAlive(rpc.global.getRootAgentId(index))
                 rpc.runtime.submit(index, listOf(ContentItem.InputText("shutdown fixture")))
                 withTimeout(10.seconds) { started.await() }
                 try {

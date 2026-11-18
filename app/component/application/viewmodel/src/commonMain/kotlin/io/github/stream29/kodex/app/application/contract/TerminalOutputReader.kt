@@ -5,6 +5,8 @@ package io.github.stream29.kodex.app.application.contract
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
+import io.github.stream29.kodex.utils.rpcexception.AgentNotActive
+import io.github.stream29.kodex.utils.rpcexception.AgentNotFound
 import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.CancellationException
@@ -105,6 +107,10 @@ public actual class TerminalOutputReader public actual constructor(
         } catch (_: ShellSessionNotRegistered) {
             finish(TerminalOutputPhase.Removed)
         } catch (_: SessionNotActive) {
+            finish(TerminalOutputPhase.SessionInactive)
+        } catch (_: AgentNotActive) {
+            finish(TerminalOutputPhase.SessionInactive)
+        } catch (_: AgentNotFound) {
             finish(TerminalOutputPhase.SessionInactive)
         } catch (_: Exception) {
             finish(TerminalOutputPhase.ReadFailed)

@@ -18,10 +18,11 @@ import kotlin.time.Duration
 import kotlin.time.TimeSource
 
 public expect class SqliteKodexSessionRepository : KodexSessionRepository, CoroutineCloseable {
-    /** Opens an existing root Agent only if it still has the expected armed deadline. */
+    /** Opens an existing Agent only if it still has the expected armed deadline. */
     public suspend fun openForAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline): KodexAgentSession?
     /** Exact persisted Agent lookup; does not start or renew an owner. */
-    public suspend fun getAgentRecord(agentId: Int): StoredAgent?
+    override suspend fun getAgentRecord(agentId: Int): StoredAgent?
+    override suspend fun openAgent(agentId: Int): KodexAgentSession?
     /** Allocates an empty child in the persisted parent's Session without opening it. */
     public suspend fun createChild(parentAgentId: Int): StoredAgent
     /** Deletes only an uninitialized child with no commits or children, after failed creation. */

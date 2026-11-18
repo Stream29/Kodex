@@ -42,7 +42,8 @@ import io.github.stream29.kodex.agentstorage.contract.ext.AskUserEntryNotFound
 import io.github.stream29.kodex.utils.rpcexception.AskAnswerRejected
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.NoMatchException
-import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
+import io.github.stream29.kodex.utils.rpcexception.AgentNotActive
+import io.github.stream29.kodex.utils.rpcexception.AgentNotFound
 import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.CancellationException
@@ -76,17 +77,26 @@ internal class BackendAgentRuntimeRpc(
     private val viewsMutex = Mutex()
     private val views = mutableMapOf<KodexAgentSession, RuntimeView>()
 
-    private fun openSession(index: Int): KodexAgentSession {
+    override suspend fun keepAgentAlive(agentId: Int) {
         checkAdmission()
-        val session = repository.openSessions.value[index] ?: throw SessionNotActive()
-        if (!session.coroutineContext.job.isActive) throw SessionNotActive()
+        repository.openAgent(agentId) ?: throw AgentNotFound()
+    }
+
+    private suspend fun openSession(index: Int): KodexAgentSession {
+        checkAdmission()
+        val session = repository.openSessions.value[index]
+        if (session == null) {
+            if (repository.getAgentRecord(index) == null) throw AgentNotFound()
+            throw AgentNotActive()
+        }
+        if (!session.coroutineContext.job.isActive) throw AgentNotActive()
         return session
     }
 
     private suspend fun view(index: Int): RuntimeView {
         val session = openSession(index)
         return viewsMutex.withLock {
-            if (!session.coroutineContext.job.isActive) throw SessionNotActive()
+            if (!session.coroutineContext.job.isActive) throw AgentNotActive()
             views.getOrPut(session) {
                 RuntimeView(session).also { created ->
                     session.launch {
@@ -116,11 +126,11 @@ internal class BackendAgentRuntimeRpc(
         currentCoroutineContext().ensureActive()
         val view = view(index)
         val currentSession = openSession(index)
-        if (currentSession !== view.session) throw SessionNotActive()
+        if (currentSession !== view.session) throw AgentNotActive()
         return view.operations.async(start = start) {
             checkAdmission()
             if (repository.openSessions.value[index] !== view.session || !view.session.coroutineContext.job.isActive) {
-                throw SessionNotActive()
+                throw AgentNotActive()
             }
             view.block()
         }
@@ -138,7 +148,7 @@ internal class BackendAgentRuntimeRpc(
             storage.block()
         } catch (failure: IllegalStateException) {
             if (!session.coroutineContext.job.isActive) {
-                throw SessionNotActive()
+                throw AgentNotActive()
             }
             throw failure
         }
@@ -222,12 +232,10 @@ internal class BackendAgentRuntimeRpc(
     override suspend fun submit(sessionIndex: Int, content: List<ContentItem>, expectedInvocationId: String?): Unit =
         command(sessionIndex) {
             if (content.isEmpty()) return@command
-            if (expectedInvocationId == null) {
-                eventBus.submitUserMessage(sessionIndex, content)
-            } else {
-                if (runtime.invocationId != expectedInvocationId) throw SessionNotActive()
-                eventBus.submitUserMessage(session, content)
+            if (expectedInvocationId != null && runtime.invocationId != expectedInvocationId) {
+                throw AgentNotActive()
             }
+            eventBus.submitUserMessage(session, content)
         }
 
     override suspend fun submitAskUserAnswer(
@@ -237,7 +245,7 @@ internal class BackendAgentRuntimeRpc(
     ): Unit =
         command(sessionIndex) {
             try {
-                eventBus.submitAskUserAnswer(sessionIndex, askId, response)
+                runtime.submitAskUserAnswer(askId, response)
             } catch (_: AskUserEntryNotFound) {
                 throw AskAnswerRejected(alreadyAnswered = false)
             } catch (_: AskUserAlreadyAnswered) {
@@ -255,7 +263,7 @@ internal class BackendAgentRuntimeRpc(
                 "Asking the user is disabled when RequestUserInputMode is NoQuestion."
             }
             val entry = runtime.createAskUser(arguments)
-            onAskUserCreated(Notification.AskUserCreated(sessionIndex, entry))
+            onAskUserCreated(Notification.AskUserCreated(session.sessionId, entry, sessionIndex))
             entry
         }
 
@@ -284,7 +292,7 @@ internal class BackendAgentRuntimeRpc(
                 workingDirectoryProvider = { runtime.storage.getSettingsAt(runtime.storage.latestIndex()).cwd },
             ).generateToFile(
                 arguments = arguments,
-                outputDirectory = imageArtifactDirectory(kodexHome, sessionIndex.toString()),
+                outputDirectory = imageArtifactDirectory(kodexHome, session.sessionId.toString()),
             )
         }
 
@@ -388,7 +396,9 @@ internal class BackendAgentRuntimeRpc(
             .registeredShell(shellSessionId, expectedRegistrationNonce)
         val output = shell.readOutput(offset = offset, limit = limit)
         currentCoroutineContext().ensureActive()
-        if (openSession(sessionIndex) !== session) throw SessionNotActive()
+        if (repository.openSessions.value[sessionIndex] !== session || !session.coroutineContext.job.isActive) {
+            throw AgentNotActive()
+        }
         return output
     }
 
@@ -437,17 +447,17 @@ internal fun <T> KodexAgentSession.observeActive(
 ): Flow<T> = channelFlow {
     checkAdmission()
     val sessionJob = this@observeActive.coroutineContext.job
-    if (!sessionJob.isActive) throw SessionNotActive()
+    if (!sessionJob.isActive) throw AgentNotActive()
     val deactivated = CompletableDeferred<Unit>()
     val completionHandle = sessionJob.invokeOnCompletion {
         deactivated.complete(Unit)
     }
     val watcher = launch {
         deactivated.await()
-        throw SessionNotActive()
+        throw AgentNotActive()
     }
     try {
-        if (!sessionJob.isActive) throw SessionNotActive()
+        if (!sessionJob.isActive) throw AgentNotActive()
         source.collect { send(it) }
     } finally {
         completionHandle.dispose()

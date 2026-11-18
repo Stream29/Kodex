@@ -24,13 +24,19 @@ import kotlinx.rpc.annotations.Rpc
  * Pending steer is persisted in the root Agent's storage via `SteerSnapshot` and observed by
  * the frontend directly through `AgentStorage` (`getSteerAt(latestIndex)`), while user input
  * submission goes through [submit].
- * Access requires an active Session; otherwise it fails with SessionNotActive without
- * implicit activation. Await keepSessionAlive before access. Deactivation ends existing
- * Session-bound upstreams with SessionNotActive, requiring activation and a new subscription.
+ * Targets are AgentIds, never SessionIds. Access does not implicitly open a target.
+ * AgentNotFound denotes absent persistence and AgentNotActive denotes absent or retired
+ * residency. Deactivation ends existing owner-bound upstreams with AgentNotActive.
  * Inactivity is distinct from currentFlow's output-binding NoMatchException.
  */
 @Rpc
 public interface AgentRuntimeRpc {
+    /**
+     * Activates or renews only the exact Agent, without unarchiving its Session.
+     * Running turns renew their own deadline; ordinary reads and subscriptions do not.
+     */
+    public suspend fun keepAgentAlive(agentId: Int)
+
     /** Reads the initial random cache-validity nonce for this storage owner. */
     public suspend fun getCacheNonce(sessionIndex: Int): Long
 

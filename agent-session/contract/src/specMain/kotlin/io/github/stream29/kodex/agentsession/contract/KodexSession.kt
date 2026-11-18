@@ -21,6 +21,7 @@ public val DefaultKodexSessionRenewalInterval: Duration = 20.seconds
 public data class IndexedAgentStopEvent(
     public val entryIndex: Int,
     public val event: AgentStopEvent,
+    public val agentId: Int = entryIndex,
 )
 
 /**
@@ -30,6 +31,7 @@ public data class IndexedAgentStopEvent(
  * runtime created when this session is opened.
  */
 public interface KodexAgentSession : CoroutineScope {
+    public val sessionId: Int
     public val storage: MutableObservableKodexAgentStorage
 
     /** The AgentRuntime owned by this open session. */
@@ -84,7 +86,7 @@ public interface KodexSessionRepository : CoroutineScope {
     /** Ordered snapshot of this repository's root Session entry indices. */
     public val entries: StateFlow<List<Int>>
 
-    /** Snapshot of currently open (active in-memory) root Sessions keyed by [entryIndex]. */
+    /** Snapshot of current runtime owners keyed by AgentId (root or child). */
     public val openSessions: StateFlow<Map<Int, KodexAgentSession>>
 
     /** The earliest armed timeout for each Agent, including nonresident Sessions. */
@@ -101,6 +103,12 @@ public interface KodexSessionRepository : CoroutineScope {
 
     /** Looks up the exact root without opening or renewing the Agent. */
     public suspend fun getRootAgentId(entryIndex: Int): Int = getEntry(entryIndex).rootAgentId
+
+    /** Persisted identity lookup; never opens or renews an owner. */
+    public suspend fun getAgentRecord(agentId: Int): StoredAgent?
+
+    /** Opens or renews an exact Agent; returns null if it does not exist. */
+    public suspend fun openAgent(agentId: Int): KodexAgentSession?
 
     /**
      * Lists root Session catalog metadata.
@@ -128,3 +136,6 @@ public interface KodexSessionRepository : CoroutineScope {
     /** Removes one root Session entry and its complete storage. */
     public suspend fun delete(entryIndex: Int)
 }
+
+/** Explicit deletion did not start because a child of the Session is running. */
+public class RunningSubagentsPreventDeletion : IllegalStateException("The Session has running subagents.")

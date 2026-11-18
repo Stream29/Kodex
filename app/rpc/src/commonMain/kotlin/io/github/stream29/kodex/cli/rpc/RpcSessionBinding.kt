@@ -24,6 +24,8 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
+import io.github.stream29.kodex.utils.rpcexception.AgentNotActive
+import io.github.stream29.kodex.utils.rpcexception.AgentNotFound
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -40,6 +42,7 @@ import kotlin.time.Instant
 
 public actual class RpcSessionBinding private constructor(
     public actual val sessionIndex: Int,
+    internal val agentId: Int,
     public actual val storage: ObservableKodexAgentStorage,
     public actual val latestIndex: StateFlow<Int>,
     public actual val state: StateFlow<AgentStateValue>,
@@ -62,19 +65,19 @@ public actual class RpcSessionBinding private constructor(
         runSessionCommand(owner, invalidate, action)
 
     public actual suspend fun submit(content: List<ContentItem>): Unit =
-        command { services.runtime.submit(sessionIndex, content) }
-    public actual suspend fun resume(): Unit = command { services.runtime.resume(sessionIndex) }
-    public actual suspend fun stop(): Unit = command { services.runtime.cancelRunningTurn(sessionIndex) }
-    public actual suspend fun forcedCompact(): Int = command { services.runtime.forcedCompact(sessionIndex) }
-    public actual suspend fun clearPending(): Int = command { services.runtime.clearPending(sessionIndex) }
+        command { services.runtime.submit(agentId, content) }
+    public actual suspend fun resume(): Unit = command { services.runtime.resume(agentId) }
+    public actual suspend fun stop(): Unit = command { services.runtime.cancelRunningTurn(agentId) }
+    public actual suspend fun forcedCompact(): Int = command { services.runtime.forcedCompact(agentId) }
+    public actual suspend fun clearPending(): Int = command { services.runtime.clearPending(agentId) }
     public actual suspend fun submitAskUserAnswer(askId: Int, response: RequestUserInputResponse): Unit =
-        command { services.runtime.submitAskUserAnswer(sessionIndex, askId, response) }
+        command { services.runtime.submitAskUserAnswer(agentId, askId, response) }
     public actual suspend fun readShellSessionOutput(id: Int, offset: ULong, limit: UInt, registrationNonce: String): StdoutSlice =
-        command { services.runtime.readShellSessionOutput(sessionIndex, id, offset, limit, registrationNonce) }
+        command { services.runtime.readShellSessionOutput(agentId, id, offset, limit, registrationNonce) }
     public actual suspend fun closeShellSession(id: Int, registrationNonce: String): Unit =
-        command { services.runtime.closeShellSession(sessionIndex, id, registrationNonce) }
+        command { services.runtime.closeShellSession(agentId, id, registrationNonce) }
     public actual suspend fun revertHistory(untilExclusive: Int, selectedCacheNonce: Long): Unit =
-        command { services.runtime.revertHistory(sessionIndex, untilExclusive, selectedCacheNonce) }
+        command { services.runtime.revertHistory(agentId, untilExclusive, selectedCacheNonce) }
     public actual suspend fun forkHistory(untilExclusive: Int, selectedCacheNonce: Long): Int =
         command { services.global.forkSessionHistory(sessionIndex, untilExclusive, selectedCacheNonce) }
     public actual suspend fun readCreatedAt(): Instant? =
@@ -89,23 +92,24 @@ public actual class RpcSessionBinding private constructor(
             index: Int,
             services: RpcServices,
             scope: CoroutineScope,
+            agentId: Int,
             invalidate: (Throwable) -> Unit,
         ): RpcSessionBinding {
             val owner = requireNotNull(scope.coroutineContext[Job])
             val runtime = services.runtime
             val storage = scope.rpcCachedAgentStorage(
-                sessionIndex = index,
+                sessionIndex = agentId,
                 rpc = runtime,
             )
             val latest = storage.latestIndexFlow
             val state = scope.rpcStateIn(
-                { runtime.getState(index) }, { runtime.getStateFlow(index).requiredState() },
+                { runtime.getState(agentId) }, { runtime.getStateFlow(agentId).requiredState() },
             )
             val running = scope.rpcStateIn(
-                { runtime.getRunningTurn(index) }, { runtime.getRunningTurnFlow(index).requiredState() },
+                { runtime.getRunningTurn(agentId) }, { runtime.getRunningTurnFlow(agentId).requiredState() },
             )
             val shell = scope.rpcStateIn(
-                { runtime.getShellSessions(index) }, { runtime.getShellSessionsFlow(index).requiredState() },
+                { runtime.getShellSessions(agentId) }, { runtime.getShellSessionsFlow(agentId).requiredState() },
             )
             val pending = scope.visibleValue(storage) { position ->
                 if (position >= 0) storage.getSteerAt(position) else emptyList()
@@ -124,9 +128,9 @@ public actual class RpcSessionBinding private constructor(
                 if (position >= 0) storage.getLlmRequestMetaAtOrNull(position) else null
             }
             return RpcSessionBinding(
-                index, storage, latest, state, scope.projectOutput(index, runtime, state), running, shell,
+                index, agentId, storage, latest, state, scope.projectOutput(agentId, runtime, state), running, shell,
                 settings.asSuspendMutableStateFlow { expect, update ->
-                    runSessionCommand(owner, invalidate) { runtime.compareAndSetSettings(index, expect, update) }
+                    runSessionCommand(owner, invalidate) { runtime.compareAndSetSettings(agentId, expect, update) }
                 },
                 pending,
                 pendingAskUser,
@@ -144,11 +148,10 @@ private suspend fun <R> runSessionCommand(
     owner.ensureActive()
     return try {
         action()
-    } catch (error: SessionNotActive) {
-        invalidate(error)
-        throw error
-    } catch (error: SessionNotFound) {
-        invalidate(error)
+    } catch (error: Throwable) {
+        if (error is AgentNotActive || error is AgentNotFound || error is SessionNotActive || error is SessionNotFound) {
+            invalidate(error)
+        }
         throw error
     }
 }

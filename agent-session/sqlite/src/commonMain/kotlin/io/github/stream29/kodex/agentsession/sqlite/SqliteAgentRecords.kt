@@ -9,12 +9,15 @@ internal class SqliteAgentRecords(private val db: SqliteConnection) {
     // Only the migration (or standalone fresh schema setup) enables independent allocation.
     private val hasIndependentIds = db.query("PRAGMA table_info(agents)").any { it[1] == "completed" }
 
-    fun rootId(sessionId: Int): Int = requireNotNull(
+    fun rootId(sessionId: Int): Int = requireNotNull(findRootId(sessionId)) {
+        "Session $sessionId does not have a unique root Agent."
+    }
+
+    fun findRootId(sessionId: Int): Int? =
         db.query(
             "SELECT agent_id FROM agents WHERE session_id = ? AND parent_agent_id IS NULL",
             listOf(sessionId.toLong()),
-        ).singleOrNull()?.single()?.agentIdInt(),
-    ) { "Session $sessionId does not have a unique root Agent." }
+        ).singleOrNull()?.single()?.agentIdInt()
 
     fun idsInSession(sessionId: Int): List<Int> = db.query(
         "SELECT agent_id FROM agents WHERE session_id = ?",

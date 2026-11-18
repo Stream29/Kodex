@@ -7,6 +7,8 @@ import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorag
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
+import io.github.stream29.kodex.utils.rpcexception.AgentNotActive
+import io.github.stream29.kodex.utils.rpcexception.AgentNotFound
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.CoroutineScope
@@ -221,8 +223,10 @@ private class RpcCachedAgentStorage(
 
     private suspend fun <R> remote(block: suspend () -> R): R = try {
         binding.read(block)
-    } catch (failure: SessionNotActive) {
-        binding.cancel(CancellationException("Storage Session is inactive.", failure))
+    } catch (failure: Throwable) {
+        if (failure is AgentNotActive || failure is AgentNotFound || failure is SessionNotActive) {
+            binding.cancel(CancellationException("The Agent storage owner is inactive.", failure))
+        }
         throw failure
     }
 

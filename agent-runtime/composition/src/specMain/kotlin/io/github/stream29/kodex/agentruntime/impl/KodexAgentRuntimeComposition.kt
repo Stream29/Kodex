@@ -13,4 +13,5 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentState
  */
 public expect fun KodexAgentState.buildMasterAgentRuntime(
     dependencies: KodexAgentDependencies,
+    admitTurn: suspend (() -> Unit) -> Unit = { claim -> claim() },
 ): AgentRuntime

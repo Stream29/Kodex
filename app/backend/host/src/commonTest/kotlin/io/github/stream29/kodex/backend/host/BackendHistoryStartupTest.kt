@@ -108,7 +108,7 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
                 assertEquals("Migrated session", global.getSessionCatalog(false).single().threadName)
-                global.keepSessionAlive(0)
+                runtime.keepAgentAlive(global.getRootAgentId(0))
                 val nonce = runtime.getCacheNonce(0)
                 assertEquals(
                     "Migrated session",
@@ -166,7 +166,7 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
                 assertEquals("Auto-migrated session", global.getSessionCatalog(false).single().threadName)
-                global.keepSessionAlive(0)
+                runtime.keepAgentAlive(global.getRootAgentId(0))
                 val nonce = runtime.getCacheNonce(0)
                 assertEquals(
                     listOf(ContentItem.InputText("From 0.5.2 file")),

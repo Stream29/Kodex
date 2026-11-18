@@ -46,6 +46,9 @@ import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.AskAnswerRejected
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
+import io.github.stream29.kodex.utils.rpcexception.AgentNotActive
+import io.github.stream29.kodex.utils.rpcexception.AgentNotFound
+import io.github.stream29.kodex.utils.rpcexception.SessionHasRunningSubagents
 import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlin.time.Clock
@@ -288,7 +291,7 @@ internal suspend fun executeCliToolCommand(
     when (command) {
         is TerminalListCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
-            services.global.keepSessionAlive(agentId)
+            services.runtime.keepAgentAlive(agentId)
             val sessions = services.runtime.getShellSessions(agentId)
                 .entries
                 .sortedBy { it.key }
@@ -304,7 +307,7 @@ internal suspend fun executeCliToolCommand(
         }
         is TerminalReadCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
-            services.global.keepSessionAlive(agentId)
+            services.runtime.keepAgentAlive(agentId)
             val slice = withTerminalRegistration {
                 services.runtime.readShellSessionOutput(
                     sessionIndex = agentId,
@@ -322,7 +325,7 @@ internal suspend fun executeCliToolCommand(
                 command.chars != null -> command.chars!!
                 else -> ""
             }
-            services.global.keepSessionAlive(agentId)
+            services.runtime.keepAgentAlive(agentId)
             services.runtime.writeShellSessionStdin(
                 sessionIndex = agentId,
                 shellSessionId = command.sessionId,
@@ -342,7 +345,7 @@ internal suspend fun executeCliToolCommand(
         }
         is TerminalKillCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
-            services.global.keepSessionAlive(agentId)
+            services.runtime.keepAgentAlive(agentId)
             withTerminalRegistration { services.runtime.closeShellSession(agentId, command.sessionId) }
             writeStdout(
                 CliToolJson.encodeToString(
@@ -354,19 +357,19 @@ internal suspend fun executeCliToolCommand(
         is AskCreateCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
             val args = command.arguments.resolve(RequestUserInputArgs.serializer(), readStdin)
-            services.global.keepSessionAlive(agentId)
+            services.runtime.keepAgentAlive(agentId)
             val created = services.runtime.createAskUser(agentId, args)
             writeStdout(CliToolJson.encodeToString(AskUserEntry.serializer(), created))
         }
         is AskListCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
-            services.global.keepSessionAlive(agentId)
+            services.runtime.keepAgentAlive(agentId)
             val entries = readAskUsers(services.runtime, agentId)
             writeStdout(CliToolJson.encodeToString(ListSerializer(AskUserEntry.serializer()), entries))
         }
         is AskGetCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
-            services.global.keepSessionAlive(agentId)
+            services.runtime.keepAgentAlive(agentId)
             val entry = readAskUsers(services.runtime, agentId).firstOrNull { it.askId == command.askId }
                 ?: error("Ask entry ${command.askId} not found in Agent $agentId.")
             writeStdout(CliToolJson.encodeToString(AskUserEntry.serializer(), entry))
@@ -407,13 +410,13 @@ internal suspend fun executeCliToolCommand(
         is SearchCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
             val commands = command.resolveCommands().resolve(SearchCommands.serializer(), readStdin)
-            services.global.keepSessionAlive(agentId)
+            services.runtime.keepAgentAlive(agentId)
             val response = services.runtime.runWebSearch(agentId, commands)
             writeStdout(response.output)
         }
         is ImageCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
-            services.global.keepSessionAlive(agentId)
+            services.runtime.keepAgentAlive(agentId)
             val artifact = services.runtime.generateImage(
                 agentId,
                 ImageGenToolArguments(
@@ -492,7 +495,7 @@ private suspend fun executeSessionAgentOperation(
     var mutationStarted = false
     suspend fun activate(id: Int) {
         phase = "activate"
-        services.global.keepSessionAlive(id)
+        services.runtime.keepAgentAlive(id)
     }
     suspend fun submit(id: Int, text: String, invocationId: String? = null) {
         if (invocationId == null) activate(id)
@@ -511,9 +514,8 @@ private suspend fun executeSessionAgentOperation(
             is SessionListCommand -> {
                 phase = "list"
                 val rows = services.global.getSessionCatalog(command.includeArchived).map { entry ->
-                    // This catalog enumerates root Sessions only; a root is addressed by its entry index.
                     CliSessionCatalogRow(
-                        entry.sessionIndex, entry.sessionIndex, entry.threadName, entry.archived, entry.running,
+                        entry.sessionIndex, entry.rootAgentId, entry.threadName, entry.archived, entry.running,
                         entry.isActive, entry.createdAt?.toString(), entry.updatedAt?.toString(),
                     )
                 }
@@ -577,9 +579,10 @@ private suspend fun executeSessionAgentOperation(
                 agentReceipt(command.agentId)
             }
             is SessionRenameCommand -> {
-                activate(command.sessionId)
+                val rootId = services.global.getRootAgentId(command.sessionId)
+                activate(rootId)
                 phase = "rename"
-                renameSessionTitle(services.runtime, command.sessionId, command.name) { mutationStarted = true }
+                renameSessionTitle(services.runtime, rootId, command.name) { mutationStarted = true }
                 buildJsonObject {
                     put("session_id", command.sessionId)
                     put("thread_name", command.name)
@@ -589,9 +592,11 @@ private suspend fun executeSessionAgentOperation(
                 phase = "fork"
                 mutationStarted = true
                 val forked = services.global.forkSession(command.sessionId)
+                sessionId = forked
+                val rootId = services.global.getRootAgentId(forked)
                 buildJsonObject {
                     put("session_id", forked)
-                    put("root_agent_id", forked)
+                    put("root_agent_id", rootId)
                 }
             }
             is SessionArchiveCommand, is SessionUnarchiveCommand -> {
@@ -651,6 +656,12 @@ private suspend fun executeSessionAgentOperation(
         }
     } catch (_: SessionNotFound) {
         return fail("target_not_found", "The target does not exist.", CliOperationOutcome.Rejected)
+    } catch (_: AgentNotFound) {
+        return fail("target_not_found", "The target Agent does not exist.", CliOperationOutcome.Rejected)
+    } catch (_: SessionHasRunningSubagents) {
+        return fail("session_has_running_subagents", "The Session has running subagents and was not deleted.", CliOperationOutcome.Rejected)
+    } catch (_: AgentNotActive) {
+        return fail("agent_not_active", "The target Agent is no longer active.", CliOperationOutcome.Rejected)
     } catch (_: SessionNotActive) {
         return fail("agent_not_active", "The target Agent is no longer active.", CliOperationOutcome.Rejected)
     } catch (failure: Throwable) {
@@ -714,7 +725,7 @@ private fun readSpawnSource(env: (String) -> String?): SessionSpawnSource? {
 }
 
 private suspend fun readAgentStatus(services: RpcServices, agentId: Int, now: () -> Instant): CliAgentStatusOutput {
-    services.global.keepSessionAlive(agentId)
+    services.runtime.keepAgentAlive(agentId)
     val (latestIndex, settings, tokenMeta) = readAgentStatusSnapshot(services.runtime, agentId)
     val running = services.runtime.getRunningTurn(agentId)
     val modelInfo = services.global.getModels().firstOrNull { it.slug == settings.model }

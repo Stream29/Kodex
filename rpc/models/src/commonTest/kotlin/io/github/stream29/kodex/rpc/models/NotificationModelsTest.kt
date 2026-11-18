@@ -34,8 +34,8 @@ val notificationModelsTest by testSuite {
         createdAt = Instant.fromEpochMilliseconds(1_700_000_000_000L),
     )
     val stops = listOf(
-        Notification.Stop.AssistantMessage(7, message),
-        Notification.Stop.UnhandledError(8, "Final fixture failure"),
+        Notification.Stop.AssistantMessage(7, message, agentId = 90),
+        Notification.Stop.UnhandledError(8, "Final fixture failure", agentId = 91),
     )
     val notifications: List<Notification> = stops + Notification.AskUserCreated(7, askEntry)
 
@@ -57,22 +57,23 @@ val notificationModelsTest by testSuite {
 
     test("notification payloads retain the original domain value encoding") {
         val assistant = Json.encodeToJsonElement<Notification>(stops[0]).jsonObject
-        assertEquals(setOf("type", "sessionIndex", "message"), assistant.keys)
+        assertEquals(setOf("type", "sessionIndex", "agentId", "message"), assistant.keys)
         assertEquals(Json.encodeToJsonElement(message), assistant.getValue("message"))
-        val askCreated = Json.encodeToJsonElement<Notification>(Notification.AskUserCreated(7, askEntry)).jsonObject
-        assertEquals(setOf("type", "sessionIndex", "entry"), askCreated.keys)
+        val askCreated = Json.encodeToJsonElement<Notification>(Notification.AskUserCreated(7, askEntry, agentId = 90)).jsonObject
+        assertEquals(setOf("type", "sessionIndex", "agentId", "entry"), askCreated.keys)
         assertEquals(Json.encodeToJsonElement(askEntry), askCreated.getValue("entry"))
         val decoded = assertIs<Notification.AskUserCreated>(
             Json.decodeFromString<Notification>(askCreated.toString()),
         )
         assertEquals(2, decoded.entry.questions.questions.size)
+        assertEquals(90, decoded.agentId)
     }
 
     test("error diagnostics preserve absence and JSON looking text without Throwable fields") {
         for (diagnostic in listOf(null, "", "failure\n诊断", """{"type":"not.an.exception.protocol"}""")) {
             val event = Notification.Stop.UnhandledError(7, diagnostic)
             val payload = Json.encodeToJsonElement<Notification>(event).jsonObject
-            assertEquals(setOf("type", "sessionIndex", "message"), payload.keys)
+            assertEquals(setOf("type", "sessionIndex", "agentId", "message"), payload.keys)
             if (diagnostic == null) assertEquals(JsonNull, payload.getValue("message"))
             assertEquals(event, Json.decodeFromString<Notification>(payload.toString()))
         }
@@ -85,6 +86,7 @@ val notificationModelsTest by testSuite {
             """{"type":"stop_suggest_subagent","sessionIndex":7,"requests":[]}""",
             """{"type":"stop_unhandled_error","message":"failure"}""",
             """{"type":"stop_unhandled_error","sessionIndex":7}""",
+            """{"type":"stop_unhandled_error","sessionIndex":7,"message":null}""",
             """{"type":"stop_unhandled_error","sessionIndex":null,"message":"failure"}""",
             """{"type":"stop_assistant_message","sessionIndex":7,"message":null}""",
             """{"type":"ask_user_created","sessionIndex":7,"entry":null}""",

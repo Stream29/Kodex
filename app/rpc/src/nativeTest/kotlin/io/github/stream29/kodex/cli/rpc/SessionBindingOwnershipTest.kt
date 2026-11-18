@@ -35,7 +35,7 @@ val sessionBindingOwnershipTest by testSuite(compartment = { TestCompartment.Rea
         sessionFrontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "keepSessionAlive" && ++keepalives == 2) {
+                    if (call.callableName == "keepAgentAlive" && ++keepalives == 2) {
                         recovering.complete(Unit)
                         resume.await()
                     }
@@ -91,7 +91,7 @@ val sessionBindingOwnershipTest by testSuite(compartment = { TestCompartment.Rea
         sessionFrontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "keepSessionAlive") {
+                    if (call.callableName == "keepAgentAlive") {
                         keepalives++
                         entered.complete(Unit)
                         proceed.await()

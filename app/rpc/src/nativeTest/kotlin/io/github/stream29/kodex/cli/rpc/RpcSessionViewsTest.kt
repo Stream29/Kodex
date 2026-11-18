@@ -102,6 +102,23 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             }
         }
     }
+    test("root binding uses the persisted AgentId when it matches another Session number") {
+        frontend {
+            val first = services.global.createSession(home)
+            val second = services.global.createSession(home)
+            val firstRoot = services.global.getRootAgentId(first)
+            val secondRoot = services.global.getRootAgentId(second)
+            assertEquals(second, firstRoot)
+            assertNotEquals(second, secondRoot)
+            val firstView = views.open(first)
+            val secondView = views.open(second)
+            assertEquals(firstRoot, firstView.current().storage.agentId)
+            assertEquals(secondRoot, secondView.current().storage.agentId)
+            assertEquals("Session $first", firstView.current().settings.value.threadName)
+            assertEquals("Session $second", secondView.current().settings.value.threadName)
+        }
+    }
+
     test("a live-transport reactivation failure affects only its captured Session owner") {
         lateinit var client: RpcClient
         frontend(decorate = { delegate -> client = delegate; delegate }) {
@@ -111,7 +128,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             var activations = 0
             val replacement = RpcServices(object : RpcClient by client {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "keepSessionAlive" && ++activations == 1) {
+                    if (call.callableName == "keepAgentAlive" && ++activations == 1) {
                         throw Throwable("damaged Session fixture")
                     }
                     return client.call(call)
@@ -184,7 +201,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "keepSessionAlive" && ++attempts == 1) {
+                    if (call.callableName == "keepAgentAlive" && ++attempts == 1) {
                         error("initial activation failed")
                     }
                     return delegate.call(call)
@@ -205,7 +222,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "keepSessionAlive" && ++attempts == 1) {
+                    if (call.callableName == "keepAgentAlive" && ++attempts == 1) {
                         throw SessionNotFound()
                     }
                     return delegate.call(call)
@@ -228,7 +245,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "keepSessionAlive" && ++attempts == 1) {
+                    if (call.callableName == "keepAgentAlive" && ++attempts == 1) {
                         entered.complete(Unit)
                         proceed.await()
                         error("initial activation failed")
@@ -258,7 +275,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "keepSessionAlive") {
+                    if (call.callableName == "keepAgentAlive") {
                         attempts++
                         entered.complete(Unit)
                         proceed.await()
@@ -320,7 +337,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             binding.running.first { !it }
             val nonce = binding.storage.cacheNonce.value
             val committed = services.runtime.getFirstCommitsIn(
-                view.sessionIndex,
+                binding.agentId,
                 nonce,
                 0,
                 binding.latestIndex.value,
@@ -492,8 +509,8 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertEquals("  persisted but retained  ", agent.composer.state.value.text)
                 assertEquals(6, agent.composer.state.value.cursorOffset)
                 assertEquals(revision + 1, agent.composer.state.value.revision)
-                services.runtime.getRunningTurnFlow(view.sessionIndex).first { !it }
-                assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(view.sessionIndex))
+                services.runtime.getRunningTurnFlow(view.current().agentId).first { !it }
+                assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(view.current().agentId))
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertEquals(1, submits)
             } finally { agent.close() }
@@ -557,10 +574,10 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             preempted.await()
             binding.pendingSteer.first { it.isNotEmpty() }
             views.release(view)
-            assertTrue(services.runtime.getRunningTurn(view.sessionIndex))
+            assertTrue(services.runtime.getRunningTurn(view.current().agentId))
             finish.complete(Unit)
-            services.runtime.getRunningTurnFlow(view.sessionIndex).first { !it }
-            assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(view.sessionIndex))
+            services.runtime.getRunningTurnFlow(view.current().agentId).first { !it }
+            assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(view.current().agentId))
             assertEquals(2, requests)
         }
     }
@@ -606,7 +623,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertEquals(first.await(), second.await())
             views.release(view)
             finish.complete(Unit)
-            services.runtime.getRunningTurnFlow(view.sessionIndex).first { !it }
+            services.runtime.getRunningTurnFlow(view.current().agentId).first { !it }
             assertEquals(SessionViewStatus.Closed, view.status.value)
         }
     }
@@ -619,7 +636,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "keepSessionAlive") keepalives++
+                    if (call.callableName == "keepAgentAlive") keepalives++
                     if (call.callableName == "submit") submits++
                     return delegate.call(call)
                 }
@@ -671,7 +688,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "keepSessionAlive" && ++keepalives == 2) {
+                    if (call.callableName == "keepAgentAlive" && ++keepalives == 2) {
                         reactivating.complete(Unit)
                         awaitCancellation()
                     }
@@ -708,7 +725,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "keepSessionAlive") keepalives++
+                    if (call.callableName == "keepAgentAlive") keepalives++
                     return delegate.call(call)
                 }
                 override fun <T> callServerStreaming(call: RpcCall): Flow<T> {
@@ -751,7 +768,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             try {
                 val revision = draft.composer.update("keep me")
                 assertFailsWith<IllegalStateException> { draft.submit(revision, views::open) }
-                val index = services.global.getSessionCatalog(true).single().sessionIndex
+                val index = services.global.getSessionCatalog(true).single().rootAgentId
                 assertEquals("keep me", draft.composer.state.value.text)
                 services.runtime.getRunningTurnFlow(index).first { !it }
                 assertEquals(AgentStateValue.AssistantMessage, services.runtime.getState(index))
@@ -767,7 +784,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
                     val result = delegate.call<T>(call)
-                    if (call.callableName == "keepSessionAlive" && ++keepalives == 2) renewed.complete(Unit)
+                    if (call.callableName == "keepAgentAlive" && ++keepalives == 2) renewed.complete(Unit)
                     return result
                 }
             }
@@ -972,7 +989,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend(decorate = { delegate ->
             object : RpcClient by delegate {
                 override suspend fun <T> call(call: RpcCall): T {
-                    if (call.callableName == "keepSessionAlive") {
+                    if (call.callableName == "keepAgentAlive") {
                         entered.complete(Unit)
                         try { awaitCancellation() } finally { released.complete(Unit) }
                     }
@@ -995,7 +1012,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val sessionIndex = services.global.createSession(home)
             val view = views.open(sessionIndex)
             val created = services.runtime.createAskUser(
-                sessionIndex,
+                view.current().agentId,
                 RequestUserInputArgs(
                     listOf(RequestUserInputQuestion("secret", "Secret", "Value?", isSecret = true)),
                 ),

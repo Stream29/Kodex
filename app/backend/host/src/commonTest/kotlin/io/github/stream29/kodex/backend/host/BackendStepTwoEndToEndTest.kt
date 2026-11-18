@@ -164,7 +164,7 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
             withLocalRpcClient(home, endpoint) { connection ->
                 val rpc = RpcServices(RestoringRpcClient(connection))
                 val index = rpc.global.createSession(home)
-                rpc.global.keepSessionAlive(index)
+                rpc.runtime.keepAgentAlive(rpc.global.getRootAgentId(index))
 
                 rpc.runtime.submit(
                     index,

@@ -9,6 +9,7 @@ import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
+import io.github.stream29.kodex.agentsession.contract.StoredAgent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,8 @@ public expect class InMemoryKodexSessionRepository : KodexSessionRepository {
     override suspend fun create(): Int
     override suspend fun createFork(sourceEntryIndex: Int): Int
     override suspend fun open(entryIndex: Int): KodexAgentSession
+    override suspend fun openAgent(agentId: Int): KodexAgentSession?
+    override suspend fun getAgentRecord(agentId: Int): StoredAgent?
     override suspend fun closeSession(entryIndex: Int)
     override suspend fun closeAllSessions()
     override suspend fun delete(entryIndex: Int)

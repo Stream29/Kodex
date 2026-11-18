@@ -2,6 +2,7 @@ package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
+import io.github.stream29.kodex.agentsession.contract.RunningSubagentsPreventDeletion
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
@@ -19,8 +20,10 @@ import io.github.stream29.kodex.rpc.models.SessionSpawnResult
 import io.github.stream29.kodex.rpc.models.SessionSpawnRejection
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
+import io.github.stream29.kodex.utils.rpcexception.AgentNotFound
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
+import io.github.stream29.kodex.utils.rpcexception.SessionHasRunningSubagents
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +71,7 @@ internal class BackendSessionManagement(
                     archived = entry.archived,
                     running = entry.running,
                     isActive = entry.isActive,
+                    rootAgentId = entry.rootAgentId,
                 )
             }.sortedWith(compareByDescending<SessionCatalogEntry> { it.updatedAt }.thenByDescending { it.sessionIndex })
         }
@@ -116,7 +120,7 @@ internal class BackendSessionManagement(
                 requestUserInputMode = request.requestUserInputMode ?: inherited?.requestUserInputMode ?: defaults.requestUserInputMode,
             )
             val (id, created) = create(initial, attachAutoTitle = true) { "Session $it" }
-            SessionSpawnResult.Created(id, id, created.runtime.invocationId)
+            SessionSpawnResult.Created(id, checkNotNull(created.runtime.agentId), created.runtime.invocationId)
         }
     }
 
@@ -134,10 +138,14 @@ internal class BackendSessionManagement(
         }
     }
 
-    suspend fun keepSessionAlive(sessionIndex: Int): Unit = inBackend {
+    suspend fun getRootAgentId(sessionIndex: Int): Int = inBackend {
         commands.withLock {
-            requireEntry(sessionIndex)
-            repository.open(sessionIndex).let {}
+            try {
+                repository.getRootAgentId(sessionIndex)
+            } catch (error: IllegalArgumentException) {
+                if (sessionIndex !in repository.list()) throw SessionNotFound()
+                throw error
+            }
         }
     }
 
@@ -158,7 +166,11 @@ internal class BackendSessionManagement(
     suspend fun deleteSession(sessionIndex: Int): Boolean = inBackend {
         commands.withLock {
             if (sessionIndex !in repository.list()) return@withLock false
-            repository.delete(sessionIndex)
+            try {
+                repository.delete(sessionIndex)
+            } catch (_: RunningSubagentsPreventDeletion) {
+                throw SessionHasRunningSubagents()
+            }
             true
         }
     }
@@ -213,9 +225,10 @@ internal class BackendSessionManagement(
         }
     }
 
-    internal suspend fun ensureSessionExists(sessionIndex: Int): Unit = inBackend {
+    internal suspend fun <T> withPersistedAgent(agentId: Int, action: suspend () -> T): T = inBackend {
         commands.withLock {
-            requireEntry(sessionIndex)
+            repository.getAgentRecord(agentId) ?: throw AgentNotFound()
+            action()
         }
     }
 
@@ -251,7 +264,7 @@ internal class BackendSessionManagement(
         block: suspend (KodexAgentSession) -> T,
     ): T {
         requireEntry(index)
-        val active = repository.openSessions.value[index]?.takeIf { it.coroutineContext.job.isActive }
+        val active = repository.openSessions.value[repository.getRootAgentId(index)]?.takeIf { it.coroutineContext.job.isActive }
         if (requireActive && active == null) throw SessionNotActive()
         if (active != null) {
             return block(active)

@@ -128,7 +128,7 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                 val error = checkNotNull(unknown.error)
                 assertEquals(CliOperationOutcome.Unknown, error.outcome)
                 assertEquals("submit", error.phase)
-                assertEquals(error.sessionId, error.agentId)
+                assertEquals(backend.global.getRootAgentId(checkNotNull(error.sessionId)), error.agentId)
                 assertTrue(backend.global.getSessionCatalog(true).any { it.sessionIndex == error.sessionId })
                 assertEquals(2, submits, "Do not retry an unknown mutation.")
 
@@ -142,31 +142,34 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                 assertEquals("already_answered", cli(answerArgs, answer, 1).error?.code)
                 assertEquals("ask_not_found", cli(listOf("ask", "answer", "--agent", "$id", "999", "--stdin"), answer, 1).error?.code)
 
-                val target = checkNotNull(error.sessionId)
+                val target = checkNotNull(error.agentId)
+                val targetSession = checkNotNull(error.sessionId)
                 concurrentSettingsUpdate = true
-                assertTrue(cli(listOf("session", "rename", "--session", "$target", "--name", " first title "), "", 0).ok)
+                assertTrue(cli(listOf("session", "rename", "--session", "$targetSession", "--name", " first title "), "", 0).ok)
                 val renamed = cli(listOf("agent", "status", "--agent", "$target"), "", 0).result?.jsonObject
                 assertEquals(unrelatedDirectory.toString(), renamed?.get("cwd")?.jsonPrimitive?.content)
                 concurrentTitle = "frontend title"
                 concurrentSettingsUpdate = true
                 assertEquals("rename_conflict",
-                    cli(listOf("session", "rename", "--session", "$target", "--name", "CLI overwrite"), "", 1).error?.code)
+                    cli(listOf("session", "rename", "--session", "$targetSession", "--name", "CLI overwrite"), "", 1).error?.code)
                 fun CliOperationEnvelope.result(key: String): String? = result?.jsonObject?.get(key)?.jsonPrimitive?.content
-                assertTrue(cli(listOf("session", "archive", "--session", "$target"), "", 0).ok)
-                val archived = backend.global.getSessionCatalog(true).single { it.sessionIndex == target }
+                assertTrue(cli(listOf("session", "archive", "--session", "$targetSession"), "", 0).ok)
+                val archived = backend.global.getSessionCatalog(true).single { it.sessionIndex == targetSession }
                 assertTrue(archived.archived)
                 assertEquals("frontend title", archived.threadName)
-                assertTrue(cli(listOf("session", "unarchive", "--session", "$target"), "", 0).ok)
-                assertFalse(backend.global.getSessionCatalog(true).single { it.sessionIndex == target }.archived)
+                assertTrue(cli(listOf("session", "unarchive", "--session", "$targetSession"), "", 0).ok)
+                assertFalse(backend.global.getSessionCatalog(true).single { it.sessionIndex == targetSession }.archived)
                 assertTrue(cli(listOf("agent", "stop", "--agent", "$target"), "", 0).ok)
                 backend.runtime.getRunningTurnFlow(target).first { !it }
                 val index = backend.runtime.getLatestIndex(target)
                 assertEquals(index.toString(), cli(listOf("agent", "clear-pending", "--agent", "$target"), "", 0).result("latest_index"))
-                val fork = cli(listOf("session", "fork", "--session", "$target"), "", 0).result("session_id")!!.toInt()
-                assertTrue(fork != target && backend.global.getSessionCatalog(true).any { it.sessionIndex == fork })
+                val forked = cli(listOf("session", "fork", "--session", "$targetSession"), "", 0)
+                val fork = forked.result("session_id")!!.toInt()
+                assertEquals(backend.global.getRootAgentId(fork).toString(), forked.result("root_agent_id"))
+                assertTrue(fork != targetSession && backend.global.getSessionCatalog(true).any { it.sessionIndex == fork })
                 assertEquals("true", cli(listOf("session", "delete", "--session", "$fork"), "", 0).result("deleted"))
                 assertEquals("false", cli(listOf("session", "delete", "--session", "$fork"), "", 0).result("deleted"))
-                assertTrue(backend.global.getSessionCatalog(true).any { it.sessionIndex == target })
+                assertTrue(backend.global.getSessionCatalog(true).any { it.sessionIndex == targetSession })
                 val sqlOutput = mutableListOf<String>()
                 withInMemoryRpc(registerServices = {
                     registerService(GlobalRpc::class) {
@@ -384,8 +387,9 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                     val services = RpcServices(RestoringRpcClient(raw))
                     services.global.getModelsFlow().first { it.isNotEmpty() }
                     val sessionId = services.global.createSession(root)
+                    val rootId = services.global.getRootAgentId(sessionId)
                     val envMap = mapOf(
-                        KodexAgentIdEnvironmentVariable to sessionId.toString(),
+                        KodexAgentIdEnvironmentVariable to rootId.toString(),
                         KodexHomeEnvironmentVariable to root.toString(),
                     )
                     val fixedNow = Instant.parse("2099-01-01T00:00:00Z")
@@ -427,14 +431,14 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                     ).sessions
                     assertEquals(expectedCatalog.map { it.sessionIndex }, fullList.map { it.sessionId })
                     assertEquals(expectedCatalog.map { it.isActive to it.running }, fullList.map { it.isActive to it.running })
-                    assertTrue(fullList.all { it.sessionId == it.rootAgentId })
+                    assertEquals(expectedCatalog.map { it.rootAgentId }, fullList.map { it.rootAgentId })
                     assertTrue(fullList.single { it.sessionId == archived }.archived)
 
                     val status = CliToolJson.decodeFromJsonElement(
                         CliAgentStatusOutput.serializer(),
-                        checkNotNull(query(listOf("agent", "status", "--agent", sessionId.toString())).result),
+                        checkNotNull(query(listOf("agent", "status", "--agent", rootId.toString())).result),
                     )
-                    assertEquals(sessionId, status.agentId)
+                    assertEquals(rootId, status.agentId)
                     assertEquals(OpenAiModelId("gpt-6-astra"), status.model)
                     assertEquals("2099-01-01T00:00:00Z", status.now)
                     assertEquals(258_400L, status.contextWindow?.effectiveWindowTokens)
@@ -454,7 +458,7 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                     assertEquals(listOf(createdAsk), askList)
                     val askSingle = CliToolJson.decodeFromString(
                         AskUserEntry.serializer(),
-                        runCli(listOf("ask", "get", "1", "--agent", sessionId.toString())).single(),
+                        runCli(listOf("ask", "get", "1", "--agent", rootId.toString())).single(),
                     )
                     assertEquals(createdAsk, askSingle)
 
@@ -463,7 +467,7 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                         ScheduleRecord.serializer(),
                         runCli(listOf("schedule", "create", "-d", "Check build", "--delay-seconds", "60")).single(),
                     )
-                    assertEquals(sessionId, createdSchedule.agentId)
+                    assertEquals(rootId, createdSchedule.agentId)
                     assertEquals(Instant.parse("2099-01-01T00:01:00Z"), createdSchedule.triggerAt)
                     val schedules = CliToolJson.decodeFromString(
                         ListSerializer(ScheduleRecord.serializer()),

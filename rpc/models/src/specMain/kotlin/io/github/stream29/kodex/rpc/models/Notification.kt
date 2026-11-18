@@ -4,6 +4,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Required
 
 /**
  * Backend-produced events for frontend-local notification Hooks.
@@ -24,12 +25,14 @@ public sealed interface Notification {
     public data class AskUserCreated(
         public val sessionIndex: Int,
         public val entry: AskUserEntry,
+        @Required public val agentId: Int = sessionIndex,
     ) : Notification
 
-    /** A persisted root Agent stopped with an assistant message or final error. */
+    /** A persisted Agent stopped with an assistant message or final error. */
     @Serializable
     public sealed interface Stop : Notification {
         public val sessionIndex: Int
+        public val agentId: Int
 
         /** The assistant message responsible for this stop, not an arbitrary historical message. */
         @Serializable
@@ -37,6 +40,7 @@ public sealed interface Notification {
         public data class AssistantMessage(
             override val sessionIndex: Int,
             public val message: StableAssistantMessage,
+            @Required override val agentId: Int = sessionIndex,
         ) : Stop
 
         /**
@@ -53,6 +57,7 @@ public sealed interface Notification {
         public data class UnhandledError(
             override val sessionIndex: Int,
             public val message: String?,
+            @Required override val agentId: Int = sessionIndex,
         ) : Stop
     }
 }
