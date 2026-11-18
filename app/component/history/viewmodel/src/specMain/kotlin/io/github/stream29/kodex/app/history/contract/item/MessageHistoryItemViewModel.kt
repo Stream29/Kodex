@@ -28,7 +28,7 @@ public sealed interface MessageHistoryItemState {
      * @throws IllegalArgumentException if [elapsed] or non-null [turnDuration] is negative or infinite.
      */
     public data class Ready(
-        public val event: AgentCommit.Steerable,
+        public val event: AgentCommit.ConversationMessage,
         public val elapsed: Duration,
         /** Complete turn duration rendered below a final assistant message. */
         public val turnDuration: Duration? = null,

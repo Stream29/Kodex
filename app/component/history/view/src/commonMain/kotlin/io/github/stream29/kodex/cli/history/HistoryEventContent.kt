@@ -27,6 +27,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
@@ -78,6 +80,8 @@ public actual fun HistoryEventContent(
             is StableDeveloperMessage,
             is StableAgentMessage,
             is StableScheduleEvent,
+            is StableSubagentCreatedEvent,
+            is StableSubagentCompletedEvent,
                 ->
                 HistoryMessageContent(
                     this,

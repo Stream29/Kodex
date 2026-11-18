@@ -15,8 +15,8 @@ internal class MessageHistoryItemViewModelImpl(
 ) : MessageHistoryItemViewModel, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<MessageHistoryItemState> = MutableStateFlow(
         try {
-            val message = descriptor.event as? AgentCommit.Steerable
-                ?: error("History item $index is not a steerable message.")
+            val message = descriptor.event as? AgentCommit.ConversationMessage
+                ?: error("History item $index is not a conversation message.")
             MessageHistoryItemState.Ready(
                 event = message,
                 elapsed = descriptor.elapsed,

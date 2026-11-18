@@ -10,6 +10,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReadMedia
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
@@ -80,6 +82,8 @@ internal fun AgentCommit.toHistoryItemDescriptor(
         is StableAgentMessage,
         is StableScheduleEvent,
         is StableTerminalExitedEvent,
+        is StableSubagentCreatedEvent,
+        is StableSubagentCompletedEvent,
             -> HistoryItemKind.Message
 
         is StableAskUserEvent -> HistoryItemKind.RequestUserInput

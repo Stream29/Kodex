@@ -12,6 +12,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.ComposerMode
 import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
@@ -120,6 +121,7 @@ private fun AgentCommit.Steerable.previewText(): String = when (this) {
     is StableAgentMessage -> "$author → $recipient: ${content.previewAgentMessageText()}"
     is StableAskUserEvent -> "Answer for ask #$askId"
     is StableScheduleEvent -> "Schedule #$scheduleId: ${description.singleLine()}"
+    is StableSubagentCompletedEvent -> notice
     is StableTerminalExitedEvent ->
         "Terminal ${name?.takeIf(String::isNotBlank) ?: "#$sessionId"} exited ($exitCode): ${command.singleLine()}"
 }.ifBlank { "[empty message]" }

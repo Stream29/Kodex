@@ -11,6 +11,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
@@ -45,7 +47,7 @@ internal fun HistoryMessageRow(
 
 @Composable
 public actual fun HistoryMessageContent(
-    event: AgentCommit.Steerable,
+    event: AgentCommit.ConversationMessage,
     heading: @Composable (String) -> Unit,
     body: @Composable (String, supporting: Boolean) -> Unit,
     assistantBody: @Composable (String) -> Unit,
@@ -70,6 +72,8 @@ public actual fun HistoryMessageContent(
                 heading("Schedule #${event.scheduleId}")
                 if (event.description.isNotBlank()) body(event.description, false)
             }
+            is StableSubagentCreatedEvent -> heading(event.notice)
+            is StableSubagentCompletedEvent -> heading(event.notice)
             is StableTerminalExitedEvent -> {
                 val label = if (!event.name.isNullOrBlank()) {
                     "Terminal #${event.sessionId} (${event.name})"

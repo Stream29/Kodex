@@ -13,7 +13,7 @@ import io.github.stream29.kodex.app.ui.UiTextRole
  */
 @Composable
 public expect fun HistoryMessageContent(
-    event: AgentCommit.Steerable,
+    event: AgentCommit.ConversationMessage,
     heading: @Composable (String) -> Unit = { UiText(it, UiTextRole.Title, maximumLines = 1) },
     body: @Composable (String, supporting: Boolean) -> Unit = { text, supporting ->
         UiProse(text, if (supporting) UiTextRole.Supporting else UiTextRole.Body)

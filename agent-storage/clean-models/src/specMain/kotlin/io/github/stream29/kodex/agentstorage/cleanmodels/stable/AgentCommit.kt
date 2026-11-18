@@ -111,7 +111,13 @@ public enum class AgentCommitType(
     Steer("steer", "steer"),
 
     @SerialName("ask_user")
-    AskUser("ask_user", "ask-user");
+    AskUser("ask_user", "ask-user"),
+
+    @SerialName("event_subagent_created")
+    EventSubagentCreated("event_subagent_created", "index"),
+
+    @SerialName("event_subagent_completed")
+    EventSubagentCompleted("event_subagent_completed", "work");
 
     public companion object {
         private val byWireName: Map<String, AgentCommitType> =
@@ -123,6 +129,7 @@ public enum class AgentCommitType(
             UserMessage,
             EventAskUser,
             EventSchedule,
+            EventSubagentCreated,
             AssistantMessage,
             AssistantMessageCommentary,
             AssistantMessageFinal,
@@ -151,6 +158,7 @@ public enum class AgentCommitType(
 
         public val WorkTypes: Set<AgentCommitType> = setOf(
             EventTerminalExited,
+            EventSubagentCompleted,
             Reasoning,
             CommandExecutionToolEvent,
             AwaitEventToolEvent,
@@ -189,9 +197,13 @@ public enum class AgentCommitType(
  */
 @Serializable
 public sealed interface AgentCommit {
+    /** Text-like clean events that can be read independently of a tool disclosure. */
+    @Serializable
+    public sealed interface ConversationMessage : AgentCommit
+
     /** Input that can be delivered to an Agent during a logical turn. */
     @Serializable
-    public sealed interface Steerable : AgentCommit
+    public sealed interface Steerable : ConversationMessage
 
     /** Completed tool interactions that can be produced by a tool handler. */
     @Serializable
@@ -203,6 +215,8 @@ public sealed interface AgentCommit {
             is StableAskUserEvent -> AgentCommitType.EventAskUser
             is StableScheduleEvent -> AgentCommitType.EventSchedule
             is StableTerminalExitedEvent -> AgentCommitType.EventTerminalExited
+            is StableSubagentCreatedEvent -> AgentCommitType.EventSubagentCreated
+            is StableSubagentCompletedEvent -> AgentCommitType.EventSubagentCompleted
             is StableAssistantMessage -> when (phase) {
                 MessagePhase.Commentary -> AgentCommitType.AssistantMessageCommentary
                 MessagePhase.FinalAnswer -> AgentCommitType.AssistantMessageFinal

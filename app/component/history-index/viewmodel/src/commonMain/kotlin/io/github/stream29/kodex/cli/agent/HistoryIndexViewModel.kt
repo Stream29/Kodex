@@ -11,6 +11,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCom
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
@@ -286,7 +287,7 @@ private fun IndexCommit.toHistoryIndexEntryKind(): HistoryIndexEntryKind = when 
         null -> HistoryIndexEntryKind.AssistantMessage
     }
     is StableDeveloperMessage -> HistoryIndexEntryKind.DeveloperMessage
-    is StableAgentMessage -> HistoryIndexEntryKind.AgentMessage
+    is StableAgentMessage, is StableSubagentCreatedEvent -> HistoryIndexEntryKind.AgentMessage
     is StableAskUserEvent -> HistoryIndexEntryKind.RequestUserInput
     is StablePlanUpdate -> HistoryIndexEntryKind.PlanUpdate
 }
@@ -300,6 +301,7 @@ private fun IndexCommit.toHistoryIndexSummary(): String = when (this) {
     is StableAskUserEvent ->
         arguments.questions.joinToString(separator = " ") { it.question }.toSummary()
     is StableScheduleEvent -> "schedule #$scheduleId: $description".toSummary()
+    is StableSubagentCreatedEvent -> notice.toSummary()
     is StablePlanUpdate -> {
         val selected = arguments.plan.lastOrNull { it.status != StepStatus.Pending } ?: arguments.plan.firstOrNull()
         selected?.step.orEmpty().toSummary()
@@ -319,6 +321,7 @@ private fun IndexCommit.toHistoryIndexDetail(): String = when (this) {
     }.joinToString("\n")
     is StableAskUserEvent -> toRequestUserInputDetail()
     is StableScheduleEvent -> "Schedule #$scheduleId\n\n$description".toDetail()
+    is StableSubagentCreatedEvent -> notice.toDetail()
     is StablePlanUpdate -> toPlanDetail()
 }
 

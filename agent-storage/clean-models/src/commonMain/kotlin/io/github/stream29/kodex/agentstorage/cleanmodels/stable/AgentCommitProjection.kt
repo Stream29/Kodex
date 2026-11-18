@@ -8,6 +8,8 @@ public actual fun AgentCommit.toResponseHistoryItems(): List<ResponseItem.Histor
         is StableAskUserEvent -> toResponseHistoryItems()
         is StableScheduleEvent -> toResponseHistoryItems()
         is StableTerminalExitedEvent -> toResponseHistoryItems()
+        is StableSubagentCreatedEvent -> toResponseHistoryItems()
+        is StableSubagentCompletedEvent -> toResponseHistoryItems()
         is StableAssistantMessage -> toResponseHistoryItems()
         is StableDeveloperMessage -> toResponseHistoryItems()
         is StableAgentMessage -> toResponseHistoryItems()

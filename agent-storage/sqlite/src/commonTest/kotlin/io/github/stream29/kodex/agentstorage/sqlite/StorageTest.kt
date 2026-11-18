@@ -6,6 +6,10 @@ import io.github.stream29.kodex.agentstorage.contract.*
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.utils.sqlite.*
+import kotlinx.io.files.Path
+import kotlinx.io.files.SystemFileSystem
+import kotlinx.io.files.SystemTemporaryDirectory
+import kotlin.random.Random
 import kotlin.test.*
 import kotlin.time.Instant
 
@@ -13,6 +17,38 @@ private fun seeded(): SqliteConnection = openInMemorySqliteConnection().also {
     ensureSqlitePhaseOneSchema(it)
     it.execute("INSERT INTO sessions VALUES(0,0)")
     it.execute("INSERT INTO agents(agent_id, session_id) VALUES(0,0)")
+}
+
+val sqliteSubagentEventTest by testSuite {
+    test("after reopening, creation and completion stay on the direct parent's correct timelines") {
+        val path = Path(SystemTemporaryDirectory, "kodex-subagent-events-${Random.nextLong().toULong()}.db")
+        val spawn = StableSubagentCreatedEvent(92)
+        val completion = StableSubagentCompletedEvent(92)
+        try {
+            openSqliteConnection(path).use { db ->
+                initializeSqlitePhaseOneSchema(db)
+                db.execute("INSERT INTO sessions(session_id) VALUES(12), (90)")
+                db.execute("""INSERT INTO agents(agent_id, session_id, parent_agent_id)
+                    VALUES(90, 12, NULL), (91, 12, 90), (92, 12, 91), (12, 90, NULL)""")
+                val directParent = SqliteAgentStorage(db, 91)
+                assertEquals(0, directParent.commit(spawn))
+                assertEquals(1, directParent.commit(completion))
+                directParent.commit(SteerSnapshot(listOf(completion)))
+            }
+            openSqliteConnection(path).use { db ->
+                val parent = SqliteAgentStorage(db, 91)
+                assertEquals(spawn, parent.getCommitExact(0, AgentCommitType.IndexTypes)?.commit)
+                assertEquals(completion, parent.getCommitExact(1, AgentCommitType.WorkTypes)?.commit)
+                assertNull(parent.getCommitExact(1, AgentCommitType.IndexTypes))
+                assertEquals(listOf(completion), parent.getSteerAt(2))
+                for (elsewhere in listOf(12, 90, 92)) {
+                    assertEquals(-1, SqliteAgentStorage(db, elsewhere).latestIndex())
+                }
+            }
+        } finally {
+            SystemFileSystem.delete(path, mustExist = false)
+        }
+    }
 }
 
 private suspend fun checkSparseFamily(
