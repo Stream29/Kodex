@@ -31,6 +31,85 @@ import kotlin.test.*
 import kotlin.time.Instant
 
 val offscreenHistoryIndexTest by testSuite {
+    test("child Index renders unique parent anchors with no rows and after append; root renders neither") { offscreenTest {
+        val model = IndexRenderFixture(emptyList())
+        val returns = mutableListOf<HistoryIndexParentAnchor>()
+        val child = HistoryIndexNavigation(model, { _, _ -> error("No creation row") }, returns::add)
+        var navigation by mutableStateOf<HistoryIndexNavigation?>(child)
+        val scene = OffscreenScene.create(width = 220, height = 180) {
+            HistoryIndexContent(model, HistoryIndexSide.Left, rememberComposeHistoryIndexRenderer(), navigation)
+        }
+        try {
+            for (count in listOf(0, 1, 2)) {
+                if (count > 0) model.append(count)
+                scene.settle { (count == 0 || scene.hasDescription("History index $count")) &&
+                    HistoryIndexParentAnchor.entries.all { scene.hasText(it.label) } }
+                for (anchor in HistoryIndexParentAnchor.entries) {
+                    assertEquals(1, scene.indexTexts().count { it == anchor.label })
+                }
+            }
+            for (anchor in HistoryIndexParentAnchor.entries) {
+                val textNode = scene.nodes().first {
+                    it.config.getOrNull(SemanticsProperties.Text).orEmpty().any { line -> line.text == anchor.label }
+                }
+                val point = textNode.boundsInWindow.center
+                scene.scene.sendPointerEvent(PointerEventType.Press, point, buttons = PointerButtons(isPrimaryPressed = true), button = PointerButton.Primary)
+                scene.scene.sendPointerEvent(PointerEventType.Release, point, buttons = PointerButtons(), button = PointerButton.Primary)
+                scene.advance()
+            }
+            assertEquals(HistoryIndexParentAnchor.entries.toList(), returns)
+            navigation = null
+            scene.settle { HistoryIndexParentAnchor.entries.none { scene.hasText(it.label) } }
+        } finally { scene.close(); model.close() }
+    } }
+
+    test("creation menu adds a targeted command and rejects its callback after revision changes") { offscreenTest {
+        val model = IndexRenderFixture(listOf(1, 2))
+        model.window.value = model.window.value.copy(entries = model.window.value.entries.map {
+            if (it.index == 1) it.copy(createdChildAgentId = 91) else it.copy(summary = "Subagent #91 created")
+        })
+        val entries = mutableListOf<Pair<HistoryIndexTarget, Int>>()
+        val navigation = HistoryIndexNavigation(model, { target, child -> entries.add(target to child) })
+        var opening by mutableStateOf<HistoryIndexMenuOpening?>(null)
+        var callback: (() -> Unit)? = null
+        val scene = OffscreenScene.create(width = 320, height = 170) {
+            val graphical = rememberComposeHistoryIndexRenderer(onOpenMenu = { opening = it })
+            val renderer = object : HistoryIndexRenderer by graphical {
+                @Composable override fun Menu(
+                    opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
+                    onDismiss: () -> Unit, onEnterChild: (() -> Unit)?, onCheckOut: () -> Unit,
+                ) {
+                    callback = onEnterChild
+                    graphical.Menu(opening, timestamp, detail, onDismiss, onEnterChild, onCheckOut)
+                }
+            }
+            HistoryIndexContent(model, HistoryIndexSide.Left, renderer)
+            val current = opening
+            HistoryIndexMenuContent(current, renderer, navigation) { if (opening === current) opening = null }
+        }
+        try {
+            scene.settle { scene.hasDescription("History index 1") }
+            scene.secondaryIndex(2)
+            scene.settle { scene.hasText("Check out") }
+            assertFalse(scene.hasText("Enter subagent"))
+            scene.key(Key.Escape)
+            opening = null
+            scene.settle { !scene.hasText("Check out") }
+            scene.secondaryIndex(1)
+            scene.settle { scene.hasText("Enter subagent") }
+            val old = assertNotNull(callback)
+            old()
+            val (target, child) = entries.single()
+            assertSame(model, target.viewModel)
+            assertEquals(1, target.index)
+            assertEquals(91, child)
+            assertTrue(model.scrolled.isEmpty())
+            model.window.value = model.window.value.copy(revision = 1)
+            old()
+            assertEquals(1, entries.size)
+        } finally { scene.close(); model.close() }
+    } }
+
     test("disposed Index anchor rejects retained menu requests while its target remains current") { offscreenTest {
         val model = IndexRenderFixture(listOf(1))
         var show by mutableStateOf(true)
@@ -330,11 +409,11 @@ val offscreenHistoryIndexTest by testSuite {
             val renderer = object : HistoryIndexRenderer by graphical {
                 @Composable override fun Menu(
                     opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
-                    onDismiss: () -> Unit, onCheckOut: () -> Unit,
+                    onDismiss: () -> Unit, onEnterChild: (() -> Unit)?, onCheckOut: () -> Unit,
                 ) {
                     capturedCheckOut = onCheckOut
                     capturedDismiss = onDismiss
-                    graphical.Menu(opening, timestamp, detail, onDismiss, onCheckOut)
+                    graphical.Menu(opening, timestamp, detail, onDismiss, onEnterChild, onCheckOut)
                 }
             }
             Box(Modifier.width(320.dp).height(160.dp)) { HistoryIndexContent(model, HistoryIndexSide.Left, renderer) }

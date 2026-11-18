@@ -19,6 +19,18 @@ public class HistoryIndexTarget(
 
 public expect fun HistoryIndexTarget.isCurrent(): Boolean
 
+/** The two anchors that a caller may resolve on the same direct parent. */
+public enum class HistoryIndexParentAnchor(public val label: String) {
+    Creation("Return to creation"), Completion("Return to completion"),
+}
+
+/** Optional intent handlers bound to one exact Index VM; they do not resolve or activate Agents. */
+public class HistoryIndexNavigation(
+    public val owner: HistoryIndexViewModel,
+    public val enterChild: (HistoryIndexTarget, Int) -> Unit,
+    public val returnToParent: ((HistoryIndexParentAnchor) -> Unit)? = null,
+)
+
 /** Opaque renderer placement, with no terminal/pixel geometry in shared composition. */
 public interface HistoryIndexInteraction {
     public val target: HistoryIndexTarget
@@ -59,13 +71,15 @@ public expect fun historyIndexDetailPresentation(
 
 public interface HistoryIndexListScope {
     public fun Rows(window: HistoryIndexWindow, content: @Composable (index: Int) -> Unit)
+    public fun ParentRow(anchor: HistoryIndexParentAnchor, content: @Composable () -> Unit)
 }
 
 public interface HistoryIndexRenderer {
     public val canShowHover: Boolean
     @Composable public fun List(
-        viewModel: HistoryIndexViewModel, window: HistoryIndexWindow, content: (HistoryIndexListScope) -> Unit,
+        viewModel: HistoryIndexViewModel, window: HistoryIndexWindow, hasParentRows: Boolean, content: (HistoryIndexListScope) -> Unit,
     )
+    @Composable public fun ParentAction(anchor: HistoryIndexParentAnchor, onReturn: () -> Unit)
     @Composable public fun rememberInteraction(target: HistoryIndexTarget, side: HistoryIndexSide): HistoryIndexRowInteraction
     @Composable public fun Row(
         interaction: HistoryIndexRowInteraction, presentation: HistoryIndexRowPresentation,
@@ -77,7 +91,7 @@ public interface HistoryIndexRenderer {
     /** Detail is already redacted; null means loading. A command dismisses before onCheckOut. */
     @Composable public fun Menu(
         opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
-        onDismiss: () -> Unit, onCheckOut: () -> Unit,
+        onDismiss: () -> Unit, onEnterChild: (() -> Unit)?, onCheckOut: () -> Unit,
     )
 }
 
@@ -85,6 +99,7 @@ public interface HistoryIndexRenderer {
 @Composable
 public expect fun HistoryIndexContent(
     viewModel: HistoryIndexViewModel, side: HistoryIndexSide, renderer: HistoryIndexRenderer,
+    navigation: HistoryIndexNavigation? = null,
 )
 
 @Composable
@@ -96,4 +111,9 @@ public expect fun HistoryIndexHoverContent(
 @Composable
 public expect fun HistoryIndexMenuContent(
     opening: HistoryIndexMenuOpening?, renderer: HistoryIndexRenderer, onDismiss: () -> Unit,
+)
+
+@Composable
+public expect fun HistoryIndexMenuContent(
+    opening: HistoryIndexMenuOpening?, renderer: HistoryIndexRenderer, navigation: HistoryIndexNavigation?, onDismiss: () -> Unit,
 )

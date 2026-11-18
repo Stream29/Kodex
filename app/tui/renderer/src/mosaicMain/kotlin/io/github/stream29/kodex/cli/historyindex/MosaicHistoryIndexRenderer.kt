@@ -46,7 +46,7 @@ internal class MosaicHistoryIndexRenderer(
     override val canShowHover: Boolean get() = columns > 0 && rows > 0
 
     @Composable override fun List(
-        viewModel: HistoryIndexViewModel, window: HistoryIndexWindow, content: (HistoryIndexListScope) -> Unit,
+        viewModel: HistoryIndexViewModel, window: HistoryIndexWindow, hasParentRows: Boolean, content: (HistoryIndexListScope) -> Unit,
     ) {
         val list = checkNotNull(listState)
         val followsLatest = remember(viewModel) { mutableStateOf(true) }
@@ -63,13 +63,23 @@ internal class MosaicHistoryIndexRenderer(
         LaunchedEffect(viewModel, list) {
             snapshotFlow { list.canScrollForward }.collect { forward -> if (!forward) followsLatest.value = true }
         }
-        LaunchedEffect(viewModel, window.generation, window.revision, window.entries.lastOrNull()?.index, followsLatest.value) {
+        LaunchedEffect(viewModel, window.generation, window.revision, window.entries.lastOrNull()?.index, hasParentRows, followsLatest.value) {
             if (followsLatest.value) list.requestScrollToEnd()
         }
         LazyColumn(
             Modifier.width(columns.coerceAtLeast(0)).height(rows.coerceAtLeast(0)), state = list, interactionSource = interaction,
         ) { content(MosaicHistoryIndexListScope(this)) }
     }
+    @Composable override fun ParentAction(anchor: HistoryIndexParentAnchor, onReturn: () -> Unit) {
+        TuiPressable(onClick = onReturn, modifier = Modifier.fillMaxWidth()) { focused, hovered, pressed ->
+            EllipsizedText(
+                anchor.label, modifier = Modifier.fillMaxWidth(),
+                color = TuiTheme.colorScheme.onSurface,
+                textStyle = tuiInteractionTextStyle(selected = focused, hovered = hovered, pressed = pressed),
+            )
+        }
+    }
+
     @Composable override fun rememberInteraction(target: HistoryIndexTarget, side: HistoryIndexSide): HistoryIndexRowInteraction {
         val anchor = rememberTuiPopupAnchor()
         val request = remember(target, side, anchor) {
@@ -120,7 +130,7 @@ internal class MosaicHistoryIndexRenderer(
     }
     @Composable override fun Menu(
         opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
-        onDismiss: () -> Unit, onCheckOut: () -> Unit,
+        onDismiss: () -> Unit, onEnterChild: (() -> Unit)?, onCheckOut: () -> Unit,
     ) {
         val origin = opening.interaction as MosaicHistoryIndexOrigin
         var details by remember(opening) { mutableStateOf(false) }
@@ -140,7 +150,7 @@ internal class MosaicHistoryIndexRenderer(
             } else {
                 HistoryIndexContextMenuPopup(
                     origin.request.anchor, origin.clickPosition, origin.target.index, onDismiss, onCheckOut, formatted,
-                    onDetails = { details = true }, state = menuState,
+                    onDetails = { details = true }, state = menuState, onEnterChild = onEnterChild,
                 )
             }
         }
@@ -177,6 +187,10 @@ private fun BoxScope.HistoryIndexDetailsDialog(detail: HistoryIndexDetailPresent
 }
 
 private class MosaicHistoryIndexListScope(private val original: LazyListScope) : HistoryIndexListScope {
+    override fun ParentRow(anchor: HistoryIndexParentAnchor, content: @Composable () -> Unit) {
+        original.item(key = anchor, content = content)
+    }
+
     override fun Rows(window: HistoryIndexWindow, content: @Composable (Int) -> Unit) {
         original.items(
             window.entries,

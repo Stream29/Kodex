@@ -51,10 +51,12 @@ internal fun HistoryIndexSidebarBody(
     onHoverChanged: (HistoryIndexInteractionRequest, Boolean) -> Unit = { _, _ -> },
     onOpenMenu: (HistoryIndexMenuRequest) -> Unit = {},
     listState: LazyListState = remember(viewModel) { LazyListState().apply { requestScrollToEnd() } },
+    navigation: HistoryIndexNavigation? = null,
 ) {
     HistoryIndexContent(
         viewModel, side,
         MosaicHistoryIndexRenderer(columns, rows, listState, onHoverChanged = onHoverChanged, onOpenMenu = onOpenMenu),
+        navigation,
     )
 }
 
@@ -86,6 +88,7 @@ internal fun BoxScope.HistoryIndexContextMenuPopup(
     timestamp: String? = null,
     onDetails: (() -> Unit)? = null,
     state: TuiPopupMenuState = rememberTuiPopupMenuState(),
+    onEnterChild: (() -> Unit)? = null,
 ) {
     TuiContextMenu(
         expanded = true, anchor = anchor, clickPosition = clickPosition,
@@ -98,6 +101,9 @@ internal fun BoxScope.HistoryIndexContextMenuPopup(
             }
         }
         TuiPopupMenuItem(key = "history-index-check-out", onClick = onCheckOut) { Text("Check out") }
+        if (onEnterChild != null) {
+            TuiPopupMenuItem(key = "history-index-enter-child", onClick = onEnterChild) { Text("Enter subagent") }
+        }
         if (onDetails != null) {
             TuiPopupMenuItem(key = "history-index-details", onClick = onDetails, dismissOnClick = false) { Text("Details") }
         }

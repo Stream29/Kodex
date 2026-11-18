@@ -67,7 +67,9 @@ val historyIndexViewModelTest by testSuite {
         )
         try {
             val window = model.awaitIndexes(listOf(entered, completed))
+            assertEquals(90, window.entryAtOrNull(entered)?.createdChildAgentId)
             val notice = assertNotNull(window.entryAtOrNull(completed))
+            assertNull(notice.createdChildAgentId)
             assertEquals(HistoryIndexEntryKind.AgentMessage, notice.kind)
             assertEquals("Subagent #90 completed", notice.detail.content)
             assertTrue(model.checkOut(window.generation, completed))

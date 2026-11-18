@@ -66,6 +66,8 @@ public data class HistoryIndexEntry(
     public val summary: String,
     public val detail: HistoryIndexEntryDetail = HistoryIndexEntryDetail(kind, summary),
     public val messageTimestamp: Instant? = null,
+    /** Present only on a committed subagent creation row; not derived from the summary. */
+    public val createdChildAgentId: Int? = null,
 )
 
 /**

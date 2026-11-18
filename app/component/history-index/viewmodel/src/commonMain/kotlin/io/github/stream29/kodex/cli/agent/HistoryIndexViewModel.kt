@@ -274,6 +274,7 @@ private fun IndexedAgentCommit.toHistoryIndexEntryOrNull(): HistoryIndexEntry? {
         summary = summary,
         detail = detail,
         messageTimestamp = messageTimestamp,
+        createdChildAgentId = (event as? StableSubagentCreatedEvent)?.childAgentId,
     )
 }
 

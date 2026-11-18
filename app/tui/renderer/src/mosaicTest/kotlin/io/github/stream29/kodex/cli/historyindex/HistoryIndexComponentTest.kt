@@ -51,6 +51,62 @@ import kotlin.time.Instant
 import kotlin.time.Duration.Companion.milliseconds
 
 val historyIndexRendererTest by testSuite {
+    test("child parent rows appear once before and after sparse entries in a narrow Index") {
+        val vm = RenderIndex(emptyList())
+        val returned = mutableListOf<HistoryIndexParentAnchor>()
+        val navigation = HistoryIndexNavigation(vm, { _, _ -> error("No creation row") }, returned::add)
+        runMosaicTest {
+            setContentAndSnapshot {
+                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    HistoryIndexSidebarBody(vm, columns = 24, rows = 6, navigation = navigation)
+                }
+            }
+            var snapshot = awaitContaining("Return to completion")
+            assertEquals(1, snapshot.lines().count { "Return to creation" in it })
+            vm.append(entry(3, "After pagination"))
+            snapshot = awaitContaining("After pagination")
+            assertEquals(1, snapshot.lines().count { "Return to creation" in it })
+            assertEquals(1, snapshot.lines().count { "Return to completion" in it })
+            for (anchor in HistoryIndexParentAnchor.entries) {
+                val y = snapshot.lines().indexOfFirst { anchor.label in it }
+                assertTrue(y >= 0)
+                sendMouseEvent(MouseEvent(2, y, MouseEvent.Type.Press, MouseEvent.Button.Left))
+                sendMouseEvent(MouseEvent(2, y, MouseEvent.Type.Release, MouseEvent.Button.Left))
+                snapshotNow()
+            }
+            assertEquals(HistoryIndexParentAnchor.entries.toList(), returned)
+        }
+    }
+
+    test("the creation menu offers keyboard Enter subagent without scrolling the parent") {
+        val vm = RenderIndex(listOf(entry(7, "Created #91").copy(createdChildAgentId = 91)))
+        val opened = mutableListOf<Pair<HistoryIndexTarget, Int>>()
+        val navigation = HistoryIndexNavigation(vm, { target, child -> opened.add(target to child) })
+        runMosaicTest {
+            setContentAndSnapshot {
+                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    TuiPopupHost(Modifier.width(60).height(12)) {
+                        val anchor = rememberTuiPopupAnchor()
+                        Text("entry", Modifier.tuiPopupAnchor(anchor))
+                        val request = remember(anchor) {
+                            mosaicIndexMenu(HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor), null))
+                        }
+                        HistoryIndexMenuContent(request, rememberMosaicIndexOverlayRenderer(0, 0), navigation) {}
+                    }
+                }
+            }
+            awaitContaining("Enter subagent")
+            sendKeyEvent(KeyboardEvent(codepoint = 9))
+            snapshotNow()
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            snapshotNow()
+            assertEquals(7, opened.single().first.index)
+            assertSame(vm, opened.single().first.viewModel)
+            assertEquals(91, opened.single().second)
+            assertTrue(vm.scrolled.isEmpty())
+        }
+    }
+
     test("keyboard menu Details renders redacted question rows and never their raw fallback") {
         val secret = StableAskUserEvent(
             askId = 1,
