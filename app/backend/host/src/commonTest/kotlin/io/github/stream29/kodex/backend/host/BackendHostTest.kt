@@ -135,7 +135,7 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 try { awaitCancellation() } finally { cancelled.complete(Unit) }
             }
         }) { home, endpoint, _ ->
-            var index = -1
+            var agentId = -1
             withLocalRpcClient(home, endpoint) { connection ->
                 val rpc = RpcServices(RestoringRpcClient(connection))
                 val model = withTimeout(10.seconds) { rpc.global.getModelsFlow().first { it.isNotEmpty() }.first().slug }
@@ -143,9 +143,10 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 assertTrue(rpc.global.compareAndSetSettings(
                     defaults, defaults.copy(newSession = defaults.newSession.copy(model = model)),
                 ))
-                index = rpc.global.createSession(home)
-                rpc.runtime.keepAgentAlive(rpc.global.getRootAgentId(index))
-                rpc.runtime.submit(index, listOf(ContentItem.InputText("offline fixture")))
+                val sessionId = rpc.global.createSession(home)
+                agentId = rpc.global.getRootAgentId(sessionId)
+                rpc.runtime.keepAgentAlive(agentId)
+                rpc.runtime.submit(agentId, listOf(ContentItem.InputText("offline fixture")))
                 withTimeout(10.seconds) { started.await() }
             }
             delay(3_000) // Longer than the daemon TTL, without frontend renewal.
@@ -153,9 +154,9 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
             assertEquals("ready", backendControlRequest(endpoint, "status")["phase"]?.jsonPrimitive?.content)
             withLocalRpcClient(home, endpoint) { connection ->
                 val rpc = RpcServices(RestoringRpcClient(connection))
-                rpc.runtime.keepAgentAlive(rpc.global.getRootAgentId(index))
-                assertTrue(rpc.runtime.getRunningTurn(index))
-                rpc.runtime.cancelRunningTurn(index)
+                rpc.runtime.keepAgentAlive(agentId)
+                assertTrue(rpc.runtime.getRunningTurn(agentId))
+                rpc.runtime.cancelRunningTurn(agentId)
                 withTimeout(10.seconds) { cancelled.await() }
             }
         }
@@ -198,9 +199,9 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 assertTrue(rpc.global.compareAndSetSettings(
                     defaults, defaults.copy(newSession = defaults.newSession.copy(model = model)),
                 ))
-                val index = rpc.global.createSession(home)
-                rpc.runtime.keepAgentAlive(rpc.global.getRootAgentId(index))
-                rpc.runtime.submit(index, listOf(ContentItem.InputText("offline fixture")))
+                val agentId = rpc.global.getRootAgentId(rpc.global.createSession(home))
+                rpc.runtime.keepAgentAlive(agentId)
+                rpc.runtime.submit(agentId, listOf(ContentItem.InputText("offline fixture")))
                 withTimeout(10.seconds) { entered.await() }
             }
             fail.complete(Unit)
@@ -237,9 +238,9 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 assertTrue(rpc.global.compareAndSetSettings(
                     defaults, defaults.copy(newSession = defaults.newSession.copy(model = model)),
                 ))
-                val index = rpc.global.createSession(home)
-                rpc.runtime.keepAgentAlive(rpc.global.getRootAgentId(index))
-                rpc.runtime.submit(index, listOf(ContentItem.InputText("shutdown fixture")))
+                val agentId = rpc.global.getRootAgentId(rpc.global.createSession(home))
+                rpc.runtime.keepAgentAlive(agentId)
+                rpc.runtime.submit(agentId, listOf(ContentItem.InputText("shutdown fixture")))
                 withTimeout(10.seconds) { started.await() }
                 try {
                     backendControlRequest(endpoint, "stop")

@@ -50,6 +50,7 @@ import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -163,11 +164,13 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
         ) { home, endpoint ->
             withLocalRpcClient(home, endpoint) { connection ->
                 val rpc = RpcServices(RestoringRpcClient(connection))
-                val index = rpc.global.createSession(home)
-                rpc.runtime.keepAgentAlive(rpc.global.getRootAgentId(index))
+                val sessionId = rpc.global.createSession(home)
+                val agentId = rpc.global.getRootAgentId(sessionId)
+                assertNotEquals(sessionId, agentId)
+                rpc.runtime.keepAgentAlive(agentId)
 
                 rpc.runtime.submit(
-                    index,
+                    agentId,
                     listOf(ContentItem.InputText("Run an interactive worker shell and await its exit")),
                 )
 
@@ -178,18 +181,18 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
 
                 val shellId = step("awaiting shellId") { capturedShellId.await() }
                 step("awaiting parked PendingAwait") {
-                    rpc.runtime.getStateFlow(index).first { state ->
+                    rpc.runtime.getStateFlow(agentId).first { state ->
                         val pending = (state as? AgentStateValue.ToolPending)?.events.orEmpty()
                         pending.singleOrNull() is PendingAwait
                     }
-                    rpc.runtime.getRunningTurnFlow(index).first { !it }
+                    rpc.runtime.getRunningTurnFlow(agentId).first { !it }
                 }
 
-                val parkedState = assertIs<AgentStateValue.ToolPending>(rpc.runtime.getState(index))
+                val parkedState = assertIs<AgentStateValue.ToolPending>(rpc.runtime.getState(agentId))
                 val parkedAwait = assertIs<PendingAwait>(parkedState.events.single())
                 assertEquals(setOf(shellId), parkedAwait.arguments.terminalIds)
                 assertTrue(
-                    readStopNotifications(home, index).isEmpty(),
+                    readStopNotifications(home, sessionId, agentId).isEmpty(),
                     "Parking on await_event must not emit Stop notifications",
                 )
 
@@ -199,16 +202,16 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                     }
                 }
 
-                val runningShell = rpc.runtime.getShellSessions(index).getValue(shellId)
+                val runningShell = rpc.runtime.getShellSessions(agentId).getValue(shellId)
                 assertNull(runningShell.exitCode)
                 assertFalse(runningShell.completed)
                 assertEquals("interactive-worker", runningShell.arguments.name)
 
                 val firstSlice = step("awaiting READY stdout slice") {
-                    var slice = rpc.runtime.readShellSessionOutput(index, shellId, offset = 0uL, limit = 4096u)
+                    var slice = rpc.runtime.readShellSessionOutput(agentId, shellId, offset = 0uL, limit = 4096u)
                     while (!slice.renderedBytes().decodeToString().contains("READY")) {
                         delay(25)
-                        slice = rpc.runtime.readShellSessionOutput(index, shellId, offset = 0uL, limit = 4096u)
+                        slice = rpc.runtime.readShellSessionOutput(agentId, shellId, offset = 0uL, limit = 4096u)
                     }
                     slice
                 }
@@ -216,16 +219,16 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                 assertTrue(firstSlice.nextOffset > 0uL)
 
                 rpc.runtime.writeShellSessionStdin(
-                    sessionIndex = index,
+                    sessionIndex = agentId,
                     shellSessionId = shellId,
                     chars = "WORLD\n",
                     closeInput = true,
                 )
 
                 step("awaiting terminal exit wakeup and AssistantMessage") {
-                    rpc.runtime.getStateFlow(index).first { it == AgentStateValue.AssistantMessage }
-                    rpc.runtime.getRunningTurnFlow(index).first { !it }
-                    while (readStopNotifications(home, index).isEmpty()) {
+                    rpc.runtime.getStateFlow(agentId).first { it == AgentStateValue.AssistantMessage }
+                    rpc.runtime.getRunningTurnFlow(agentId).first { !it }
+                    while (readStopNotifications(home, sessionId, agentId).isEmpty()) {
                         delay(25)
                     }
                 }
@@ -237,12 +240,12 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                 )
                 assertTrue(thirdInput.contains("timestamp"), "Expected AwaitEventOutput timestamp in $thirdInput")
 
-                val completedShell = rpc.runtime.getShellSessions(index).getValue(shellId)
+                val completedShell = rpc.runtime.getShellSessions(agentId).getValue(shellId)
                 assertEquals(0, completedShell.exitCode)
                 assertTrue(completedShell.completed)
 
                 val deltaSlice = rpc.runtime.readShellSessionOutput(
-                    sessionIndex = index,
+                    sessionIndex = agentId,
                     shellSessionId = shellId,
                     offset = firstSlice.nextOffset,
                     limit = 4096u,
@@ -252,7 +255,7 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                 assertFalse(deltaText.contains("READY"), "Incremental cursor read must not repeat READY: $deltaText")
 
                 val fullSlice = rpc.runtime.readShellSessionOutput(
-                    sessionIndex = index,
+                    sessionIndex = agentId,
                     shellSessionId = shellId,
                     offset = 0uL,
                     limit = 4096u,
@@ -262,19 +265,19 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                 assertTrue(fullText.contains("DONE:WORLD"), "Expected DONE:WORLD in full output: $fullText")
 
                 // Second turn: park for user input and wake directly via user submit over RPC.
-                rpc.runtime.submit(index, listOf(ContentItem.InputText("Park until next message")))
+                rpc.runtime.submit(agentId, listOf(ContentItem.InputText("Park until next message")))
                 step("awaiting second parked await_event") {
-                    rpc.runtime.getStateFlow(index).first { state ->
+                    rpc.runtime.getStateFlow(agentId).first { state ->
                         (state as? AgentStateValue.ToolPending)?.events?.singleOrNull() is PendingAwait
                     }
-                    rpc.runtime.getRunningTurnFlow(index).first { !it }
+                    rpc.runtime.getRunningTurnFlow(agentId).first { !it }
                 }
 
-                rpc.runtime.submit(index, listOf(ContentItem.InputText("Wake up now")))
+                rpc.runtime.submit(agentId, listOf(ContentItem.InputText("Wake up now")))
                 step("awaiting user-message wakeup") {
-                    rpc.runtime.getStateFlow(index).first { it == AgentStateValue.AssistantMessage }
-                    rpc.runtime.getRunningTurnFlow(index).first { !it }
-                    while (readStopNotifications(home, index).size < 2) {
+                    rpc.runtime.getStateFlow(agentId).first { it == AgentStateValue.AssistantMessage }
+                    rpc.runtime.getRunningTurnFlow(agentId).first { !it }
+                    while (readStopNotifications(home, sessionId, agentId).size < 2) {
                         delay(25)
                     }
                 }
@@ -378,7 +381,7 @@ private suspend fun withStepTwoHost(
     }
 }
 
-private suspend fun readStopNotifications(home: Path, sessionIndex: Int): List<Notification.Stop.AssistantMessage> {
+private suspend fun readStopNotifications(home: Path, sessionId: Int, agentId: Int): List<Notification.Stop.AssistantMessage> {
     val path = Path(home, "notifications.jsonl")
     if (!SystemCoroutineFileSystem.exists(path)) return emptyList()
     return SystemCoroutineFileSystem.readString(path)
@@ -386,7 +389,7 @@ private suspend fun readStopNotifications(home: Path, sessionIndex: Int): List<N
         .filter(String::isNotBlank)
         .mapNotNull { line -> runCatching { Json.decodeFromString<Notification>(line) }.getOrNull() }
         .filterIsInstance<Notification.Stop.AssistantMessage>()
-        .filter { it.sessionIndex == sessionIndex }
+        .filter { it.sessionIndex == sessionId && it.agentId == agentId }
         .toList()
 }
 
