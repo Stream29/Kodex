@@ -301,7 +301,7 @@ val agentEventBusRealTerminalTest by testSuite(
                 val runtime = session.runtime
                 runtime.modify { it.initialize(KodexAgentSettings(OpenAiModelId("test-model"))) }
                 terminalId = assertNotNull(runtime.unifiedExecToolClient.execCommand(ExecCommandArguments(
-                    command = "IFS= read -r line", yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
+                    command = "IFS= read -r line", name = "Wait for fixture input", yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
                 )).sessionId)
                 if (alreadyExited) {
                     val process = runtime.unifiedExecToolClient.activeSessions.value.getValue(terminalId)

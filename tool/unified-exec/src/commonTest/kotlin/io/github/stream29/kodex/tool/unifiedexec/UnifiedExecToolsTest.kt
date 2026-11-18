@@ -178,7 +178,7 @@ val unifiedExecToolsTest by testSuite {
 
     test("UnifiedExecTools exposes only exec_command model tool without write_stdin") {
         assertEquals(UnifiedExecTools.ExecCommandName, UnifiedExecTools.execCommandSpec.name)
-        assertEquals(listOf("cmd", "yield_time_ms"), UnifiedExecTools.execCommandSpec.parameters.required)
+        assertEquals(listOf("cmd", "name", "yield_time_ms"), UnifiedExecTools.execCommandSpec.parameters.required)
         assertIs<StringPropertyDefinition>(
             requireNotNull(ExecCommandParametersSchema.properties?.get("name")),
         )
@@ -307,7 +307,30 @@ val unifiedExecToolsTest by testSuite {
         )
         try {
             assertFailsWith<UnifiedExecToolException> {
-                client.execCommand(ExecCommandArguments(command = "echo test", yieldTimeMillis = -1))
+                client.execCommand(ExecCommandArguments(command = "echo test", name = "Run validation fixture", yieldTimeMillis = -1))
+            }
+        } finally {
+            client.close()
+        }
+    }
+
+    test("invalid typed names never allocate shell settings, process or registry entry") {
+        val shell = object : ShellClient, CoroutineScope by CoroutineScope(SupervisorJob()) {
+            override suspend fun start(command: ShellProcessCommand): ProcessSession = fail("Invalid name started a process")
+            override fun close() { cancel() }
+        }
+        val client = UnifiedExecToolClient(
+            workingDirectoryProvider = { fail("Invalid name looked up the execution directory") },
+            settingsProvider = { fail("Invalid name looked up shell settings") },
+            shellClient = shell,
+        )
+        try {
+            for (name in listOf(null, "", "  ", "first\nsecond", "a\u001bb", "a\u2029b")) {
+                val error = assertFailsWith<UnifiedExecToolException> {
+                    client.execCommand(ExecCommandArguments("private command", name = name, yieldTimeMillis = 10_000))
+                }
+                assertEquals("`name` must be nonblank, single-line text.", error.message)
+                assertTrue(client.activeSessions.value.isEmpty())
             }
         } finally {
             client.close()
@@ -340,6 +363,7 @@ val unifiedExecToolsTest by testSuite {
             val result = exec.exec(
                 ExecCommandArguments(
                     command = oneShotExecCommand,
+                    name = "Print the fixture marker",
                     shell = unifiedExecTestShell,
                     yieldTimeMillis = 10_000,
                 ),
@@ -352,7 +376,7 @@ val unifiedExecToolsTest by testSuite {
 
         test("exec_command waits through separate output bursts", testConfig = realIoTestConfig) { client ->
             val result = client.execCommand(
-                ExecCommandArguments(command = phasedOutputExecCommand, yieldTimeMillis = 3_000),
+                ExecCommandArguments(command = phasedOutputExecCommand, name = "Read phased output", yieldTimeMillis = 3_000),
             )
 
             assertEquals(0, result.exitCode)
@@ -366,6 +390,7 @@ val unifiedExecToolsTest by testSuite {
             val initial = client.execCommand(
                 ExecCommandArguments(
                     command = interactiveExecCommand,
+                    name = "Exercise interactive input",
                     shell = unifiedExecTestShell,
                     yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
                 ),
@@ -400,6 +425,7 @@ val unifiedExecToolsTest by testSuite {
             val result = exec.exec(
                 ExecCommandArguments(
                     command = ttyProbeExecCommand,
+                    name = "Check PTY allocation",
                     shell = unifiedExecTestShell,
                     yieldTimeMillis = 10_000,
                 ),
@@ -430,7 +456,7 @@ val unifiedExecToolsTest by testSuite {
         try {
             settings.value = TestShellSettings()
             val output = client.execCommand(
-                ExecCommandArguments(command = oneShotExecCommand, yieldTimeMillis = 10_000),
+                ExecCommandArguments(command = oneShotExecCommand, name = "Read the fixture marker", yieldTimeMillis = 10_000),
             )
             if (output.exitCode != null) {
                 assertEquals(0, output.exitCode)
@@ -462,6 +488,7 @@ val unifiedExecToolsTest by testSuite {
             val result = client.execCommand(
                 ExecCommandArguments(
                     command = "echo session-cwd > $fileName; echo cwd-written",
+                    name = "Verify the session directory",
                     shell = unifiedExecTestShell,
                     yieldTimeMillis = 10_000,
                 ),
@@ -487,6 +514,7 @@ val unifiedExecToolsTest by testSuite {
             val output = exec.exec(
                 ExecCommandArguments(
                     command = interactiveExecCommand,
+                    name = "Exercise interactive execution",
                     shell = unifiedExecTestShell,
                     yieldTimeMillis = 0,
                 ),
@@ -512,7 +540,7 @@ val unifiedExecToolsTest by testSuite {
 
         try {
             client.execCommand(
-                ExecCommandArguments(command = oneShotExecCommand, yieldTimeMillis = 10_000),
+                ExecCommandArguments(command = oneShotExecCommand, name = "Check the closed owner", yieldTimeMillis = 10_000),
             )
             fail("Cancelled owner left its unified-exec shell client usable.")
         } catch (failure: UnifiedExecToolException) {
@@ -528,6 +556,7 @@ val unifiedExecToolsTest by testSuite {
                     client.execCommand(
                         ExecCommandArguments(
                             command = delayedExecCommand,
+                            name = "Observe delayed output",
                             shell = unifiedExecTestShell,
                             yieldTimeMillis = UnifiedExecMaximumYieldTimeMillis,
                         ),
@@ -562,6 +591,7 @@ val unifiedExecSessionControlIoTest by testSuite(
             val initial = client.execCommand(
                 ExecCommandArguments(
                     command = interactiveExecCommand,
+                    name = "Read output without consuming it",
                     shell = unifiedExecTestShell,
                     yieldTimeMillis = 0,
                 ),
@@ -589,6 +619,7 @@ val unifiedExecSessionControlIoTest by testSuite(
             val initial = client.execCommand(
                 ExecCommandArguments(
                     command = interactiveExecCommand,
+                    name = "Verify session completion",
                     shell = unifiedExecTestShell,
                     yieldTimeMillis = 0,
                 ),
@@ -631,6 +662,7 @@ val unifiedExecSessionControlIoTest by testSuite(
             val output = client.execCommand(
                 ExecCommandArguments(
                     command = printEnvCommand,
+                    name = "Verify the tool environment",
                     shell = unifiedExecTestShell,
                     yieldTimeMillis = 5_000L,
                 ),

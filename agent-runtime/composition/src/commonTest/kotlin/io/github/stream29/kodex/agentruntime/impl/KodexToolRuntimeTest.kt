@@ -555,12 +555,12 @@ val kodexToolRuntimeTest by testSuite {
         test("exec command and failed exec command persist independent completions") {
             val execCall = ResponseItem.FunctionCall(
                 name = "exec_command",
-                arguments = "{\"cmd\":\"sleep 1\",\"yield_time_ms\":250}",
+                arguments = "{\"cmd\":\"sleep 1\",\"name\":\"Exercise background wait\",\"yield_time_ms\":250}",
                 callId = "call_exec",
             )
             val failedExecCall = ResponseItem.FunctionCall(
                 name = "exec_command",
-                arguments = "{\"cmd\":\"   \",\"yield_time_ms\":250}",
+                arguments = "{\"cmd\":\"   \",\"name\":\"Check blank command failure\",\"yield_time_ms\":250}",
                 callId = "call_failed_exec",
             )
             val fixture = testStateWithCalls(calls = arrayOf(execCall, failedExecCall))
@@ -590,8 +590,13 @@ val kodexToolRuntimeTest by testSuite {
             )
             val missingYieldExecCall = ResponseItem.FunctionCall(
                 name = UnifiedExecTools.ExecCommandName,
-                arguments = """{"cmd":"echo should-not-run"}""",
+                arguments = """{"cmd":"echo should-not-run","name":"Check missing yield"}""",
                 callId = "call_exec_missing_yield",
+            )
+            val missingNameExecCall = ResponseItem.FunctionCall(
+                name = UnifiedExecTools.ExecCommandName,
+                arguments = """{"cmd":"echo should-not-run","yield_time_ms":250}""",
+                callId = "call_exec_missing_name",
             )
             val retiredToolSearchCall = ResponseItem.ClientToolSearchCall(
                 callId = "call_retired_search",
@@ -601,6 +606,7 @@ val kodexToolRuntimeTest by testSuite {
                 malformedExecCall,
                 missingYieldExecCall,
                 retiredToolSearchCall,
+                missingNameExecCall,
             )
             val fixture = testStateWithCalls(
                 calls = invalidCalls.toTypedArray(),
@@ -618,7 +624,7 @@ val kodexToolRuntimeTest by testSuite {
             assertTrue(workEvents.filterIsInstance<StableCommandExecution>().isEmpty())
             val completed = workEvents.filterIsInstance<StableInvalidToolCall>()
             assertEquals(
-                listOf("call_invalid", "call_exec_missing_yield", "call_retired_search"),
+                listOf("call_invalid", "call_exec_missing_yield", "call_retired_search", "call_exec_missing_name"),
                 completed.map { it.callId },
             )
             assertEquals(
@@ -635,6 +641,7 @@ val kodexToolRuntimeTest by testSuite {
                 ),
                 completed[2].invocation,
             )
+            assertEquals("`name` must be nonblank, single-line text.", completed[3].message)
             assertEquals(KodexAgentStateValue.AssistantMessage, fixture.state.state.value)
         }
 

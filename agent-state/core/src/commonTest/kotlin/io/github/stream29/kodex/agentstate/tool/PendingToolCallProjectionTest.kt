@@ -43,6 +43,7 @@ val pendingToolEventProjectionTest by testSuite {
     test("projects specialized function calls into direct pending branches") {
         val exec = ExecCommandArguments(
             command = "./gradlew check",
+            name = "Verify project checks",
             workdir = "Kodex",
             yieldTimeMillis = 10_000,
         )
@@ -158,19 +159,19 @@ val pendingToolEventProjectionTest by testSuite {
                 id = ItemId,
                 callId = "call_exec_missing_yield",
                 name = UnifiedExecTools.ExecCommandName,
-                arguments = """{"cmd":"pwd"}""",
+                arguments = """{"cmd":"pwd","name":"Inspect cwd"}""",
             ),
             ResponseItem.FunctionCall(
                 id = ItemId,
                 callId = "call_exec_null_yield",
                 name = UnifiedExecTools.ExecCommandName,
-                arguments = """{"cmd":"pwd","yield_time_ms":null}""",
+                arguments = """{"cmd":"pwd","name":"Inspect cwd","yield_time_ms":null}""",
             ),
             ResponseItem.FunctionCall(
                 id = ItemId,
                 callId = "call_exec_bad_yield",
                 name = UnifiedExecTools.ExecCommandName,
-                arguments = """{"cmd":"pwd","yield_time_ms":"10s"}""",
+                arguments = """{"cmd":"pwd","name":"Inspect cwd","yield_time_ms":"10s"}""",
             ),
             ResponseItem.FunctionCall(
                 id = ItemId,
@@ -198,9 +199,23 @@ val pendingToolEventProjectionTest by testSuite {
         }
     }
 
+    test("strictly validates new exec_command names before projecting typed pending work") {
+        val base = """"cmd":"not-in-diagnostic","yield_time_ms":100"""
+        for (name in listOf(null, "null", "7", "true", "[]", "{}", "\"\"", "\"  \"", "\"a\\tb\"", "\"a\\r\\nb\"", "\"a\\u0085b\"", "\"a\\u2028b\"")) {
+            val field = if (name == null) "" else ",\"name\":$name"
+            val call = ResponseItem.FunctionCall(name = UnifiedExecTools.ExecCommandName, callId = "bad-name", arguments = "{$base$field}")
+            val rejected = assertIs<PendingInvalidToolCall>(call.toPendingToolEvent(CallTimestamp))
+            assertEquals("`name` must be nonblank, single-line text.", rejected.message)
+        }
+        val call = ResponseItem.FunctionCall(name = UnifiedExecTools.ExecCommandName, callId = "valid-name",
+            arguments = """{$base,"name":"  检查结果 🧪  "}""")
+        val pending = assertIs<PendingCommandExecution>(call.toPendingToolEvent(CallTimestamp))
+        assertEquals("  检查结果 🧪  ", assertIs<PendingCommandExecutionAction.ExecCommand>(pending.action).arguments.name)
+    }
+
     test("round trips explicit exec_command yield_time_ms and projects legacy write_stdin as generic function call") {
         listOf(10_000L, 250L, 600_000L).forEach { yieldMillis ->
-            val exec = ExecCommandArguments(command = "echo wait", yieldTimeMillis = yieldMillis)
+            val exec = ExecCommandArguments(command = "echo wait", name = "Check wait output", yieldTimeMillis = yieldMillis)
             val execCall = functionCall(
                 UnifiedExecTools.ExecCommandName,
                 ExecCommandArguments.serializer(),

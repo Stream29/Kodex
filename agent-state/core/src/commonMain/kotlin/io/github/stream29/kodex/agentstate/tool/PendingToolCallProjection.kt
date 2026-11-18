@@ -21,9 +21,12 @@ import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.readmedia.ReadMediaTools
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
+import io.github.stream29.kodex.tool.unifiedexec.isValidCommandIntentName
 import io.github.stream29.kodex.utils.applypatch.parsePatch
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.time.Instant
 
 /** Converts one provider-issued local tool call at the AgentState boundary. */
@@ -43,14 +46,7 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(timestamp: Instant): Pe
             ?: invalid("Invalid JSON arguments for ${qualifiedName()}.")
 
     return when {
-        namespace == null && name == UnifiedExecTools.ExecCommandName ->
-            typed(ExecCommandArguments.serializer()) { arguments ->
-                PendingCommandExecution(
-                    callId = callId,
-                    itemId = id,
-                    action = PendingCommandExecutionAction.ExecCommand(arguments),
-                )
-            }
+        namespace == null && name == UnifiedExecTools.ExecCommandName -> toPendingExecCommand()
 
         namespace == null && name == AwaitEventTools.Name ->
             try {
@@ -94,6 +90,20 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(timestamp: Instant): Pe
                 )
             } ?: invalid("Invalid JSON arguments for ${qualifiedName()}.")
     }
+}
+
+private fun ResponseItem.FunctionCall.toPendingExecCommand(): PendingToolCall {
+    val input = parsedJson() as? JsonObject ?: return invalid("Invalid JSON arguments for exec_command.")
+    val rawName = input["name"] as? JsonPrimitive
+    if (rawName?.isString != true || !rawName.content.isValidCommandIntentName()) {
+        return invalid("`name` must be nonblank, single-line text.")
+    }
+    val command = try {
+        OpenAiJsonCodec.decodeFromJsonElement(ExecCommandArguments.serializer(), input)
+    } catch (_: IllegalArgumentException) {
+        return invalid("Invalid JSON arguments for exec_command.")
+    }
+    return PendingCommandExecution(callId, id, PendingCommandExecutionAction.ExecCommand(command))
 }
 
 private fun ResponseItem.CustomToolCall.toPendingToolEvent(): PendingToolCall =

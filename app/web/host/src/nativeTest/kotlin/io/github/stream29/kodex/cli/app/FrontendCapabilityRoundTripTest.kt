@@ -389,6 +389,7 @@ private suspend fun runSessionCliProcessRoundTrip(binary: Path) {
                     name = "exec_command",
                     arguments = buildJsonObject {
                         put("cmd", nestedCommand)
+                        put("name", "Check nested Session CLI inheritance")
                         put("yield_time_ms", 10_000)
                     }.toString(),
                     callId = "spawn-fixture-call",

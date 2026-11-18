@@ -378,6 +378,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                     shell.execCommand(
                         io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments(
                             command = "printf 'ready\\n'; read line; printf 'got:%s\\n' \"\$line\"",
+                            name = "Exercise the RPC terminal",
                             yieldTimeMillis = 250,
                         ),
                     )

@@ -241,6 +241,7 @@ private class VirtualWaitHarness(
             client.execCommand(
                 ExecCommandArguments(
                     command = command,
+                    name = "Wait for test output",
                     yieldTimeMillis = initialYieldMillis,
                 ),
             )
@@ -355,6 +356,7 @@ private suspend fun requireLinuxFlockAvailable(client: UnifiedExecToolClient) {
     val probe = client.execCommand(
         ExecCommandArguments(
             command = "command -v flock",
+            name = "Find the test lock utility",
             shell = unifiedExecTestShell,
             yieldTimeMillis = 5_000L,
         ),
@@ -384,6 +386,7 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
                     execTool.invokeExec(
                         ExecCommandArguments(
                             command = "flock /tmp/private.lock ./build.sh",
+                            name = "Observe the build lock",
                             yieldTimeMillis = TenMinuteYieldWindowMillis,
                         ),
                     )
@@ -461,6 +464,7 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
                     client.execCommand(
                         ExecCommandArguments(
                             command = "over-cap-command",
+                            name = "Check the wait limit",
                             yieldTimeMillis = 1_200_000L,
                         ),
                     )
@@ -487,6 +491,7 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
                         execTool.invokeExec(
                             ExecCommandArguments(
                                 command = "build-step-$earlyExitMillis",
+                                name = "Observe early build exit",
                                 yieldTimeMillis = TenMinuteYieldWindowMillis,
                             ),
                         )
@@ -526,6 +531,7 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
                     client.execCommand(
                         ExecCommandArguments(
                             command = "phased-long-command",
+                            name = "Observe phased output",
                             yieldTimeMillis = TenMinuteYieldWindowMillis,
                         ),
                     )
@@ -583,6 +589,7 @@ val unifiedExecVirtualWaitRegressionTest by testSuite(
                     client.execCommand(
                         ExecCommandArguments(
                             command = "cancelled-exec",
+                            name = "Exercise cancelled execution",
                             yieldTimeMillis = TenMinuteYieldWindowMillis,
                         ),
                     )
@@ -617,6 +624,7 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                 val result = client.execCommand(
                     ExecCommandArguments(
                         command = "echo kodex-ten-minute-fast-exit",
+                        name = "Check fast termination",
                         shell = unifiedExecTestShell,
                         yieldTimeMillis = TenMinuteYieldWindowMillis,
                     ),
@@ -636,6 +644,7 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                 val result = client.execCommand(
                     ExecCommandArguments(
                         command = realTimePhasedOutputCommand,
+                        name = "Follow timed output",
                         shell = unifiedExecTestShell,
                         yieldTimeMillis = TenMinuteYieldWindowMillis,
                     ),
@@ -656,6 +665,7 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                 val initial = client.execCommand(
                     ExecCommandArguments(
                         command = realTimeSlowAfterStdinCommand,
+                        name = "Wait for delayed input handling",
                         shell = unifiedExecTestShell,
                         yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
                     ),
@@ -706,6 +716,7 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                     val holderInitial = client.execCommand(
                         ExecCommandArguments(
                             command = holderCommand,
+                            name = "Hold the fixture lock",
                             shell = unifiedExecTestShell,
                             yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
                         ),
@@ -723,6 +734,7 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                         client.execCommand(
                             ExecCommandArguments(
                                 command = waiterCommand,
+                                name = "Wait for the fixture lock",
                                 shell = unifiedExecTestShell,
                                 yieldTimeMillis = TenMinuteYieldWindowMillis,
                             ),
@@ -783,6 +795,7 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                     val holderInitial = client.execCommand(
                         ExecCommandArguments(
                             command = holderCommand,
+                            name = "Hold the second fixture lock",
                             shell = unifiedExecTestShell,
                             yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
                         ),
@@ -800,6 +813,7 @@ val unifiedExecRealTimeWaitSmokeTest by testSuite(
                         client.execCommand(
                             ExecCommandArguments(
                                 command = waiterCommand,
+                                name = "Wait for the second fixture lock",
                                 shell = unifiedExecTestShell,
                                 yieldTimeMillis = TenMinuteYieldWindowMillis,
                             ),

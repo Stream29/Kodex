@@ -11,7 +11,11 @@ public actual val ExecCommandParametersSchema: ObjectPropertyDefinition =
             string { description = "Shell command to execute in a pseudoterminal." }
         }
         property("name") {
-            string { description = "Optional human-readable label for the command session." }
+            required = true
+            string {
+                description = "Short, specific, single-line intent in the conversation's language. " +
+                    "Describe what the command is for; do not copy the command, include sensitive literals, or claim success."
+            }
         }
         property("workdir") {
             string { description = "Working directory for the command. Defaults to the turn cwd." }
