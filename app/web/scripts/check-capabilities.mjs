@@ -221,7 +221,7 @@ export async function probeCapabilities(h) {
   await input("Name", "capability-observe-error");
   await toggle("Unhandled error", true);
   assert.ok(!(await tree()).some(node => ["checkbox", "switch"].includes(node.role?.value) &&
-    ["Assistant message", "Request user input", "Suggest subagent"].includes(node.name?.value)),
+    ["Assistant message", "Ask user created"].includes(node.name?.value)),
     "Frontend errors must not offer backend Stop notification types.");
   await input("Command", process.env.KODEX_CAPABILITY_ERROR_COMMAND);
   await click("Save");
@@ -229,7 +229,7 @@ export async function probeCapabilities(h) {
   await hookAdd(0);
   measurements.capabilityStage = "backend-hook-configuration";
   await input("Name", "capability-stop-runner");
-  for (const type of ["Assistant message", "Request user input", "Suggest subagent", "Unhandled error"]) {
+  for (const type of ["Assistant message", "Ask user created", "Unhandled error"]) {
     await toggle(type, type === "Assistant message");
   }
   await input("Command", process.env.KODEX_CAPABILITY_STOP_COMMAND);

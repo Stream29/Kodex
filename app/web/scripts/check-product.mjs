@@ -890,7 +890,7 @@ try {
     mcpCredentialsConfinedToExistingAuthenticatedBusinessRpc: true,
     securityResponseReadsComplete: true, securityResponseCounts: responseScanner.counts,
     typedRpcEvidence: rpcEvidence, retiredRouteRequests, capturedLaunchBase,
-    gaps: ["Frontend ObserveError runner has no deterministic page-originated error trigger.",
+    gaps: [...(capabilityCheck ? [] : ["The fake-provider authorization and page-originated error Hook were not exercised."]),
       "Relative directory input cannot currently be entered through the page picker; launch-base query is checked, not relative resolution.",
       "Not full cancellation/denial/grant expiry, host shutdown or cross-platform acceptance."],
     capabilityFunctions: capabilityCheck ? measurements : "Not exercised; run check-capabilities.mjs",
