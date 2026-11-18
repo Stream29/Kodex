@@ -11,7 +11,7 @@ import kotlinx.serialization.Serializable
 @SerialName("event_subagent_created")
 public data class StableSubagentCreatedEvent(
     @SerialName("child_agent_id") public val childAgentId: Int,
-) : IndexCommit, AgentCommit.ConversationMessage {
+) : CompactionRetainedItem, AgentCommit.ConversationMessage {
     init { require(childAgentId >= 0) }
 
     public val notice: String get() = "Subagent #$childAgentId created"

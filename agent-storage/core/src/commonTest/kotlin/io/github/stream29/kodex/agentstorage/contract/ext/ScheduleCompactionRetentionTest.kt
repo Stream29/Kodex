@@ -6,6 +6,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
@@ -13,6 +15,32 @@ import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import kotlin.test.assertEquals
 
 val scheduleCompactionRetentionTest by testSuite {
+    test("creation and not completion survives across the first and successive checkpoints") {
+        val storage = InMemoryKodexAgentStorage.empty()
+        val first = StableSubagentCreatedEvent(71)
+        val second = StableSubagentCreatedEvent(72)
+        storage.commit(first)
+        val i0 = storage.commit(StableSubagentCompletedEvent(71))
+        assertEquals(listOf<CompactionRetainedItem>(first), storage.buildCompactionRetainedItems(i0))
+        storage.commit(StableContextCompaction(encryptedContent = "first", retainedItems = listOf(first)))
+        storage.commit(second)
+        val i1 = storage.commit(StableSubagentCompletedEvent(72))
+        val retained = storage.buildCompactionRetainedItems(i1)
+        assertEquals(listOf<CompactionRetainedItem>(first, second), retained)
+        val i2 = storage.commit(StableContextCompaction(encryptedContent = "second", retainedItems = retained))
+        assertEquals(retained, storage.buildCompactionRetainedItems(i2))
+    }
+
+    test("a creation notice is charged against the same retention budget") {
+        val storage = InMemoryKodexAgentStorage.empty()
+        val spawn = StableSubagentCreatedEvent(73)
+        storage.commit(spawn)
+        val prefix = "schedule #2 fired: "
+        val fillsBudget = StableScheduleEvent(2, "x".repeat(256_000 - prefix.length))
+        val index = storage.commit(fillsBudget)
+        assertEquals(listOf<CompactionRetainedItem>(fillsBudget), storage.buildCompactionRetainedItems(index))
+    }
+
     test("schedules survive repeated compaction but await and terminal exit do not") {
         val storage = InMemoryKodexAgentStorage.empty()
         val first = StableScheduleEvent(1, "")

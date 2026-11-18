@@ -564,7 +564,7 @@ private suspend fun migrateAgentsInPlace(
 }
 
 private val RetainedCommitWireNames: Set<String> =
-    AgentCommitType.CompactionRetainedTypes.mapTo(mutableSetOf()) { it.wireName }
+    setOf("user_message", "event_ask_user", "event_schedule", "plan_update")
 
 private fun upgradeCompactionCommitsForAgent(
     commits: List<CommitRecord>,
@@ -672,6 +672,7 @@ private fun CompactionRetainedItem.approximateTokenCount(): Int =
         is StablePlanUpdate ->
             arguments.approximateTokenCount() +
                 PlanUpdatedOutput.approximateTokenCount()
+        else -> throw IOException("Unsupported retained item for migration to 0.7.2: ${commitType.wireName}")
     }
     .coerceAtLeast(1)
 

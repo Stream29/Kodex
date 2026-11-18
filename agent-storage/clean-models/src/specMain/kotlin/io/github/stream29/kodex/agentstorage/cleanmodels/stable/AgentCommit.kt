@@ -154,6 +154,7 @@ public enum class AgentCommitType(
             EventAskUser,
             EventSchedule,
             PlanUpdate,
+            EventSubagentCreated,
         )
 
         public val WorkTypes: Set<AgentCommitType> = setOf(
