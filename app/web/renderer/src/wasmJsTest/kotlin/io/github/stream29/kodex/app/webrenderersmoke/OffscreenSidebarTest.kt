@@ -44,7 +44,8 @@ val offscreenSidebarTest by testSuite {
             val narrow = side == SessionSidebarSide.Left
             val width = if (narrow) 320 else 920
             val height = if (narrow) 240 else 480
-            val shell = SidebarTestShell(32, "long fixture command " + "word ".repeat(30))
+            val title = "读取终端 🧪 " + "long intent ".repeat(22).trimEnd()
+            val shell = SidebarTestShell(32, "long fixture command " + "word ".repeat(30), title)
             val payload = (1..100).joinToString("") { "record $it 终端\n" }.encodeToByteArray()
             var source = payload
             shell.read = { offset, limit ->
@@ -80,14 +81,16 @@ val offscreenSidebarTest by testSuite {
             }
             try {
                 scene.settle { scene.hasDescription("Shell session 32") }
+                assertTrue(scene.hasText(title))
+                assertFalse(scene.hasText(shell.arguments.command))
                 assertEquals(0, shell.readCount)
                 scene.secondaryShell(32)
-                scene.settle { scene.hasText("View output") && scene.hasText("Close session") }
+                scene.settle { scene.hasText("View output") && scene.hasText("Close session") && scene.hasText(shell.arguments.command) }
                 assertEquals(0, shell.readCount)
                 scene.click("View output")
-                scene.settle { scene.hasText("Terminal output") && scene.hasText("record 100 终端") }
+                scene.settle { scene.hasTerminalOutput(title) && scene.hasText("record 100 终端") }
                 assertTrue(scene.text("Back").boundsInWindow.bottom <= height)
-                assertTrue(scene.text("Terminal output").boundsInWindow.right <= width)
+                assertTrue(scene.nodes().single { it.config.getOrNull(SemanticsProperties.PaneTitle) == title }.boundsInWindow.right <= width)
                 scene.key(Key.PageUp)
                 scene.settle { scene.hasDescription("Scroll to latest") && !scene.hasText("record 100 终端") }
                 source = payload + "new tail\n".encodeToByteArray()
@@ -97,7 +100,7 @@ val offscreenSidebarTest by testSuite {
                 scene.clickDescription("Scroll to latest")
                 scene.settle { scene.hasText("new tail") && !scene.hasDescription("Scroll to latest") }
                 scene.escape()
-                scene.settle("Escape restores the running terminal menu") { scene.hasText("View output") && !scene.hasText("Terminal output") }
+                scene.settle("Escape restores the running terminal menu") { scene.hasText("View output") && !scene.hasTerminalOutput(title) }
                 assertIs<ApplicationOverlayMenu.Shell>(overlays?.menu)
                 val stopped = shell.readCount
                 delay(225)
@@ -107,7 +110,8 @@ val offscreenSidebarTest by testSuite {
                 shell.exitCode.value = 12
                 shell.completed.value = true
                 scene.settle("final output remains after row exit") {
-                    scene.hasText("Exit code 12") && scene.hasText("new tail") && !scene.hasDescription("Shell session 32")
+                    scene.hasTerminalOutput(title) && scene.hasText("Exit code 12") && scene.hasText("new tail") &&
+                        !scene.hasDescription("Shell session 32")
                 }
                 assertIs<ApplicationOverlayMenu.ShellOutput>(overlays?.menu)
                 scene.click("Back")
@@ -146,14 +150,14 @@ val offscreenSidebarTest by testSuite {
             scene.secondaryShell(32)
             scene.settle { scene.hasText("View output") }
             scene.click("View output")
-            scene.settle { shell.readCount == 1 && scene.hasText("Terminal output") }
+            scene.settle { shell.readCount == 1 && scene.hasTerminalOutput("Terminal #32") }
             val opening = assertIs<ApplicationOverlayMenu.ShellOutput>(overlays?.menu)
             val state = assertNotNull(overlays)
             state.hoverChanged(ApplicationOverlayHover.Shell(SessionSidebarSide.Right, assertNotNull(row)), true)
             assertSame(opening, state.menu)
             assertNull(state.hover)
             visible = false
-            scene.settle { released == 1 && !scene.hasText("Terminal output") && state.menu == null }
+            scene.settle { released == 1 && !scene.hasTerminalOutput("Terminal #32") && state.menu == null }
             visible = true
             scene.settle { scene.hasDescription("Shell session 32") }
             scene.secondaryShell(32)
@@ -161,7 +165,7 @@ val offscreenSidebarTest by testSuite {
             scene.click("View output")
             scene.settle { shell.readCount == 2 }
             state.openMenu(ApplicationOverlayMenu.Shell(SessionSidebarSide.Right, SidebarShellMenuOpening(assertNotNull(row))))
-            scene.settle { released == 2 && !scene.hasText("Terminal output") }
+            scene.settle { released == 2 && !scene.hasTerminalOutput("Terminal #32") }
             assertEquals(0, shell.closeCount)
         } finally { scene.close() }
     } }
@@ -258,8 +262,8 @@ val offscreenSidebarTest by testSuite {
         } finally { scene.close() }
     } }
 
-    test("shell summary preserves a command's own leading status-like character") { offscreenTest {
-        val shell = SidebarTestShell(23, "● user command\n  second line")
+    test("shell summary preserves a name's own status-like character and normalizes old multiline text") { offscreenTest {
+        val shell = SidebarTestShell(23, "private command", "● user intent\n  second line")
         val agent = SidebarTestAgent(MutableStateFlow(mapOf(23 to shell)))
         val scene = OffscreenScene.create(width = 320, height = 160) {
             Box(Modifier.fillMaxWidth().height(120.dp)) {
@@ -267,9 +271,9 @@ val offscreenSidebarTest by testSuite {
             }
         }
         try {
-            scene.settle { scene.hasText("● user command   second line") }
+            scene.settle { scene.hasText("● user intent   second line") }
             assertEquals("Running", scene.shellNodes(23).single().config.getOrNull(SemanticsProperties.StateDescription))
-            assertFalse(scene.hasText("● ● user command   second line"))
+            assertFalse(scene.hasText("● ● user intent   second line"))
         } finally { scene.close() }
     } }
 
@@ -296,7 +300,7 @@ val offscreenSidebarTest by testSuite {
             val row = scene.shellNodes(19).single()
             assertNull(row.config.getOrNull(SemanticsActions.OnClick))
             assertEquals("Running", row.config.getOrNull(SemanticsProperties.StateDescription))
-            val summary = command.lineSequence().joinToString(" ")
+            val summary = "Terminal #19"
             assertTrue(scene.hasText(summary))
             assertFalse(scene.hasText("● $summary"), "The status indicator must not be part of the command text.")
             assertTrue(row.boundsInRoot.height <= 32f)
@@ -484,7 +488,7 @@ val offscreenSidebarTest by testSuite {
         try {
             scene.settle { scene.hasDescription("Shell session 42") }
             scene.scene.sendPointerEvent(PointerEventType.Move, scene.shellNodes(42).single().boundsInWindow.center)
-            scene.settle { scene.hasText(command) && scene.hasText("Session 42") }
+            scene.settle { scene.hasText(command) && scene.hasText("Terminal #42") }
             assertSame(shell, assertIs<ApplicationOverlayHover.Shell>(assertNotNull(overlays).hover).interaction.session)
             scene.frame()
             shell.completed.value = true
@@ -494,8 +498,8 @@ val offscreenSidebarTest by testSuite {
     } }
 
     test("menu closes its captured handle rather than an equal-id replacement and stale completion rejects Close") { offscreenTest {
-        val captured = SidebarTestShell(7, "old")
-        val replacement = SidebarTestShell(7, "new")
+        val captured = SidebarTestShell(7, "old", "Same intent")
+        val replacement = SidebarTestShell(7, "new", "Same intent")
         val registry = MutableStateFlow<Map<Int, AgentShellSession>>(mapOf(7 to captured))
         val ownerAgent = SidebarTestAgent(MutableStateFlow(mapOf(7 to captured)))
         var overlays: ApplicationOverlayState? = null
@@ -540,8 +544,11 @@ val offscreenSidebarTest by testSuite {
     } }
 }
 
-internal class SidebarTestShell(override val sessionId: Int, command: String) : AgentShellSession {
-    override val arguments = ExecCommandArguments(command, yieldTimeMillis = 10_000)
+private fun OffscreenScene.hasTerminalOutput(title: String): Boolean =
+    nodes().any { it.config.getOrNull(SemanticsProperties.PaneTitle) == title }
+
+internal class SidebarTestShell(override val sessionId: Int, command: String, name: String? = null) : AgentShellSession {
+    override val arguments = ExecCommandArguments(command, name = name, yieldTimeMillis = 10_000)
     override val completed = MutableStateFlow(false)
     override val exitCode = MutableStateFlow<Int?>(null)
     var read: suspend (ULong, UInt) -> StdoutSlice = { _, _ -> error("Unexpected shell read") }

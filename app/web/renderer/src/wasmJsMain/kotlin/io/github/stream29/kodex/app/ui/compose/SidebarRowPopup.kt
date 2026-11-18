@@ -134,6 +134,7 @@ internal fun SidebarHoverPopup(
     origin: ComposeSidebarPopupPlacement,
     title: String,
     onHoverChanged: (Boolean) -> Unit,
+    singleLineTitle: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val bounds = origin.bounds ?: return
@@ -148,7 +149,11 @@ internal fun SidebarHoverPopup(
                 .onPointerEvent(PointerEventType.Exit) { onHoverChanged(false) },
         ) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = if (singleLineTitle) 1 else Int.MAX_VALUE,
+                    overflow = if (singleLineTitle) TextOverflow.Ellipsis else TextOverflow.Clip,
+                )
                 content()
             }
         }

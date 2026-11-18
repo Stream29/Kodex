@@ -86,22 +86,22 @@ val offscreenApplicationOverlaysTest by testSuite {
         try {
             scene.settle { scene.hasDescription("Shell session 7") }
             scene.moveOver("Shell session 7")
-            scene.settle { scene.hasText("Session 7") }
+            scene.settle { scene.hasText("Terminal #7") && scene.hasText(shell.arguments.command) }
             val overlays = assertNotNull(state)
             val oldHover = assertNotNull(overlays.hover)
             content = SidebarContent.None
-            scene.settle { overlays.hover == null && !scene.hasText("Session 7") }
+            scene.settle { overlays.hover == null && !scene.hasText(shell.arguments.command) }
             content = SidebarContent.TerminalSessions
             scene.settle { scene.hasDescription("Shell session 7") }
             scene.moveOver("History index 3")
             scene.moveOver("Shell session 7")
-            scene.settle { scene.hasText("Session 7") }
+            scene.settle { scene.hasText("Terminal #7") && scene.hasText(shell.arguments.command) }
             val replacement = assertNotNull(overlays.hover)
             assertNotSame(oldHover, replacement)
             assertFalse(overlays.dismissHover(oldHover))
             assertSame(replacement, overlays.hover)
             popup = dialog
-            scene.settle { overlays.hover == null && overlays.menu == null && !scene.hasText("Session 7") }
+            scene.settle { overlays.hover == null && overlays.menu == null && !scene.hasText(shell.arguments.command) }
             assertEquals(0, shell.closeCount + agent.closeCount + session.closeCount)
             scene.frame()
         } finally { scene.close(); rename.close(); index.close() }

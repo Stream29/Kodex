@@ -70,7 +70,7 @@ val sessionSidebarTest by testSuite {
             val fixture = startRpcFrontendFixture(this)
             try {
                 val real = requireNotNull(fixture.create().rootAgent.value)
-                val session = TestAgentShellSession(7, "long test command " + "argument ".repeat(15))
+                val session = TestAgentShellSession(7, "long test command " + "argument ".repeat(15), "读取输出 🧪")
                 var source = (1..64).joinToString("") { "sample $it 界界 ${"cell".repeat(13)}\n" }.encodeToByteArray()
                 session.read = { offset, limit ->
                     val start = offset.toInt()
@@ -109,22 +109,23 @@ val sessionSidebarTest by testSuite {
                     assertEquals(0, session.readCount)
                     sendKeyEvent(KeyboardEvent(13))
                     val latest = awaitSnapshotContaining("cell")
-                    assertTrue("Terminal output" in latest)
+                    assertTrue("读取输出" in latest)
                     sendKeyEvent(KeyboardEvent(KeyboardEvent.PageUp))
                     val paused = awaitSnapshotContaining("[↓]")
-                    assertTrue("Terminal output" in paused)
+                    assertTrue("读取输出" in paused)
                     sendKeyEvent(KeyboardEvent(27))
                     awaitSnapshotContaining("View output")
                     val stopped = session.readCount
                     delay(225)
                     assertEquals(stopped, session.readCount)
                     sendKeyEvent(KeyboardEvent(13))
-                    awaitSnapshotContaining("Terminal output")
+                    awaitSnapshotContaining("读取输出")
                     source += "FINAL🙂\n".encodeToByteArray()
                     session.exitCode.value = 23
                     session.completed.value = true
                     val completed = awaitSnapshotContaining("Exit code 23")
                     assertTrue("FINAL" in completed, completed)
+                    assertTrue("读取输出" in completed, completed)
                     sendKeyEvent(KeyboardEvent(27))
                     awaitSnapshotContaining("fixture sidebar")
                     assertEquals(1, fallback)
@@ -345,7 +346,8 @@ val sessionSidebarTest by testSuite {
                             side = SessionSidebarSide.Left,
                             session = TestAgentShellSession(
                                 sessionId = 41,
-                                command = "first",
+                                command = "command-one",
+                                name = "first",
                             ),
                             renderer = renderer,
                         )
@@ -353,7 +355,8 @@ val sessionSidebarTest by testSuite {
                             side = SessionSidebarSide.Left,
                             session = TestAgentShellSession(
                                 sessionId = 42,
-                                command = "abcdefghijklmnop",
+                                command = "command-two",
+                                name = "abcdefghijklmnop",
                             ),
                             renderer = renderer,
                         )
@@ -367,11 +370,12 @@ val sessionSidebarTest by testSuite {
             assertTrue("● abcdefg..." in snapshot, snapshot)
             assertFalse("41" in snapshot, snapshot)
             assertFalse("42" in snapshot, snapshot)
+            assertFalse("command-" in snapshot, snapshot)
             assertEquals(2, snapshot.lines().count { line -> "● " in line }, snapshot)
         }
     }
 
-    test("terminalSessionHoverShowsIdAndCompleteCommand") {
+    test("terminal hover uses the unnamed fallback and still shows the complete command") {
         val session = TestAgentShellSession(
             sessionId = 42,
             command = "echo first\necho second",
@@ -400,7 +404,7 @@ val sessionSidebarTest by testSuite {
             }
 
             val snapshot = awaitSnapshotContaining("echo second")
-            assertTrue("Session 42" in snapshot, snapshot)
+            assertTrue("Terminal #42" in snapshot, snapshot)
             assertTrue("echo first" in snapshot, snapshot)
         }
     }
@@ -928,9 +932,9 @@ val sessionSidebarTest by testSuite {
         val fixture = startRpcFrontendFixture(this)
         try {
             val real = requireNotNull(fixture.create().rootAgent.value)
-            val first = TestAgentShellSession(1, "first")
-            val second = TestAgentShellSession(2, "second")
-            val retained = TestAgentShellSession(3, "retained").apply { completed.value = true }
+            val first = TestAgentShellSession(1, "raw first", "first")
+            val second = TestAgentShellSession(2, "raw second", "second")
+            val retained = TestAgentShellSession(3, "raw retained", "retained").apply { completed.value = true }
             val sessions = MutableStateFlow<Map<Int, AgentShellSession>>(
                 linkedMapOf(2 to second, 3 to retained, 1 to first),
             )
@@ -1039,9 +1043,10 @@ val sessionSidebarTest by testSuite {
 private class TestAgentShellSession(
     override val sessionId: Int = 1,
     command: String = "sleep 1",
+    name: String? = null,
 ) : AgentShellSession {
     override val arguments: ExecCommandArguments =
-        ExecCommandArguments(command = command, yieldTimeMillis = 10_000)
+        ExecCommandArguments(command = command, name = name, yieldTimeMillis = 10_000)
     override val completed = MutableStateFlow(false)
     override val exitCode = MutableStateFlow<Int?>(null)
     var read: suspend (ULong, UInt) -> StdoutSlice = { _, _ -> error("Unexpected shell read") }

@@ -19,17 +19,17 @@ internal object MosaicTerminalOutputPlacement : SidebarShellOutputPlacement
 
 @Composable
 internal fun BoxScope.MosaicTerminalOutput(
-    columns: Int, rows: Int, command: String, output: StateFlow<TerminalOutputState>, onBack: () -> Unit,
+    columns: Int, rows: Int, title: String, command: String, output: StateFlow<TerminalOutputState>, onBack: () -> Unit,
 ) {
     val state by output.collectAsState()
     val width = (columns - 2).coerceIn(1, 84)
     val height = (rows - 2).coerceIn(1, 36)
-    val title = height >= 3
+    val showTitle = height >= 3
     val status = height >= 4
     val showCommand = height >= 6
     var pausedAt by remember { mutableStateOf<TerminalLineAnchor?>(null) }
     val affordance = pausedAt != null && height >= 4
-    val bodyHeight = (height - 1 - listOf(title, status, showCommand, affordance).count { it }).coerceAtLeast(0)
+    val bodyHeight = (height - 1 - listOf(showTitle, status, showCommand, affordance).count { it }).coerceAtLeast(0)
     val layout = remember(state, width) { TerminalCellLines(state.items, width) }
     val start = layout.start(pausedAt, bodyHeight)
     val back = remember { FocusRequester() }
@@ -64,8 +64,8 @@ internal fun BoxScope.MosaicTerminalOutput(
         modifier = Modifier.width(width).height(height).background(TuiTheme.colorScheme.surfaceContainer),
     ) {
         Column(Modifier.fillMaxSize().onPreviewKeyEvent(::page)) {
-            if (title) EllipsizedText(
-                "Terminal output",
+            if (showTitle) EllipsizedText(
+                title,
                 Modifier.fillMaxWidth().background(TuiTheme.colorScheme.surfaceContainerHigh),
                 color = TuiTheme.colorScheme.onSurface,
             )

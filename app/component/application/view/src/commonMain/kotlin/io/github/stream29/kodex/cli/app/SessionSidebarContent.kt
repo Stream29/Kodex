@@ -6,6 +6,7 @@ import io.github.stream29.kodex.app.application.contract.TerminalOutputItem
 import io.github.stream29.kodex.app.application.contract.TerminalOutputPhase
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.cli.historyindex.HistoryIndexSide
+import io.github.stream29.kodex.tool.unifiedexec.commandIntentDisplayName
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -53,7 +54,7 @@ public actual fun ShellSessionSidebarContent(
 ) {
     val interaction = renderer.rememberShellInteraction(side, session)
     DisposableEffect(interaction) { onDispose { interaction.emitHover(false) } }
-    renderer.ShellRow(interaction, session.arguments.command, interaction::emitHover, interaction::emitMenu)
+    renderer.ShellRow(interaction, session.terminalIntentTitle(), interaction::emitHover, interaction::emitMenu)
 }
 
 @Composable
@@ -85,7 +86,7 @@ public actual fun SidebarShellHoverContent(
     if (completed) return
     var visible by remember(current) { mutableStateOf(false) }
     LaunchedEffect(current) { delay(300.milliseconds); visible = true }
-    if (visible) renderer.ShellHover(current, "Session ${current.session.sessionId}", current.session.arguments.command, onHoverChanged)
+    if (visible) renderer.ShellHover(current, current.session.terminalIntentTitle(), current.session.arguments.command, onHoverChanged)
 }
 
 @Composable
@@ -105,6 +106,9 @@ public actual fun SidebarShellMenuContent(
         onViewOutput = onViewOutput?.let { open -> { if (canUseMenu()) open() } },
     )
 }
+
+public actual fun AgentShellSession.terminalIntentTitle(): String =
+    arguments.name.commandIntentDisplayName().ifEmpty { "Terminal #$sessionId" }
 
 public actual fun terminalOutputItemLabel(item: TerminalOutputItem): String = when (item) {
     is TerminalOutputItem.Text -> item.text

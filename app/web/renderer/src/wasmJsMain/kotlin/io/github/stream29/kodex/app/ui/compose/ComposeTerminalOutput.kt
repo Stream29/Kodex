@@ -43,7 +43,8 @@ internal class ComposeTerminalOutputPlacement(
 
 @Composable
 internal fun ComposeTerminalOutput(
-    placement: ComposeTerminalOutputPlacement, command: String, output: StateFlow<TerminalOutputState>, onBack: () -> Unit,
+    placement: ComposeTerminalOutputPlacement, title: String, command: String,
+    output: StateFlow<TerminalOutputState>, onBack: () -> Unit,
 ) {
     val position = remember(placement) { PointerPopupPosition(placement.bounds, placement.preferAfter, placement.point) }
     EditorPopup(
@@ -74,7 +75,7 @@ internal fun ComposeTerminalOutput(
             val width = (maxWidth - 12.dp).coerceIn(1.dp, 560.dp)
             val height = (maxHeight - 12.dp).coerceIn(1.dp, 420.dp)
             Surface(
-                modifier = Modifier.width(width).height(height).semantics { paneTitle = "Terminal output" },
+                modifier = Modifier.width(width).height(height).semantics { paneTitle = title },
                 shape = RoundedCornerShape(4.dp),
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 6.dp,
@@ -94,7 +95,7 @@ internal fun ComposeTerminalOutput(
                         }
                     },
                 ) {
-                    Text("Terminal output", style = MaterialTheme.typography.titleSmall)
+                    Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     SelectionContainer {
                         Text(command, maxLines = 2, overflow = TextOverflow.Ellipsis, fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodySmall)

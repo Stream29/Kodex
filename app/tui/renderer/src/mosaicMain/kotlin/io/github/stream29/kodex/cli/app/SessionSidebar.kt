@@ -742,11 +742,11 @@ private class MosaicSessionSidebarRenderer(
         return remember(request) { MosaicSidebarShellRowInteraction(request, hover, menu) }
     }
     @Composable override fun ShellRow(
-        interaction: SidebarShellRowInteraction, command: String, onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit,
+        interaction: SidebarShellRowInteraction, title: String, onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit,
     ) {
         val origin = interaction as MosaicSidebarShellRowInteraction
         val request = origin.request
-        val summary = remember(command, columns) { shellSessionSidebarSummary(command, columns) }
+        val summary = remember(title, columns) { shellSessionSidebarSummary(title, columns) }
         TuiPressable(
             onClick = {},
             onSecondaryClick = { position -> origin.openingPosition = position; onOpenMenu() },
@@ -800,7 +800,8 @@ private class MosaicSessionSidebarRenderer(
         opening: ApplicationOverlayMenu.ShellOutput, output: StateFlow<TerminalOutputState>, onBack: () -> Unit,
     ) {
         with(checkNotNull(popupScope)) {
-            MosaicTerminalOutput(columns, rows, opening.original.opening.interaction.session.arguments.command, output, onBack)
+            val session = opening.original.opening.interaction.session
+            MosaicTerminalOutput(columns, rows, session.terminalIntentTitle(), session.arguments.command, output, onBack)
         }
     }
 }

@@ -148,13 +148,12 @@ private class ComposeSessionSidebarRenderer(
     }
 
     @Composable override fun ShellRow(
-        interaction: SidebarShellRowInteraction, command: String, onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit,
+        interaction: SidebarShellRowInteraction, title: String, onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit,
     ) {
         val origin = interaction as ComposeShellRowOrigin
-        val summary = remember(command) { command.lineSequence().joinToString(" ") }
         SidebarPopupRow(
             origin = origin,
-            summary = summary,
+            summary = title,
             rowDescription = "Shell session ${origin.session.sessionId}",
             rowStateDescription = "Running",
             menuActionDescription = "Open menu for shell session ${origin.session.sessionId}",
@@ -166,7 +165,7 @@ private class ComposeSessionSidebarRenderer(
     @Composable override fun ShellHover(
         interaction: SidebarShellInteraction, title: String, command: String, onHoverChanged: (Boolean) -> Unit,
     ) {
-        SidebarHoverPopup(interaction as ComposeShellPlacement, title, onHoverChanged) {
+        SidebarHoverPopup(interaction as ComposeShellPlacement, title, onHoverChanged, singleLineTitle = true) {
             SelectionContainer {
                 Text(
                     command, Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
@@ -201,7 +200,7 @@ private class ComposeSessionSidebarRenderer(
                 }
             },
         ) {
-            Text("Session ${origin.session.sessionId}", style = MaterialTheme.typography.titleSmall)
+            Text(origin.session.terminalIntentTitle(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             SelectionContainer(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                 Text(
                     origin.session.arguments.command,
@@ -228,7 +227,7 @@ private class ComposeSessionSidebarRenderer(
             origin.isPlaced && !origin.session.completed.value &&
                 opening.agent.shellSessions.activeSessions.value[origin.session.sessionId] === origin.session
         }
-        ComposeTerminalOutput(placement, origin.session.arguments.command, output, onBack)
+        ComposeTerminalOutput(placement, origin.session.terminalIntentTitle(), origin.session.arguments.command, output, onBack)
     }
 }
 

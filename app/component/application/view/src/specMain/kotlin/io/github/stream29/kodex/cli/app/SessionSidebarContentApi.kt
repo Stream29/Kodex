@@ -32,7 +32,7 @@ public interface SidebarShellRenderer {
     public val canShowHover: Boolean
     @Composable public fun rememberShellInteraction(side: SessionSidebarSide, session: AgentShellSession): SidebarShellRowInteraction
     @Composable public fun ShellRow(
-        interaction: SidebarShellRowInteraction, command: String,
+        interaction: SidebarShellRowInteraction, title: String,
         onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit,
     )
     @Composable public fun ShellHover(
@@ -94,6 +94,9 @@ public expect fun SidebarShellMenuContent(
     opening: SidebarShellMenuOpening?, renderer: SidebarShellRenderer,
     onViewOutput: (() -> Unit)? = null, canAct: () -> Boolean = { true }, onDismiss: () -> Unit,
 )
+
+/** Title from this exact registration; never resolves a process by caption or numeric ID. */
+public expect fun AgentShellSession.terminalIntentTitle(): String
 
 public expect fun terminalOutputItemLabel(item: TerminalOutputItem): String
 public expect fun terminalOutputStatus(phase: TerminalOutputPhase, hasOutput: Boolean): String
