@@ -15,40 +15,48 @@ import kotlin.test.*
 
 val offscreenApplicationFrameTest by testSuite {
     test("a retained child page action cannot become current again after leaving its mount") { offscreenTest {
-        val root = SidebarTestAgent()
+        val root = object : SidebarTestAgent() { override val running = MutableStateFlow(false) }
         val a = SidebarTestAgent()
         val b = SidebarTestAgent()
-        val tab = NavigationSession(12, "root Session", root)
+        val tab = object : NavigationSession(12, "root Session", root) {
+            override val selectedAgent = MutableStateFlow<AgentViewModel?>(a)
+            override val lifecycle = MutableStateFlow<PersistedSessionLifecycleState>(PersistedSessionLifecycleState.Open)
+        }
         val opened = mutableListOf<AgentViewModel>()
         val app = object : NavigationApplication(listOf(tab)) {
+            override val popup = MutableStateFlow<ApplicationPopupState>(ApplicationPopupState.Closed)
             override suspend fun openAgentSettingsPopup(target: AgentPageActionTarget): ApplicationPopupState.Settings? {
                 assertSame(tab, target.session)
                 if (target.isCurrent()) opened += target.agent
                 return null
             }
         }
-        var selected by mutableStateOf<AgentViewModel>(a)
+        app.navigation.value = app.navigation.value.copy(selection = ApplicationTabSelection.SelectedTab(0))
         lateinit var page: AgentPageActionTarget
         lateinit var rootActions: ApplicationRootActions
         val scene = OffscreenScene.create {
             rootActions = rememberApplicationRootActions(app) { throw IllegalStateException("Unexpected action failure", it) }
-            page = rememberAgentPageActionTarget(tab, selected)
-            UiText("Agent page")
+            val frame = collectApplicationFrame(app)
+            ApplicationPersistedSurfaceContent(frame, { selected ->
+                page = rememberAgentPageActionTarget(tab, selected)
+                assertSame(root, frame.tabs.tabs.single().agent)
+                UiText("Agent page")
+            }, { UiText(it) })
         }
         try {
-            scene.settle { scene.hasText("Agent page") && page.agent === a && page.isCurrent() }
+            scene.settle("initial child mount") { scene.hasText("Agent page") && page.agent === a && page.isCurrent() }
             val first = page
             rootActions.openAgentSettings(first)
-            scene.settle { opened.size == 1 }
-            selected = b
-            scene.settle { page.agent === b }
+            scene.settle("first child settings action") { opened.size == 1 }
+            tab.selectedAgent.value = b
+            scene.settle("replacement child mount") { page.agent === b && page.isCurrent() }
             assertFalse(first.isCurrent())
             rootActions.openAgentSettings(first)
             rootActions.openAgentSettings(page)
-            scene.settle { opened.size == 2 }
+            scene.settle("replacement child settings action") { opened.size == 2 }
             assertEquals(listOf<AgentViewModel>(a, b), opened)
-            selected = a
-            scene.settle { page.agent === a && page.isCurrent() }
+            tab.selectedAgent.value = a
+            scene.settle("remounted first child") { page.agent === a && page.isCurrent() }
             assertFalse(first.isCurrent())
             assertSame(root, tab.rootAgent.value)
         } finally { scene.close() }

@@ -4,9 +4,12 @@ import androidx.compose.runtime.*
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.*
+import io.github.stream29.kodex.app.session.contract.AgentParentAnchor
 import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexNavigation
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexParentAnchor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -17,8 +20,13 @@ public actual fun collectApplicationFrame(viewModel: ApplicationViewModel): Appl
         val tabs = collectApplicationTabBar(navigation)
         val popup = viewModel.popup.collectAsState().value
         val selected = navigation.selectedSession
-        val lifecycle = selected?.let { key(ApplicationChildKey(it)) { it.lifecycle.collectAsState().value } }
-        RootFrame(navigation, popup, tabs, tabs.tabs.firstOrNull { it.target === selected }?.agent, lifecycle)
+        val surface = selected?.let { key(ApplicationChildKey(it)) {
+            val selectedAgent = it.selectedAgent
+            val agent = if (selectedAgent === it.rootAgent) tabs.tabs.firstOrNull { tab -> tab.target === it }?.agent
+                else selectedAgent.collectAsState().value
+            agent to it.lifecycle.collectAsState().value
+        } }
+        RootFrame(navigation, popup, tabs, surface?.first, surface?.second)
     }
 
 private class RootFrame(
@@ -54,7 +62,47 @@ public actual fun rememberAgentPageActionTarget(
         mounted.value = true
         onDispose { mounted.value = false }
     }
-    return remember(mounted) { AgentPageActionTarget(session, agent) { mounted.value } }
+    return remember(mounted) { AgentPageActionTarget(session, agent) { mounted.value && session.selectedAgent.value === agent } }
+}
+
+@Composable
+public actual fun rememberApplicationIndexNavigation(
+    viewModel: ApplicationViewModel, frame: ApplicationFrame, onOperationFailure: (Throwable) -> Unit,
+): HistoryIndexNavigation? {
+    val session = frame.navigation.selectedSession ?: return null
+    val agent = frame.selectedAgent ?: return null
+    val isChild = frame.tabs.tabs.firstOrNull { it.target === session }?.agent !== agent
+    val scope = rememberCoroutineScope()
+    val report = rememberUpdatedState(onOperationFailure)
+    return remember(viewModel, ApplicationChildKey(session), ApplicationChildKey(agent), isChild) {
+        fun command(block: suspend (() -> Boolean) -> Unit) {
+            val selection = viewModel.navigation.value
+            if (selection.selectedSession !== session || session.selectedAgent.value !== agent) return
+            scope.launch {
+                val isTabSelected = { viewModel.navigation.value === selection }
+                try { block(isTabSelected) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Throwable) { if (isTabSelected()) report.value(failure) }
+            }
+        }
+        HistoryIndexNavigation(
+            agent.historyIndex,
+            enterChild = { target, child ->
+                if (target.viewModel === agent.historyIndex) command { selected ->
+                    session.enterChild(agent, target.index, target.generation, target.revision, child, selected)
+                }
+            },
+            returnToParent = if (isChild) { anchor ->
+                command { selected ->
+                    val type = when (anchor) {
+                        HistoryIndexParentAnchor.Creation -> AgentParentAnchor.Creation
+                        HistoryIndexParentAnchor.Completion -> AgentParentAnchor.Completion
+                    }
+                    session.returnToParent(agent, type, selected)
+                }
+            } else null,
+        )
+    }
 }
 
 @Composable

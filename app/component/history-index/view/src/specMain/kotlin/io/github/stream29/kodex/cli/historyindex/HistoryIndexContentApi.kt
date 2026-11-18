@@ -1,6 +1,8 @@
 package io.github.stream29.kodex.cli.historyindex
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ProvidableCompositionLocal
+import androidx.compose.runtime.compositionLocalOf
 import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.cli.history.HistoryPlanModel
 import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRowModel
@@ -30,6 +32,9 @@ public class HistoryIndexNavigation(
     public val enterChild: (HistoryIndexTarget, Int) -> Unit,
     public val returnToParent: ((HistoryIndexParentAnchor) -> Unit)? = null,
 )
+
+/** One host selection shared by the two sidebars and the root-level overlay. */
+public val LocalHistoryIndexNavigation: ProvidableCompositionLocal<HistoryIndexNavigation?> = compositionLocalOf { null }
 
 /** Opaque renderer placement, with no terminal/pixel geometry in shared composition. */
 public interface HistoryIndexInteraction {

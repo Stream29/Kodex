@@ -47,7 +47,7 @@ internal fun createRpcAgentViewModel(
     scope: CoroutineScope,
     models: StateFlow<List<ModelInfo>>,
     reportUnhandledError: (Throwable) -> Unit,
-): AgentViewModel = RpcAgentViewModel(binding, scope, models, reportUnhandledError)
+): RpcAgentViewModel = RpcAgentViewModel(binding, scope, models, reportUnhandledError)
 
 /** Original Agent behavior and children share one disposable, binding-scoped owner. */
 internal class RpcAgentViewModel(

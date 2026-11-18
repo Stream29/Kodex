@@ -50,6 +50,20 @@ public interface PersistedSessionViewModel : AgentSettingsViewModel, AutoCloseab
     /** Borrowed child replaced on reactivation; null means no current renderable Agent. */
     public val rootAgent: StateFlow<AgentViewModel?>
 
+    /** The visible Agent in this tab; other open ancestors retain their local owners. */
+    public val selectedAgent: StateFlow<AgentViewModel?> get() = rootAgent
+
+    /** Only a current creation row from [source] can open a direct child. */
+    public suspend fun enterChild(
+        source: AgentViewModel, index: Int, generation: Long, revision: Long, childAgentId: Int,
+        isTabSelected: () -> Boolean,
+    ): Unit = Unit
+
+    /** Pops one local view, then optionally scrolls its parent to the child's event. */
+    public suspend fun returnToParent(
+        source: AgentViewModel, anchor: AgentParentAnchor, isTabSelected: () -> Boolean,
+    ): Unit = Unit
+
     /** Local loading/open/failure/closed rendering; independent of Agent running state. */
     public val lifecycle: StateFlow<PersistedSessionLifecycleState>
 
@@ -104,6 +118,8 @@ public interface PersistedSessionViewModel : AgentSettingsViewModel, AutoCloseab
      */
     public suspend fun shutdown(): Unit
 }
+
+public enum class AgentParentAnchor { Creation, Completion }
 
 /**
  * Opens one persisted Session and returns its stable frontend handle.

@@ -13,8 +13,9 @@ import io.github.stream29.kodex.cli.history.AgentHistoryViewState
 @Composable
 internal fun rememberHistoryRenderStates(
     tabs: List<SessionTabRenderState>,
+    selected: AgentHistoryViewModel? = null,
 ): MutableList<Pair<AgentHistoryViewModel, AgentHistoryViewState>> {
-    val histories = tabs.mapNotNull { it.agent?.history }
+    val histories = tabs.mapNotNull { it.agent?.history } + listOfNotNull(selected)
     val states = remember { mutableListOf<Pair<AgentHistoryViewModel, AgentHistoryViewState>>() }
     pruneHistoryRenderStates(states, histories)
     return states

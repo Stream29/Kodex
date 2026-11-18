@@ -6,6 +6,7 @@ import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.*
 import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexNavigation
 
 /** Read-only observations frozen for one root composition; no registry, execution or writable state. */
 public interface ApplicationFrame {
@@ -40,6 +41,12 @@ public interface ApplicationRootActions {
 /** Captures the page's existing selection without choosing or opening any Agent. */
 @Composable
 public expect fun rememberAgentPageActionTarget(session: PersistedSessionViewModel, agent: AgentViewModel): AgentPageActionTarget
+
+/** Connects the existing Index actions to an exact Agent in one captured tab. */
+@Composable
+public expect fun rememberApplicationIndexNavigation(
+    viewModel: ApplicationViewModel, frame: ApplicationFrame, onOperationFailure: (Throwable) -> Unit,
+): HistoryIndexNavigation?
 
 /** Waits belong to the root mount. Ordinary failures use its existing outlet; no cancellation report or retry. */
 @Composable

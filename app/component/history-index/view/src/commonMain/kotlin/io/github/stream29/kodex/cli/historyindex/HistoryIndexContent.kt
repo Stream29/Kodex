@@ -16,8 +16,9 @@ public actual fun HistoryIndexContent(
     navigation: HistoryIndexNavigation?,
 ) {
     val window = viewModel.window.collectAsState().value
-    val currentNavigation = rememberUpdatedState(navigation)
-    val owned = navigation?.takeIf { it.owner === viewModel && it.returnToParent != null }
+    val supplied = navigation ?: LocalHistoryIndexNavigation.current
+    val currentNavigation = rememberUpdatedState(supplied)
+    val owned = supplied?.takeIf { it.owner === viewModel && it.returnToParent != null }
     var mounted by remember(viewModel) { mutableStateOf(false) }
     DisposableEffect(viewModel) {
         mounted = true
@@ -88,7 +89,7 @@ public actual fun HistoryIndexHoverContent(
 public actual fun HistoryIndexMenuContent(
     opening: HistoryIndexMenuOpening?, renderer: HistoryIndexRenderer, onDismiss: () -> Unit,
 ) {
-    HistoryIndexMenuContent(opening, renderer, null, onDismiss)
+    HistoryIndexMenuContent(opening, renderer, LocalHistoryIndexNavigation.current, onDismiss)
 }
 
 @Composable

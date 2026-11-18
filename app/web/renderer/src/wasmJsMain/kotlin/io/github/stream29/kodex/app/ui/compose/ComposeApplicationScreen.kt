@@ -32,6 +32,7 @@ import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.ui.rememberUiEditorFocusHandle
 import io.github.stream29.kodex.cli.app.*
+import io.github.stream29.kodex.cli.historyindex.LocalHistoryIndexNavigation
 import io.github.stream29.kodex.cli.settings.MinimumSidebarWidthColumns
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SettingsHostCapabilities
@@ -71,7 +72,9 @@ private fun GraphicalApplication(
     val overlays = rememberApplicationOverlays(frame.selectedAgent, configuration.left, configuration.right, frame.popup)
     val applicationMenuRenderer = rememberComposeApplicationMenuRenderer()
     val historyStates = remember { mutableListOf<Pair<AgentHistoryViewModel, ComposeHistoryViewState>>() }
-    retainApplicationHistoryWidgetStates(historyStates, frame.tabs.tabs.mapNotNull { it.agent?.history })
+    retainApplicationHistoryWidgetStates(
+        historyStates, frame.tabs.tabs.mapNotNull { it.agent?.history } + listOfNotNull(frame.selectedAgent?.history),
+    )
     val composerFocus = key(GraphicalRootOwnerKey(frame.selectedAgent)) { rememberUiEditorFocusHandle() }
     val report by rememberUpdatedState(onOperationFailure)
     val scope = rememberCoroutineScope()
@@ -120,10 +123,14 @@ private fun GraphicalApplication(
     val rightRenderer = sidebarRenderer(SessionSidebarSide.Right)
 
     val popupForFocus = rememberUpdatedState(frame.popup)
+    val indexNavigation = rememberApplicationIndexNavigation(viewModel, frame, onOperationFailure)
     Surface(Modifier.fillMaxSize()) {
-        CompositionLocalProvider(LocalSidebarFocusRestoreAllowed provides {
-            overlays.menu == null && popupForFocus.value == ApplicationPopupState.Closed
-        }) {
+        CompositionLocalProvider(
+            LocalSidebarFocusRestoreAllowed provides {
+                overlays.menu == null && popupForFocus.value == ApplicationPopupState.Closed
+            },
+            LocalHistoryIndexNavigation provides indexNavigation,
+        ) {
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
                 BoxWithConstraints(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer)) {

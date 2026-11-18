@@ -6,6 +6,8 @@ import io.github.stream29.kodex.cli.historyindex.HistoryIndexInteractionRequest
 import io.github.stream29.kodex.cli.historyindex.HistoryIndexSide
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import io.github.stream29.kodex.cli.historyindex.LocalHistoryIndexNavigation
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -67,7 +69,7 @@ public actual fun SessionTreeCliScreen(
     val overlays = rememberApplicationOverlays(
         selectedAgent, sidebarConfiguration.left, sidebarConfiguration.right, popup,
     )
-    val historyRenderStates = rememberHistoryRenderStates(tabStates)
+    val historyRenderStates = rememberHistoryRenderStates(tabStates, selectedAgent?.history)
     val sessionSummary = summarizeOpenSessions(tabStates)
     val runningFrame = rememberRunningIndicatorFrame(
         active = sessionSummary.runningSessionCount > 0,
@@ -219,6 +221,8 @@ public actual fun SessionTreeCliScreen(
         }
     }
 
+    val indexNavigation = rememberApplicationIndexNavigation(viewModel, frame, onOperationFailure)
+    CompositionLocalProvider(LocalHistoryIndexNavigation provides indexNavigation) {
     TuiTheme(colorScheme = tuiColorSchemeFor(terminal.theme)) {
         TuiPopupHost {
             val menuRenderer = remember(this) { MosaicApplicationMenuRenderer(this) }
@@ -596,6 +600,7 @@ public actual fun SessionTreeCliScreen(
                 viewModel, popup, rememberMosaicApplicationPopupRenderer(), onOperationFailure, openMcpUrl,
             )
         }
+    }
     }
 }
 
