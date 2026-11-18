@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.migration.v0_7_3
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
+import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -15,12 +16,17 @@ internal suspend fun migrateToV0_7_3(home: Path, fileSystem: CoroutineFileSystem
         // The database commit precedes the separate Home version checkpoint.
         connection.execute("PRAGMA synchronous=FULL")
         connection.transaction {
-            connection.execute("DROP VIEW session_catalog")
-            connection.execute(SessionCatalogV073)
-            // SQLite defers resolution of a view's dependencies until it is queried.
-            connection.query("SELECT * FROM session_catalog LIMIT 0")
+            optimizeSessionCatalog(connection)
+            migrateSubagentAgentIds(connection)
         }
     }
+}
+
+private fun optimizeSessionCatalog(db: SqliteConnection) {
+    db.execute("DROP VIEW session_catalog")
+    db.execute(SessionCatalogV073)
+    // SQLite defers resolution of a view's dependencies until it is queried.
+    db.query("SELECT * FROM session_catalog LIMIT 0")
 }
 
 // language=SQL

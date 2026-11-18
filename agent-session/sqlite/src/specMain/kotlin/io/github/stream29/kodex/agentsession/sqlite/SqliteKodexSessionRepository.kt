@@ -18,15 +18,25 @@ import kotlin.time.Duration
 import kotlin.time.TimeSource
 
 public expect class SqliteKodexSessionRepository : KodexSessionRepository, CoroutineCloseable {
-    /** Opens an existing entry only if it still has the expected armed deadline. */
-    public suspend fun openForAwaitDeadline(entryIndex: Int, expected: PendingAwaitDeadline): KodexAgentSession?
+    /** Opens an existing root Agent only if it still has the expected armed deadline. */
+    public suspend fun openForAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline): KodexAgentSession?
+    /** Exact persisted Agent lookup; does not start or renew an owner. */
+    public suspend fun getAgentRecord(agentId: Int): StoredAgent?
+    /** Allocates an empty child in the persisted parent's Session without opening it. */
+    public suspend fun createChild(parentAgentId: Int): StoredAgent
+    /** Deletes only an uninitialized child with no commits or children, after failed creation. */
+    public suspend fun discardUninitializedChild(agentId: Int): Boolean
+    /** Marks an existing child completed; returns its direct parent only if the marker changed. */
+    public suspend fun markChildCompleted(agentId: Int): Int?
     override val coroutineContext: CoroutineContext
     override val entries: StateFlow<List<Int>>
     override val openSessions: StateFlow<Map<Int, KodexAgentSession>>
+    override val pendingAwaitDeadlines: StateFlow<Map<Int, PendingAwaitDeadline>>
     override val stopEvents: Flow<IndexedAgentStopEvent>
     override suspend fun list(): List<Int>
     override suspend fun listEntries(includeArchived: Boolean): List<KodexSessionEntry>
     override suspend fun getEntry(entryIndex: Int): KodexSessionEntry
+    override suspend fun getRootAgentId(entryIndex: Int): Int
     override suspend fun create(): Int
     override suspend fun createFork(sourceEntryIndex: Int): Int
     override suspend fun open(entryIndex: Int): KodexAgentSession

@@ -12,7 +12,7 @@ import kotlin.time.Instant
 private fun seeded(): SqliteConnection = openInMemorySqliteConnection().also {
     ensureSqlitePhaseOneSchema(it)
     it.execute("INSERT INTO sessions VALUES(0,0)")
-    it.execute("INSERT INTO agents VALUES(0,0,NULL)")
+    it.execute("INSERT INTO agents(agent_id, session_id) VALUES(0,0)")
 }
 
 private suspend fun checkSparseFamily(

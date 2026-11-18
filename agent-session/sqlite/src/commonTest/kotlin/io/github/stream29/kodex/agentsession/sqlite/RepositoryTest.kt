@@ -45,10 +45,12 @@ val sqliteRepositoryTest by testSuite {
                     assertTrue(repository.entries.value.isEmpty())
                     val first = repository.create()
                     assertEquals(0, first)
-                    assertNull(repository.getEntry(first).threadName)
+                    val firstEntry = repository.getEntry(first)
+                    assertNull(firstEntry.threadName)
+                    assertNotEquals(first, firstEntry.rootAgentId)
                     val session = repository.open(first)
-                    assertEquals(first, session.storage.agentId)
-                    assertEquals(first, session.runtime.agentId)
+                    assertEquals(firstEntry.rootAgentId, session.storage.agentId)
+                    assertEquals(firstEntry.rootAgentId, session.runtime.agentId)
                     assertSame(session, repository.open(first))
                     session.runtime.modify { it.initialize(settings("original")) }
                     val created = repository.getEntry(first).createdAt
@@ -122,7 +124,7 @@ val sqliteRepositoryTest by testSuite {
             openSqliteConnection(Path(root, "kodex.db")).use { db ->
                 ensureSqlitePhaseOneSchema(db)
                 db.execute("INSERT INTO sessions VALUES(0,0)")
-                db.execute("INSERT INTO agents VALUES(0,0,NULL)")
+                db.execute("INSERT INTO agents(agent_id, session_id) VALUES(0,0)")
                 db.execute(
                     """INSERT INTO agent_commits VALUES
                        (0,'settings',0,'{"model":"test","thread_name":"older"}','2026-11-17T00:00:00Z'),
@@ -159,7 +161,7 @@ val sqliteRepositoryTest by testSuite {
             openSqliteConnection(Path(root, "kodex.db")).use { db ->
                 ensureSqlitePhaseOneSchema(db)
                 db.execute("INSERT INTO sessions VALUES(0,0)")
-                db.execute("INSERT INTO agents VALUES(0,0,NULL)")
+                db.execute("INSERT INTO agents(agent_id, session_id) VALUES(0,0)")
                 testKodexAgentDependencies().use { dependencies ->
                     SqliteKodexSessionRepository(root, dependencies).use { repository ->
                         val session = repository.open(0)

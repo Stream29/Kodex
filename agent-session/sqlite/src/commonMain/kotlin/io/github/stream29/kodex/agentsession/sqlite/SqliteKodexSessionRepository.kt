@@ -45,6 +45,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
     private val dependencies: KodexAgentDependencies,
     private val fileSystem: CoroutineFileSystem,
     private val connection: SqliteConnection,
+    private val agents: SqliteAgentRecords,
     private val mutex: Mutex,
     private val ownsConnection: Boolean,
     initialEntries: List<Int>,
@@ -77,7 +78,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
 
     public actual override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
     public actual override val openSessions: StateFlow<Map<Int, KodexAgentSession>> = residency.openSessions
-    override val pendingAwaitDeadlines: StateFlow<Map<Int, PendingAwaitDeadline>> = mutableAwaitDeadlines.asStateFlow()
+    public actual override val pendingAwaitDeadlines: StateFlow<Map<Int, PendingAwaitDeadline>> = mutableAwaitDeadlines.asStateFlow()
     public actual override val stopEvents: Flow<IndexedAgentStopEvent> = mutableStopEvents.asSharedFlow()
 
     private var closed = false
@@ -123,6 +124,45 @@ public actual class SqliteKodexSessionRepository internal constructor(
 
     private fun directory(index: Int): Path = Path(root, "sessions", index.toString())
 
+    private fun childDirectory(sessionId: Int, agentId: Int): Path =
+        Path(directory(sessionId), "agents", agentId.toString())
+
+    public actual override suspend fun getRootAgentId(entryIndex: Int): Int = withDbLock {
+        requireOpen()
+        agents.rootId(entryIndex)
+    }
+
+    public actual suspend fun getAgentRecord(agentId: Int): StoredAgent? = withDbLock {
+        requireOpen()
+        agents.get(agentId)
+    }
+
+    public actual suspend fun createChild(parentAgentId: Int): StoredAgent = lifecycleMutex.withLock {
+        withDbLock {
+            requireOpen()
+            val child = connection.transaction { agents.createChild(parentAgentId) }
+            val target = childDirectory(child.sessionId, child.agentId)
+            mirror.enqueue { initializeMirrorDirectory(target, fileSystem, emptyList()) }
+            child
+        }
+    }
+
+    public actual suspend fun discardUninitializedChild(agentId: Int): Boolean = lifecycleMutex.withLock {
+        withDbLock {
+            requireOpen()
+            val sessionId = connection.transaction { agents.discardUninitializedChild(agentId) }
+                ?: return@withDbLock false
+            val target = childDirectory(sessionId, agentId)
+            mirror.enqueue { deleteRecursively(fileSystem, target) }
+            true
+        }
+    }
+
+    public actual suspend fun markChildCompleted(agentId: Int): Int? = withDbLock {
+        requireOpen()
+        connection.transaction { agents.markChildCompleted(agentId) }
+    }
+
     public actual override suspend fun list(): List<Int> = withDbLock {
         requireOpen()
         inventory()
@@ -132,7 +172,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
         requireOpen()
         val activeSessions = openSessions.value
         connection.query(
-            "SELECT * FROM session_catalog " + (if (includeArchived) "" else "WHERE archived = 0 ") + "ORDER BY session_id",
+            "$RootCatalog " + (if (includeArchived) "" else "WHERE c.archived = 0 ") + "ORDER BY c.session_id",
         ).map { row -> entry(row, activeSessions) }
     }
 
@@ -141,7 +181,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
         requireEntry(entryIndex)
         val activeSessions = openSessions.value
         entry(
-            connection.query("SELECT * FROM session_catalog WHERE session_id = ?", listOf(entryIndex.toLong())).single(),
+            connection.query("$RootCatalog WHERE c.session_id = ?", listOf(entryIndex.toLong())).single(),
             activeSessions,
         )
     }
@@ -156,6 +196,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
         val owner = activeSessions[index]?.takeIf { it.coroutineContext[Job]?.isActive == true }
         return object : KodexSessionEntry {
             override val entryIndex = index
+            override val rootAgentId = checkNotNull(row[6] as Long?) { "Session $index is missing its root Agent." }.toInt()
             override val archived = row[1] == 1L
             override val threadName = row[2] as String?
             override val createdAt = instant(row[4])
@@ -189,19 +230,16 @@ public actual class SqliteKodexSessionRepository internal constructor(
     private suspend fun createCopy(source: Int?): Int = withDbLock {
         requireOpen()
         var files = emptyList<Triple<String, Int, String>>()
-        val index = connection.transaction {
-            if (source != null) requireEntry(source)
+        val (index, targetAgent) = connection.transaction {
+            val sourceAgent = source?.let(agents::rootId)
             var candidate = 0L
             inventory().forEach { if (it.toLong() == candidate) candidate++ }
             check(candidate <= Int.MAX_VALUE)
             connection.execute("INSERT INTO sessions(session_id) VALUES (?)", listOf(candidate))
-            connection.execute(
-                "INSERT INTO agents(agent_id, session_id, parent_agent_id) VALUES (?, ?, NULL)",
-                listOf(candidate, candidate),
-            )
-            if (source != null) {
+            val targetAgent = agents.createRoot(candidate.toInt())
+            if (sourceAgent != null) {
                 val emptySteerJson = SteerSnapshot(emptyList()).encodePayloadJson()
-                // An Agent ID can be reused; a nested Fork must not reactivate an ancestor's arming.
+                // A fork must not import the source Agent's armed wait.
                 connection.execute(
                     """INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at)
                         SELECT ?, type, "index", CASE
@@ -215,23 +253,23 @@ public actual class SqliteKodexSessionRepository internal constructor(
                             )
                             ELSE payload_json
                         END, created_at FROM agent_commits WHERE agent_id = ?""",
-                    listOf(candidate, AgentCommitType.Steer.wireName, emptySteerJson, source.toLong()),
+                    listOf(targetAgent.toLong(), AgentCommitType.Steer.wireName, emptySteerJson, sourceAgent.toLong()),
                 )
                 val snapshot = connection.query(
                     """SELECT type, "index", payload_json FROM agent_commits WHERE agent_id = ? ORDER BY "index", type""",
-                    listOf(candidate),
+                    listOf(targetAgent.toLong()),
                 )
                 files = snapshot.map { row ->
                     val type = row[0] as String
                     Triple(mirrorTimelineDirectory(type), (row[1] as Long).toInt(), row[2] as String)
                 }
             }
-            candidate.toInt()
+            candidate.toInt() to targetAgent
         }
         val fs = fileSystem
         val target = directory(index)
         val snapshotFiles = files
-        if (source != null) refreshDeadlineLocked(index)
+        if (source != null) refreshDeadlineLocked(targetAgent)
         mirror.enqueue {
             // An index can be reused after deletion; discard any stale mirror first.
             deleteRecursively(fs, target)
@@ -242,26 +280,25 @@ public actual class SqliteKodexSessionRepository internal constructor(
     }
 
     public actual override suspend fun open(entryIndex: Int): KodexAgentSession = lifecycleMutex.withLock {
-        withDbLock {
+        val agentId = withDbLock {
             requireOpen()
-            requireEntry(entryIndex)
+            agents.rootId(entryIndex)
         }
-        openLocked(entryIndex)
+        openLocked(entryIndex, agentId)
     }
 
-    public actual suspend fun openForAwaitDeadline(entryIndex: Int, expected: PendingAwaitDeadline): KodexAgentSession? =
+    public actual suspend fun openForAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline): KodexAgentSession? =
         lifecycleMutex.withLock {
-            if (mutableAwaitDeadlines.value[entryIndex] != expected) return@withLock null
-            withDbLock {
+            if (mutableAwaitDeadlines.value[agentId] != expected) return@withLock null
+            val root = withDbLock {
                 requireOpen()
-                if (mutableAwaitDeadlines.value[entryIndex] != expected) return@withDbLock false
-                requireEntry(entryIndex)
-                true
-            }.let { if (!it) return@withLock null }
-            openLocked(entryIndex)
+                if (mutableAwaitDeadlines.value[agentId] != expected) return@withDbLock null
+                agents.get(agentId)?.takeIf { it.parentAgentId == null }
+            } ?: return@withLock null
+            openLocked(root.sessionId, root.agentId)
         }
 
-    private suspend fun openLocked(entryIndex: Int): KodexAgentSession {
+    private suspend fun openLocked(entryIndex: Int, agentId: Int): KodexAgentSession {
         residency.reuseOrCleanupLocked(entryIndex)?.let { return it }
 
         val storageScope = CoroutineScope(coroutineContext.minusKey(Job) + SupervisorJob())
@@ -272,20 +309,20 @@ public actual class SqliteKodexSessionRepository internal constructor(
                 val targetDirectory = directory(entryIndex)
                 val storage = SqliteAgentStorage(
                     connection = connection,
-                    agentId = entryIndex,
+                    agentId = agentId,
                     uri = targetDirectory.toStorageUri(),
                     mutex = mutex,
                     requireAccess = { check(storageScope.isActive) { "Session storage is closed" } },
                     onHistoryChanged = { changedTypes ->
                         if (changedTypes == null || AgentCommitType.Unstable in changedTypes) {
-                            refreshDeadlineLocked(entryIndex)
+                            refreshDeadlineLocked(agentId)
                         }
                     },
                 )
                 val initialLatestIndex = (
                     connection.query(
                         """SELECT coalesce(max("index"), -1) FROM agent_commits WHERE agent_id = ?""",
-                        listOf(entryIndex.toLong()),
+                        listOf(agentId.toLong()),
                     ).single().single() as Long
                 ).toInt()
                 val observable = ScopedObservableAgentStorage(storageScope, storage, initialLatestIndex)
@@ -337,11 +374,13 @@ public actual class SqliteKodexSessionRepository internal constructor(
         withContext(NonCancellable) {
             withDbLock {
                 requireOpen()
-                connection.transaction {
+                val removedAgents = connection.transaction {
+                    val ids = agents.idsInSession(entryIndex)
                     onDeleteInTransaction(entryIndex)
                     connection.execute("DELETE FROM sessions WHERE session_id = ?", listOf(entryIndex.toLong()))
+                    ids
                 }
-                mutableAwaitDeadlines.value -= entryIndex
+                mutableAwaitDeadlines.value -= removedAgents.toSet()
                 mutableEntries.value = inventory()
                 val fs = fileSystem
                 val target = directory(entryIndex)
@@ -425,9 +464,9 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     val (resolvedRoot, openedConnection) = openVerifiedKodexDatabase(root, fileSystem)
     return openedConnection.closeOnFailure { connection ->
         supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
-            val (initialEntries, initialDeadlines) = withContext(Dispatchers.IO) {
+            val (initialEntries, initialDeadlines, agents) = withContext(Dispatchers.IO) {
                 ensureSqlitePhaseOneSchema(connection)
-                querySessionInventory(connection) to queryAwaitDeadlines(connection)
+                Triple(querySessionInventory(connection), queryAwaitDeadlines(connection), SqliteAgentRecords(connection))
             }
             currentCoroutineContext().ensureActive()
             scope.coroutineContext.ensureActive()
@@ -437,6 +476,7 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
                 dependencies = dependencies,
                 fileSystem = fileSystem,
                 connection = connection,
+                agents = agents,
                 mutex = Mutex(),
                 ownsConnection = true,
                 initialEntries = initialEntries,
@@ -468,10 +508,10 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     fileSystem.createDirectories(root)
     val resolvedRoot = fileSystem.resolve(root)
     return supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
-        val (initialEntries, initialDeadlines) = mutex.withLock {
+        val (initialEntries, initialDeadlines, agents) = mutex.withLock {
             withContext(Dispatchers.IO) {
                 ensureSqlitePhaseOneSchema(connection)
-                querySessionInventory(connection) to queryAwaitDeadlines(connection)
+                Triple(querySessionInventory(connection), queryAwaitDeadlines(connection), SqliteAgentRecords(connection))
             }
         }
         currentCoroutineContext().ensureActive()
@@ -482,6 +522,7 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
             dependencies = dependencies,
             fileSystem = fileSystem,
             connection = connection,
+            agents = agents,
             mutex = mutex,
             ownsConnection = false,
             initialEntries = initialEntries,
@@ -495,6 +536,11 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
         )
     }
 }
+
+private const val RootCatalog = """
+    SELECT c.*, root.agent_id FROM session_catalog AS c
+    LEFT JOIN agents AS root ON root.session_id = c.session_id AND root.parent_agent_id IS NULL
+"""
 
 private fun querySessionInventory(connection: SqliteConnection): List<Int> =
     connection.query("SELECT session_id FROM sessions ORDER BY session_id").map { (it[0] as Long).toInt() }

@@ -15,10 +15,13 @@ CREATE TABLE sessions (
 CREATE INDEX idx_sessions_archived ON sessions(archived, session_id);
 
 CREATE TABLE agents (
-    agent_id INTEGER PRIMARY KEY CHECK (agent_id BETWEEN 0 AND 2147483647),
+    agent_id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (agent_id BETWEEN 0 AND 2147483647),
     session_id INTEGER NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-    parent_agent_id INTEGER REFERENCES agents(agent_id) ON DELETE CASCADE
+    parent_agent_id INTEGER REFERENCES agents(agent_id) ON DELETE CASCADE,
+    completed INTEGER NOT NULL DEFAULT 0 CHECK (completed IN (0, 1))
 ) STRICT;
+
+CREATE UNIQUE INDEX idx_agents_root_session ON agents(session_id) WHERE parent_agent_id IS NULL;
 
 CREATE TABLE agent_commits (
     agent_id INTEGER NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
@@ -28,6 +31,8 @@ CREATE TABLE agent_commits (
             'event_ask_user',
             'event_schedule',
             'event_terminal_exited',
+            'event_subagent_created',
+            'event_subagent_completed',
             'assistant_message',
             'assistant_message_commentary',
             'assistant_message_final',
@@ -78,14 +83,15 @@ SELECT s.session_id, s.archived,
     CASE WHEN st.agent_id IS NULL THEN NULL
         ELSE coalesce(json_extract(st.payload_json, '$.cwd'), '.') END,
     (SELECT c.created_at FROM agent_commits AS c INDEXED BY commits_global_index
-        WHERE c.agent_id = s.session_id AND c."index" = 0 ORDER BY c.type LIMIT 1),
-    (SELECT c.created_at FROM agent_commits AS c WHERE c.agent_id = s.session_id ORDER BY c."index" DESC LIMIT 1)
+        WHERE c.agent_id = root.agent_id AND c."index" = 0 ORDER BY c.type LIMIT 1),
+    (SELECT c.created_at FROM agent_commits AS c WHERE c.agent_id = root.agent_id ORDER BY c."index" DESC LIMIT 1)
 FROM sessions AS s
+LEFT JOIN agents AS root ON root.session_id = s.session_id AND root.parent_agent_id IS NULL
 LEFT JOIN agent_commits AS st
-    ON st.agent_id = s.session_id AND st.type = 'settings'
+    ON st.agent_id = root.agent_id AND st.type = 'settings'
     AND st."index" = (
         SELECT max("index") FROM agent_commits
-        WHERE agent_id = s.session_id AND type = 'settings'
+        WHERE agent_id = root.agent_id AND type = 'settings'
     );
 """
 

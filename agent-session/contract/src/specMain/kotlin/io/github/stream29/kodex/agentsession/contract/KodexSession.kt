@@ -41,6 +41,9 @@ public interface KodexSessionEntry {
     /** Root Session entry index within the owning repository. */
     public val entryIndex: Int
 
+    /** The persisted Agent ID of this Session's root. It is not the Session ID. */
+    public val rootAgentId: Int
+
     /** The latest thread name, or `null` while the entry is uninitialized. */
     public val threadName: String?
 
@@ -66,6 +69,14 @@ public interface KodexSessionEntry {
     public suspend fun unarchive()
 }
 
+/** Persisted identity and direct parent relation, independent of runtime residency. */
+public data class StoredAgent(
+    public val agentId: Int,
+    public val sessionId: Int,
+    public val parentAgentId: Int?,
+    public val completed: Boolean,
+)
+
 /**
  * One collection of root Session entries owning in-memory [KodexAgentSession] residency and TTL.
  */
@@ -87,6 +98,9 @@ public interface KodexSessionRepository : CoroutineScope {
 
     /** Reads one exact root Session as an actionable entry without scanning other metadata. */
     public suspend fun getEntry(entryIndex: Int): KodexSessionEntry
+
+    /** Looks up the exact root without opening or renewing the Agent. */
+    public suspend fun getRootAgentId(entryIndex: Int): Int = getEntry(entryIndex).rootAgentId
 
     /**
      * Lists root Session catalog metadata.

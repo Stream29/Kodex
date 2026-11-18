@@ -316,8 +316,10 @@ private suspend fun SessionNode.toEntry(
     val threadName = if (latest >= 0) storage.getSettingsAtOrNull(latest)?.threadName else null
     val createdAt = if (latest >= 0) storage.getCommitExact(0)?.createdAt?.takeIf { it != Instant.DISTANT_PAST } else null
     val lastActivityAt = if (latest >= 0) storage.getCommitAtOrBefore(latest)?.createdAt?.takeIf { it != Instant.DISTANT_PAST } else null
+    val agentId = checkNotNull(storage.agentId)
     return object : KodexSessionEntry {
         override val entryIndex: Int = entryIndex
+        override val rootAgentId: Int = agentId
         override val threadName: String? = threadName
         override val createdAt: Instant? = createdAt
         override val lastActivityAt: Instant? = lastActivityAt

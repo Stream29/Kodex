@@ -43,7 +43,7 @@ private fun SqliteConnection.catalog(id: Int): List<Any?> = query("SELECT * FROM
 val sqliteSchemaTest by testSuite {
     test("phase one DDL and constraints exclude global settings and retired commit types") { withSchema { db ->
         assertEquals(1L, db.query("PRAGMA user_version").single().single())
-        assertEquals(setOf("sessions", "agents", "agent_commits", "session_catalog"), db.query("SELECT name FROM sqlite_master WHERE type IN ('table','view')").map { it[0] }.toSet())
+        assertEquals(setOf("sessions", "agents", "agent_commits", "session_catalog", "sqlite_sequence"), db.query("SELECT name FROM sqlite_master WHERE type IN ('table','view')").map { it[0] }.toSet())
         db.session(0)
         assertFailsWith<SqliteFailure> { db.session(-1) }
         assertFailsWith<SqliteFailure> { db.put(999, "user_message", 0, "{}") }
@@ -53,8 +53,9 @@ val sqliteSchemaTest by testSuite {
         assertFailsWith<SqliteFailure> { db.put(0, "token_count_response", 0, "{}") }
         assertFailsWith<SqliteFailure> { db.put(0, "hosted_web_search", -1, "{}") }
         assertFailsWith<SqliteFailure> { db.put(0, "hosted_web_search", 0, "malformed") }
-        assertFailsWith<SqliteFailure> { db.execute("INSERT INTO agents VALUES(-1, 0, NULL)") }
-        assertFailsWith<SqliteFailure> { db.execute("INSERT INTO agents VALUES(99, 0, 888)") }
+        assertFailsWith<SqliteFailure> { db.execute("INSERT INTO agents(agent_id, session_id) VALUES(-1, 0)") }
+        assertFailsWith<SqliteFailure> { db.execute("INSERT INTO agents(agent_id, session_id, parent_agent_id) VALUES(99, 0, 888)") }
+        assertFailsWith<SqliteFailure> { db.execute("INSERT INTO agents(session_id) VALUES(0)") }
     } }
     test("catalog exact zero, latest settings, archive and revert semantics") { withSchema { db ->
         db.session(0)
@@ -77,12 +78,12 @@ val sqliteSchemaTest by testSuite {
         db.execute("""DELETE FROM agent_commits WHERE agent_id=0 AND "index">=12""")
         assertEquals(listOf(0L, 1L, "", ".", t0.toString(), t2.toString()), db.catalog(0))
         db.put(0, "assistant_message", 0, "{}", createdAt = t15)
-        db.execute("INSERT INTO agents VALUES(100, 0, 0)")
+        db.execute("INSERT INTO agents(agent_id, session_id, parent_agent_id) VALUES(100, 0, 0)")
         db.put(100, "assistant_message", 0, "{}")
         db.put(100, "settings", 20, settingsPayload("child", "/child"), createdAt = Instant.fromEpochSeconds(1000))
         assertEquals(listOf(0L, 1L, "", ".", t15.toString(), t2.toString()), db.catalog(0))
     } }
-    test("fork strict until, sparse boundaries and deleted index reuse") { withSchema { db ->
+    test("fork strict until, sparse boundaries and deleted Session index reuse") { withSchema { db ->
         db.session(0)
         val t0 = Instant.fromEpochSeconds(10, 7)
         val t9 = Instant.fromEpochSeconds(11, 9)
@@ -100,7 +101,9 @@ val sqliteSchemaTest by testSuite {
         assertEquals(listOf("forkable", "/kept", t0.toString(), t0.toString()), db.catalog(1).subList(2, 6))
         db.execute("DELETE FROM sessions WHERE session_id=0")
         assertTrue(db.query("SELECT * FROM agent_commits WHERE agent_id=0").isEmpty())
-        db.session(0)
+        db.execute("INSERT INTO sessions(session_id) VALUES(0)")
+        val replacement = db.query("INSERT INTO agents(session_id) VALUES(0) RETURNING agent_id").single().single()
+        assertEquals(2L, replacement)
         assertEquals(listOf(0L, 0L, null, null, null, null), db.catalog(0))
     } }
     test("full catalog uses exact root index zero and keeps the settings lookup") { withSchema { db ->
