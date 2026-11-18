@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
+import io.github.stream29.kodex.app.application.contract.AgentPageActionTarget
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
@@ -240,6 +241,33 @@ internal class ApplicationViewModelImpl(
         )
     }
 
+    override suspend fun openAgentSettingsPopup(target: AgentPageActionTarget): ApplicationPopupState.Settings? =
+        commandMutex.withLock {
+            ensureOpen()
+            if (!isCurrentPage(target)) return@withLock null
+            installPopup(ApplicationPopupState.Settings(
+                target = target.session,
+                viewModel = settingsFactory.create(SettingsViewModelArguments(
+                    target.session, SettingsPage.CurrentSession, target.agent, { isCurrentPage(target) },
+                )),
+            ))
+        }
+
+    override suspend fun openAgentWorkingDirectoryPopup(target: AgentPageActionTarget): ApplicationPopupState.WorkingDirectory? =
+        commandMutex.withLock {
+            ensureOpen()
+            if (!isCurrentPage(target)) return@withLock null
+            val agent = target.agent
+            val created = ApplicationPopupState.WorkingDirectory(createWorkingDirectoryViewModel(
+                picker = createDirectoryPicker(agent.settings.value.cwd),
+                dependencies = WorkingDirectoryDependencies { cwd ->
+                    if (isCurrentPage(target)) agent.updateWorkingDirectory(cwd)
+                },
+            ))
+            workingDirectoryOwner = created to target.session
+            installPopup(created)
+        }
+
     override suspend fun openRenameSessionPopup(
         target: PersistedSessionViewModel,
     ): ApplicationPopupState.RenameSession = commandMutex.withLock {
@@ -398,6 +426,9 @@ internal class ApplicationViewModelImpl(
         }
         return ApplicationNavigationState(remaining, next)
     }
+
+    private fun isCurrentPage(target: AgentPageActionTarget): Boolean =
+        !closed.value && mutableNavigation.value.selectedSession === target.session && target.isCurrent()
 
     private fun requireOwned(target: PersistedSessionViewModel) {
         require(mutableNavigation.value.tabs.any { child -> child === target }) {

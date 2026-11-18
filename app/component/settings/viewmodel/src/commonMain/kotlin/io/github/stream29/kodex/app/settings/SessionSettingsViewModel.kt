@@ -126,6 +126,7 @@ private class SessionSettingsViewModelImpl(
 
     override fun requestRename(expectedRevision: Long) {
         val snapshot = currentExpected(expectedRevision) ?: return
+        if (!snapshot.canRenameSession) return
         lateinit var handle: SessionSettingsRename
         handle = SessionSettingsRename(
             expectedRevision,
@@ -145,7 +146,7 @@ private class SessionSettingsViewModelImpl(
     private fun renameSession(expectedRevision: Long, sessionName: String) {
         val normalized = sessionName.trim()
         val snapshot = currentExpected(expectedRevision) ?: return
-        if (normalized.isEmpty()) return
+        if (normalized.isEmpty() || !snapshot.canRenameSession) return
         commands.trySend(Command(snapshot.configuration.workingDirectory) {
             source.tryRenameSession(expectedRevision, normalized)
         })

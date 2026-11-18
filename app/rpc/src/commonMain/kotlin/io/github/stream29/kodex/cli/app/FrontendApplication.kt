@@ -74,7 +74,13 @@ public actual suspend fun <R> withFrontendApplication(
             },
             catalogDependencies = RpcSessionCatalogDependencies(services.global),
             SettingsViewModelFactory { arguments ->
-                val source = when (val target = arguments.target) {
+                val source = if (arguments.agent != null) {
+                    val selected = arguments.agent as? RpcAgentViewModel ?: error("Unknown frontend Agent view.")
+                    val session = checkNotNull(arguments.target)
+                    RpcSessionSettingsSource(
+                        selected, frontendScope, arguments.isAgentPageCurrent, canRenameSession = session.rootAgent.value === selected,
+                    )
+                } else when (val target = arguments.target) {
                     is RpcSessionView -> RpcSessionSettingsSource(target, frontendScope)
                     null -> UnavailableSessionSettingsDataSource
                     else -> error("Unknown frontend Session view.")

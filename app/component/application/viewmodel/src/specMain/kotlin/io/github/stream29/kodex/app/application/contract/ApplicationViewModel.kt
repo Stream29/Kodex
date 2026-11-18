@@ -1,10 +1,21 @@
 package io.github.stream29.kodex.app.application.contract
 
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
+import io.github.stream29.kodex.app.agent.contract.AgentViewModel
+import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import kotlinx.coroutines.flow.StateFlow
+
+/** An already selected Agent under an exact Session tab. Selection lifetime is supplied by the page host. */
+public class AgentPageActionTarget(
+    public val session: PersistedSessionViewModel,
+    public val agent: AgentViewModel,
+    private val isSelected: () -> Boolean,
+) {
+    public fun isCurrent(): Boolean = isSelected() && agent.lifecycle.value == AgentLifecycleState.Open
+}
 
 /**
  * Application-level ViewModel contract.
@@ -136,6 +147,12 @@ public interface ApplicationViewModel : AutoCloseable {
         target: PersistedSessionViewModel?,
         initialPage: SettingsPage,
     ): ApplicationPopupState.Settings
+
+    /** Opens settings for the bound Agent; returns null if its page is no longer selected. */
+    public suspend fun openAgentSettingsPopup(target: AgentPageActionTarget): ApplicationPopupState.Settings? = null
+
+    /** Opens a working-directory picker whose eventual selection still requires the captured Agent page. */
+    public suspend fun openAgentWorkingDirectoryPopup(target: AgentPageActionTarget): ApplicationPopupState.WorkingDirectory? = null
 
     /**
      * Opens a Rename child for the exact currently-owned [target].

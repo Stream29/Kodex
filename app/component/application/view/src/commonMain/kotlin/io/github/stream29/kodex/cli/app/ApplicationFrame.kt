@@ -46,6 +46,18 @@ public actual fun ApplicationPersistedSurfaceContent(
 }
 
 @Composable
+public actual fun rememberAgentPageActionTarget(
+    session: PersistedSessionViewModel, agent: AgentViewModel,
+): AgentPageActionTarget {
+    val mounted = remember(ApplicationChildKey(session), ApplicationChildKey(agent)) { mutableStateOf(false) }
+    DisposableEffect(mounted) {
+        mounted.value = true
+        onDispose { mounted.value = false }
+    }
+    return remember(mounted) { AgentPageActionTarget(session, agent) { mounted.value } }
+}
+
+@Composable
 public actual fun rememberApplicationRootActions(
     viewModel: ApplicationViewModel, onOperationFailure: (Throwable) -> Unit,
 ): ApplicationRootActions {
@@ -65,6 +77,12 @@ public actual fun rememberApplicationRootActions(
             }
             override fun openSettings(target: PersistedSessionViewModel?) = command {
                 viewModel.openSettingsPopup(target, if (target == null) SettingsPage.NewSession else SettingsPage.CurrentSession)
+            }
+            override fun browseAgentWorkingDirectory(target: AgentPageActionTarget) = command {
+                viewModel.openAgentWorkingDirectoryPopup(target)
+            }
+            override fun openAgentSettings(target: AgentPageActionTarget) = command {
+                viewModel.openAgentSettingsPopup(target)
             }
         }
     }

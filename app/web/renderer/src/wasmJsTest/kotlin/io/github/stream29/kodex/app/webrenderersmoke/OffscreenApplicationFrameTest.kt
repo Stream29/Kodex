@@ -14,6 +14,46 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.*
 
 val offscreenApplicationFrameTest by testSuite {
+    test("a retained child page action cannot become current again after leaving its mount") { offscreenTest {
+        val root = SidebarTestAgent()
+        val a = SidebarTestAgent()
+        val b = SidebarTestAgent()
+        val tab = NavigationSession(12, "root Session", root)
+        val opened = mutableListOf<AgentViewModel>()
+        val app = object : NavigationApplication(listOf(tab)) {
+            override suspend fun openAgentSettingsPopup(target: AgentPageActionTarget): ApplicationPopupState.Settings? {
+                assertSame(tab, target.session)
+                if (target.isCurrent()) opened += target.agent
+                return null
+            }
+        }
+        var selected by mutableStateOf<AgentViewModel>(a)
+        lateinit var page: AgentPageActionTarget
+        lateinit var rootActions: ApplicationRootActions
+        val scene = OffscreenScene.create {
+            rootActions = rememberApplicationRootActions(app) { throw IllegalStateException("Unexpected action failure", it) }
+            page = rememberAgentPageActionTarget(tab, selected)
+            UiText("Agent page")
+        }
+        try {
+            scene.settle { scene.hasText("Agent page") && page.agent === a && page.isCurrent() }
+            val first = page
+            rootActions.openAgentSettings(first)
+            scene.settle { opened.size == 1 }
+            selected = b
+            scene.settle { page.agent === b }
+            assertFalse(first.isCurrent())
+            rootActions.openAgentSettings(first)
+            rootActions.openAgentSettings(page)
+            scene.settle { opened.size == 2 }
+            assertEquals(listOf<AgentViewModel>(a, b), opened)
+            selected = a
+            scene.settle { page.agent === a && page.isCurrent() }
+            assertFalse(first.isCurrent())
+            assertSame(root, tab.rootAgent.value)
+        } finally { scene.close() }
+    } }
+
     test("selected lifecycle is keyed by exact child and the frame never rereads a replaced Agent") { offscreenTest {
         val agent = object : SidebarTestAgent() { override val running = MutableStateFlow(false) }
         val first = object : NavigationSession(1, "first", agent) {

@@ -30,6 +30,8 @@ public data class SessionSettingsSnapshot(
     public val sessionName: String,
     public val configuration: SessionSettingsConfiguration,
     public val editable: Boolean,
+    /** Session title is never an Agent-level configuration field. */
+    public val canRenameSession: Boolean = true,
 ) {
     init {
         require(revision >= 0) { "A Session Settings revision must not be negative." }

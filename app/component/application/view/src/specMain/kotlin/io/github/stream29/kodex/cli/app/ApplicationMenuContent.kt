@@ -68,7 +68,7 @@ public expect fun applicationTabMenuEntries(
 ): List<ApplicationMenuEntry>
 
 public expect fun applicationHistoryMenuEntries(
-    messageIndex: Int?, timestamp: String?, onRevert: () -> Unit, onFork: () -> Unit,
+    messageIndex: Int?, timestamp: String?, onRevert: () -> Unit, onFork: (() -> Unit)?,
     onRevertAndEdit: (() -> Unit)?,
 ): List<ApplicationMenuEntry>
 

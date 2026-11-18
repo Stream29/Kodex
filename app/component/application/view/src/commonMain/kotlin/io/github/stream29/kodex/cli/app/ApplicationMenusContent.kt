@@ -25,20 +25,22 @@ public actual fun ApplicationMenusContent(
     val scope = rememberCoroutineScope()
     val acceptTab by rememberUpdatedState(admitTab)
     val acceptHistory by rememberUpdatedState(admitHistory)
+    val currentAgent by rememberUpdatedState(selectedAgent)
     val focus by rememberUpdatedState(focusEditedComposer)
     val report by rememberUpdatedState(onOperationFailure)
     fun consumeTab(request: ApplicationTabMenuTarget): Boolean =
         renderer.isTabPlaced(request.placement) &&
             viewModel.navigation.value.tabs.any { it === request.target } && acceptTab(request)
-    fun consumeHistory(request: ApplicationHistoryMenuOpening): Boolean {
+    fun isCurrentHistory(request: ApplicationHistoryMenuOpening): Boolean {
         val selected = viewModel.navigation.value.selectedSession
         val agent = request.agent
-        return renderer.isHistoryPlaced(request.placement) &&
-            selected === request.session && selected.rootAgent.value === agent &&
+        return selected === request.session && currentAgent === agent &&
             agent.state.value.canEditHistory(agent.running.value) &&
             agent.history.historyItems.value.generation == request.generation &&
-            agent.history.contains(request.generation, request.storageIndex) && acceptHistory(request)
+            agent.history.contains(request.generation, request.storageIndex)
     }
+    fun consumeHistory(request: ApplicationHistoryMenuOpening): Boolean =
+        renderer.isHistoryPlaced(request.placement) && isCurrentHistory(request) && acceptHistory(request)
     fun command(block: suspend () -> Unit) {
         scope.launch {
             try { block() }
@@ -59,20 +61,23 @@ public actual fun ApplicationMenusContent(
         onDismiss = { acceptHistory(it) },
         onRevert = { request ->
             if (consumeHistory(request)) command {
+                if (!isCurrentHistory(request)) return@command
                 request.agent.requestHistoryRevert(request.storageIndex + 1, request.generation)
             }
         },
         onRevertAndEdit = { request, text ->
             if (consumeHistory(request)) command {
+                if (!isCurrentHistory(request)) return@command
                 revertAndEdit(request.agent, request.storageIndex, request.generation, text)
                 withFrameNanos { }
-                if (viewModel.navigation.value.selectedSession?.rootAgent?.value === request.agent &&
+                if (viewModel.navigation.value.selectedSession === request.session && currentAgent === request.agent &&
                     viewModel.popup.value == ApplicationPopupState.Closed
                 ) focus(request.agent)
             }
         },
         onFork = { request ->
-            if (consumeHistory(request)) command {
+            if (request.session.rootAgent.value === request.agent && consumeHistory(request)) command {
+                if (!isCurrentHistory(request) || request.session.rootAgent.value !== request.agent) return@command
                 val index = request.session.fork(request.agent, request.storageIndex + 1, request.generation)
                 viewModel.openSession(index)
             }

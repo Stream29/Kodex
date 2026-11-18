@@ -251,10 +251,11 @@ private fun GraphicalApplication(
                                                 }
                                             },
                                         )
+                                        val pageTarget = rememberAgentPageActionTarget(selected, agent)
                                         AgentPageContent(
                                             agent, currentNewLineKey, renderer,
-                                            { actions.browseWorkingDirectory(agent) },
-                                            { actions.openSettings(selected) },
+                                            { actions.browseAgentWorkingDirectory(pageTarget) },
+                                            { actions.openAgentSettings(pageTarget) },
                                         )
                                     }, status = { Text(it, Modifier.padding(16.dp)) })
                                 },

@@ -50,8 +50,8 @@ internal fun createRpcAgentViewModel(
 ): AgentViewModel = RpcAgentViewModel(binding, scope, models, reportUnhandledError)
 
 /** Original Agent behavior and children share one disposable, binding-scoped owner. */
-private class RpcAgentViewModel(
-    private val binding: RpcSessionBinding,
+internal class RpcAgentViewModel(
+    internal val binding: RpcSessionBinding,
     scope: CoroutineScope,
     override val models: StateFlow<List<ModelInfo>>,
     private val reportUnhandledError: (Throwable) -> Unit,

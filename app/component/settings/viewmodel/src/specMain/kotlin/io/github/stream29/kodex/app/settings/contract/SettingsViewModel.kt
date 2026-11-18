@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.app.settings.contract
 
+import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import kotlinx.coroutines.flow.StateFlow
 
@@ -98,6 +99,9 @@ public data class SettingsViewModelArguments(
     public val target: PersistedSessionViewModel?,
     /** Initial render destination; OpenAi also requests one initial usage refresh. */
     public val initialPage: SettingsPage,
+    /** Exact Agent settings owner for an Agent-page popup; absent for Session management and global settings. */
+    public val agent: AgentViewModel? = null,
+    public val isAgentPageCurrent: () -> Boolean = { true },
 )
 
 /**

@@ -345,6 +345,7 @@ public actual fun SessionTreeCliScreen(
                                 },
                                 persistedSession = { selected ->
                                     ApplicationPersistedSurfaceContent(frame, agent = { agent ->
+                                        val pageTarget = rememberAgentPageActionTarget(selected, agent)
                                         AgentRuntimeScreen(
                                             viewModel = agent,
                                             historyViewState = historyRenderStateFor(historyRenderStates, agent.history),
@@ -364,10 +365,10 @@ public actual fun SessionTreeCliScreen(
                                                 )))
                                             },
                                             onBrowseWorkingDirectory = {
-                                                rootActions.browseWorkingDirectory(agent)
+                                                rootActions.browseAgentWorkingDirectory(pageTarget)
                                             },
                                             onOpenSettings = {
-                                                rootActions.openSettings(selected)
+                                                rootActions.openAgentSettings(pageTarget)
                                             },
                                         )
                                     }, status = { Text(it) })

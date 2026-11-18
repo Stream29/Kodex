@@ -20,11 +20,13 @@ public actual fun SessionSettingsContent(
                 val snapshot = current.snapshot
                 val configuration = snapshot.configuration
                 renderer.Section("Identity") {
-                    renderer.Item("Session name", snapshot.sessionName, enabled = true) {
-                        renderer.Action(
-                            "Rename", onClick = { viewModel.requestRename(snapshot.revision) },
-                            enabled = true, autoFocus = false, role = UiActionRole.Normal,
-                        )
+                    if (snapshot.canRenameSession) {
+                        renderer.Item("Session name", snapshot.sessionName, enabled = true) {
+                            renderer.Action(
+                                "Rename", onClick = { viewModel.requestRename(snapshot.revision) },
+                                enabled = true, autoFocus = false, role = UiActionRole.Normal,
+                            )
+                        }
                     }
                     renderer.Item("Working directory", configuration.workingDirectory.toString(), enabled = snapshot.editable) {
                         renderer.Action(

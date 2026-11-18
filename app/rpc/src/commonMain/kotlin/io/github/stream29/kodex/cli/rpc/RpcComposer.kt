@@ -31,7 +31,7 @@ internal fun createRpcComposerViewModel(
     }.stateIn(ownerScope, SharingStarted.Eagerly, ComposerRequestInputPresentation.None)
 
     return createComposerViewModel(
-        ownerId = ComposerOwnerId("session-${binding.sessionIndex}"),
+        ownerId = ComposerOwnerId("agent-${binding.agentId}"),
         dependencies = object : ComposerDependencies {
             override val runtime = object : ComposerRuntimePort {
                 override val running: StateFlow<Boolean> = binding.running

@@ -33,7 +33,7 @@ public actual fun applicationTabMenuEntries(
 )
 
 public actual fun applicationHistoryMenuEntries(
-    messageIndex: Int?, timestamp: String?, onRevert: () -> Unit, onFork: () -> Unit,
+    messageIndex: Int?, timestamp: String?, onRevert: () -> Unit, onFork: (() -> Unit)?,
     onRevertAndEdit: (() -> Unit)?,
 ): List<ApplicationMenuEntry> = buildList {
     if (messageIndex != null) add(ApplicationMenuEntry.Information("history-index-information", buildList {
@@ -41,7 +41,7 @@ public actual fun applicationHistoryMenuEntries(
         timestamp?.let { add("Timestamp: $it") }
     }))
     add(ApplicationMenuEntry.Action("revert-to-here", "Revert to here", onRevert))
-    add(ApplicationMenuEntry.Action("fork-from-here", "Fork from here", onFork))
+    onFork?.let { add(ApplicationMenuEntry.Action("fork-from-here", "Fork from here", it)) }
     onRevertAndEdit?.let { add(ApplicationMenuEntry.Action("revert-and-edit", "Revert and edit", it)) }
 }
 
@@ -99,6 +99,7 @@ public actual fun ApplicationHistoryMenuContent(
     val state = current.agent.state.collectAsState().value
     val running = current.agent.running.collectAsState().value
     val window = current.agent.history.historyItems.collectAsState().value
+    val rootAgent = current.session.rootAgent.collectAsState().value
     val message = current.item as? MessageHistoryItemViewModel
     val messageState = message?.state?.collectAsState()?.value
     val display = current.displayOption.takeIf {
@@ -115,7 +116,8 @@ public actual fun ApplicationHistoryMenuContent(
     val timestamp = if (canEdit) rememberApplicationMenuTimestamp(current) { message?.readTimestamp() } else null
     val entries = buildList {
         if (canEdit) addAll(applicationHistoryMenuEntries(
-            message?.index, timestamp, { onRevert(current) }, { onFork(current) },
+            message?.index, timestamp, { onRevert(current) },
+            if (rootAgent === current.agent) ({ onFork(current) }) else null,
             text?.let { value -> { onRevertAndEdit(current, value) } },
         ))
         display?.let { add(ApplicationMenuEntry.Action("history-display-mode", it.label, it.onToggle)) }
@@ -134,7 +136,14 @@ public actual fun AgentHistoryRevertContent(agent: AgentViewModel?, renderer: Ap
     val matches = state.canEditHistory(running) && confirm.expectedGeneration == window.generation
     LaunchedEffect(agent, confirm.requestId, matches) { if (!matches) agent.dismissHistoryRevert(confirm.requestId) }
     if (!matches) return
-    DisposableEffect(agent, confirm.requestId) { onDispose { agent.dismissHistoryRevert(confirm.requestId) } }
+    var mounted by remember(ConfirmationKey(agent, confirm.requestId)) { mutableStateOf(false) }
+    DisposableEffect(agent, confirm.requestId) {
+        mounted = true
+        onDispose {
+            mounted = false
+            agent.dismissHistoryRevert(confirm.requestId)
+        }
+    }
     key(ConfirmationKey(agent, confirm.requestId)) {
         renderer.RevertConfirmation(
             "Revert history to here?",
@@ -142,7 +151,9 @@ public actual fun AgentHistoryRevertContent(agent: AgentViewModel?, renderer: Ap
             "Cancel", "Revert",
             onCancel = { agent.dismissHistoryRevert(confirm.requestId) },
             onConfirm = {
-                try { agent.confirmHistoryRevert(confirm.requestId) }
+                try {
+                    if (mounted && agent.historyAction.value === confirm) agent.confirmHistoryRevert(confirm.requestId)
+                }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Throwable) { /* The Agent already reports rejected and failed reverts. */ }
             },

@@ -33,7 +33,13 @@ public interface ApplicationRootActions {
     public fun browseWorkingDirectory(owner: AgentSettingsViewModel): Unit
     /** Opens Current Session for a captured target, or New Session for the singleton draft. */
     public fun openSettings(target: PersistedSessionViewModel?): Unit
+    public fun browseAgentWorkingDirectory(target: AgentPageActionTarget): Unit
+    public fun openAgentSettings(target: AgentPageActionTarget): Unit
 }
+
+/** Captures the page's existing selection without choosing or opening any Agent. */
+@Composable
+public expect fun rememberAgentPageActionTarget(session: PersistedSessionViewModel, agent: AgentViewModel): AgentPageActionTarget
 
 /** Waits belong to the root mount. Ordinary failures use its existing outlet; no cancellation report or retry. */
 @Composable
