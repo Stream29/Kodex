@@ -30,12 +30,14 @@ import kotlinx.serialization.json.decodeFromJsonElement
 public class SessionCommand : KodexGroupCommand(
     "session", "List and manage independent Sessions.",
     SessionListCommand(), SessionSpawnCommand(),
+    SessionRenameCommand(), SessionForkCommand(), SessionArchiveCommand(), SessionUnarchiveCommand(), SessionDeleteCommand(),
     isToolGroup = true,
 )
 
 public class AgentCommand : KodexGroupCommand(
     "agent", "Inspect and control a specific Agent.",
     AgentStatusCommand(), AgentSubmitCommand(), AgentResumeCommand(), AgentStopCommand(),
+    AgentCompactCommand(), AgentClearPendingCommand(),
     isToolGroup = true,
 )
 
@@ -83,6 +85,30 @@ public class AgentSubmitCommand : ExplicitAgentOperation("submit", "Submit one t
 public class AgentResumeCommand : ExplicitAgentOperation("resume", "Continue without a new message; return on admission.")
 
 public class AgentStopCommand : ExplicitAgentOperation("stop", "Request cancellation of only the currently running turn.")
+
+public class AgentCompactCommand : ExplicitAgentOperation("compact", "Compact the Agent's context and return its committed index.")
+
+public class AgentClearPendingCommand : ExplicitAgentOperation(
+    "clear-pending", "Resolve pending tool calls as interrupted without clearing messages or resuming.",
+)
+
+public sealed class ExplicitSessionOperation(name: String, summary: String) : SessionAgentOperation(name, summary) {
+    public val sessionId: Int by option("--session", metavar = "ID", help = "Required target Session ID.")
+        .int().required().check("Session ID must be non-negative.") { it >= 0 }
+}
+
+public class SessionRenameCommand : ExplicitSessionOperation("rename", "Update only the Session's title.") {
+    public val name: String by option("--name", metavar = "TEXT", help = "New Session title.")
+        .convert { it.trim().also { name -> require(name.isNotEmpty()) { "Session title must not be blank." } } }.required()
+}
+
+public class SessionForkCommand : ExplicitSessionOperation("fork", "Fork the complete Session as a new independent Session.")
+
+public class SessionArchiveCommand : ExplicitSessionOperation("archive", "Archive the Session without stopping it.")
+
+public class SessionUnarchiveCommand : ExplicitSessionOperation("unarchive", "Remove the Session's archived flag.")
+
+public class SessionDeleteCommand : ExplicitSessionOperation("delete", "Close and permanently delete the specified Session.")
 
 public class AskAnswerCommand : ExplicitAgentOperation("answer", "Submit a user-provided structured answer to an existing question.") {
     public val askId: Int by argument("ask-id", help = "1-based local ask ID.").int().check("Ask ID must be positive.") { it > 0 }

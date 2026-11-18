@@ -227,7 +227,8 @@ internal suspend fun dispatchCliWithToolRpc(
                         exitCode?.let { return@invokeTool it } // A known reply survives connection teardown failure.
                         if (entered) throw failure
                         writeOperationFailure("connection_failed", "Could not connect to the selected backend.",
-                            "connect", CliOperationOutcome.Failed, (toolLeaf as? ExplicitAgentOperation)?.agentId) {
+                            "connect", CliOperationOutcome.Failed, (toolLeaf as? ExplicitAgentOperation)?.agentId,
+                            (toolLeaf as? ExplicitSessionOperation)?.sessionId) {
                             output(it, false)
                         }
                     }
@@ -472,7 +473,7 @@ private suspend fun executeSessionAgentOperation(
     env: (String) -> String?, readStdin: () -> String,
 ): Int {
     var agentId = (command as? ExplicitAgentOperation)?.agentId
-    var sessionId: Int? = null
+    var sessionId = (command as? ExplicitSessionOperation)?.sessionId
     var phase = "input"
     var mutationStarted = false
     suspend fun activate(id: Int) {
@@ -561,6 +562,56 @@ private suspend fun executeSessionAgentOperation(
                 services.runtime.cancelRunningTurn(command.agentId)
                 agentReceipt(command.agentId)
             }
+            is SessionRenameCommand -> {
+                activate(command.sessionId)
+                phase = "rename"
+                renameSessionTitle(services.runtime, command.sessionId, command.name) { mutationStarted = true }
+                buildJsonObject {
+                    put("session_id", command.sessionId)
+                    put("thread_name", command.name)
+                }
+            }
+            is SessionForkCommand -> {
+                phase = "fork"
+                mutationStarted = true
+                val forked = services.global.forkSession(command.sessionId)
+                buildJsonObject {
+                    put("session_id", forked)
+                    put("root_agent_id", forked)
+                }
+            }
+            is SessionArchiveCommand, is SessionUnarchiveCommand -> {
+                val target = checkNotNull(sessionId)
+                val archive = command is SessionArchiveCommand
+                phase = if (archive) "archive" else "unarchive"
+                mutationStarted = true
+                if (archive) services.global.archiveSession(target) else services.global.unarchiveSession(target)
+                buildJsonObject {
+                    put("session_id", target)
+                    put("archived", archive)
+                }
+            }
+            is SessionDeleteCommand -> {
+                phase = "delete"
+                mutationStarted = true
+                val deleted = services.global.deleteSession(command.sessionId)
+                buildJsonObject {
+                    put("session_id", command.sessionId)
+                    put("deleted", deleted)
+                }
+            }
+            is AgentCompactCommand, is AgentClearPendingCommand -> {
+                val target = checkNotNull(agentId)
+                val compact = command is AgentCompactCommand
+                activate(target)
+                phase = if (compact) "compact" else "clear_pending"
+                mutationStarted = true
+                val latest = if (compact) services.runtime.forcedCompact(target) else services.runtime.clearPending(target)
+                buildJsonObject {
+                    put("agent_id", target)
+                    put("latest_index", latest)
+                }
+            }
             is AskAnswerCommand -> {
                 val response = CliToolJson.decodeFromString(RequestUserInputResponse.serializer(), command.response.readText(readStdin))
                 activate(command.agentId)
@@ -597,6 +648,35 @@ private suspend fun executeSessionAgentOperation(
     }
     write(CliToolJson.encodeToString(CliOperationEnvelope.serializer(), CliOperationEnvelope(ok = true, result = result)))
     return 0
+}
+
+private suspend fun renameSessionTitle(
+    runtime: AgentRuntimeRpc, id: Int, name: String, onCompareAndSet: (Boolean) -> Unit,
+) {
+    fun conflict(): Nothing = throw OperationRejected("rename_conflict", "The Session title or history changed concurrently.")
+    val nonce = runtime.getCacheNonce(id)
+    suspend fun read(): KodexAgentSettings {
+        val top = runtime.getLatestIndex(id)
+        if (top < 0) throw OperationRejected("uninitialized_session", "The Session does not have initial settings.")
+        return try {
+            runtime.getLastCommitsIn(id, nonce, 0, top, AgentCommitType.SettingsTypes, limit = 1)
+                .lastOrNull()?.commit as? KodexAgentSettings
+                ?: throw OperationRejected("uninitialized_session", "The Session does not have initial settings.")
+        } catch (_: CacheNonceMismatch) {
+            conflict()
+        }
+    }
+    var current = read()
+    val originalTitle = current.threadName
+    repeat(12) {
+        if (current.threadName != originalTitle) conflict()
+        if (current.threadName == name) return
+        onCompareAndSet(true)
+        if (runtime.compareAndSetSettings(id, current, current.copy(threadName = name))) return
+        onCompareAndSet(false) // A false CAS attests no title write by this attempt.
+        current = read()
+    }
+    conflict()
 }
 
 private fun CliPayloadInput<String>.readText(readStdin: () -> String): String =

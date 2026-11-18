@@ -8,6 +8,7 @@ import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
@@ -62,17 +63,29 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
         val root = Path(SystemTemporaryDirectory, "kodex-cli-spawn-${Random.nextLong().toULong()}")
         var loseSubmitReply = false
         var submits = 0
+        var concurrentTitle: String? = null
+        var concurrentSettingsUpdate = false
         val fs = SystemCoroutineFileSystem
+        val unrelatedDirectory = Path(root, "unrelated-directory")
         try {
             withBackendServices(root, Path(root, "codex"), Path(root, "agents"),
                 defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
                 createClient = { mockOpenAiClient { createResponse { flow { awaitCancellation() } } } },
             ) { backend ->
+                fs.createDirectories(unrelatedDirectory)
                 val runtime = object : AgentRuntimeRpc by backend.runtime {
                     override suspend fun submit(sessionIndex: Int, content: List<ContentItem>, expectedInvocationId: String?) {
                         submits++
                         backend.runtime.submit(sessionIndex, content, expectedInvocationId)
                         if (loseSubmitReply) error("Fixture reply lost")
+                    }
+                    override suspend fun compareAndSetSettings(sessionIndex: Int, expect: KodexAgentSettings, update: KodexAgentSettings): Boolean {
+                        if (concurrentSettingsUpdate) {
+                            concurrentSettingsUpdate = false
+                            assertTrue(backend.runtime.compareAndSetSettings(sessionIndex, expect,
+                                expect.copy(cwd = unrelatedDirectory, threadName = concurrentTitle ?: expect.threadName)))
+                        }
+                        return backend.runtime.compareAndSetSettings(sessionIndex, expect, update)
                     }
                 }
                 suspend fun cli(args: List<String>, stdin: String, expectedExit: Int): CliOperationEnvelope {
@@ -125,6 +138,32 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                 assertTrue(cli(answerArgs, answer, 0).ok)
                 assertEquals("already_answered", cli(answerArgs, answer, 1).error?.code)
                 assertEquals("ask_not_found", cli(listOf("ask", "answer", "--agent", "$id", "999", "--stdin"), answer, 1).error?.code)
+
+                val target = checkNotNull(error.sessionId)
+                concurrentSettingsUpdate = true
+                assertTrue(cli(listOf("session", "rename", "--session", "$target", "--name", " first title "), "", 0).ok)
+                val renamed = cli(listOf("agent", "status", "--agent", "$target"), "", 0).result?.jsonObject
+                assertEquals(unrelatedDirectory.toString(), renamed?.get("cwd")?.jsonPrimitive?.content)
+                concurrentTitle = "frontend title"
+                concurrentSettingsUpdate = true
+                assertEquals("rename_conflict",
+                    cli(listOf("session", "rename", "--session", "$target", "--name", "CLI overwrite"), "", 1).error?.code)
+                fun CliOperationEnvelope.result(key: String): String? = result?.jsonObject?.get(key)?.jsonPrimitive?.content
+                assertTrue(cli(listOf("session", "archive", "--session", "$target"), "", 0).ok)
+                val archived = backend.global.getSessionCatalog(true).single { it.sessionIndex == target }
+                assertTrue(archived.archived)
+                assertEquals("frontend title", archived.threadName)
+                assertTrue(cli(listOf("session", "unarchive", "--session", "$target"), "", 0).ok)
+                assertFalse(backend.global.getSessionCatalog(true).single { it.sessionIndex == target }.archived)
+                assertTrue(cli(listOf("agent", "stop", "--agent", "$target"), "", 0).ok)
+                backend.runtime.getRunningTurnFlow(target).first { !it }
+                val index = backend.runtime.getLatestIndex(target)
+                assertEquals(index.toString(), cli(listOf("agent", "clear-pending", "--agent", "$target"), "", 0).result("latest_index"))
+                val fork = cli(listOf("session", "fork", "--session", "$target"), "", 0).result("session_id")!!.toInt()
+                assertTrue(fork != target && backend.global.getSessionCatalog(true).any { it.sessionIndex == fork })
+                assertEquals("true", cli(listOf("session", "delete", "--session", "$fork"), "", 0).result("deleted"))
+                assertEquals("false", cli(listOf("session", "delete", "--session", "$fork"), "", 0).result("deleted"))
+                assertTrue(backend.global.getSessionCatalog(true).any { it.sessionIndex == target })
             }
         } finally {
             suspend fun delete(path: Path) {
