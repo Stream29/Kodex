@@ -8,6 +8,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
+import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
@@ -148,7 +149,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertTrue(runCatching { global.validateDirectory(DirectoryQuery(".", ".")) }.isFailure)
                 assertTrue(runCatching { global.listDirectories(DirectoryQuery(".", ".")) }.isFailure)
                 assertTrue(runCatching { global.evaluateContextPaths(ContextPathQuery("/", emptyList(), ".")) }.isFailure)
-                assertTrue(runCatching { global.abandonPendingOAuthLogin(Long.MAX_VALUE) }.isFailure)
+                assertTrue(runCatching { global.startOAuthLogin(OAuthTarget.OpenAi(KodexAuthSource.Kodex)).first() }.isFailure)
                 assertEquals(8, rejected)
                 assertEquals(before, services.settings.unified.current.backend)
                 assertEquals(front, services.settings.unified.current.frontend)

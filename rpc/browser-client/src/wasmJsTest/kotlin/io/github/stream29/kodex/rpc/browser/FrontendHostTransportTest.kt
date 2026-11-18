@@ -297,7 +297,7 @@ private external fun restoreStreamingBootstrap(state: JsAny)
             if (lost) return Promise.reject(new TypeError('Failed to fetch'));
             return Promise.resolve(new Response(JSON.stringify({
                 protocol: 2, workingDirectory: '/project',
-                endpoint: {instanceId: 'direct-test', port: 1234, password: 'c'.repeat(64), businessProtocol: '0.5.5'},
+                endpoint: {instanceId: 'direct-test', port: 1234, password: 'c'.repeat(64), businessProtocol: '0.5.6'},
                 host: {
                     protocol: 1, hostInstanceId: 'h'.repeat(64), backendInstanceId: 'direct-test',
                     origin: 'http://127.0.0.1:1', baseUrl: 'http://127.0.0.1:1',

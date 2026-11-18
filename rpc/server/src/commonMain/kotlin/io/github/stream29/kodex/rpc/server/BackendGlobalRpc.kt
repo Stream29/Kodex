@@ -25,6 +25,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.io.files.Path
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -115,12 +117,9 @@ internal class BackendGlobalRpc(
     override suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome =
         inBackend { account.consumeUsageReset(creditId) }
 
-    override suspend fun startOAuthLogin(target: OAuthTarget): OAuthAuthorization =
-        inBackend { effects.startOAuth(target) }
-
-    override suspend fun awaitOAuthLogin(attemptId: Long) {
+    override fun startOAuthLogin(target: OAuthTarget): Flow<OAuthLoginEvent> = flow {
         ensureAdmission()
-        effects.awaitOAuth(attemptId)
+        emitAll(effects.startOAuth(target))
     }
 
     override suspend fun reportFrontendError(message: String?): FrontendErrorAdmission =
@@ -128,9 +127,6 @@ internal class BackendGlobalRpc(
 
     override suspend fun cancelOAuthLogin(attemptId: Long): Unit =
         inBackend { effects.cancelOAuth(attemptId) }
-
-    override suspend fun abandonPendingOAuthLogin(attemptId: Long): Unit =
-        inBackend { effects.abandonPendingOAuth(attemptId) }
 
     override suspend fun removeAuthentication(source: KodexAuthSource): Unit =
         inBackend { effects.removeAuthentication(source) }

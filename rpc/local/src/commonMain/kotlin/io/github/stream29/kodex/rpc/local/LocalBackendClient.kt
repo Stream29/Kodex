@@ -52,6 +52,7 @@ public actual class LocalRpcConnection internal constructor(
     actual override val state: StateFlow<BackendConnectionState> get() = managed.state
     actual override val failureReason: StateFlow<String?> get() = managed.failureReason
     actual override val available: Boolean get() = managed.available
+    actual override fun bindOperation(): RpcClient = managed.bindOperation()
     actual override fun onReconnection(handler: suspend (RpcClient, () -> Boolean) -> Unit) {
         managed.onReconnection(handler)
     }

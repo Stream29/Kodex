@@ -33,7 +33,7 @@ val localBrowserProtocolTest by testSuite {
         }
     }
     test("business bootstrap and companion checkpoints are independent of control and browser grant") {
-        assertEquals("0.5.5", BackendBusinessProtocol)
+        assertEquals("0.5.6", BackendBusinessProtocol)
         assertEquals(1, BackendControlProtocol)
         assertEquals(1, LocalBrowserProtocol)
         assertEquals(1, LocalBrowserGrantProtocol)

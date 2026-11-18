@@ -34,6 +34,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
@@ -51,7 +52,8 @@ val backendOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 val listener = OwnedIntegrationListener(OpenAiRedirect)
                 val owned = f.ownedOAuth(this, listener)
                 try {
-                    val login = owned.start(OAuthTarget.OpenAi(source))
+                    val observation = observeOAuth(owned.start(OAuthTarget.OpenAi(source)))
+                    val login = observation.authorization
                     assertTrue(!listener.armedState.isNullOrBlank())
                     val entered = CompletableDeferred<Unit>()
                     val release = CompletableDeferred<Unit>()
@@ -62,11 +64,8 @@ val backendOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
                     }
                     listener.deliver(login.callback(OpenAiRedirect))
                     entered.await()
-                    owned.abandonPending(login.attemptId)
-                    val waiter = async { owned.await(login.attemptId) }
                     release.complete(Unit)
-                    waiter.await()
-                    owned.await(login.attemptId)
+                    observation.awaitCommitted()
                     assertEquals(1, f.login.exchanged.size)
                     assertEquals(OpenAiRedirect, f.login.exchanged.single().redirectUri)
                     assertTrue(f.authFiles.moves > 0)
@@ -80,9 +79,10 @@ val backendOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val listener = OwnedIntegrationListener(McpRedirect)
             val owned = f.ownedOAuth(this, listener)
             try {
-                val login = owned.start(McpTarget)
+                val observation = observeOAuth(owned.start(McpTarget))
+                val login = observation.authorization
                 listener.deliver(login.callback(McpRedirect))
-                owned.await(login.attemptId)
+                observation.awaitCommitted()
                 val config = f.global.settings.value.mcpServers.getValue("server") as McpServerConfiguration.StreamableHttp
                 assertIs<McpOAuthConfiguration.Initialized>(config.oauth)
                 assertEquals(1, f.mcpPreparations)
@@ -95,13 +95,14 @@ val backendOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val listener = OwnedIntegrationListener(OpenAiRedirect)
             val owned = f.ownedOAuth(this, listener)
             try {
-                val login = owned.start(OpenAiTarget)
+                val observation = observeOAuth(owned.start(OpenAiTarget))
+                val login = observation.authorization
                 val deadline = f.deadlines.receive()
                 val deliver = listener.claim(login.callback(OpenAiRedirect))
                 deadline.complete(Unit)
                 yield()
                 deliver()
-                owned.await(login.attemptId)
+                observation.awaitCommitted()
                 assertEquals(1, f.login.exchanged.size)
             } finally { owned.closeAndJoin() }
         }
@@ -112,7 +113,7 @@ val backendOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val listener = OwnedIntegrationListener(OpenAiRedirect)
             val owned = f.ownedOAuth(this, listener)
             try {
-                val failure = assertFailsWith<IllegalStateException> { owned.start(OpenAiTarget) }
+                val failure = assertFailsWith<IllegalStateException> { owned.start(OpenAiTarget).toList() }
                 assertFalse(failure.toString().contains("wrong-state"))
                 assertNull(listener.armedState)
                 assertTrue(f.login.exchanged.isEmpty())

@@ -39,6 +39,7 @@ public actual suspend fun <R> withFrontendApplication(
     var failure: Throwable? = null
     try {
         val services = RpcServices(RestoringRpcClient(connection))
+        val oauthRpc = { RpcServices(RestoringRpcClient(connection.bindOperation())).global }
         val pickerDependencies = object : DirectoryPickerDependencies {
             override val browser = RpcDirectoryPickerBrowser(services.global, cwd.toString())
         }
@@ -80,7 +81,7 @@ public actual suspend fun <R> withFrontendApplication(
                 }
                 createSettingsViewModel(
                     arguments.initialPage,
-                    RpcGlobalEditor(settings, services.global, frontendScope, cwd.toString()),
+                    RpcGlobalEditor(settings, services.global, frontendScope, cwd.toString(), oauthRpc),
                     createSessionSettingsViewModel(
                         SessionSettingsDependencies(source, settings.models, directoryPicker),
                         frontendScope,
@@ -92,7 +93,7 @@ public actual suspend fun <R> withFrontendApplication(
                 val target = OAuthTarget.OpenAi(settings.settings.value.authSource)
                 createOpenAiLoginViewModel(
                     dependencies = OpenAiLoginDependencies {
-                        startRpcOAuth(services.global, target, frontendScope)
+                        startRpcOAuth(oauthRpc(), target, frontendScope)
                     },
                     ownerScope = frontendScope,
                 )

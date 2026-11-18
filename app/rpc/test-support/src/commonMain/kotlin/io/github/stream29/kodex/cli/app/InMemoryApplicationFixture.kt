@@ -19,6 +19,7 @@ private class InMemoryFrontendConnection(private val client: RpcClient) : Fronte
     override val state = MutableStateFlow(BackendConnectionState.Connected)
     override val failureReason = MutableStateFlow<String?>(null)
     override val available: Boolean get() = true
+    override fun bindOperation(): RpcClient = client
     override fun onReconnection(handler: suspend (RpcClient, () -> Boolean) -> Unit) {
         // Scoped in-memory transport has no network reconnection. Session recovery remains real.
     }

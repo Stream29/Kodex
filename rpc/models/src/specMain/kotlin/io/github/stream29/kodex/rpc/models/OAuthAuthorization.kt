@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.rpc.models
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 
 /**
  * Prepared login shared by both OAuth targets.
@@ -19,4 +20,16 @@ public data class OAuthAuthorization(
     }
 
     override fun toString(): String = "OAuthAuthorization(attemptId=$attemptId, url=<redacted>)"
+}
+
+/** Events from a single OAuth operation: authorization first, then committed credentials. */
+@Serializable
+public sealed interface OAuthLoginEvent {
+    @Serializable
+    @SerialName("authorization")
+    public data class Authorization(public val authorization: OAuthAuthorization) : OAuthLoginEvent
+
+    @Serializable
+    @SerialName("committed")
+    public data object Committed : OAuthLoginEvent
 }

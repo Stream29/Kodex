@@ -68,4 +68,15 @@ val oauthModelsTest by testSuite {
             }
         }
     }
+
+    test("operation events have stable tags and committed carries no URL or credential") {
+        val authorization = OAuthAuthorization(42, "https://example.invalid/?state=transient")
+        val prepared = OAuthLoginEvent.Authorization(authorization)
+        val codec = OAuthLoginEvent.serializer()
+        val record = json.encodeToJsonElement(codec, prepared).jsonObject
+        assertEquals("authorization", record.getValue("type").jsonPrimitive.content)
+        assertEquals(prepared, json.decodeFromJsonElement(codec, record))
+        assertFalse(prepared.toString().contains("transient"))
+        assertEquals("""{"type":"committed"}""", json.encodeToString(codec, OAuthLoginEvent.Committed))
+    }
 }

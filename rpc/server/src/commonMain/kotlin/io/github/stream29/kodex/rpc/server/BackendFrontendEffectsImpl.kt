@@ -2,15 +2,14 @@ package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.rpc.models.FrontendErrorAdmission
-import io.github.stream29.kodex.rpc.models.OAuthAuthorization
+import io.github.stream29.kodex.rpc.models.OAuthLoginEvent
 import io.github.stream29.kodex.rpc.models.OAuthTarget
+import kotlinx.coroutines.flow.Flow
 
 /** Backend-owned effects used by the global service. */
 internal interface BackendFrontendEffects {
-    suspend fun startOAuth(target: OAuthTarget): OAuthAuthorization
-    suspend fun awaitOAuth(attemptId: Long)
+    fun startOAuth(target: OAuthTarget): Flow<OAuthLoginEvent>
     suspend fun cancelOAuth(attemptId: Long)
-    suspend fun abandonPendingOAuth(attemptId: Long)
     suspend fun removeAuthentication(source: KodexAuthSource)
     suspend fun logoutMcp(serverName: String)
     fun reportFrontendError(message: String?): FrontendErrorAdmission
@@ -21,10 +20,8 @@ internal class BackendFrontendEffectsImpl(
     private val oauth: BackendOAuth,
     private val errors: FrontendErrorQueue,
 ) : BackendFrontendEffects {
-    override suspend fun startOAuth(target: OAuthTarget): OAuthAuthorization = owned.start(target)
-    override suspend fun awaitOAuth(attemptId: Long) = owned.await(attemptId)
+    override fun startOAuth(target: OAuthTarget): Flow<OAuthLoginEvent> = owned.start(target)
     override suspend fun cancelOAuth(attemptId: Long) = owned.cancel(attemptId)
-    override suspend fun abandonPendingOAuth(attemptId: Long) = owned.abandonPending(attemptId)
 
     override suspend fun removeAuthentication(source: KodexAuthSource) {
         owned.cancelTarget(OAuthTarget.OpenAi(source))

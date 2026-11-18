@@ -26,6 +26,8 @@ internal class FixtureConnection : FrontendRpcConnection {
     override val state = status.asStateFlow()
     override val failureReason = MutableStateFlow<String?>(null).asStateFlow()
     override val available: Boolean get() = active.value?.alive?.invoke() == true
+    override fun bindOperation(): RpcClient = active.value?.takeIf { it.alive() }?.client
+        ?: throw BackendConnectionLost("Test backend is disconnected.")
     private var recovery: suspend (RpcClient, () -> Boolean) -> Unit = { _, _ -> }
     private var everConnected = false
     private val replacements = MutableStateFlow(0)

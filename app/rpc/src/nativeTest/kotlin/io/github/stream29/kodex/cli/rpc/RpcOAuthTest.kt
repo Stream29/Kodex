@@ -9,7 +9,10 @@ import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
+import io.github.stream29.kodex.rpc.local.ActiveRpcPeer
+import io.github.stream29.kodex.rpc.local.ManagedFrontendRpcConnection
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
+import io.github.stream29.kodex.rpc.models.OAuthLoginEvent
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.ktor.client.HttpClient
@@ -20,80 +23,88 @@ import io.ktor.http.URLBuilder
 import io.ktor.http.Url
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.io.files.Path
+import kotlinx.rpc.RpcCall
+import kotlinx.rpc.RpcClient
 import kotlin.test.*
 
 val rpcOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("frontend observes the exact backend attempt and releases only its pending ownership") {
+    test("frontend uses one collection for authorization and even an immediately delivered result") {
         frontend {
-            val completed = CompletableDeferred<Unit>()
-            val released = CompletableDeferred<Long>()
+            var collections = 0
             val rpc = object : GlobalRpc by services.global {
-                override suspend fun startOAuthLogin(target: OAuthTarget): OAuthAuthorization {
+                override fun startOAuthLogin(target: OAuthTarget) = flow {
                     assertEquals(Target, target)
-                    return Prepared
+                    collections++
+                    emit(OAuthLoginEvent.Authorization(Prepared))
+                    emit(OAuthLoginEvent.Committed)
                 }
-                override suspend fun awaitOAuthLogin(attemptId: Long) {
-                    assertEquals(Prepared.attemptId, attemptId)
-                    completed.await()
-                }
-                override suspend fun abandonPendingOAuthLogin(attemptId: Long) { released.complete(attemptId) }
                 override suspend fun cancelOAuthLogin(attemptId: Long): Unit = error("not an explicit cancel")
             }
             val attempt = startRpcOAuth(rpc, Target, this)
             assertEquals(Prepared.url, attempt.authorizationUrl)
-            completed.complete(Unit)
             attempt.awaitCompletion()
-            assertEquals(Prepared.attemptId, released.await())
+            assertEquals(1, collections)
         }
     }
 
     test("cancelling an observer releases pending work without exact cancellation") {
         frontend {
-            val released = CompletableDeferred<Long>()
+            val released = CompletableDeferred<Unit>()
             val rpc = object : GlobalRpc by services.global {
-                override suspend fun startOAuthLogin(target: OAuthTarget) = Prepared
-                override suspend fun awaitOAuthLogin(attemptId: Long): Unit = awaitCancellation()
-                override suspend fun abandonPendingOAuthLogin(attemptId: Long) { released.complete(attemptId) }
+                override fun startOAuthLogin(target: OAuthTarget) = flow<OAuthLoginEvent> {
+                    emit(OAuthLoginEvent.Authorization(Prepared))
+                    awaitCancellation()
+                }.onCompletion { released.complete(Unit) }
                 override suspend fun cancelOAuthLogin(attemptId: Long): Unit = error("not an explicit cancel")
             }
             val attempt = startRpcOAuth(rpc, Target, this)
             val waiter = async(start = CoroutineStart.UNDISPATCHED) { attempt.awaitCompletion() }
             waiter.cancelAndJoin()
-            assertEquals(Prepared.attemptId, released.await())
+            released.await()
         }
     }
 
     test("explicit cancel uses the exact returned identity and also releases local observation") {
         frontend {
             val cancelled = CompletableDeferred<Long>()
-            val released = CompletableDeferred<Long>()
+            val allowedToFinish = CompletableDeferred<Unit>()
+            val released = CompletableDeferred<Unit>()
             val rpc = object : GlobalRpc by services.global {
-                override suspend fun startOAuthLogin(target: OAuthTarget) = Prepared
-                override suspend fun awaitOAuthLogin(attemptId: Long): Unit = awaitCancellation()
-                override suspend fun abandonPendingOAuthLogin(attemptId: Long) { released.complete(attemptId) }
-                override suspend fun cancelOAuthLogin(attemptId: Long) { cancelled.complete(attemptId) }
+                override fun startOAuthLogin(target: OAuthTarget) = flow<OAuthLoginEvent> {
+                    emit(OAuthLoginEvent.Authorization(Prepared))
+                    awaitCancellation()
+                }.onCompletion { released.complete(Unit) }
+                override suspend fun cancelOAuthLogin(attemptId: Long) {
+                    cancelled.complete(attemptId)
+                    allowedToFinish.await()
+                }
             }
             val attempt = startRpcOAuth(rpc, Target, this)
             attempt.cancel()
-            assertFailsWith<CancellationException> { attempt.awaitCompletion() }
             assertEquals(Prepared.attemptId, cancelled.await())
-            assertEquals(Prepared.attemptId, released.await())
+            assertFalse(released.isCompleted)
+            allowedToFinish.complete(Unit)
+            assertFailsWith<CancellationException> { attempt.awaitCompletion() }
+            released.await()
         }
     }
 
-    test("an already cancelled owner still releases a delivered pending attempt") {
+    test("an already cancelled owner never starts a login") {
         frontend {
-            val released = CompletableDeferred<Long>()
+            var starts = 0
             val deadOwner = SupervisorJob().also { it.cancel() }
             val rpc = object : GlobalRpc by services.global {
-                override suspend fun startOAuthLogin(target: OAuthTarget) = Prepared
-                override suspend fun awaitOAuthLogin(attemptId: Long): Unit = error("must not start")
-                override suspend fun abandonPendingOAuthLogin(attemptId: Long) { released.complete(attemptId) }
+                override fun startOAuthLogin(target: OAuthTarget) = flow<OAuthLoginEvent> {
+                    starts++
+                    emit(OAuthLoginEvent.Authorization(Prepared))
+                }
             }
-            val attempt = startRpcOAuth(rpc, Target, CoroutineScope(coroutineContext + deadOwner))
-            assertFailsWith<CancellationException> { attempt.awaitCompletion() }
-            assertEquals(Prepared.attemptId, released.await())
+            assertFailsWith<CancellationException> { startRpcOAuth(rpc, Target, CoroutineScope(coroutineContext + deadOwner)) }
+            assertEquals(0, starts)
         }
     }
 
@@ -101,11 +112,10 @@ val rpcOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
         frontend {
             var starts = 0
             val rpc = object : GlobalRpc by services.global {
-                override suspend fun startOAuthLogin(target: OAuthTarget): OAuthAuthorization {
+                override fun startOAuthLogin(target: OAuthTarget) = flow<OAuthLoginEvent> {
                     starts++
                     error("private provider value")
                 }
-                override suspend fun abandonPendingOAuthLogin(attemptId: Long): Unit = error("no identity delivered")
                 override suspend fun cancelOAuthLogin(attemptId: Long): Unit = error("no identity delivered")
             }
             val failure = assertFailsWith<IllegalStateException> { startRpcOAuth(rpc, Target, this) }
@@ -114,29 +124,63 @@ val rpcOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
         }
     }
 
-    test("lost observation reply is sanitized and neither start nor await is replayed") {
+    test("lost operation after authorization is sanitized and not replayed") {
         frontend {
             var starts = 0
-            var observes = 0
-            val released = CompletableDeferred<Long>()
             val rpc = object : GlobalRpc by services.global {
-                override suspend fun startOAuthLogin(target: OAuthTarget): OAuthAuthorization {
+                override fun startOAuthLogin(target: OAuthTarget) = flow<OAuthLoginEvent> {
                     starts++
-                    return Prepared
-                }
-                override suspend fun awaitOAuthLogin(attemptId: Long) {
-                    observes++
+                    emit(OAuthLoginEvent.Authorization(Prepared))
                     error("private provider value")
                 }
-                override suspend fun abandonPendingOAuthLogin(attemptId: Long) { released.complete(attemptId) }
                 override suspend fun cancelOAuthLogin(attemptId: Long): Unit = error("unknown is not cancellation")
             }
             val attempt = startRpcOAuth(rpc, Target, this)
             val failure = assertFailsWith<IllegalStateException> { attempt.awaitCompletion() }
             assertEquals("Sign-in failed. Check the current authentication state before trying again.", failure.message)
             assertEquals(1, starts)
-            assertEquals(1, observes)
-            assertEquals(Prepared.attemptId, released.await())
+        }
+    }
+
+    test("transport replacement cancels the old operation and cannot replay it or cancel on a new peer") {
+        coroutineScope {
+            val stopped = CompletableDeferred<Unit>()
+            val connection = ManagedFrontendRpcConnection()
+            var firstCollections = 0
+            var replacementCalls = 0
+            val original = ActiveRpcPeer(object : RpcClient {
+                override suspend fun <T> call(call: RpcCall): T = error("No unary call on the detached peer.")
+                @Suppress("UNCHECKED_CAST")
+                override fun <T> callServerStreaming(call: RpcCall): Flow<T> = flow {
+                    firstCollections++
+                    try {
+                        emit(OAuthLoginEvent.Authorization(Prepared) as T)
+                        awaitCancellation()
+                    } finally {
+                        stopped.complete(Unit)
+                    }
+                }
+            }) { true }
+            val replacement = ActiveRpcPeer(object : RpcClient {
+                override suspend fun <T> call(call: RpcCall): T {
+                    replacementCalls++
+                    error("Exact cancellation must not target a replacement peer.")
+                }
+                override fun <T> callServerStreaming(call: RpcCall): Flow<T> = flow {
+                    replacementCalls++
+                    error("An OAuth operation must not be recollected on a replacement peer.")
+                }
+            }) { true }
+            connection.install(original)
+            val rpc = RpcServices(connection.bindOperation()).global
+            val attempt = startRpcOAuth(rpc, Target, this)
+            connection.detach(original)
+            connection.install(replacement)
+            assertFailsWith<IllegalStateException> { attempt.awaitCompletion() }
+            stopped.await()
+            assertFailsWith<IllegalStateException> { rpc.cancelOAuthLogin(Prepared.attemptId) }
+            assertEquals(1, firstCollections)
+            assertEquals(0, replacementCalls)
         }
     }
 
@@ -155,10 +199,8 @@ private suspend fun acceptedFrontendLifetime(source: KodexAuthSource, explicitCa
     frontend(login = login) {
         val released = CompletableDeferred<Unit>()
         val rpc = object : GlobalRpc by services.global {
-            override suspend fun abandonPendingOAuthLogin(attemptId: Long) {
-                services.global.abandonPendingOAuthLogin(attemptId)
-                released.complete(Unit)
-            }
+            override fun startOAuthLogin(target: OAuthTarget) =
+                services.global.startOAuthLogin(target).onCompletion { released.complete(Unit) }
         }
         val vm = createOpenAiLoginViewModel(
             dependencies = io.github.stream29.kodex.app.settings.contract.OpenAiLoginDependencies {

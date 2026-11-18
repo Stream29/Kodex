@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.rpc.RpcCall
 import kotlinx.rpc.RpcClient
 
@@ -50,6 +52,36 @@ public actual class ManagedFrontendRpcConnection actual constructor() : Frontend
         active.value = null
         failure.value = reason
         status.value = BackendConnectionState.Failed
+    }
+
+    actual override fun bindOperation(): RpcClient {
+        val peer = active.value?.takeIf { it.alive() }
+            ?: throw BackendConnectionLost("Backend is disconnected; operation was not submitted.")
+        fun ensurePeer() {
+            if (active.value !== peer || !peer.alive()) {
+                throw BackendConnectionLost("Original backend transport closed; operation outcome may be unknown.")
+            }
+        }
+        return object : RpcClient {
+            override suspend fun <T> call(call: RpcCall): T {
+                currentCoroutineContext().ensureActive()
+                ensurePeer()
+                return peer.client.call(call)
+            }
+
+            override fun <T> callServerStreaming(call: RpcCall): Flow<T> = channelFlow {
+                ensurePeer()
+                val watch = launch {
+                    active.first { it !== peer }
+                    throw BackendConnectionLost("Original backend transport closed; operation outcome may be unknown.")
+                }
+                try {
+                    peer.client.callServerStreaming<T>(call).collect { send(it) }
+                } finally {
+                    watch.cancel()
+                }
+            }.buffer(0)
+        }
     }
 
     actual override suspend fun <T> call(call: RpcCall): T {

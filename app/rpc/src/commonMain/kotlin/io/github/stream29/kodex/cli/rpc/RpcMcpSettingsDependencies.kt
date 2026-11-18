@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 /** Credentials and full settings baselines are private to this RPC adapter, not renderer state. */
 internal class RpcMcpSettingsDependencies(
     private val global: RpcGlobalSettings,
-    private val rpc: GlobalRpc,
+    private val oauthRpc: () -> GlobalRpc,
     private val mcp: RpcMcpSettings,
     private val accept: (suspend () -> Unit) -> Boolean,
 ) : McpSettingsDependencies {
@@ -68,7 +68,7 @@ internal class RpcMcpSettingsDependencies(
         val configuration = global.settings.value.mcpServers[serverName] as? McpServerConfiguration.StreamableHttp
             ?: return null
         if (configuration.oauth == null) return null
-        val attempt = startRpcOAuth(rpc, OAuthTarget.Mcp(serverName), interactionScope)
+        val attempt = startRpcOAuth(oauthRpc(), OAuthTarget.Mcp(serverName), interactionScope)
         return object : McpSettingsLogin {
             override val serverName: String = serverName
             override val authorizationUrl: String = attempt.authorizationUrl

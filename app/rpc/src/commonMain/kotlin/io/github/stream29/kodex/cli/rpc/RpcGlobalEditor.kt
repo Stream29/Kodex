@@ -25,6 +25,7 @@ public actual class RpcGlobalEditor actual constructor(
     private val rpc: GlobalRpc,
     applicationScope: CoroutineScope,
     launchBaseDirectory: String,
+    oauthRpc: () -> GlobalRpc,
 ) : GlobalSettingsViewModel {
     private val owner = Job(applicationScope.coroutineContext[Job])
     private val scope: CoroutineScope = CoroutineScope(applicationScope.coroutineContext + owner)
@@ -93,7 +94,7 @@ public actual class RpcGlobalEditor actual constructor(
         }, scope,
     )
     actual override val mcpSettings: McpSettingsViewModel = createMcpSettingsViewModel(
-        RpcMcpSettingsDependencies(global, rpc, mcp, ::acceptWrite), scope,
+        RpcMcpSettingsDependencies(global, oauthRpc, mcp, ::acceptWrite), scope,
     )
     actual override val hookSettings: HookSettingsViewModel = createHookSettingsViewModel(
         RpcHookSettingsDependencies(global, global.settings.projectState { it.hooks }, backend = true, accept = ::acceptWrite), scope,

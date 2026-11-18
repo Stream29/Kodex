@@ -7,6 +7,7 @@ import kotlinx.rpc.descriptor.serviceDescriptorOf
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 val frontendParityContractTest by testSuite {
     test("approved parity methods have required typed query or exact attempt parameters") {
@@ -15,12 +16,15 @@ val frontendParityContractTest by testSuite {
             "validateDirectory" to "query",
             "listDirectories" to "query",
             "evaluateContextPaths" to "query",
-            "abandonPendingOAuthLogin" to "attemptId",
+            "startOAuthLogin" to "target",
+            "cancelOAuthLogin" to "attemptId",
         )) {
             val callable = assertNotNull(descriptor.getCallable(method))
             val parameter = callable.parameters.single()
             assertEquals(parameterName, parameter.name)
             assertFalse(parameter.isOptional)
         }
+        assertNull(descriptor.getCallable("awaitOAuthLogin"))
+        assertNull(descriptor.getCallable("abandonPendingOAuthLogin"))
     }
 }

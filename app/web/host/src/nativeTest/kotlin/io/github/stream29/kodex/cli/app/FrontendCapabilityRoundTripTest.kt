@@ -163,16 +163,14 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
             withRoundTrip { f ->
                 f.wire.requireOpenAiPortsFree()
                 f.host { page ->
-                    f.rpc { rpc ->
+                    f.rpc(bound = true) { rpc ->
                         val old = rpc.global.getSettings()
                         val other = KodexAuthSource.entries.single { it != source }
                         assertTrue(rpc.global.compareAndSetSettings(old, old.copy(authSource = other)))
-                        val authorization = rpc.global.startOAuthLogin(OAuthTarget.OpenAi(source))
+                        val (authorization, waiter) = observeRoundTripOAuth(rpc.global.startOAuthLogin(OAuthTarget.OpenAi(source)))
                         f.authorize(authorization)
-                        val waiter = async { rpc.global.awaitOAuthLogin(authorization.attemptId) }
                         try {
                             withTimeout(10.seconds) { f.login.entered.await() }
-                            rpc.global.abandonPendingOAuthLogin(authorization.attemptId)
                             assertIs<LocalFrontendHostReply.OwnerClosed>(page.call(LocalFrontendHostRequest.CloseOwner))
                             waiter.cancelAndJoin()
                             assertFalse(f.login.exchangeCancelled.isCompleted)
@@ -206,26 +204,21 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
         }
     }
 
-    test("pending abandon and explicit cancel retain terminal results without token exchange") {
+    test("dropping pending observation and exact cancellation release listeners without exchange") {
         withRoundTrip { f ->
             f.wire.requireOpenAiPortsFree()
             f.host { page ->
-                f.rpc { rpc ->
+                f.rpc(bound = true) { rpc ->
                     val target = OAuthTarget.OpenAi(KodexAuthSource.Kodex)
-                    val abandoned = rpc.global.startOAuthLogin(target)
-                    rpc.global.abandonPendingOAuthLogin(abandoned.attemptId)
-                    rpc.global.abandonPendingOAuthLogin(abandoned.attemptId)
-                    val abandonedFailure = assertFails {
-                        rpc.global.awaitOAuthLogin(abandoned.attemptId)
-                    }
-                    assertReleasedAttempt(abandonedFailure)
+                    val (abandoned, observer) = observeRoundTripOAuth(rpc.global.startOAuthLogin(target))
+                    observer.cancelAndJoin()
                     f.wire.assertClosed(requireNotNull(Url(abandoned.url).parameters["redirect_uri"]))
-                    val next = rpc.global.startOAuthLogin(target)
+                    val (next, nextObserver) = observeRoundTripOAuth(rpc.global.startOAuthLogin(target))
                     assertTrue(next.attemptId > abandoned.attemptId)
-                    rpc.global.abandonPendingOAuthLogin(abandoned.attemptId)
+                    rpc.global.cancelOAuthLogin(abandoned.attemptId)
                     rpc.global.cancelOAuthLogin(next.attemptId)
                     val cancelledFailure = assertFails {
-                        rpc.global.awaitOAuthLogin(next.attemptId)
+                        nextObserver.await().getOrThrow()
                     }
                     assertReleasedAttempt(cancelledFailure)
                     assertTrue(f.login.exchanges.value.isEmpty())
@@ -239,14 +232,14 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
         withRoundTrip { f ->
             f.host { page ->
                 val redirect = f.wire.spareRedirect()
-                f.rpc { rpc ->
+                f.rpc(bound = true) { rpc ->
                     val old = rpc.global.getSettings()
                     val config = McpServerConfiguration.StreamableHttp(
                         url = "${f.provider.origin}/mcp", enabled = false,
                         oauth = McpOAuthConfiguration.Uninitialized(McpOAuthClient(redirectUri = redirect)),
                     )
                     assertTrue(rpc.global.compareAndSetSettings(old, old.copy(mcpServers = mapOf("fixture" to config))))
-                    val authorization = rpc.global.startOAuthLogin(OAuthTarget.Mcp("fixture"))
+                    val (authorization, waiter) = observeRoundTripOAuth(rpc.global.startOAuthLogin(OAuthTarget.Mcp("fixture")))
                     val prepared = assertIs<McpOAuthConfiguration.Uninitialized>(
                         (rpc.global.getSettings().mcpServers.getValue("fixture") as McpServerConfiguration.StreamableHttp).oauth,
                     )
@@ -257,10 +250,8 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
                         f.provider.registrations.value.single().getValue("redirect_uris").jsonArray.map { it.jsonPrimitive.content },
                     )
                     f.authorize(authorization)
-                    val waiter = async { rpc.global.awaitOAuthLogin(authorization.attemptId) }
                     try {
                         withTimeout(10.seconds) { f.provider.tokenEntered.await() }
-                        rpc.global.abandonPendingOAuthLogin(authorization.attemptId)
                         assertIs<LocalFrontendHostReply.OwnerClosed>(page.call(LocalFrontendHostRequest.CloseOwner))
                         waiter.cancelAndJoin()
                     } finally {
@@ -357,8 +348,8 @@ private class RoundTripFixture(val root: Path, val wire: RoundTripWire, val prov
     val login = RoundTripLogin(provider)
     lateinit var endpoint: BackendEndpoint
 
-    suspend fun <R> rpc(block: suspend CoroutineScope.(RpcServices) -> R): R =
-        withLocalRpcClient(home, endpoint) { block(RpcServices(RestoringRpcClient(it))) }
+    suspend fun <R> rpc(bound: Boolean = false, block: suspend CoroutineScope.(RpcServices) -> R): R =
+        withLocalRpcClient(home, endpoint) { block(RpcServices(RestoringRpcClient(if (bound) it.bindOperation() else it))) }
 
     suspend fun <R> host(block: suspend CoroutineScope.(RoundTripPage) -> R): R = withFrontendHostListener(
         endpoint, launch.toString(),
@@ -424,6 +415,28 @@ private class RoundTripFixture(val root: Path, val wire: RoundTripWire, val prov
         while (!SystemFileSystem.exists(path)) delay(20)
     }
 
+}
+
+private suspend fun CoroutineScope.observeRoundTripOAuth(
+    events: Flow<OAuthLoginEvent>,
+): Pair<OAuthAuthorization, Deferred<Result<Unit>>> {
+    val ready = CompletableDeferred<OAuthAuthorization>()
+    val observer = async {
+        runCatching {
+            var committed = false
+            events.collect { event ->
+                when (event) {
+                    is OAuthLoginEvent.Authorization -> check(ready.complete(event.authorization))
+                    OAuthLoginEvent.Committed -> {
+                        check(ready.isCompleted && !committed)
+                        committed = true
+                    }
+                }
+            }
+            check(committed)
+        }.onFailure { ready.completeExceptionally(it) }
+    }
+    return ready.await() to observer
 }
 
 private fun assertReleasedAttempt(failure: Throwable) {

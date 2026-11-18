@@ -15,6 +15,7 @@ public expect class LocalRpcConnection : FrontendRpcConnection {
     override val state: StateFlow<BackendConnectionState>
     override val failureReason: StateFlow<String?>
     override val available: Boolean
+    override fun bindOperation(): RpcClient
     override fun onReconnection(handler: suspend (RpcClient, () -> Boolean) -> Unit)
     override suspend fun <T> call(call: RpcCall): T
     override fun <T> callServerStreaming(call: RpcCall): Flow<T>

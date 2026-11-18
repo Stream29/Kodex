@@ -21,7 +21,7 @@ import io.github.stream29.kodex.rpc.models.DirectoryQuery
 import io.github.stream29.kodex.rpc.models.DirectoryListResult
 import io.github.stream29.kodex.rpc.models.DirectoryValidationResult
 import io.github.stream29.kodex.rpc.models.FrontendErrorAdmission
-import io.github.stream29.kodex.rpc.models.OAuthAuthorization
+import io.github.stream29.kodex.rpc.models.OAuthLoginEvent
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.utils.kotlinxioserialization.PathAsStringSerializer
 import kotlinx.coroutines.flow.Flow
@@ -165,17 +165,14 @@ public interface GlobalRpc {
      * Attempt ids are unique across both target kinds within the backend's lifetime and are not
      * reused during that lifetime. A common handle does not relax target-specific login limits.
      *
-     * A lost response does not prove that no attempt started; do not blindly replay this command.
+     * Collect once on the original connection. The first event contains the authorization URL;
+     * [OAuthLoginEvent.Committed] follows only after credentials are saved. Completion does not
+     * promise that an MCP server is connected. The operation can fail with a sanitized error.
+     * Cancelling observation releases a pending callback, not accepted exchange or persistence.
+     * A lost connection does not establish whether credentials were committed; never recollect
+     * automatically.
      */
-    public suspend fun startOAuthLogin(target: OAuthTarget): OAuthAuthorization
-
-    /**
-     * Observes an attempt until credential commit or a sanitized failure. Cancelling an observer
-     * does not cancel the attempt. Multiple observers may see the same retained terminal result;
-     * unknown or expired identities fail. A lost reply is not permission to replay a login.
-     * MCP success means credentials saved, not a connected server.
-     */
-    public suspend fun awaitOAuthLogin(attemptId: Long): Unit
+    public fun startOAuthLogin(target: OAuthTarget): Flow<OAuthLoginEvent>
 
     /**
      * Admits one frontend error observation to the bounded backend Hook queue. The result reports
@@ -191,15 +188,6 @@ public interface GlobalRpc {
      * asynchronous cleanup has finished.
      */
     public suspend fun cancelOAuthLogin(attemptId: Long): Unit
-
-    /**
-     * Releases only preparing/waiting state for this exact attempt. Unknown, finished or already
-     * accepted callbacks are no-ops. In particular it never cancels accepted exchange/persistence.
-     * Used for view release, timeout and lost local ownership, not explicit user cancellation.
-     * Does not delete credentials, undo MCP preparation writes or replay an unknown outcome.
-     * Existing [cancelOAuthLogin] remains the separate explicit-cancel operation.
-     */
-    public suspend fun abandonPendingOAuthLogin(attemptId: Long): Unit
 
     /**
      * Removes local credentials belonging to [source], for either Codex or Kodex storage.

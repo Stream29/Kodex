@@ -41,7 +41,8 @@ val backendOwnedOAuthSocketTest by testSuite(compartment = { TestCompartment.Rea
                 )
                 val client = HttpClient(CIO) { expectSuccess = false }
                 try {
-                    val authorization = oauth.start(OAuthTarget.Mcp("fixture"))
+                    val observation = observeOAuth(oauth.start(OAuthTarget.Mcp("fixture")))
+                    val authorization = observation.authorization
                     val redirect = requireNotNull(Url(authorization.url).parameters["redirect_uri"])
                     val bound = Url(redirect)
                     assertEquals("127.0.0.1", bound.host)
@@ -50,7 +51,7 @@ val backendOwnedOAuthSocketTest by testSuite(compartment = { TestCompartment.Rea
                     assertEquals(HttpStatusCode.BadRequest, client.get("$redirect?state=fixture-state&code=").status)
                     assertEquals(HttpStatusCode.BadRequest, client.get("$redirect?state=fixture-state&error=%20").status)
                     assertEquals(HttpStatusCode.OK, client.get("$redirect?state=fixture-state&code=fixture").status)
-                    oauth.await(authorization.attemptId)
+                    observation.awaitCommitted()
                     assertEquals(listOf("$redirect?state=fixture-state&code=fixture"), callbacks)
                 } finally {
                     client.close()

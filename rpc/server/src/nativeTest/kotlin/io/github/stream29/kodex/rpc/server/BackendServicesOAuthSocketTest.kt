@@ -32,7 +32,8 @@ val backendServicesOAuthSocketTest by testSuite(compartment = { TestCompartment.
                 assertIs<SettingsAuthenticationState.Unavailable>(global.getAuthentication())
                 val old = global.getSettings()
                 assertTrue(global.compareAndSetSettings(old, old.copy(authSource = KodexAuthSource.Kodex)))
-                val authorization = global.startOAuthLogin(OAuthTarget.OpenAi(KodexAuthSource.Kodex))
+                val observation = observeOAuth(global.startOAuthLogin(OAuthTarget.OpenAi(KodexAuthSource.Kodex)))
+                val authorization = observation.authorization
                 val url = Url(authorization.url)
                 val redirect = requireNotNull(url.parameters["redirect_uri"])
                 val callback = URLBuilder(redirect).apply {
@@ -40,8 +41,7 @@ val backendServicesOAuthSocketTest by testSuite(compartment = { TestCompartment.
                     parameters.append("code", "one-code")
                 }.buildString()
                 HttpClient(CIO).use { client -> assertEquals(HttpStatusCode.OK, client.get(callback).status) }
-                global.awaitOAuthLogin(authorization.attemptId)
-                global.awaitOAuthLogin(authorization.attemptId)
+                observation.awaitCommitted()
                 val summary = global.getAuthenticationFlow().filterIsInstance<SettingsAuthenticationState.Authenticated>().first()
                 assertEquals("account", summary.accountId)
                 assertEquals(1, login.exchanges)

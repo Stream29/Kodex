@@ -14,6 +14,8 @@ public interface FrontendRpcConnection : RpcClient {
     public val state: StateFlow<BackendConnectionState>
     public val failureReason: StateFlow<String?>
     public val available: Boolean
+    /** Binds a one-shot command or operation stream to the current peer without reconnection. */
+    public fun bindOperation(): RpcClient
     /**
      * Rebind frontend-owned resources before publishing a replacement connection.
      * The predicate describes that exact replacement transport, not an old connection.
@@ -37,6 +39,7 @@ public expect class ManagedFrontendRpcConnection() : FrontendRpcConnection {
     override val state: StateFlow<BackendConnectionState>
     override val failureReason: StateFlow<String?>
     override val available: Boolean
+    override fun bindOperation(): RpcClient
     override fun onReconnection(handler: suspend (RpcClient, () -> Boolean) -> Unit)
     public suspend fun install(peer: ActiveRpcPeer)
     public fun detach(peer: ActiveRpcPeer)
