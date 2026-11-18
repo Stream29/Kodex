@@ -76,9 +76,11 @@ val sqliteSchemaTest by testSuite {
         assertTrue(db.query("SELECT * FROM session_catalog WHERE cwd='/old'").isEmpty())
         db.execute("""DELETE FROM agent_commits WHERE agent_id=0 AND "index">=12""")
         assertEquals(listOf(0L, 1L, "", ".", t0.toString(), t2.toString()), db.catalog(0))
+        db.put(0, "assistant_message", 0, "{}", createdAt = t15)
         db.execute("INSERT INTO agents VALUES(100, 0, 0)")
+        db.put(100, "assistant_message", 0, "{}")
         db.put(100, "settings", 20, settingsPayload("child", "/child"), createdAt = Instant.fromEpochSeconds(1000))
-        assertEquals("", db.catalog(0)[2])
+        assertEquals(listOf(0L, 1L, "", ".", t15.toString(), t2.toString()), db.catalog(0))
     } }
     test("fork strict until, sparse boundaries and deleted index reuse") { withSchema { db ->
         db.session(0)
@@ -101,7 +103,7 @@ val sqliteSchemaTest by testSuite {
         db.session(0)
         assertEquals(listOf(0L, 0L, null, null, null, null), db.catalog(0))
     } }
-    test("controlled catalog scale and query plan use composite primary key") { withSchema { db ->
+    test("full catalog uses exact root index zero and keeps the settings lookup") { withSchema { db ->
         for (sessionCount in listOf(100, 1000)) {
             db.transaction {
                 val first = if (sessionCount == 100) 0 else 100
@@ -123,10 +125,13 @@ val sqliteSchemaTest by testSuite {
                 assertEquals(expected, rows.map { it[0] })
             }
             val elapsed = mark.elapsedNow()
-            val plan = db.query("EXPLAIN QUERY PLAN SELECT * FROM session_catalog WHERE archived=0 AND cwd='/cwd/3' ORDER BY session_id DESC").map { it.last().toString() }
-            assertTrue(plan.any { "SEARCH st USING PRIMARY KEY" in it }, plan.toString())
-            assertTrue(plan.any { "SEARCH c USING" in it }, plan.toString())
-            assertTrue(plan.none { "SCAN agent_commits" in it }, plan.toString())
+            for (filter in listOf("", "WHERE archived=0 AND cwd='/cwd/3' ")) {
+                val plan = db.query("EXPLAIN QUERY PLAN SELECT * FROM session_catalog ${filter}ORDER BY session_id")
+                    .map { it.last().toString() }
+                assertTrue(plan.any { "SEARCH st USING PRIMARY KEY" in it }, plan.toString())
+                assertTrue(plan.any { "commits_global_index (agent_id=? AND index=?)" in it }, plan.toString())
+                assertTrue(plan.none { "SCAN agent_commits" in it }, plan.toString())
+            }
             val historyPlan = db.query("EXPLAIN QUERY PLAN SELECT agent_id FROM agent_commits WHERE type='settings' AND json_extract(payload_json,'$.cwd')='/cwd/1'").joinToString()
             assertTrue("commits_settings_cwd" in historyPlan, historyPlan)
             assertTrue(elapsed.inWholeMilliseconds < 5000, "Five warm catalog queries exceeded 5s: $elapsed")

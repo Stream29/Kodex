@@ -77,7 +77,8 @@ SELECT s.session_id, s.archived,
         ELSE coalesce(json_extract(st.payload_json, '$.threadName'), '') END,
     CASE WHEN st.agent_id IS NULL THEN NULL
         ELSE coalesce(json_extract(st.payload_json, '$.cwd'), '.') END,
-    (SELECT c.created_at FROM agent_commits AS c WHERE c.agent_id = s.session_id AND c."index" = 0 LIMIT 1),
+    (SELECT c.created_at FROM agent_commits AS c INDEXED BY commits_global_index
+        WHERE c.agent_id = s.session_id AND c."index" = 0 ORDER BY c.type LIMIT 1),
     (SELECT c.created_at FROM agent_commits AS c WHERE c.agent_id = s.session_id ORDER BY c."index" DESC LIMIT 1)
 FROM sessions AS s
 LEFT JOIN agent_commits AS st
