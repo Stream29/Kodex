@@ -8,10 +8,12 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.terminal.AnsiLevel
+import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
@@ -49,6 +51,45 @@ private val ansiSnapshots = SnapshotStrategy { mosaic ->
 }
 
 val agentHistoryEntryInteractionTest by testSuite {
+    for (grouped in listOf(false, true)) {
+        test("terminal exit is a one-line disclosure, grouped=$grouped") {
+            val code = if (grouped) 23 else 0
+            val child = FakeMessage(4, MessageHistoryItemState.Ready(
+                StableTerminalExitedEvent(37, "background ".repeat(10), "first\n${"x".repeat(96)}\nlast", code),
+                Duration.ZERO,
+            ))
+            val item = if (grouped) FakeWorkGroup(4..4, listOf(child)) else child
+            runMosaicTest {
+                var snapshot = setContentAndSnapshot {
+                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                        Column(Modifier.width(24)) {
+                            HistoryItemContent(item, MosaicHistoryItemRenderer(item, 1, null, null))
+                        }
+                    }
+                }
+                val line = if (grouped) 1 else 0
+                if (grouped) {
+                    assertFalse("Terminal" in snapshot)
+                    sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
+                    awaitSnapshot()
+                    sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Release))
+                    snapshot = awaitSnapshot()
+                }
+                assertEquals("> Terminal #37 exit $code", snapshot.lines().filter(String::isNotBlank)[line].trimEnd())
+                assertEquals(line + 1, snapshot.lines().count(String::isNotBlank))
+                sendMouseEvent(MouseEvent(1, line, MouseEvent.Type.Press, MouseEvent.Button.Left))
+                awaitSnapshot()
+                sendMouseEvent(MouseEvent(1, line, MouseEvent.Type.Release))
+                val expanded = awaitSnapshot()
+                assertTrue("first" in expanded && "last" in expanded && "background" in expanded, expanded)
+                assertEquals(97, expanded.count { it == 'x' }) // command plus the x in "exit"
+                sendMouseEvent(MouseEvent(1, line, MouseEvent.Type.Press, MouseEvent.Button.Left))
+                awaitSnapshot()
+                sendMouseEvent(MouseEvent(1, line, MouseEvent.Type.Release))
+                assertEquals(snapshot, awaitSnapshot())
+            }
+        }
+    }
     test("requestUserInput rows preserve the original storage context action") {
         var selected: Int? = null
         val item = FakeRequestUserInput(

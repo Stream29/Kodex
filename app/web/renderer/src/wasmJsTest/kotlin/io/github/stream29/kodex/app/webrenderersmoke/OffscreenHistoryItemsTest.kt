@@ -38,6 +38,49 @@ import kotlin.time.Duration
 import kotlin.time.Instant
 
 val offscreenHistoryItemsTest by testSuite {
+    for (grouped in listOf(false, true)) {
+        test("terminal exit stays a single row and reveals the full command, grouped=$grouped") { offscreenTest {
+            val code = if (grouped) 23 else 0
+            val summary = "Terminal #37 exit $code"
+            val command = "first\n" + "x".repeat(120) + "\nlast"
+            val name = "long name ".repeat(22).trimEnd()
+            val child = object : MessageHistoryItemViewModel {
+                override val index = 4
+                override val state = MutableStateFlow(
+                    MessageHistoryItemState.Ready(StableTerminalExitedEvent(37, name, command, code), Duration.ZERO),
+                )
+                override suspend fun readTimestamp(): Instant? = null
+            }
+            val group = object : WorkGroupHistoryItemViewModel {
+                override val indexRange = child.index..child.index
+                override val itemCount = 1
+                override val state = MutableStateFlow<WorkGroupHistoryItemState>(WorkGroupHistoryItemState.Collapsed(Duration.ZERO))
+                override fun expand() { state.value = WorkGroupHistoryItemState.Expanded(listOf(child), Duration.ZERO) }
+                override fun collapse() { state.value = WorkGroupHistoryItemState.Collapsed(Duration.ZERO) }
+            }
+            val scene = OffscreenScene.create(width = 200) {
+                HistoryItemContent(if (grouped) group else child, rememberComposeHistoryItemRenderer())
+            }
+            try {
+                if (grouped) {
+                    scene.settle { scene.hasDescription("History group: Take 1 action") }
+                    assertFalse(scene.hasDescription(summary))
+                    scene.clickDescription("History group: Take 1 action")
+                }
+                scene.settle { scene.hasDescription(summary) }
+                val layouts = mutableListOf<TextLayoutResult>()
+                assertTrue(assertNotNull(scene.text(summary).config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
+                assertEquals(1, layouts.single().lineCount)
+                assertFalse(scene.hasText(name))
+                assertFalse(scene.hasText(command))
+                scene.clickDescription(summary)
+                scene.settle { scene.hasText(command) && scene.hasText(name) }
+                assertFalse(scene.hasDescription("History tool: $summary"))
+                scene.clickDescription(summary)
+                scene.settle { !scene.hasText(command) && !scene.hasText(name) }
+            } finally { scene.close() }
+        } }
+    }
     for (dark in listOf(false, true)) {
         for (status in listOf("failed", "running", "streaming", "starting", "in_progress", "inprogress", "completed")) {
             test("lazy collapsed tool uses status color for title and elapsed dark=$dark status=$status") { offscreenTest {

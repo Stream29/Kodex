@@ -62,6 +62,9 @@ public interface HistoryContentRenderer : HistoryFormRenderer {
         detailStyle: HistoryTextStyle, expandedSummary: String?,
         content: @Composable (HistoryToolDetails) -> Unit,
     )
+    @Composable public fun TerminalExit(
+        summary: String, status: String, expansionKey: Any, content: @Composable () -> Unit,
+    )
     @Composable public fun StablePatch(event: StablePatch)
     @Composable public fun PendingPatch(diff: Patch)
 }

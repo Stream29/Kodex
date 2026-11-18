@@ -77,7 +77,6 @@ public actual fun HistoryEventContent(
             is StableDeveloperMessage,
             is StableAgentMessage,
             is StableScheduleEvent,
-            is StableTerminalExitedEvent,
                 ->
                 HistoryMessageContent(
                     this,
@@ -85,6 +84,14 @@ public actual fun HistoryEventContent(
                     body = { text, supporting -> DetailText(text, if (supporting) TextStyle.Dim else TextStyle.Normal) },
                     assistantBody = { renderer.AssistantText(it) },
                 )
+            is StableTerminalExitedEvent -> renderer.TerminalExit(
+                summary = "Terminal #$sessionId exit $exitCode",
+                status = if (exitCode == 0) "completed" else "failed",
+                expansionKey = this,
+            ) {
+                name?.takeIf(String::isNotBlank)?.let { renderer.Text(it, TextStyle.Dim) }
+                renderer.Text(command, TextStyle.Normal)
+            }
             is StableAskUserEvent -> renderer.RequestUserInput(this, elapsed)
             is StableReasoning -> renderReasoning()
             is StableInvalidToolCall -> renderInvalidToolCall()

@@ -84,9 +84,28 @@ private class ComposeHistoryContentRenderer(
         detailStyle: HistoryTextStyle, expandedSummary: String?,
         content: @Composable (HistoryToolDetails) -> Unit,
     ) {
+        Disclosure(
+            summary, status, expansionKey, "History tool: $summary",
+            singleLineWhenCollapsed = rawName == "exec_command", expandedSummary = expandedSummary,
+        ) {
+            val details = remember(expansionKey, detailStyle) { ComposeHistoryToolDetails(detailStyle) }
+            rawName?.takeIf(String::isNotBlank)?.let { HistoryPlainText("Tool: $it", HistoryTextStyle.Dim) }
+            content(details)
+        }
+    }
+    @Composable override fun TerminalExit(
+        summary: String, status: String, expansionKey: Any, content: @Composable () -> Unit,
+    ) {
+        Disclosure(summary, status, expansionKey, summary, singleLineWhenCollapsed = true,
+            showElapsed = false, content = content)
+    }
+    @Composable private fun Disclosure(
+        summary: String, status: String, expansionKey: Any, description: String,
+        singleLineWhenCollapsed: Boolean, expandedSummary: String? = null,
+        showElapsed: Boolean = true, content: @Composable () -> Unit,
+    ) {
         var localExpanded by remember(expansionKey) { mutableStateOf(false) }
         val expanded = expansion.value ?: localExpanded
-        val details = remember(expansionKey, detailStyle) { ComposeHistoryToolDetails(detailStyle) }
         val color = when (status) {
             "failed" -> MaterialTheme.colorScheme.error
             "running", "streaming", "starting", "in_progress", "inprogress" -> MaterialTheme.colorScheme.tertiary
@@ -96,7 +115,7 @@ private class ComposeHistoryContentRenderer(
             HistoryDisclosureButton(
                 onClick = { if (expansion.value == null) localExpanded = !localExpanded else toggle.value?.invoke() },
                 modifier = Modifier.fillMaxWidth().semantics {
-                    contentDescription = "History tool: $summary"
+                    contentDescription = description
                     stateDescription = "$status; ${if (expanded) "Expanded" else "Collapsed"}"
                 },
                 stage = if (expansion.value != null) DisclosureFocusStage.Expanded else null,
@@ -108,17 +127,16 @@ private class ComposeHistoryContentRenderer(
                     MaterialText(
                         if (expanded) expandedSummary ?: summary else summary,
                         Modifier.weight(1f), color = color,
-                        maxLines = if (!expanded && rawName == "exec_command") 1 else Int.MAX_VALUE,
-                        overflow = if (!expanded && rawName == "exec_command") TextOverflow.Ellipsis else TextOverflow.Clip,
+                        maxLines = if (!expanded && singleLineWhenCollapsed) 1 else Int.MAX_VALUE,
+                        overflow = if (!expanded && singleLineWhenCollapsed) TextOverflow.Ellipsis else TextOverflow.Clip,
                         style = if (LocalHistoryPatchTitle.current) historyPatchTitleStyle() else historyToolTitleStyle(),
                     )
-                    elapsed.value?.let { MaterialText(it.historyElapsedSuffix(), color = color, style = MaterialTheme.typography.bodySmall) }
+                    if (showElapsed) elapsed.value?.let {
+                        MaterialText(it.historyElapsedSuffix(), color = color, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
-            if (expanded) {
-                rawName?.takeIf(String::isNotBlank)?.let { HistoryPlainText("Tool: $it", HistoryTextStyle.Dim) }
-                content(details)
-            }
+            if (expanded) content()
         }
     }
     @Composable override fun StablePatch(event: StablePatch) {

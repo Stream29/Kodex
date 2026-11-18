@@ -46,9 +46,16 @@ internal class MosaicHistoryContentRenderer : HistoryContentRenderer {
         detailStyle: HistoryTextStyle, expandedSummary: String?,
         content: @Composable (HistoryToolDetails) -> Unit,
     ) {
-        ToolEvent(summary, rawName, status, expansionKey, detailStyle.mosaicStyle(), expandedSummary) {
-            content(MosaicHistoryToolDetails(this))
+        HistoryEventDisclosure(summary, status, expansionKey, expandedSummary) {
+            val style = detailStyle.mosaicStyle()
+            rawName?.takeIf(String::isNotBlank)?.let { WrappedHistoryText("Tool: $it", style) }
+            content(MosaicHistoryToolDetails(ToolEventDetailsScope(style)))
         }
+    }
+    @Composable override fun TerminalExit(
+        summary: String, status: String, expansionKey: Any, content: @Composable () -> Unit,
+    ) {
+        HistoryEventDisclosure(summary, status, expansionKey, showElapsed = false, content = content)
     }
     @Composable override fun StablePatch(event: StablePatch) {
         val expansion = LocalHistoryExpansion.current

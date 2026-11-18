@@ -38,10 +38,10 @@ internal val LocalHistoryExpansion = staticCompositionLocalOf<HistoryExpansionBi
 internal val LocalHistoryElapsed = staticCompositionLocalOf<Duration?> { null }
 
 @Composable
-internal fun ToolEvent(
-    summary: String, rawName: String?, status: String, expansionKey: Any,
-    detailStyle: TextStyle = TextStyle.Unspecified, expandedSummary: String? = null,
-    content: @Composable ToolEventDetailsScope.() -> Unit,
+internal fun HistoryEventDisclosure(
+    summary: String, status: String, expansionKey: Any, expandedSummary: String? = null,
+    showElapsed: Boolean = true,
+    content: @Composable () -> Unit,
 ) {
     var localExpanded by remember(expansionKey) { mutableStateOf(false) }
     val externalExpansion = LocalHistoryExpansion.current
@@ -63,14 +63,12 @@ internal fun ToolEvent(
             } else {
                 HistoryItemHeader(
                     "${if (expanded) "v" else ">"} $summary",
+                    elapsed = LocalHistoryElapsed.current.takeIf { showElapsed },
                     modifier = Modifier.fillMaxWidth(), color = headerColor, textStyle = style,
                 )
             }
         }
-        if (expanded) {
-            rawName?.takeIf(String::isNotBlank)?.let { WrappedHistoryText("Tool: $it", detailStyle) }
-            ToolEventDetailsScope(detailStyle).content()
-        }
+        if (expanded) content()
     }
 }
 

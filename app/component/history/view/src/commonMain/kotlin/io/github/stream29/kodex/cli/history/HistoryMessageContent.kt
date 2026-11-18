@@ -28,12 +28,16 @@ internal fun HistoryMessageRow(
     body: @Composable (String, supporting: Boolean) -> Unit,
     turnMarker: @Composable (Duration) -> Unit,
     assistantBody: @Composable (String) -> Unit,
+    terminalExit: @Composable (StableTerminalExitedEvent, Duration) -> Unit,
 ) {
     val state by model.state.collectAsState()
     when (val current = state) {
         MessageHistoryItemState.Failed -> UiText("Error", UiTextRole.Error)
         is MessageHistoryItemState.Ready -> UiColumn {
-            HistoryMessageContent(current.event, { heading(it, current.elapsed) }, body, assistantBody)
+            when (val event = current.event) {
+                is StableTerminalExitedEvent -> key(model) { terminalExit(event, current.elapsed) }
+                else -> HistoryMessageContent(event, { heading(it, current.elapsed) }, body, assistantBody)
+            }
             current.turnDuration?.let { turnMarker(it) }
         }
     }
