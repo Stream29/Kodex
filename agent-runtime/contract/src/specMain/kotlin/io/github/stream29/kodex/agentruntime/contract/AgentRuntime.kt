@@ -97,6 +97,15 @@ public interface AgentRuntime : KodexAgentState {
      */
     public suspend fun resume()
 
+    /**
+     * Same turn execution as [resume], signalling this invocation's admission before sampling.
+     * @throws AgentResumeNotAdmittedException when state does not admit a new turn.
+     */
+    public suspend fun resume(onAccepted: () -> Unit)
+
+    /** Ephemeral identity of this owner, injected into the shells launched by it. */
+    public val invocationId: String
+
     /** Rechecks a due, still-current deadline. The returned job belongs to this Runtime. */
     public fun requestAwaitDeadlineCheck(expected: PendingAwaitDeadline): Job
 
@@ -146,6 +155,8 @@ public interface AgentRuntime : KodexAgentState {
 
     public val unifiedExecToolClient: UnifiedExecClient
 }
+
+public class AgentResumeNotAdmittedException : IllegalStateException("The Agent cannot resume in its current state.")
 
 /**
  * Convenience wrapper around [AgentRuntime.submit] for a single user message.

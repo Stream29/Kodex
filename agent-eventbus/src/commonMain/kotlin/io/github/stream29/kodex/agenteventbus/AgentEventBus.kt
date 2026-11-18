@@ -35,7 +35,11 @@ private class RepositoryAgentEventBus(
         content: List<ContentItem>,
     ) {
         if (content.isEmpty()) return
-        repository.open(agentId).runtime.submitUserMessage(content)
+        submitUserMessage(repository.open(agentId), content)
+    }
+
+    override suspend fun submitUserMessage(session: KodexAgentSession, content: List<ContentItem>) {
+        if (content.isNotEmpty()) session.runtime.submitUserMessage(content)
     }
 
     override suspend fun submitAskUserAnswer(

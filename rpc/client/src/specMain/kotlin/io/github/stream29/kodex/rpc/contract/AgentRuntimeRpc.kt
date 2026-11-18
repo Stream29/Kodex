@@ -132,7 +132,7 @@ public interface AgentRuntimeRpc {
      * Accepted work belongs to the backend Agent lifetime; cancelling the caller's wait does
      * not undo the persisted steer or cancel an accepted turn.
      */
-    public suspend fun submit(sessionIndex: Int, content: List<ContentItem>): Unit
+    public suspend fun submit(sessionIndex: Int, content: List<ContentItem>, expectedInvocationId: String? = null): Unit
 
     /**
      * Submits a first-time user answer for `ask_user` entry [askId] on [sessionIndex] through
@@ -201,6 +201,9 @@ public interface AgentRuntimeRpc {
      * AgentRunFailureReported; clients must not also send a local error notification.
      */
     public suspend fun resume(sessionIndex: Int): Unit
+
+    /** Starts the same backend-owned operation; returns when this invocation is admitted, not completed. */
+    public suspend fun requestResume(sessionIndex: Int): Boolean
 
     /**
      * Performs the existing forcedCompact operation and returns its committed checkpoint index.

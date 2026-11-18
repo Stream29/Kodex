@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.agentruntime.impl
 
+import kotlin.uuid.Uuid
+import io.github.stream29.kodex.agentruntime.contract.AgentResumeNotAdmittedException
+import kotlinx.coroutines.ensureActive
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
@@ -62,6 +65,7 @@ internal interface ResumableAgentLayer : KodexAgentState {
 }
 
 /** Builds the root Agent runtime. */
+@OptIn(kotlin.uuid.ExperimentalUuidApi::class)
 public actual fun KodexAgentState.buildMasterAgentRuntime(
     dependencies: KodexAgentDependencies,
 ): AgentRuntime {
@@ -69,7 +73,8 @@ public actual fun KodexAgentState.buildMasterAgentRuntime(
     return try {
         val logger = sessionLogger.agent()
         val runtime = try {
-            val fixedTools = fixedTools(dependencies)
+            val invocationId = Uuid.random().toString()
+            val fixedTools = fixedTools(dependencies, invocationId)
             val delegate = fixedTools.tools.closeOnFailure {
                 compactionRuntime(
                     modelCatalog = dependencies.modelCatalog,
@@ -98,6 +103,7 @@ public actual fun KodexAgentState.buildMasterAgentRuntime(
                 unifiedExecToolClient = fixedTools.unifiedExecToolClient,
                 logger = logger,
                 clock = dependencies.clock,
+                invocationId = invocationId,
             )
         } catch (failure: Throwable) {
             logger.error(failure) { "Agent runtime failed to open." }
@@ -124,6 +130,7 @@ private class AgentRuntimeImpl(
     override val unifiedExecToolClient: UnifiedExecToolClient,
     private val logger: KLogger,
     private val clock: Clock,
+    override val invocationId: String,
 ) : AgentRuntime, KodexAgentState by delegate {
     private val runningTurnSlot: MutableStateFlow<Job?> = MutableStateFlow(null)
     private val needsSubmittedSteerDrain: AtomicBoolean = AtomicBoolean(false)
@@ -137,6 +144,8 @@ private class AgentRuntimeImpl(
     override val stopEvents: Flow<AgentStopEvent> = mutableStopEvents.asSharedFlow()
 
     override suspend fun resume(): Unit = runAdmittedTurn()
+
+    override suspend fun resume(onAccepted: () -> Unit): Unit = runAdmittedTurn(onAccepted = onAccepted)
 
     override fun requestAwaitDeadlineCheck(expected: PendingAwaitDeadline): Job =
         launchAwaitCheck(AwaitWake.Deadline(expected))
@@ -161,11 +170,16 @@ private class AgentRuntimeImpl(
         }
     }
 
-    private suspend fun runAdmittedTurn(wake: AwaitWake? = null) {
+    private suspend fun runAdmittedTurn(wake: AwaitWake? = null, onAccepted: (() -> Unit)? = null) {
         var completedNormally = false
         withRunningTurn {
             val before = delegate.latestIndex.value
             val acceptedStart = isAcceptedResumeStart(before)
+            if (onAccepted != null) {
+                if (!acceptedStart) throw AgentResumeNotAdmittedException()
+                currentCoroutineContext().ensureActive()
+                onAccepted()
+            }
             var started = wake == null
             try {
                 if (wake != null) {

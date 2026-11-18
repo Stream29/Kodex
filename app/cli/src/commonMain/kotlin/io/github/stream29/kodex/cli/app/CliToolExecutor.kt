@@ -19,6 +19,7 @@ import io.github.stream29.kodex.mcp.contract.McpManagedServerState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.ReservedMcpServerNames
 import io.github.stream29.kodex.openai.CallToolResult
+import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.contextWindowTokenStatus
 import io.github.stream29.kodex.openai.effectiveContextWindow
@@ -28,13 +29,21 @@ import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.local.withLocalRpcClient
 import io.github.stream29.kodex.rpc.models.GeneratedImageArtifact
 import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
+import io.github.stream29.kodex.rpc.models.SessionSpawnRequest
+import io.github.stream29.kodex.rpc.models.SessionSpawnSource
+import io.github.stream29.kodex.rpc.models.SessionSpawnResult
+import io.github.stream29.kodex.rpc.models.SessionSpawnRejection
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.KodexAgentIdEnvironmentVariable
 import io.github.stream29.kodex.tool.unifiedexec.KodexHomeEnvironmentVariable
+import io.github.stream29.kodex.tool.unifiedexec.KodexInvocationIdEnvironmentVariable
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
+import io.github.stream29.kodex.utils.rpcexception.AskAnswerRejected
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
+import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlin.time.Clock
@@ -50,6 +59,8 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Serializable
 internal data class CliTerminalSummary(
@@ -256,7 +267,7 @@ internal suspend fun executeCliToolCommand(
     command: KodexToolLeafCommand,
     services: RpcServices,
     env: (String) -> String? = ::environmentVariable,
-    readStdin: () -> String = ::readCliStdinText,
+    readStdin: () -> String = if (command is SessionAgentOperation) ::readCliStdinTextStrict else ::readCliStdinText,
     writeStdout: (String) -> Unit = ::println,
     now: () -> Instant = Clock.System::now,
 ): Int {
@@ -377,7 +388,7 @@ internal suspend fun executeCliToolCommand(
                 ),
             )
         }
-        is SessionAgentOperation -> return executeSessionAgentQuery(command, services, writeStdout, now)
+        is SessionAgentOperation -> return executeSessionAgentOperation(command, services, writeStdout, now, env, readStdin)
         is SearchCommand -> {
             val agentId = resolveTargetAgentId(command.agent, env)
             val commands = command.resolveCommands().resolve(SearchCommands.serializer(), readStdin)
@@ -446,21 +457,44 @@ internal suspend fun executeCliToolCommand(
 
 private fun writeOperationFailure(
     code: String, message: String, phase: String, outcome: CliOperationOutcome, agentId: Int? = null,
+    sessionId: Int? = null,
     write: (String) -> Unit,
 ): Int {
-    val failure = CliOperationFailure(code, message, phase, outcome, agentId = agentId)
+    val failure = CliOperationFailure(code, message, phase, outcome, sessionId = sessionId, agentId = agentId)
     write(CliToolJson.encodeToString(CliOperationEnvelope.serializer(), CliOperationEnvelope(ok = false, error = failure)))
     return 1
 }
 
-private suspend fun executeSessionAgentQuery(
+private class OperationRejected(val code: String, val diagnostic: String) : Exception(diagnostic)
+
+private suspend fun executeSessionAgentOperation(
     command: SessionAgentOperation, services: RpcServices, write: (String) -> Unit, now: () -> Instant,
+    env: (String) -> String?, readStdin: () -> String,
 ): Int {
-    val agentId = (command as? ExplicitAgentOperation)?.agentId
-    val phase = if (command is SessionListCommand) "list" else "status"
+    var agentId = (command as? ExplicitAgentOperation)?.agentId
+    var sessionId: Int? = null
+    var phase = "input"
+    var mutationStarted = false
+    suspend fun activate(id: Int) {
+        phase = "activate"
+        services.global.keepSessionAlive(id)
+    }
+    suspend fun submit(id: Int, text: String, invocationId: String? = null) {
+        if (invocationId == null) activate(id)
+        phase = "submit"
+        mutationStarted = true
+        services.runtime.submit(id, listOf(ContentItem.InputText(text)), invocationId)
+    }
+    fun agentReceipt(id: Int, accepted: Boolean = false): JsonObject = buildJsonObject {
+        put("agent_id", id)
+        if (accepted) put("accepted", true)
+    }
+    fun fail(code: String, message: String, outcome: CliOperationOutcome): Int =
+        writeOperationFailure(code, message, phase, outcome, agentId, sessionId, write)
     val result: JsonElement = try {
         when (command) {
             is SessionListCommand -> {
+                phase = "list"
                 val rows = services.global.getSessionCatalog(command.includeArchived).map { entry ->
                     // This catalog enumerates root Sessions only; a root is addressed by its entry index.
                     CliSessionCatalogRow(
@@ -470,21 +504,116 @@ private suspend fun executeSessionAgentQuery(
                 }
                 CliToolJson.encodeToJsonElement(CliSessionCatalogOutput.serializer(), CliSessionCatalogOutput(rows))
             }
-            is AgentStatusCommand -> CliToolJson.encodeToJsonElement(
-                CliAgentStatusOutput.serializer(), readAgentStatus(services, command.agentId, now),
-            )
+            is AgentStatusCommand -> {
+                phase = "status"
+                CliToolJson.encodeToJsonElement(CliAgentStatusOutput.serializer(), readAgentStatus(services, command.agentId, now))
+            }
+            is SessionSpawnCommand -> {
+                val message = command.message?.readText(readStdin)
+                val source = readSpawnSource(env)
+                val launch = SystemCoroutineFileSystem.resolve(Path("."))
+                val absoluteOverride = command.cwd?.let { raw ->
+                    require('\u0000' !in raw)
+                    val path = Path(raw)
+                    if (path.isAbsolute) path else Path(launch, raw)
+                }
+                phase = "create"
+                mutationStarted = true
+                val response = services.global.spawnSession(SessionSpawnRequest(
+                    launch.toString(), absoluteOverride?.toString(), source, command.model, command.reasoningEffort,
+                    command.serviceTier, command.requestUserInputMode,
+                ))
+                val created = when (response) {
+                    is SessionSpawnResult.Created -> response
+                    is SessionSpawnResult.Rejected -> when (response.reason) {
+                        SessionSpawnRejection.InvalidSource -> throw OperationRejected("invalid_source", "The calling Agent is not live on the selected backend.")
+                        SessionSpawnRejection.InvalidDirectory -> throw OperationRejected("invalid_directory", "The initial working directory is not a valid directory.")
+                        SessionSpawnRejection.InvalidConfiguration -> throw OperationRejected("invalid_configuration", "The selected model does not support the requested configuration.")
+                    }
+                }
+                sessionId = created.sessionId
+                agentId = created.rootAgentId
+                mutationStarted = false
+                if (message != null) submit(created.rootAgentId, message, created.invocationId)
+                buildJsonObject {
+                    put("session_id", created.sessionId)
+                    put("root_agent_id", created.rootAgentId)
+                    put("submitted", message != null)
+                }
+            }
+            is AgentSubmitCommand -> {
+                submit(command.agentId, command.message.readText(readStdin))
+                agentReceipt(command.agentId, accepted = true)
+            }
+            is AgentResumeCommand -> {
+                activate(command.agentId)
+                phase = "resume"
+                mutationStarted = true
+                if (!services.runtime.requestResume(command.agentId)) {
+                    throw OperationRejected("resume_not_admitted", "The Agent cannot accept a new turn now.")
+                }
+                agentReceipt(command.agentId, accepted = true)
+            }
+            is AgentStopCommand -> {
+                activate(command.agentId)
+                phase = "stop"
+                mutationStarted = true
+                services.runtime.cancelRunningTurn(command.agentId)
+                agentReceipt(command.agentId)
+            }
+            is AskAnswerCommand -> {
+                val response = CliToolJson.decodeFromString(RequestUserInputResponse.serializer(), command.response.readText(readStdin))
+                activate(command.agentId)
+                phase = "answer"
+                mutationStarted = true
+                services.runtime.submitAskUserAnswer(command.agentId, command.askId, response)
+                buildJsonObject {
+                    put("agent_id", command.agentId)
+                    put("ask_id", command.askId)
+                    put("accepted", true)
+                }
+            }
         }
     } catch (cancelled: CancellationException) {
         throw cancelled
+    } catch (rejected: OperationRejected) {
+        return fail(rejected.code, rejected.diagnostic, CliOperationOutcome.Rejected)
+    } catch (rejected: AskAnswerRejected) {
+        return if (rejected.alreadyAnswered) {
+            fail("already_answered", "The question has already been answered.", CliOperationOutcome.Rejected)
+        } else {
+            fail("ask_not_found", "The question does not exist on the target Agent.", CliOperationOutcome.Rejected)
+        }
     } catch (_: SessionNotFound) {
-        return writeOperationFailure("agent_not_found", "The target Agent does not exist.",
-            phase, CliOperationOutcome.Rejected, agentId, write)
+        return fail("target_not_found", "The target does not exist.", CliOperationOutcome.Rejected)
+    } catch (_: SessionNotActive) {
+        return fail("agent_not_active", "The target Agent is no longer active.", CliOperationOutcome.Rejected)
     } catch (_: Exception) {
-        return writeOperationFailure("query_failed", "The selected backend did not return the requested snapshot.",
-            phase, CliOperationOutcome.Failed, agentId, write)
+        return when {
+            phase == "input" -> fail("invalid_input", "Input must be valid, nonempty UTF-8 in the required format.", CliOperationOutcome.Rejected)
+            mutationStarted -> fail("result_unknown", "The selected backend did not confirm the operation. Do not replay it blindly.", CliOperationOutcome.Unknown)
+            else -> fail("operation_failed", "The selected backend did not complete this operation.", CliOperationOutcome.Failed)
+        }
     }
     write(CliToolJson.encodeToString(CliOperationEnvelope.serializer(), CliOperationEnvelope(ok = true, result = result)))
     return 0
+}
+
+private fun CliPayloadInput<String>.readText(readStdin: () -> String): String =
+    (when (this) {
+        is CliPayloadInput.Inline -> value
+        CliPayloadInput.Stdin -> readStdin()
+    }).also { require(it.isNotEmpty()) }
+
+private fun readSpawnSource(env: (String) -> String?): SessionSpawnSource? {
+    val id = env(KodexAgentIdEnvironmentVariable)
+    val owner = env(KodexInvocationIdEnvironmentVariable)
+    if (id == null && owner == null) return null
+    val index = id?.toIntOrNull()
+    if (index == null || index < 0 || owner.isNullOrBlank()) {
+        throw OperationRejected("invalid_source", "The calling Agent context could not be verified.")
+    }
+    return SessionSpawnSource(index, owner)
 }
 
 private suspend fun readAgentStatus(services: RpcServices, agentId: Int, now: () -> Instant): CliAgentStatusOutput {

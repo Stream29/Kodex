@@ -8,6 +8,7 @@ import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.readBytes
 import kotlinx.io.Buffer
 import kotlinx.io.readString
+import kotlinx.io.readByteArray
 import platform.posix.ferror
 import platform.posix.fputs
 import platform.posix.fread
@@ -20,7 +21,12 @@ internal fun printCliMessage(message: String, error: Boolean) {
 }
 
 @OptIn(ExperimentalForeignApi::class)
-internal fun readCliStdinText(): String = memScoped {
+internal fun readCliStdinText(): String = readCliStdin().readString()
+
+internal fun readCliStdinTextStrict(): String = readCliStdin().readByteArray().decodeToString(throwOnInvalidSequence = true)
+
+@OptIn(ExperimentalForeignApi::class)
+private fun readCliStdin(): Buffer = memScoped {
     val chunkSize = 8192
     val buffer = allocArray<ByteVar>(chunkSize)
     val out = Buffer()
@@ -34,5 +40,5 @@ internal fun readCliStdinText(): String = memScoped {
             break
         }
     }
-    out.readString()
+    out
 }

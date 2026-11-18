@@ -3,6 +3,7 @@ package io.github.stream29.kodex.rpc.server
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
+import io.github.stream29.kodex.agentruntime.contract.AgentResumeNotAdmittedException
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -36,6 +37,9 @@ import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecProcessSession
 import io.github.stream29.kodex.tool.webrun.WebRunToolClient
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported
+import io.github.stream29.kodex.agentstorage.contract.ext.AskUserAlreadyAnswered
+import io.github.stream29.kodex.agentstorage.contract.ext.AskUserEntryNotFound
+import io.github.stream29.kodex.utils.rpcexception.AskAnswerRejected
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.NoMatchException
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
@@ -45,6 +49,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -102,18 +107,23 @@ internal class BackendAgentRuntimeRpc(
         }
     }
 
-    private suspend fun <T> command(index: Int, block: suspend RuntimeView.() -> T): T {
+    private suspend fun <T> command(index: Int, block: suspend RuntimeView.() -> T): T =
+        startCommand(index, block = block).await()
+
+    private suspend fun <T> startCommand(
+        index: Int, start: CoroutineStart = CoroutineStart.UNDISPATCHED, block: suspend RuntimeView.() -> T,
+    ): Deferred<T> {
         currentCoroutineContext().ensureActive()
         val view = view(index)
         val currentSession = openSession(index)
         if (currentSession !== view.session) throw SessionNotActive()
-        return view.operations.async(start = CoroutineStart.UNDISPATCHED) {
+        return view.operations.async(start = start) {
             checkAdmission()
             if (repository.openSessions.value[index] !== view.session || !view.session.coroutineContext.job.isActive) {
                 throw SessionNotActive()
             }
             view.block()
-        }.await()
+        }
     }
 
     private suspend fun <R> checkedStorage(
@@ -209,10 +219,15 @@ internal class BackendAgentRuntimeRpc(
         emitAll(view.session.observeActive(checkAdmission, source))
     }
 
-    override suspend fun submit(sessionIndex: Int, content: List<ContentItem>): Unit =
+    override suspend fun submit(sessionIndex: Int, content: List<ContentItem>, expectedInvocationId: String?): Unit =
         command(sessionIndex) {
             if (content.isEmpty()) return@command
-            eventBus.submitUserMessage(sessionIndex, content)
+            if (expectedInvocationId == null) {
+                eventBus.submitUserMessage(sessionIndex, content)
+            } else {
+                if (runtime.invocationId != expectedInvocationId) throw SessionNotActive()
+                eventBus.submitUserMessage(session, content)
+            }
         }
 
     override suspend fun submitAskUserAnswer(
@@ -221,7 +236,13 @@ internal class BackendAgentRuntimeRpc(
         response: RequestUserInputResponse,
     ): Unit =
         command(sessionIndex) {
-            eventBus.submitAskUserAnswer(sessionIndex, askId, response)
+            try {
+                eventBus.submitAskUserAnswer(sessionIndex, askId, response)
+            } catch (_: AskUserEntryNotFound) {
+                throw AskAnswerRejected(alreadyAnswered = false)
+            } catch (_: AskUserAlreadyAnswered) {
+                throw AskAnswerRejected(alreadyAnswered = true)
+            }
         }
 
     override suspend fun createAskUser(
@@ -288,6 +309,25 @@ internal class BackendAgentRuntimeRpc(
 
     override suspend fun forcedCompact(sessionIndex: Int): Int = command(sessionIndex) {
         exclusive { runtime.forcedCompact() }
+    }
+
+    override suspend fun requestResume(sessionIndex: Int): Boolean {
+        val accepted = CompletableDeferred<Boolean>()
+        val run = startCommand(sessionIndex, CoroutineStart.DEFAULT) {
+            val completed = tryExclusive {
+                runtime.resume { accepted.complete(true) }
+                true
+            }
+            if (completed == null) accepted.complete(false)
+        }
+        run.invokeOnCompletion { failure ->
+            when (failure) {
+                is ConcurrentAgentRuntimeResumeException, is AgentResumeNotAdmittedException -> accepted.complete(false)
+                null -> if (!accepted.isCompleted) accepted.complete(false) else Unit
+                else -> accepted.completeExceptionally(failure)
+            }
+        }
+        return accepted.await()
     }
 
     override suspend fun clearPending(sessionIndex: Int): Int =
@@ -443,6 +483,15 @@ private class RuntimeView(val session: KodexAgentSession) {
 
     suspend fun <T> exclusive(block: suspend () -> T): T {
         check(admission.tryLock()) { "This Agent already has a running or history operation." }
+        try {
+            return block()
+        } finally {
+            admission.unlock()
+        }
+    }
+
+    suspend fun <T : Any> tryExclusive(block: suspend () -> T): T? {
+        if (!admission.tryLock()) return null
         try {
             return block()
         } finally {

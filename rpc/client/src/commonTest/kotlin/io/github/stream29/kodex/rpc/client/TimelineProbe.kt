@@ -39,7 +39,8 @@ internal abstract class StubAgentRuntimeRpc : AgentRuntimeRpc {
     override fun getStateFlow(sessionIndex: Int): Flow<AgentStateValue> = throw UnsupportedOperationException()
     override fun currentFlow(sessionIndex: Int, nonce: Long): Flow<ResponsesStreamEvent> =
         throw UnsupportedOperationException()
-    override suspend fun submit(sessionIndex: Int, content: List<ContentItem>) = throw UnsupportedOperationException()
+    override suspend fun submit(sessionIndex: Int, content: List<ContentItem>, expectedInvocationId: String?) =
+        throw UnsupportedOperationException()
     override suspend fun submitAskUserAnswer(
         sessionIndex: Int,
         askId: Int,
@@ -58,6 +59,7 @@ internal abstract class StubAgentRuntimeRpc : AgentRuntimeRpc {
         arguments: ImageGenToolArguments,
     ): GeneratedImageArtifact = throw UnsupportedOperationException()
     override suspend fun resume(sessionIndex: Int) = throw UnsupportedOperationException()
+    override suspend fun requestResume(sessionIndex: Int): Boolean = throw UnsupportedOperationException()
     override suspend fun forcedCompact(sessionIndex: Int): Int = throw UnsupportedOperationException()
     override suspend fun clearPending(sessionIndex: Int): Int = throw UnsupportedOperationException()
     override suspend fun revertHistory(

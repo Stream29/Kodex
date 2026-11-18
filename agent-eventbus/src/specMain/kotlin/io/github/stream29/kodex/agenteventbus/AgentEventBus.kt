@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.agenteventbus
 
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
+import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 
@@ -29,6 +30,9 @@ public interface AgentEventBus {
         agentId: Int,
         content: List<ContentItem>,
     )
+
+    /** Delivers to a previously verified owner without re-resolving a reusable numeric id. */
+    public suspend fun submitUserMessage(session: KodexAgentSession, content: List<ContentItem>)
 
     /**
      * Records first-time [response] for [askId] in [agentId]'s `AskUserSnapshot` timeline and

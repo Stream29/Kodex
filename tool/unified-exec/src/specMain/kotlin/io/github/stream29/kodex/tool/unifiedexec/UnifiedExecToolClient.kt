@@ -11,6 +11,9 @@ import kotlinx.io.files.Path
 /** Environment variable injected into `exec_command` subprocesses carrying the owning Agent ID. */
 public const val KodexAgentIdEnvironmentVariable: String = "KODEX_AGENT_ID"
 
+/** Identifies the live runtime that launched a shell; not a backend login credential. */
+public const val KodexInvocationIdEnvironmentVariable: String = "KODEX_INVOCATION_ID"
+
 /** Environment variable injected into `exec_command` subprocesses carrying the active Kodex Home path. */
 public const val KodexHomeEnvironmentVariable: String = "KODEX_HOME"
 

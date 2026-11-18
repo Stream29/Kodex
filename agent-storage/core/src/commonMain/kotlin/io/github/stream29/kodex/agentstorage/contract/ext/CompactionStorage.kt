@@ -65,9 +65,9 @@ public actual suspend fun MutableKodexAgentStorage.answerAskUser(
     require(currentLatest >= 0) { "AskUser updates require an existing state index." }
     val existing = getAskUsersAt(currentLatest)
     val entryIndex = existing.indexOfFirst { it.askId == askId }
-    require(entryIndex >= 0) { "Unknown ask_user askId: $askId" }
+    if (entryIndex < 0) throw AskUserEntryNotFound(askId)
     val target = existing[entryIndex]
-    check(target.answer == null) { "ask_user #$askId has already been answered." }
+    if (target.answer != null) throw AskUserAlreadyAnswered(askId)
 
     val answeredEntry = target.copy(
         answer = AskUserAnswer(

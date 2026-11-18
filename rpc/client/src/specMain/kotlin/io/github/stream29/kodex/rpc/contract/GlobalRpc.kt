@@ -4,6 +4,8 @@ package io.github.stream29.kodex.rpc.contract
 
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.rpc.models.SessionSpawnRequest
+import io.github.stream29.kodex.rpc.models.SessionSpawnResult
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
@@ -288,6 +290,9 @@ public interface GlobalRpc {
      * Does not select tabs, consume the frontend composer or establish a keepalive lease.
      */
     public suspend fun createSession(cwd: @Serializable(with = PathAsStringSerializer::class) Path): Int
+
+    /** Creates an independent root with verified source settings and/or explicit overrides. Never submits work. */
+    public suspend fun spawnSession(request: SessionSpawnRequest): SessionSpawnResult
 
     /**
      * Creates and persists an external one-shot (`cron == null`) or recurring 5-field cron schedule

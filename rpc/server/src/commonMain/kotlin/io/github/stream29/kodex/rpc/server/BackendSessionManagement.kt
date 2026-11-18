@@ -5,16 +5,24 @@ import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
+import io.github.stream29.kodex.agentstorage.contract.getSettingsAtOrNull
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.sessiontitle.attachSessionTitleGeneration
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.Reasoning
+import io.github.stream29.kodex.openai.ModelInfo
+import io.github.stream29.kodex.openai.availableServiceTiers
+import io.github.stream29.kodex.rpc.models.SessionSpawnRequest
+import io.github.stream29.kodex.rpc.models.SessionSpawnResult
+import io.github.stream29.kodex.rpc.models.SessionSpawnRejection
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -76,6 +84,53 @@ internal class BackendSessionManagement(
                 cwd = cwd,
             )
             create(initialSettings, attachAutoTitle = true) { "Session $it" }.first
+        }
+    }
+
+    suspend fun spawnSession(request: SessionSpawnRequest, models: () -> List<ModelInfo>): SessionSpawnResult = inBackend {
+        commands.withLock {
+            val inherited = request.source?.let { source ->
+                val owner = repository.openSessions.value[source.agentId]
+                if (owner == null || !owner.coroutineContext.job.isActive || owner.runtime.invocationId != source.invocationId) {
+                    return@withLock SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidSource)
+                }
+                owner.storage.getSettingsAtOrNull(Int.MAX_VALUE)
+                    ?: return@withLock SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidSource)
+            }
+            val rawDirectory = request.workingDirectory ?: inherited?.cwd?.toString() ?: request.launchDirectory
+            val cwd = resolveSpawnDirectory(rawDirectory)
+                ?: return@withLock SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidDirectory)
+            val defaults = newSessionDefaults()
+            val model = request.model ?: inherited?.model ?: defaults.model
+            val effort = request.reasoningEffort ?: inherited?.reasoning?.effort ?: defaults.reasoningEffort
+            val tier = request.serviceTier ?: inherited?.serviceTier ?: defaults.serviceTier
+            val catalog = models()
+            val info = catalog.firstOrNull { it.slug == model }
+            if ((request.model != null && catalog.isNotEmpty() && info == null) ||
+                (info != null && info.supportedReasoningLevels.isNotEmpty() &&
+                    info.supportedReasoningLevels.none { it.effort == effort }) ||
+                (info != null && tier !in info.availableServiceTiers())
+            ) return@withLock SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidConfiguration)
+            val initial = KodexAgentSettings(
+                model = model, reasoning = Reasoning(effort = effort), serviceTier = tier, cwd = cwd,
+                requestUserInputMode = request.requestUserInputMode ?: inherited?.requestUserInputMode ?: defaults.requestUserInputMode,
+            )
+            val (id, created) = create(initial, attachAutoTitle = true) { "Session $it" }
+            SessionSpawnResult.Created(id, id, created.runtime.invocationId)
+        }
+    }
+
+    private suspend fun resolveSpawnDirectory(value: String): Path? {
+        if (value.isBlank() || '\u0000' in value) return null
+        return try {
+            val path = Path(value)
+            if (!path.isAbsolute) return null
+            val resolved = SystemCoroutineFileSystem.resolve(path)
+            resolved.takeIf { SystemCoroutineFileSystem.metadataOrNull(it)?.isDirectory == true }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
         }
     }
 

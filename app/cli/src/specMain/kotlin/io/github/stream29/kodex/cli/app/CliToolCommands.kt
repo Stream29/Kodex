@@ -118,10 +118,11 @@ public class TerminalKillCommand : KodexAgentToolCommand(
 
 public class AskCommand : KodexGroupCommand(
     "ask",
-    "Create non-blocking structured user-input questions or inspect existing questions and answers.",
+    "Create, inspect, or answer structured user-input questions.",
     AskCreateCommand(),
     AskListCommand(),
     AskGetCommand(),
+    AskAnswerCommand(),
     isToolGroup = true,
 )
 

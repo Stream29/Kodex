@@ -19,15 +19,68 @@ import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import io.github.stream29.kodex.rpc.models.SessionSpawnRequest
+import io.github.stream29.kodex.rpc.models.SessionSpawnSource
+import io.github.stream29.kodex.rpc.models.SessionSpawnResult
+import io.github.stream29.kodex.rpc.models.SessionSpawnRejection
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.rpcexception.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
+import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.test.*
 import kotlin.time.Instant
 
 val backendSessionManagementTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("spawn inherits only configuration from a matching live owner; rejects stale and forged sources") {
+        runtimeFixture { repository, _, runtime ->
+            val management = testSessionManagement(repository)
+            val directory = SystemCoroutineFileSystem.resolve(SystemTemporaryDirectory)
+            val source = assertIs<SessionSpawnResult.Created>(management.spawnSession(SessionSpawnRequest(
+                launchDirectory = directory.toString(), model = OpenAiModelId("caller"), reasoningEffort = ReasoningEffort.High,
+                serviceTier = ServiceTier.Flex, requestUserInputMode = RequestUserInputMode.NoQuestion,
+            )) { emptyList() })
+            val caller = repository.openSessions.value.getValue(source.rootAgentId)
+            val previous = caller.storage.getSettingsAt(0)
+            caller.runtime.appendUserMessage(listOf(ContentItem.InputText("caller-only history")))
+            val copied = assertIs<SessionSpawnResult.Created>(management.spawnSession(SessionSpawnRequest(
+                launchDirectory = "/not-used",
+                source = SessionSpawnSource(source.rootAgentId, source.invocationId),
+                serviceTier = ServiceTier.Default,
+            )) { emptyList() })
+            val fresh = repository.openSessions.value.getValue(copied.rootAgentId).storage.getSettingsAt(0)
+            assertEquals(previous.model, fresh.model)
+            assertEquals(previous.reasoning.effort, fresh.reasoning.effort)
+            assertEquals(previous.requestUserInputMode, fresh.requestUserInputMode)
+            assertEquals(directory, fresh.cwd)
+            assertEquals(ServiceTier.Default, fresh.serviceTier)
+            assertEquals("Session ${copied.sessionId}", fresh.threadName)
+            assertNotEquals(previous.windowId, fresh.windowId)
+            assertNotEquals(previous.turnId, fresh.turnId)
+            assertEquals(0, runtime.getLatestIndex(copied.rootAgentId))
+            assertFailsWith<SessionNotActive> {
+                runtime.submit(copied.rootAgentId, listOf(ContentItem.InputText("wrong owner")), source.invocationId)
+            }
+            assertEquals(0, runtime.getLatestIndex(copied.rootAgentId))
+            val unchanged = repository.list()
+            val request = SessionSpawnRequest(directory.toString(), source = SessionSpawnSource(source.rootAgentId, "other-backend"))
+            assertEquals(SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidSource), management.spawnSession(request) { emptyList() })
+            repository.closeSession(source.sessionId)
+            management.keepSessionAlive(source.sessionId)
+            assertEquals(SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidSource),
+                management.spawnSession(request.copy(source = SessionSpawnSource(source.rootAgentId, source.invocationId))) { emptyList() })
+            assertEquals(unchanged, repository.list())
+            assertEquals(SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidDirectory),
+                management.spawnSession(SessionSpawnRequest("relative-path")) { emptyList() })
+            assertEquals(SessionSpawnResult.Rejected(SessionSpawnRejection.InvalidConfiguration),
+                management.spawnSession(SessionSpawnRequest(directory.toString(), model = OpenAiModelId("unavailable"))) {
+                    listOf(ModelInfo(slug = OpenAiModelId("available"), displayName = "Fixture"))
+                })
+        }
+    }
+
     test("catalog preserves missing dates and does not activate entries") {
         runtimeFixture { repository, initial, runtime ->
             val management = testSessionManagement(repository)

@@ -12,6 +12,7 @@ import io.github.stream29.kodex.tool.readmedia.ReadMediaToolClient
 import io.github.stream29.kodex.tool.readmedia.ReadMediaTools
 import io.github.stream29.kodex.tool.unifiedexec.KodexAgentIdEnvironmentVariable
 import io.github.stream29.kodex.tool.unifiedexec.KodexHomeEnvironmentVariable
+import io.github.stream29.kodex.tool.unifiedexec.KodexInvocationIdEnvironmentVariable
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecToolClient
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
 import io.github.stream29.kodex.utils.coroutines.closeOnFailure
@@ -24,6 +25,7 @@ internal data class KodexAgentFixedTools(
 
 internal fun KodexAgentState.fixedTools(
     dependencies: KodexAgentDependencies,
+    invocationId: String,
 ): KodexAgentFixedTools {
     val agentSettingsProvider: suspend () -> KodexAgentSettings = {
         storage.getSettingsAt(storage.latestIndex())
@@ -34,7 +36,10 @@ internal fun KodexAgentState.fixedTools(
     val environmentProvider: suspend () -> Map<String, String> = {
         buildMap {
             put(KodexHomeEnvironmentVariable, dependencies.contextSettings.value.kodexHome.toString())
-            agentId?.let { id -> put(KodexAgentIdEnvironmentVariable, id.toString()) }
+            agentId?.let { id ->
+                put(KodexAgentIdEnvironmentVariable, id.toString())
+                put(KodexInvocationIdEnvironmentVariable, invocationId)
+            }
         }
     }
     val unifiedExecClient = UnifiedExecToolClient(

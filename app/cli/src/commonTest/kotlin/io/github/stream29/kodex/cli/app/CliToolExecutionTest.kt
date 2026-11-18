@@ -6,11 +6,14 @@ import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.mcp.contract.McpCatalogTool
 import io.github.stream29.kodex.openai.CallToolResult
+import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -19,9 +22,14 @@ import io.github.stream29.kodex.openai.SearchResponse
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
+import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.server.defaultBackendSettings
 import io.github.stream29.kodex.rpc.server.withBackendServices
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.KodexAgentIdEnvironmentVariable
 import io.github.stream29.kodex.tool.unifiedexec.KodexHomeEnvironmentVariable
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -35,6 +43,9 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.rpc.registerService
@@ -44,8 +55,86 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.int
 
 val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("spawn preserves raw text, keeps accepted turns alive, and reports a known id on lost submit reply") {
+        val root = Path(SystemTemporaryDirectory, "kodex-cli-spawn-${Random.nextLong().toULong()}")
+        var loseSubmitReply = false
+        var submits = 0
+        val fs = SystemCoroutineFileSystem
+        try {
+            withBackendServices(root, Path(root, "codex"), Path(root, "agents"),
+                defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
+                createClient = { mockOpenAiClient { createResponse { flow { awaitCancellation() } } } },
+            ) { backend ->
+                val runtime = object : AgentRuntimeRpc by backend.runtime {
+                    override suspend fun submit(sessionIndex: Int, content: List<ContentItem>, expectedInvocationId: String?) {
+                        submits++
+                        backend.runtime.submit(sessionIndex, content, expectedInvocationId)
+                        if (loseSubmitReply) error("Fixture reply lost")
+                    }
+                }
+                suspend fun cli(args: List<String>, stdin: String, expectedExit: Int): CliOperationEnvelope {
+                    val lines = mutableListOf<String>()
+                    withInMemoryRpc(registerServices = {
+                        registerService(GlobalRpc::class) { backend.global }
+                        registerService(AgentRuntimeRpc::class) { runtime }
+                    }) { raw ->
+                        val services = RpcServices(RestoringRpcClient(raw))
+                        val exit = dispatchCli(args, { message, _ -> error(message) }) { leaf ->
+                            executeCliToolCommand(assertIs<KodexToolLeafCommand>(leaf), services,
+                                env = { null }, readStdin = { stdin }, writeStdout = lines::add)
+                        }
+                        assertEquals(expectedExit, exit, lines.toString())
+                    }
+                    assertFalse(lines.single().contains(stdin.takeIf(String::isNotEmpty) ?: "Fixture reply lost"))
+                    return CliToolJson.decodeFromString(CliOperationEnvelope.serializer(), lines.single())
+                }
+                val created = cli(listOf("session", "spawn", "--cwd", root.toString()), "", 0)
+                val id = checkNotNull(created.result).jsonObject.getValue("root_agent_id").jsonPrimitive.int
+                assertEquals("false", created.result.jsonObject.getValue("submitted").jsonPrimitive.content)
+                assertEquals(0, backend.runtime.getLatestIndex(id))
+                assertFalse(cli(listOf("agent", "submit", "--agent", "$id", "--stdin"), "", 1).ok)
+                val text = " \n  literal α\n"
+                assertTrue(cli(listOf("agent", "submit", "--agent", "$id", "--stdin"), text, 0).ok)
+                withTimeout(10_000) {
+                    backend.runtime.getRunningTurnFlow(id).first { it }
+                    backend.runtime.getLatestIndexFlow(id).first { index ->
+                        val nonce = backend.runtime.getCacheNonce(id)
+                        val items = backend.runtime.getLastCommitsIn(id, nonce, 0, index, setOf(AgentCommitType.UserMessage), 1)
+                        (items.singleOrNull()?.commit as? StableUserMessage)?.content == listOf(ContentItem.InputText(text))
+                    }
+                }
+                assertTrue(cli(listOf("agent", "stop", "--agent", "$id"), "", 0).ok)
+                loseSubmitReply = true
+                val unknown = cli(listOf("session", "spawn", "--cwd", root.toString(), "--stdin"), "private text", 1)
+                val error = checkNotNull(unknown.error)
+                assertEquals(CliOperationOutcome.Unknown, error.outcome)
+                assertEquals("submit", error.phase)
+                assertEquals(error.sessionId, error.agentId)
+                assertTrue(backend.global.getSessionCatalog(true).any { it.sessionIndex == error.sessionId })
+                assertEquals(2, submits, "Do not retry an unknown mutation.")
+
+                val ask = backend.runtime.createAskUser(id, RequestUserInputArgs(
+                    questions = listOf(RequestUserInputQuestion(id = "q", header = "Fixture", question = "Which value?")),
+                ))
+                val answer = CliToolJson.encodeToString(RequestUserInputResponse.serializer(),
+                    RequestUserInputResponse(answers = mapOf("q" to RequestUserInputAnswer(listOf("private answer")))))
+                val answerArgs = listOf("ask", "answer", "--agent", "$id", "${ask.askId}", "--stdin")
+                assertTrue(cli(answerArgs, answer, 0).ok)
+                assertEquals("already_answered", cli(answerArgs, answer, 1).error?.code)
+                assertEquals("ask_not_found", cli(listOf("ask", "answer", "--agent", "$id", "999", "--stdin"), answer, 1).error?.code)
+            }
+        } finally {
+            suspend fun delete(path: Path) {
+                val metadata = fs.metadataOrNull(path) ?: return
+                if (metadata.isDirectory) fs.list(path).forEach { delete(it) }
+                fs.delete(path, mustExist = false)
+            }
+            delete(root)
+        }
+    }
     test("Session queries print one sanitized failure receipt even before the RPC opens") {
         val replies = mutableListOf<String>()
         val exit = dispatchCliWithToolRpc(

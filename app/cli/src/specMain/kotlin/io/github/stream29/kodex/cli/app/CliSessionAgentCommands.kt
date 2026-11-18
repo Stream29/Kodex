@@ -1,23 +1,41 @@
 package io.github.stream29.kodex.cli.app
 
+import com.github.ajalt.clikt.core.ParameterHolder
+import com.github.ajalt.clikt.core.UsageError
+import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.arguments.check
+import com.github.ajalt.clikt.parameters.groups.MutuallyExclusiveOptions
+import com.github.ajalt.clikt.parameters.groups.mutuallyExclusiveOptions
+import com.github.ajalt.clikt.parameters.groups.provideDelegate
+import com.github.ajalt.clikt.parameters.groups.required
+import com.github.ajalt.clikt.parameters.groups.single
 import com.github.ajalt.clikt.parameters.options.check
+import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
+import com.github.ajalt.clikt.parameters.options.switch
 import com.github.ajalt.clikt.parameters.types.int
+import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.ReasoningEffortSerializer
+import io.github.stream29.kodex.openai.RequestUserInputMode
+import io.github.stream29.kodex.openai.ServiceTier
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 
 public class SessionCommand : KodexGroupCommand(
     "session", "List and manage independent Sessions.",
-    SessionListCommand(),
+    SessionListCommand(), SessionSpawnCommand(),
     isToolGroup = true,
 )
 
 public class AgentCommand : KodexGroupCommand(
     "agent", "Inspect and control a specific Agent.",
-    AgentStatusCommand(),
+    AgentStatusCommand(), AgentSubmitCommand(), AgentResumeCommand(), AgentStopCommand(),
     isToolGroup = true,
 )
 
@@ -36,6 +54,50 @@ public sealed class ExplicitAgentOperation(name: String, summary: String) : Sess
 public class AgentStatusCommand : ExplicitAgentOperation(
     "status", "Read UTC time, Agent state, and remaining context-window budget.",
 )
+
+public class SessionSpawnCommand : SessionAgentOperation("spawn", "Create an independent Session, optionally submitting its first message.") {
+    public val cwd: String? by option("--cwd", metavar = "DIR", help = "Initial working directory, relative to this CLI process if needed.")
+    public val model: OpenAiModelId? by option("--model", metavar = "MODEL", help = "Override the initial model.")
+        .convert { require(it.isNotBlank()) { "Model must not be blank." }; OpenAiModelId(it) }
+    public val reasoningEffort: ReasoningEffort? by option("--reasoning-effort", metavar = "EFFORT", help = "Override the initial reasoning effort.")
+        .convert {
+            require(it.isNotBlank()) { "Reasoning effort must not be blank." }
+            CliToolJson.decodeFromJsonElement(ReasoningEffortSerializer, JsonPrimitive(it))
+        }
+    public val serviceTier: ServiceTier? by option("--service-tier", metavar = "TIER", help = "Override the initial service tier.")
+        .convert { ServiceTier.entries.firstOrNull { tier -> tier.requestValue == it } ?: error("Invalid service tier.") }
+    public val requestUserInputMode: RequestUserInputMode? by option(
+        "--request-user-input-mode", metavar = "MODE", help = "Override the initial question mode: ask_user or no_question.",
+    ).convert { CliToolJson.decodeFromJsonElement(RequestUserInputMode.serializer(), JsonPrimitive(it)) }
+    public val message: CliPayloadInput<String>? by textOperationInput("--message", "Initial message text.")
+
+    override fun validate() {
+        if (cwd?.isBlank() == true) throw UsageError("Working directory must not be blank.", paramName = "--cwd")
+    }
+}
+
+public class AgentSubmitCommand : ExplicitAgentOperation("submit", "Submit one text message; return when the backend accepts it.") {
+    public val message: CliPayloadInput<String> by textOperationInput("--message", "Message text.").required()
+}
+
+public class AgentResumeCommand : ExplicitAgentOperation("resume", "Continue without a new message; return on admission.")
+
+public class AgentStopCommand : ExplicitAgentOperation("stop", "Request cancellation of only the currently running turn.")
+
+public class AskAnswerCommand : ExplicitAgentOperation("answer", "Submit a user-provided structured answer to an existing question.") {
+    public val askId: Int by argument("ask-id", help = "1-based local ask ID.").int().check("Ask ID must be positive.") { it > 0 }
+    public val response: CliPayloadInput<String> by textOperationInput("--json", "RequestUserInputResponse JSON object.").required()
+}
+
+private fun ParameterHolder.textOperationInput(
+    optionName: String, optionHelp: String,
+): MutuallyExclusiveOptions<CliPayloadInput<String>, CliPayloadInput<String>?> = mutuallyExclusiveOptions(
+    option(optionName, help = optionHelp).convert {
+        require(it.isNotEmpty()) { "Input must not be empty." }
+        CliPayloadInput.Inline(it)
+    },
+    option(help = "Read raw UTF-8 from standard input.").switch("--stdin" to CliPayloadInput.Stdin),
+).single()
 
 @Serializable
 public data class CliSessionCatalogOutput(public val sessions: List<CliSessionCatalogRow>)

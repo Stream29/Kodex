@@ -230,6 +230,30 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
         }
     }
 
+    test("async resume acknowledges its own admission while the model is still blocked") {
+        val entered = CompletableDeferred<Unit>()
+        val client = mockOpenAiClient { createResponse { flow { entered.complete(Unit); awaitCancellation() } } }
+        runtimeFixture(client) { repository, index, backend ->
+            val session = repository.openSessions.value.getValue(index)
+            assertFalse(backend.requestResume(index), "An empty Agent cannot admit a new turn.")
+            session.runtime.appendUserMessage(listOf(ContentItem.InputText("fixture question")))
+            val messages = setOf(AgentCommitType.UserMessage)
+            val before = session.storage.countCommitsIn(0..Int.MAX_VALUE, messages)
+            withInMemoryRpc(registerServices = { registerService(AgentRuntimeRpc::class) { backend } }) { raw ->
+                val rpc = RestoringRpcClient(raw).withService<AgentRuntimeRpc>()
+                assertTrue(rpc.requestResume(index))
+                entered.await()
+                assertFalse(rpc.requestResume(index), "A concurrent RPC cannot claim the occupied slot.")
+                assertFailsWith<IllegalStateException> { backend.resume(index) }
+            }
+            assertTrue(backend.getRunningTurn(index), "Closing the admitting connection must not stop the turn.")
+            assertEquals(before, session.storage.countCommitsIn(0..Int.MAX_VALUE, messages), "Resume must not append a user message.")
+            backend.cancelRunningTurn(index)
+            backend.getRunningTurnFlow(index).first { !it }
+            backend.cancelRunningTurn(index)
+        }
+    }
+
     test("stop cancels current operation while a cancelled waiter does not") {
         val entered = CompletableDeferred<Unit>()
         val client = mockOpenAiClient {

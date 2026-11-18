@@ -147,6 +147,9 @@ internal class BackendGlobalRpc(
 
     override suspend fun createSession(cwd: Path): Int = sessions.createSession(cwd)
 
+    override suspend fun spawnSession(request: SessionSpawnRequest): SessionSpawnResult =
+        sessions.spawnSession(request) { settings.models.value }
+
     override suspend fun createSchedule(
         agentId: Int,
         triggerAt: Instant,

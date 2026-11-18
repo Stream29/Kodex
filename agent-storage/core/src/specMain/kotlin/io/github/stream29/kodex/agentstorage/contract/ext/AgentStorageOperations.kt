@@ -63,3 +63,9 @@ public expect suspend fun MutableKodexAgentStorage.answerAskUser(
     response: RequestUserInputResponse,
     timestamp: Instant = Clock.System.now(),
 ): AskUserEntry
+
+/** Thrown before modifying either ask or steer history. */
+public class AskUserEntryNotFound(askId: Int) : IllegalArgumentException("Unknown ask_user askId: $askId")
+
+/** Thrown before modifying either ask or steer history. */
+public class AskUserAlreadyAnswered(askId: Int) : IllegalStateException("ask_user #$askId has already been answered.")
