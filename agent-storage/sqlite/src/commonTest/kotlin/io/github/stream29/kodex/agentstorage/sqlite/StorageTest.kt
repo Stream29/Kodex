@@ -32,14 +32,19 @@ val sqliteSubagentEventTest by testSuite {
                     VALUES(90, 12, NULL), (91, 12, 90), (92, 12, 91), (12, 90, NULL)""")
                 val directParent = SqliteAgentStorage(db, 91)
                 assertEquals(0, directParent.commit(spawn))
-                assertEquals(1, directParent.commit(completion))
-                directParent.commit(SteerSnapshot(listOf(completion)))
+                // Rows produced before reclassification used the same wire name and payload.
+                val oldPayload = """{"type":"event_subagent_completed","child_agent_id":92}"""
+                db.execute(
+                    """INSERT INTO agent_commits VALUES(91,'event_subagent_completed',1,?,'2026-11-19T00:00:00Z'),
+                        (91,'steer',2,?,'2026-11-19T00:00:00Z')""",
+                    listOf(oldPayload, "[$oldPayload]"),
+                )
             }
             openSqliteConnection(path).use { db ->
                 val parent = SqliteAgentStorage(db, 91)
                 assertEquals(spawn, parent.getCommitExact(0, AgentCommitType.IndexTypes)?.commit)
-                assertEquals(completion, parent.getCommitExact(1, AgentCommitType.WorkTypes)?.commit)
-                assertNull(parent.getCommitExact(1, AgentCommitType.IndexTypes))
+                assertEquals(completion, parent.getCommitExact(1, AgentCommitType.IndexTypes)?.commit)
+                assertNull(parent.getCommitExact(1, AgentCommitType.WorkTypes))
                 assertEquals(listOf(completion), parent.getSteerAt(2))
                 for (elsewhere in listOf(12, 90, 92)) {
                     assertEquals(-1, SqliteAgentStorage(db, elsewhere).latestIndex())

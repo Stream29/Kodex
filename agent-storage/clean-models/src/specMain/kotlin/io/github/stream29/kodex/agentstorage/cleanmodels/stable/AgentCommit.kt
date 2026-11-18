@@ -117,7 +117,7 @@ public enum class AgentCommitType(
     EventSubagentCreated("event_subagent_created", "index"),
 
     @SerialName("event_subagent_completed")
-    EventSubagentCompleted("event_subagent_completed", "work");
+    EventSubagentCompleted("event_subagent_completed", "index");
 
     public companion object {
         private val byWireName: Map<String, AgentCommitType> =
@@ -130,6 +130,7 @@ public enum class AgentCommitType(
             EventAskUser,
             EventSchedule,
             EventSubagentCreated,
+            EventSubagentCompleted,
             AssistantMessage,
             AssistantMessageCommentary,
             AssistantMessageFinal,
@@ -160,7 +161,6 @@ public enum class AgentCommitType(
 
         public val WorkTypes: Set<AgentCommitType> = setOf(
             EventTerminalExited,
-            EventSubagentCompleted,
             Reasoning,
             CommandExecutionToolEvent,
             AwaitEventToolEvent,

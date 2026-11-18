@@ -12,7 +12,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 val subagentHistoryEventsTest by testSuite {
-    test("the child ID is the only event payload; creation is Index and completion is steerable Work") {
+    test("both child notices are Index; completion keeps its old payload, turn boundary and steer identity") {
         val created = StableSubagentCreatedEvent(91)
         val completed = StableSubagentCompletedEvent(92)
         for ((event, id) in listOf(created to 91, completed to 92)) {
@@ -26,10 +26,15 @@ val subagentHistoryEventsTest by testSuite {
         }
         assertTrue(created.commitType in AgentCommitType.IndexTypes)
         assertFalse(created.commitType in AgentCommitType.WorkTypes)
-        assertTrue(completed.commitType in AgentCommitType.WorkTypes)
-        assertFalse(completed.commitType in AgentCommitType.IndexTypes)
+        assertFalse(completed.commitType in AgentCommitType.WorkTypes)
+        assertTrue(completed.commitType in AgentCommitType.IndexTypes)
+        assertTrue(completed.commitType in AgentCommitType.TurnStartBoundaryTypes)
         assertFalse(completed.commitType in AgentCommitType.CompactionRetainedTypes)
+        val oldPayload = """{"type":"event_subagent_completed","child_agent_id":92}"""
+        assertEquals(oldPayload, completed.encodePayloadJson())
+        assertEquals(completed, AgentCommitType.EventSubagentCompleted.decodePayloadJson(oldPayload))
         val steer = SteerSnapshot(listOf(completed))
-        assertEquals(steer, steer.commitType.decodePayloadJson(steer.encodePayloadJson()))
+        assertEquals("[$oldPayload]", steer.encodePayloadJson())
+        assertEquals(steer, steer.commitType.decodePayloadJson("[$oldPayload]"))
     }
 }

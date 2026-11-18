@@ -9,6 +9,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -48,9 +50,34 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 val historyIndexViewModelTest by testSuite {
+    test("completion is independently locatable in the parent index without making other Work a boundary") {
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("fixture")))
+        val entered = storage.commit(StableSubagentCreatedEvent(90))
+        storage.commit(StableTerminalExitedEvent(18, command = "./fixture", exitCode = 0))
+        val completed = storage.commit(StableSubagentCompletedEvent(90))
+        val scrolled = mutableListOf<Int>()
+        val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        val model = storageIndex(
+            storage, MutableStateFlow(completed), MutableStateFlow(KodexAgentStateValue.Empty), scope,
+            requestScroll = { scrolled.add(it) },
+        )
+        try {
+            val window = model.awaitIndexes(listOf(entered, completed))
+            val notice = assertNotNull(window.entryAtOrNull(completed))
+            assertEquals(HistoryIndexEntryKind.AgentMessage, notice.kind)
+            assertEquals("Subagent #90 completed", notice.detail.content)
+            assertTrue(model.checkOut(window.generation, completed))
+            assertEquals(listOf(completed), scrolled)
+        } finally {
+            model.close()
+            scope.cancelAndJoin()
+        }
+    }
+
     test("only exact Message timestamps are exposed and replacement invalidates requests") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test")))
         val time = kotlin.time.Instant.parse("2026-09-08T01:02:03Z")
@@ -318,11 +345,12 @@ private fun storageIndex(
     agentState: StateFlow<KodexAgentStateValue>,
     scope: CoroutineScope,
     cacheNonce: StateFlow<Long>? = null,
+    requestScroll: (Int) -> Unit = {},
 ): HistoryIndexViewModel = createHistoryIndexViewModel(object : HistoryIndexDependencies {
     override val storage = storage
     override val latestIndex = latestIndex
     override val cacheNonce = cacheNonce
     override val externalWrite = agentState.map { it == KodexAgentStateValue.ExternalWrite }
         .stateIn(scope, SharingStarted.Eagerly, agentState.value == KodexAgentStateValue.ExternalWrite)
-    override fun requestScrollToStorageIndex(index: Int) = Unit
+    override fun requestScrollToStorageIndex(index: Int) = requestScroll(index)
 }, scope)

@@ -20,12 +20,12 @@ public data class StableSubagentCreatedEvent(
         listOf(ResponseItem.Message(role = MessageRole.Developer, content = listOf(ContentItem.InputText(notice))))
 }
 
-/** Notification for the direct parent, not a result or an acceptance decision. */
+/** Notification and History Index anchor for the direct parent, not a result or acceptance. */
 @Serializable
 @SerialName("event_subagent_completed")
 public data class StableSubagentCompletedEvent(
     @SerialName("child_agent_id") public val childAgentId: Int,
-) : WorkCommit, AgentCommit.Steerable {
+) : IndexCommit, AgentCommit.Steerable {
     init { require(childAgentId >= 0) }
 
     public val notice: String get() = "Subagent #$childAgentId completed"

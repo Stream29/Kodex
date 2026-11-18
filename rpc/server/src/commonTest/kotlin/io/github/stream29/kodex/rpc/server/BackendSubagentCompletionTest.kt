@@ -88,6 +88,12 @@ val backendSubagentCompletionTest by testSuite(compartment = { TestCompartment.R
                 assertEquals("Subagent #$childId completed", completedNotice.await())
                 assertSame(parentTurn, parent.runtime.runningTurn.value)
                 checkCompletion(parent, childId)
+                val nonce = rpc.getCacheNonce(rootId)
+                val at = rpc.getLatestIndex(rootId)
+                val notice = rpc.getFirstCommitsIn(rootId, nonce, 0, at, AgentCommitType.IndexTypes)
+                    .single { it.commit is StableSubagentCompletedEvent }
+                assertEquals(StableSubagentCompletedEvent(childId), notice.commit)
+                assertTrue(rpc.getFirstCommitsIn(rootId, nonce, notice.index, notice.index, AgentCommitType.WorkTypes).isEmpty())
                 returnAfterNotice.complete(Unit)
                 rpc.cancelRunningTurn(childId)
                 rpc.getRunningTurnFlow(childId).first { !it }
