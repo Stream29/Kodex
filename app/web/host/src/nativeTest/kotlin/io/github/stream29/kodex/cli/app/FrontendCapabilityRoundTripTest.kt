@@ -29,6 +29,7 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellType
 import io.github.stream29.kodex.utils.shellclient.default
+import io.github.stream29.kodex.utils.shellclient.renderedBytes
 import io.ktor.http.*
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.WebSockets
@@ -84,6 +85,55 @@ val frontendCapabilityRoundTripTest by testSuite(compartment = { TestCompartment
                     assertTrue(browser.global.getSessionCatalog(true).isEmpty())
                 }
                 assertEquals(200, page.heartbeat().status)
+            }
+        }
+    }
+
+    test("two live terminals with the same intent stay distinct when reading and closing by registration") {
+        val markers = listOf("INTENT_TWIN_ONE", "INTENT_TWIN_TWO")
+        withRoundTrip(response = { request ->
+            if (request.input.any { it is ResponseItem.FunctionCallOutput && it.callId.startsWith("intent-twin-") }) {
+                flowOf(ResponsesStreamEvent.Completed(Response(id = "intent-twins-end", endTurn = true)))
+            } else {
+                val commands = markers.mapIndexed { index, marker ->
+                    ResponsesStreamEvent.OutputItemDone(index.toLong(), ResponseItem.FunctionCall(
+                        name = "exec_command", callId = "intent-twin-$index", arguments = buildJsonObject {
+                            put("cmd", "printf '%s\\n' $marker; IFS= read -r line")
+                            put("name", "Read twin output")
+                            put("yield_time_ms", 250)
+                        }.toString(),
+                    ))
+                }
+                (commands + ResponsesStreamEvent.Completed(Response(id = "intent-twins-exec", endTurn = false))).asFlow()
+            }
+        }) { fixture ->
+            fixture.rpc { rpc ->
+                val agent = rpc.global.createSession(fixture.launch)
+                rpc.runtime.submit(agent, listOf(ContentItem.InputText("Run the private twin fixture.")))
+                val registry = withTimeout(12.seconds) {
+                    rpc.runtime.getShellSessionsFlow(agent).first { it.size == 2 && it.values.none(ShellSessionState::completed) }
+                }
+                assertEquals(setOf("Read twin output"), registry.values.map { it.arguments.name }.toSet())
+                assertEquals(2, registry.values.map(ShellSessionState::registrationNonce).toSet().size)
+                val entries = markers.map { marker -> registry.entries.single { marker in it.value.arguments.command } }
+                suspend fun output(entry: Map.Entry<Int, ShellSessionState>) = rpc.runtime.readShellSessionOutput(
+                    agent, entry.key, expectedRegistrationNonce = entry.value.registrationNonce,
+                ).renderedBytes().decodeToString()
+                withTimeout(6.seconds) {
+                    for ((index, entry) in entries.withIndex()) {
+                        var text = output(entry)
+                        while (markers[index] !in text) { delay(25); text = output(entry) }
+                        assertFalse(markers[1 - index] in text)
+                    }
+                }
+                val (first, second) = entries
+                rpc.runtime.closeShellSession(agent, first.key, first.value.registrationNonce)
+                val after = withTimeout(6.seconds) {
+                    rpc.runtime.getShellSessionsFlow(agent).first { it[first.key]?.completed != false }
+                }
+                assertEquals(second.value, after[second.key])
+                assertTrue(markers[1] in output(second))
+                rpc.runtime.closeShellSession(agent, second.key, second.value.registrationNonce)
             }
         }
     }
