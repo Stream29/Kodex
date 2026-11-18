@@ -45,16 +45,21 @@ public actual fun productMain(): Unit = runBlocking {
         Path(temporaryDirectory, "kodex-product-browser-${Random.nextLong()}")
     }
     val terminalCheck = environmentVariable("KODEX_CHECK_TERMINAL_INSPECTOR") == "1"
+    val navigationCheck = environmentVariable("KODEX_CHECK_SUBAGENT_NAVIGATION") == "1"
+    val navigation = if (navigationCheck) SubagentNavigationFixture(temporaryDirectory) else null
     val intentScenario = environmentVariable("KODEX_CHECK_COMMAND_INTENT")
     require(intentScenario == null || terminalCheck && intentScenario in setOf("watch", "no-watch", "legacy"))
     SystemCoroutineFileSystem.createDirectories(home, mustCreate = true)
     SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"0.4.15\"")
     val frontendSettings = if (terminalCheck) {
         "frontend:\n  new_line_key: shift_enter\n  sidebars:\n    left: terminal_sessions\n    right: none\n"
+    } else if (navigationCheck) {
+        "frontend:\n  new_line_key: shift_enter\n  sidebars:\n    left: history_index\n    right: none\n"
     } else "frontend: {}\n"
     SystemCoroutineFileSystem.writeString(Path(home, "settings.yml"),
         "backend:\n  daemon_ttl_seconds: $idleTtl\n  new_session:\n    model: test-model\n  session_title:\n    enabled: false\n$frontendSettings")
     val historyCheck = environmentVariable("KODEX_CHECK_HISTORY") == "1"
+    require(!navigationCheck || !terminalCheck && !historyCheck && environmentVariable("KODEX_CHECK_CAPABILITIES") != "1")
     val terminal = if (terminalCheck) {
         check(!historyCheck && environmentVariable("KODEX_CHECK_CAPABILITIES") != "1")
         check(SystemFileSystem.exists(Path(temporaryDirectory, "emit-terminal-inspector")))
@@ -83,7 +88,7 @@ public actual fun productMain(): Unit = runBlocking {
                         OpenAiModelId("test-model"), "Offline browser verification",
                         contextWindow = 100_000, maxContextWindow = 100_000,
                     )))) }
-                    createResponse { terminal?.response(it) ?: flow {
+                    createResponse { navigation?.response(it) ?: terminal?.response(it) ?: flow {
                         val id = ResponseItemId("product-browser-answer-${Random.nextLong()}")
                         val parts = if (historyCheck) historyProductStreamParts() else listOf("test ", "answer — ", "你好")
                         val answer = parts.joinToString("")
