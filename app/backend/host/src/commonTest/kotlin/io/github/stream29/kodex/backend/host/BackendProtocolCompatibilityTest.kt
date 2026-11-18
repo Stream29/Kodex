@@ -22,7 +22,7 @@ import kotlin.test.assertTrue
 val backendProtocolCompatibilityTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("old business checkpoint is refused without stopping or replacing the locked backend") {
         withHost { home, endpoint, backend ->
-            assertEquals("0.5.4", endpoint.businessProtocol)
+            assertEquals("0.5.5", endpoint.businessProtocol)
             assertEquals(1, endpoint.controlProtocol)
             val obsolete = BackendEndpoint(
                 endpoint.instanceId, endpoint.pid, endpoint.port, endpoint.password,

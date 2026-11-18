@@ -3,6 +3,7 @@
 package io.github.stream29.kodex.agentsession.inmemory
 
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
+import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
 import io.github.stream29.kodex.agentsession.contract.IndexedAgentStopEvent
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
@@ -11,8 +12,13 @@ import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.contract.ScopedObservableAgentStorage
 import io.github.stream29.kodex.agentsession.contract.SessionResidencyTable
+import io.github.stream29.kodex.agentsession.contract.pendingDeadline
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
@@ -36,11 +42,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration
+import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
@@ -67,6 +75,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         turnRenewalInterval = turnRenewalInterval,
     )
     private val mutableEntries = MutableStateFlow<List<Int>>(emptyList())
+    private val mutableAwaitDeadlines = MutableStateFlow<Map<Int, PendingAwaitDeadline>>(emptyMap())
     private val mutableStopEvents = MutableSharedFlow<IndexedAgentStopEvent>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -75,6 +84,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
 
     actual override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
     actual override val openSessions: StateFlow<Map<Int, KodexAgentSession>> = residency.openSessions
+    override val pendingAwaitDeadlines: StateFlow<Map<Int, PendingAwaitDeadline>> = mutableAwaitDeadlines.asStateFlow()
     actual override val stopEvents: Flow<IndexedAgentStopEvent> = mutableStopEvents.asSharedFlow()
 
     init {
@@ -135,7 +145,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
     actual override suspend fun create(): Int = entriesMutex.withLock {
         requireOpen()
         val index = nextSessionIndex()
-        check(sessions.put(index, SessionNode(InMemoryKodexAgentStorage.empty(index))) == null)
+        check(sessions.put(index, SessionNode(trackedStorage(index))) == null)
         mutableEntries.value = (entries.value + index).sorted()
         index
     }
@@ -144,7 +154,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         requireOpen()
         val source = requireSession(sourceEntryIndex).storage
         val index = nextSessionIndex()
-        val storage = InMemoryKodexAgentStorage.empty(index)
+        val storage = trackedStorage(index)
         cloneStorage(source, storage)
         sessions[index] = SessionNode(storage)
         mutableEntries.value = (entries.value + index).sorted()
@@ -169,6 +179,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
                 client = dependencies.client,
                 storage = storage,
                 contextSettings = dependencies.contextSettings,
+                clock = dependencies.clock,
             ).buildMasterAgentRuntime(dependencies)
             sessionScope.launch(start = CoroutineStart.UNDISPATCHED) {
                 runtime.stopEvents.collect { event ->
@@ -202,7 +213,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         val handle = entriesMutex.withLock {
             requireOpen()
             require(entryIndex >= 0) { "Session entry index must be non-negative." }
-            requireSession(entryIndex)
+            requireSession(entryIndex).storage.detach()
             sessions.remove(entryIndex)
             mutableEntries.value = entries.value - entryIndex
             residency.detachLocked(entryIndex)
@@ -226,6 +237,11 @@ public actual class InMemoryKodexSessionRepository internal constructor(
     private fun requireOpen() {
         check(coroutineContext[Job]?.isActive == true) { "Session repository is closed." }
     }
+
+    private fun trackedStorage(agentId: Int): DeadlineTrackingStorage =
+        DeadlineTrackingStorage(agentId, InMemoryKodexAgentStorage.empty(agentId)) { deadline ->
+            mutableAwaitDeadlines.update { if (deadline == null) it - agentId else it + (agentId to deadline) }
+        }
 }
 
 private class InMemoryKodexAgentSession(
@@ -254,9 +270,41 @@ public actual fun CoroutineScope.InMemoryKodexSessionRepository(
 }
 
 private class SessionNode(
-    val storage: InMemoryKodexAgentStorage,
+    val storage: DeadlineTrackingStorage,
 ) {
     var archived: Boolean = false
+}
+
+private class DeadlineTrackingStorage(
+    override val agentId: Int,
+    private val source: InMemoryKodexAgentStorage,
+    private val publish: (PendingAwaitDeadline?) -> Unit,
+) : MutableKodexAgentStorage by source {
+    private val writeMutex = Mutex()
+    private var detached = false
+
+    override suspend fun commit(commit: AgentCommit): Int = commit(listOf(commit))
+    override suspend fun commit(commit: AgentCommit, timestamp: Instant): Int = commit(listOf(commit), timestamp)
+    override suspend fun commit(commits: List<AgentCommit>): Int = commit(commits, Clock.System.now())
+
+    override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int = writeMutex.withLock {
+        check(!detached) { "Agent storage was deleted." }
+        val index = source.commit(commits, timestamp)
+        commits.firstNotNullOfOrNull { it as? UnstableSnapshot }?.let { publish(it.pendingDeadline(agentId, index)) }
+        index
+    }
+
+    override suspend fun revert(untilExclusive: Int): Unit = writeMutex.withLock {
+        check(!detached) { "Agent storage was deleted." }
+        source.revert(untilExclusive)
+        val index = source.getCommitAtOrBefore(source.latestIndex(), AgentCommitType.UnstableTypes)
+        publish(index?.let { (it.commit as UnstableSnapshot).pendingDeadline(agentId, it.index) })
+    }
+
+    suspend fun detach(): Unit = writeMutex.withLock {
+        detached = true
+        publish(null)
+    }
 }
 
 private suspend fun SessionNode.toEntry(
@@ -292,7 +340,16 @@ private suspend fun cloneStorage(
         val commits = grouped[index] ?: continue
         val createdAt = source.getCommitExact(index)?.createdAt ?: Instant.DISTANT_PAST
         val mapped = commits.map { commit ->
-            if (commit is SteerSnapshot) SteerSnapshot(emptyList()) else commit
+            when (commit) {
+                is SteerSnapshot -> SteerSnapshot(emptyList())
+                is UnstableSnapshot -> UnstableSnapshot(
+                    commit.events.map { record ->
+                        if (record is PendingAwait && record.armedForAgentId != null) record.copy(armedForAgentId = null)
+                        else record
+                    },
+                )
+                else -> commit
+            }
         }
         if (createdAt != Instant.DISTANT_PAST) {
             target.commit(mapped, createdAt)

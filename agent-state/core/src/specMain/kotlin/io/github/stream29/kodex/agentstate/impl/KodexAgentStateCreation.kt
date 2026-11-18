@@ -6,6 +6,7 @@ import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.time.Clock
 
 /**
  * Loads a state-layer implementation from [storage] as a child of this scope.
@@ -29,4 +30,5 @@ public expect suspend fun CoroutineScope.KodexAgentState(
     client: OpenAiClient,
     storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
+    clock: Clock = Clock.System,
 ): KodexAgentState

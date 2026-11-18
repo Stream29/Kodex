@@ -50,6 +50,7 @@ import io.github.stream29.kodex.openai.FunctionCallOutputContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.tool.readmedia.MediaDetail
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
@@ -140,6 +141,7 @@ public actual fun HistoryEventContent(
             expansionKey = callId,
         ) {
             section("Arguments") { arguments.renderDetails() }
+            timeoutAt?.let { section("Deadline") { Detail("Deadline", it.toString()) } }
         }
 
         is PendingCommandExecution -> renderCommandExecution(shellSessions)
@@ -347,16 +349,14 @@ private fun StableReadMedia.renderReadMedia() {
 private fun StableAwait.renderAwaitEvent() {
     BuiltInToolEvent(
         summary = functionToolSummary("await_event", null, failed = result is StableAwaitEventResult.Failure),
-        firstLine = compactToolLine(
-            "await_event",
-            "terminals" to arguments.terminals.takeIf { it.isNotEmpty() }?.joinToString(),
-        ),
+        firstLine = "await_event",
         status = when (result) {
             is StableAwaitEventResult.Output -> "succeeded"
             is StableAwaitEventResult.Failure -> "failed"
         },
         expansionKey = callId,
     ) {
+        RecordedField("events", arguments.events.joinToString("\n") { it.description() })
         when (val outcome = result) {
             is StableAwaitEventResult.Output -> RecordedField("timestamp", outcome.value.timestamp.toString())
             is StableAwaitEventResult.Failure -> RecordedErrorField("error", outcome.message)
@@ -551,14 +551,16 @@ private fun ReadMediaToolArguments.renderDetails(
 }
 
 @Composable
-private fun AwaitEventArguments.renderDetails(
-    textStyle: TextStyle = TextStyle.Normal,
-) {
-    if (terminals.isEmpty()) {
-        Detail("Terminals", "none", textStyle)
-    } else {
-        Detail("Terminals", terminals.joinToString(), textStyle)
-    }
+private fun AwaitEventArguments.renderDetails() {
+    for (event in events) Detail("Event", event.description())
+}
+
+private fun AwaitEventInput.description(): String = when (this) {
+    AwaitEventInput.UserMessage -> "User message"
+    AwaitEventInput.AskUserAnswered -> "Ask user answered"
+    AwaitEventInput.ScheduleTriggered -> "Schedule triggered"
+    is AwaitEventInput.TerminalExited -> "Terminal #$sessionId exits"
+    is AwaitEventInput.Timeout -> "Timeout after $durationMillis ms"
 }
 
 private fun PendingCommandExecutionAction.activeSessionId(): Int? = when (this) {
@@ -703,10 +705,10 @@ private fun ReadMediaToolArguments.ongoingToolSummary(): String =
         ?: "Reading media"
 
 private fun AwaitEventArguments.ongoingToolSummary(): String =
-    if (terminals.isEmpty()) {
+    if (terminalIds.isEmpty()) {
         "Waiting for events"
     } else {
-        "Waiting for events (terminals: ${terminals.joinToString()})"
+        "Waiting for events (terminals: ${terminalIds.joinToString()})"
     }
 
 internal fun JsonElement.ongoingServerToolSearchSummary(): String {

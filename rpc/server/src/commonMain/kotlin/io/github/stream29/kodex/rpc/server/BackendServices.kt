@@ -7,6 +7,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
 import io.github.stream29.kodex.agentruntime.contract.AgentStopEvent
+import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRepository
 import io.github.stream29.kodex.agentschedule.contract.nextCronTriggerAt
@@ -86,6 +87,7 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
     renewBackend: suspend () -> Unit = {},
     backendRenewalInterval: () -> Duration = { 20.seconds },
     checkAdmission: () -> Unit = {},
+    clock: Clock = Clock.System,
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R = coroutineScope {
     val owner = supervisorChildScope()
@@ -148,6 +150,7 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                 global.modelCatalog,
                 global.contextSettings,
                 global.contextSettings,
+                clock,
             )
             val persistence = LazySqliteBackendPersistence(
                 owner = owner,
@@ -165,6 +168,7 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                 }
                 val eventBus = AgentEventBus(persistence.sessionRepository)
                 persistence.startScheduleRunner(eventBus)
+                persistence.startAwaitDeadlineRunner()
                 val runtime = BackendAgentRuntimeRpc(
                     repository = persistence.sessionRepository,
                     eventBus = eventBus,
@@ -275,6 +279,7 @@ internal class LazySqliteBackendPersistence(
     private val renewBackend: suspend () -> Unit,
     private val backendRenewalInterval: () -> Duration,
     private val checkAdmission: () -> Unit,
+    private val sessionTtl: Duration = DefaultKodexSessionTtl,
 ) {
     private val persistenceScope: CoroutineScope =
         CoroutineScope(owner.coroutineContext.minusKey(Job) + SupervisorJob())
@@ -287,9 +292,11 @@ internal class LazySqliteBackendPersistence(
     private var acquiredSessions: SqliteKodexSessionRepository? = null
     private var acquiredSchedules: SqliteScheduleRepository? = null
     private var scheduleRunnerJob: Job? = null
+    private var awaitDeadlineRunnerJob: Job? = null
 
     private val lazyEntries = MutableStateFlow<List<Int>>(emptyList())
     private val lazyOpenSessions = MutableStateFlow<Map<Int, KodexAgentSession>>(emptyMap())
+    private val lazyAwaitDeadlines = MutableStateFlow<Map<Int, PendingAwaitDeadline>>(emptyMap())
     private val notificationsShared = MutableSharedFlow<Notification>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -309,6 +316,7 @@ internal class LazySqliteBackendPersistence(
             get() = persistenceScope.coroutineContext
         override val entries: StateFlow<List<Int>> = lazyEntries.asStateFlow()
         override val openSessions: StateFlow<Map<Int, KodexAgentSession>> = lazyOpenSessions.asStateFlow()
+        override val pendingAwaitDeadlines: StateFlow<Map<Int, PendingAwaitDeadline>> = lazyAwaitDeadlines.asStateFlow()
         override val stopEvents: Flow<IndexedAgentStopEvent> = emptyFlow()
 
         override suspend fun list(): List<Int> = acquire().first.list()
@@ -421,6 +429,7 @@ internal class LazySqliteBackendPersistence(
                     connection = connection,
                     mutex = dbMutex,
                     dependencies = dependencies,
+                    sessionTtl = sessionTtl,
                     onTurnActiveRenewal = renewBackend,
                     turnRenewalInterval = backendRenewalInterval,
                     reportMirrorFailure = { mirrorError ->
@@ -443,12 +452,16 @@ internal class LazySqliteBackendPersistence(
                     acquiredSchedules = schedules
                     lazyEntries.value = sessions.entries.value
                     lazyOpenSessions.value = sessions.openSessions.value
+                    lazyAwaitDeadlines.value = sessions.pendingAwaitDeadlines.value
                     lazyNextTriggerAt.value = schedules.nextTriggerAt.value
                     persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
                         sessions.entries.collect { lazyEntries.value = it }
                     }
                     persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
                         sessions.openSessions.collect { lazyOpenSessions.value = it }
+                    }
+                    persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                        sessions.pendingAwaitDeadlines.collect { lazyAwaitDeadlines.value = it }
                     }
                     persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
                         schedules.nextTriggerAt.collect { lazyNextTriggerAt.value = it }
@@ -566,13 +579,58 @@ internal class LazySqliteBackendPersistence(
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun startAwaitDeadlineRunner() {
+        awaitDeadlineRunnerJob = persistenceScope.launch {
+            val inFlight = MutableStateFlow(emptySet<Int>())
+            val clock = dependencies.clock
+            while (isActive && !stopping) {
+                val candidates = combine(lazyAwaitDeadlines, inFlight) { deadlines, busy ->
+                    deadlines.filterKeys { it !in busy }
+                }.transformLatest { deadlines ->
+                    val earliest = deadlines.values.minOfOrNull { it.timeoutAt } ?: return@transformLatest
+                    val remaining = earliest - clock.now()
+                    if (remaining.isPositive()) delay(remaining)
+                    val now = clock.now()
+                    emit(deadlines.filterValues { it.timeoutAt <= now })
+                }.first()
+                for ((agentId, expected) in candidates) {
+                    inFlight.update { it + agentId }
+                    launch {
+                        try {
+                            ensureAdmission()
+                            val repository = acquisitionMutex.withLock { acquiredSessions }
+                            repository?.openForAwaitDeadline(agentId, expected)
+                                ?.runtime?.requestAwaitDeadlineCheck(expected)?.join()
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
+                        } catch (error: Exception) {
+                            if (!stopping) {
+                                BackendLogger.warn(error) { "Could not check await_event deadline for Agent $agentId; will retry." }
+                            }
+                        } finally {
+                            try {
+                                // A still-current deadline may have met a temporarily unavailable Agent or backend.
+                                if (lazyAwaitDeadlines.value[agentId] == expected) delay(200.milliseconds)
+                            } finally {
+                                inFlight.update { it - agentId }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     suspend fun shutdownSessions(): Unit = withContext(NonCancellable) {
         val sessions = acquisitionMutex.withLock {
             stopping = true
             scheduleRunnerJob?.cancel()
+            awaitDeadlineRunnerJob?.cancel()
             acquiredSessions
         }
         scheduleRunnerJob?.join()
+        awaitDeadlineRunnerJob?.join()
         sessions?.closeAllSessions()
     }
 
@@ -580,6 +638,7 @@ internal class LazySqliteBackendPersistence(
         val (sessions, connection) = acquisitionMutex.withLock {
             stopping = true
             scheduleRunnerJob?.cancel()
+            awaitDeadlineRunnerJob?.cancel()
             val currentSessions = acquiredSessions
             val currentConnection = acquiredConnection
             acquiredSessions = null
@@ -589,6 +648,7 @@ internal class LazySqliteBackendPersistence(
         }
         try {
             scheduleRunnerJob?.join()
+            awaitDeadlineRunnerJob?.join()
             sessions?.closeAndJoin()
         } finally {
             try {

@@ -30,6 +30,7 @@ import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventTools
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
@@ -76,7 +77,7 @@ val agentEventBusTest by testSuite(
                                     callId = "await_1",
                                     arguments = OpenAiJsonCodec.encodeToString(
                                         AwaitEventArguments.serializer(),
-                                        AwaitEventArguments(),
+                                        AwaitEventArguments(listOf(AwaitEventInput.AskUserAnswered)),
                                     ),
                                 ),
                             ),
@@ -90,7 +91,7 @@ val agentEventBusTest by testSuite(
                                     callId = "await_2",
                                     arguments = OpenAiJsonCodec.encodeToString(
                                         AwaitEventArguments.serializer(),
-                                        AwaitEventArguments(),
+                                        AwaitEventArguments(listOf(AwaitEventInput.UserMessage)),
                                     ),
                                 ),
                             ),
@@ -211,7 +212,7 @@ val agentEventBusTest by testSuite(
                                     callId = "await_bad",
                                     arguments = OpenAiJsonCodec.encodeToString(
                                         AwaitEventArguments.serializer(),
-                                        AwaitEventArguments(terminals = listOf(99999)),
+                                        AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(99999))),
                                     ),
                                 ),
                             ),
@@ -266,6 +267,64 @@ val agentEventBusRealTerminalTest by testSuite(
     compartment = { TestCompartment.RealTime },
     testConfig = TestConfig.testScope(isEnabled = false, timeout = 30.seconds),
 ) {
+    for (alreadyExited in listOf(false, true)) {
+        test("duplicate terminal IDs count as one target; exit already observed=$alreadyExited") {
+            val scope = CoroutineScope(currentCoroutineContext() + SupervisorJob())
+            try {
+                var terminalId = -1
+                var requests = 0
+                val client = mockOpenAiClient {
+                    createResponse {
+                        if (++requests == 1) {
+                            val input = AwaitEventArguments(List(2) { AwaitEventInput.TerminalExited(terminalId) })
+                            flowOf(
+                                ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
+                                    name = AwaitEventTools.Name, callId = "terminal-only",
+                                    arguments = OpenAiJsonCodec.encodeToString(AwaitEventArguments.serializer(), input),
+                                )),
+                                ResponsesStreamEvent.Completed(Response(id = "pending", endTurn = false)),
+                            )
+                        } else {
+                            flowOf(
+                                ResponsesStreamEvent.OutputItemDone(0, ResponseItem.Message(
+                                    role = MessageRole.Assistant,
+                                    content = listOf(ContentItem.OutputText("resumed")),
+                                )),
+                                ResponsesStreamEvent.Completed(Response(id = "done", endTurn = true)),
+                            )
+                        }
+                    }
+                }
+                val repository = scope.InMemoryKodexSessionRepository(testKodexAgentDependencies(client))
+                AgentEventBus(repository)
+                val session = repository.open(repository.create())
+                val runtime = session.runtime
+                runtime.modify { it.initialize(KodexAgentSettings(OpenAiModelId("test-model"))) }
+                terminalId = assertNotNull(runtime.unifiedExecToolClient.execCommand(ExecCommandArguments(
+                    command = "IFS= read -r line", yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
+                )).sessionId)
+                if (alreadyExited) {
+                    val process = runtime.unifiedExecToolClient.activeSessions.value.getValue(terminalId)
+                    process.writeStdin("complete\n", closeInput = true)
+                    withTimeout(5.seconds) { process.exitCode.first { it != null } }
+                }
+                runtime.appendUserMessage(listOf(ContentItem.InputText("wait")))
+                runtime.resume()
+                assertEquals(KodexAgentStateValue.AssistantMessage, runtime.state.value)
+                assertEquals(2, requests)
+                val result = session.storage.getCommitsIn(0..runtime.latestIndex.value, AgentCommitType.WorkTypes)
+                    .map { it.commit }.filterIsInstance<StableAwait>().single().result
+                if (alreadyExited) {
+                    assertIs<StableAwaitEventResult.Output>(result)
+                } else {
+                    assertTrue("Add a timeout event" in assertIs<StableAwaitEventResult.Failure>(result).message)
+                }
+            } finally {
+                scope.cancelAndJoin()
+            }
+        }
+    }
+
     test("watched background terminal exit automatically wakes parked await_event with StableTerminalExitedEvent") {
         val scope = CoroutineScope(currentCoroutineContext() + SupervisorJob())
         try {
@@ -283,7 +342,10 @@ val agentEventBusRealTerminalTest by testSuite(
                                     callId = "await_term",
                                     arguments = OpenAiJsonCodec.encodeToString(
                                         AwaitEventArguments.serializer(),
-                                        AwaitEventArguments(terminals = listOf(requireNotNull(watchedSessionId))),
+                                        AwaitEventArguments(listOf(
+                                            AwaitEventInput.TerminalExited(requireNotNull(watchedSessionId)),
+                                            AwaitEventInput.UserMessage,
+                                        )),
                                     ),
                                 ),
                             ),

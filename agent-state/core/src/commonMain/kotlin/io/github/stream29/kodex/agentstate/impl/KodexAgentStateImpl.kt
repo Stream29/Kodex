@@ -110,6 +110,7 @@ public actual suspend fun CoroutineScope.KodexAgentState(
     client: OpenAiClient,
     storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
+    clock: Clock,
 ): KodexAgentState {
     val stateScope = supervisorChildScope()
     try {
@@ -119,6 +120,7 @@ public actual suspend fun CoroutineScope.KodexAgentState(
             client = client,
             storage = storage,
             contextSettings = contextSettings,
+            clock = clock,
             loadedLatestIndex = loadedLatestIndex,
             initialState = storage.stateAt(loadedLatestIndex),
         )
@@ -141,11 +143,13 @@ private class KodexAgentStateImpl(
     private val client: OpenAiClient,
     override val storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
+    private val clock: Clock,
     loadedLatestIndex: Int,
     initialState: KodexAgentStateValue,
 ) : KodexAgentState, CoroutineScope by scope {
     private val contextPrefixResolver = AgentContextPrefixResolver(contextSettings)
     private val writeMutex = Mutex()
+    private fun now(): Instant = clock.now()
 
     override var lastResponseFailure: OpenAiFailureDiagnostic? = null
         private set
@@ -553,7 +557,7 @@ private class KodexAgentStateImpl(
     ) {
         when (item) {
             is ResponseItem.ToolCall ->
-                appendPendingToolEvent(item.toPendingToolEvent(), timestamp)
+                appendPendingToolEvent(item.toPendingToolEvent(timestamp), timestamp)
 
             is ResponseItem.ServerToolSearchCall ->
                 appendPendingServerToolSearch(item, timestamp)
@@ -1027,5 +1031,3 @@ private fun ResponseItem.toRequestResponse(
         else -> KodexAgentStateValue.RequestResponse.Unknown(events)
     }
 }
-
-private fun now(): Instant = Clock.System.now()

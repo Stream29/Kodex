@@ -367,7 +367,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                             0,
                             ResponseItem.FunctionCall(
                                 name = "await_event",
-                                arguments = """{"terminals":[]}""",
+                                arguments = """{"events":[{"type":"user_message"}]}""",
                                 callId = "await_1",
                             ),
                         ),

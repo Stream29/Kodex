@@ -29,6 +29,7 @@ public actual class SqliteAgentStorage actual constructor(
     public actual override val uri: String,
     private val mutex: Mutex,
     private val requireAccess: () -> Unit,
+    private val onHistoryChanged: ((Set<AgentCommitType>?) -> Unit)?,
 ) : MutableKodexAgentStorage {
     internal val sqlAgentId: Long = agentId.also { require(it >= 0) { "Invalid agent id: $it" } }.toLong()
 
@@ -37,15 +38,13 @@ public actual class SqliteAgentStorage actual constructor(
         return mutex.withLock { withContext(Dispatchers.IO) { requireAccess(); block() } }
     }
 
-    internal suspend fun <T> write(block: () -> T): T {
+    private suspend fun <T> write(changedTypes: Set<AgentCommitType>?, block: () -> T): T {
         currentCoroutineContext().ensureActive()
         return mutex.withLock {
             withContext(NonCancellable) {
                 withContext(Dispatchers.IO) {
                     requireAccess()
-                    connection.transaction {
-                        block()
-                    }
+                    connection.transaction { block() }.also { onHistoryChanged?.invoke(changedTypes) }
                 }
             }
         }
@@ -123,7 +122,7 @@ public actual class SqliteAgentStorage actual constructor(
             Triple(commit.commitType.wireName, commit.commitType.legacyTimelineName, commit.encodePayloadJson(OpenAiJsonCodec))
         }
         val timestampStr = timestamp.toString()
-        val index = write {
+        val index = write(onHistoryChanged?.let { sorted.mapTo(mutableSetOf()) { it.commitType } }) {
             val nextIndex = tailUnsafe() + 1
             for ((wireType, _, payloadJson) in encoded) {
                 connection.execute(
@@ -139,7 +138,7 @@ public actual class SqliteAgentStorage actual constructor(
     public actual override suspend fun revert(untilExclusive: Int) {
         require(untilExclusive >= 0) { "Revert boundary $untilExclusive must be non-negative." }
         val emptySteerJson = SteerSnapshot(emptyList()).encodePayloadJson(OpenAiJsonCodec)
-        write {
+        write(changedTypes = null) {
             connection.execute(
                 """DELETE FROM agent_commits WHERE agent_id = ? AND "index" >= ?""",
                 listOf(sqlAgentId, untilExclusive.toLong()),

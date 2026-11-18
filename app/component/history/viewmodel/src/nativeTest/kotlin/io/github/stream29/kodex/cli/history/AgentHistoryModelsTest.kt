@@ -33,6 +33,7 @@ import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistor
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemViewModel
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
@@ -275,7 +276,7 @@ val agentHistoryModelsTest by testSuite {
                     storage.commit(userMessage("Start"))
                     storage.commit(textTool("before"))
                     storage.commit(
-                        StableAwait("await", null, AwaitEventArguments(listOf(37)), StableAwaitEventResult.Failure("fixture")),
+                        StableAwait("await", null, AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(37))), StableAwaitEventResult.Failure("fixture")),
                     )
                     storage.commit(terminal)
                     storage.commit(textTool("after"))

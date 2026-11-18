@@ -3,6 +3,7 @@ package io.github.stream29.kodex.agentstate.tool
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ToolSpec
+import kotlin.time.Instant
 
 /**
  * Returns the static 5 direct tool definitions visible in every Responses API request:
@@ -10,5 +11,5 @@ import io.github.stream29.kodex.openai.ToolSpec
  */
 public expect fun visibleToolSpecs(): List<ToolSpec>
 
-/** Converts one provider-issued local tool call at the AgentState boundary. */
-public expect fun ResponseItem.ToolCall.toPendingToolEvent(): PendingToolCall
+/** Converts a provider-issued tool call at the timestamp of its first pending commit. */
+public expect fun ResponseItem.ToolCall.toPendingToolEvent(timestamp: Instant): PendingToolCall

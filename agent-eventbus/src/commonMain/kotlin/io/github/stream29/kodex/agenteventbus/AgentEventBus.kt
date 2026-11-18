@@ -7,12 +7,10 @@ import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecProcessSession
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -63,25 +61,6 @@ private class RepositoryAgentEventBus(
         )
     }
 
-    private suspend fun submitTerminalExited(
-        agentId: Int,
-        sessionId: Int,
-        name: String?,
-        command: String,
-        exitCode: Int,
-    ) {
-        repository.open(agentId).runtime.submit(
-            listOf(
-                StableTerminalExitedEvent(
-                    sessionId = sessionId,
-                    name = name,
-                    command = command,
-                    exitCode = exitCode,
-                ),
-            ),
-        )
-    }
-
     fun attachWatchedTerminalExitObserver() {
         val watchers = mutableMapOf<Int, Pair<KodexAgentSession, Job>>()
         repository.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -94,7 +73,7 @@ private class RepositoryAgentEventBus(
                     for ((agentId, session) in openByAgent) {
                         if (watchers[agentId]?.first === session) continue
                         val job = session.launch(start = CoroutineStart.UNDISPATCHED) {
-                            observeSessionWatchedTerminals(agentId, session)
+                            observeSessionWatchedTerminals(session)
                         }
                         watchers[agentId] = session to job
                     }
@@ -106,11 +85,7 @@ private class RepositoryAgentEventBus(
         }
     }
 
-    private suspend fun observeSessionWatchedTerminals(
-        agentId: Int,
-        session: KodexAgentSession,
-    ) {
-        val dispatchedKeys = mutableSetOf<Pair<String, Int>>()
+    private suspend fun observeSessionWatchedTerminals(session: KodexAgentSession) {
         val runtime = session.runtime
 
         combine(
@@ -129,53 +104,34 @@ private class RepositoryAgentEventBus(
                 activeSessions = activeSessions,
             )
         }.flatMapLatest { snapshot ->
-            val activeCallIds = snapshot.awaitEvents.mapTo(mutableSetOf()) { it.callId }
-            dispatchedKeys.retainAll { (callId, _) -> callId in activeCallIds }
-
             if (!snapshot.parked) {
-                flowOf(emptyList())
+                flowOf(null)
             } else {
-                val watchedIds = snapshot.awaitEvents
-                    .flatMap { it.arguments.terminals }
-                    .distinct()
-                val watchedSessions = watchedIds.mapNotNull { id -> snapshot.activeSessions[id] }
-                if (watchedSessions.isEmpty()) {
-                    flowOf(emptyList())
+                val watched = buildMap {
+                    for (pending in snapshot.awaitEvents) {
+                        for (id in pending.arguments.terminalIds) if (id !in this) put(id, pending)
+                    }
+                }
+                val missing = watched.entries.firstOrNull { (id, _) -> id !in snapshot.activeSessions }
+                if (missing != null) {
+                    flowOf(WatchedTerminalCheck(missing.value, missing.key))
+                } else if (watched.isEmpty()) {
+                    flowOf(null)
                 } else {
                     combine(
-                        watchedSessions.map { proc ->
-                            proc.exitCode.map { code ->
-                                code?.let { ExitedWatchedTerminal(snapshot.awaitEvents, proc, it) }
+                        watched.map { (id, pending) ->
+                            snapshot.activeSessions.getValue(id).exitCode.map { exitCode ->
+                                exitCode?.let { WatchedTerminalCheck(pending, id) }
                             }
                         },
                     ) { candidates ->
-                        candidates.filterNotNull()
+                        candidates.firstOrNull { it != null }
                     }
                 }
             }
-        }.collect { exitedList ->
-            for (exited in exitedList) {
-                val matchingCalls = exited.awaitEvents.filter { pending ->
-                    exited.session.sessionId in pending.arguments.terminals
-                }
-                val newlyTriggered = matchingCalls.any { pending ->
-                    dispatchedKeys.add(pending.callId to exited.session.sessionId)
-                }
-                if (newlyTriggered) {
-                    try {
-                        submitTerminalExited(
-                            agentId = agentId,
-                            sessionId = exited.session.sessionId,
-                            name = exited.session.arguments.name,
-                            command = exited.session.arguments.command,
-                            exitCode = exited.exitCode,
-                        )
-                    } catch (cancellation: CancellationException) {
-                        throw cancellation
-                    } catch (_: Throwable) {
-                        // Ignore races when the session closes or deletes concurrently.
-                    }
-                }
+        }.collect { check ->
+            if (check != null) {
+                runtime.requestAwaitTerminalCheck(check.pending, check.terminalId).join()
             }
         }
     }
@@ -187,8 +143,7 @@ private data class WatchedAwaitSnapshot(
     val activeSessions: Map<Int, UnifiedExecProcessSession>,
 )
 
-private data class ExitedWatchedTerminal(
-    val awaitEvents: List<PendingAwait>,
-    val session: UnifiedExecProcessSession,
-    val exitCode: Int,
+private data class WatchedTerminalCheck(
+    val pending: PendingAwait,
+    val terminalId: Int,
 )

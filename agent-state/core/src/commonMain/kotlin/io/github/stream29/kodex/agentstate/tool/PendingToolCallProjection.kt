@@ -15,8 +15,8 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
-import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventTools
+import io.github.stream29.kodex.tool.awaitevent.decodeAwaitEventArguments
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.readmedia.ReadMediaTools
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
@@ -24,16 +24,17 @@ import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
 import io.github.stream29.kodex.utils.applypatch.parsePatch
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
+import kotlin.time.Instant
 
 /** Converts one provider-issued local tool call at the AgentState boundary. */
-public actual fun ResponseItem.ToolCall.toPendingToolEvent(): PendingToolCall =
+public actual fun ResponseItem.ToolCall.toPendingToolEvent(timestamp: Instant): PendingToolCall =
     when (this) {
-        is ResponseItem.FunctionCall -> toPendingToolEvent()
+        is ResponseItem.FunctionCall -> toPendingToolEvent(timestamp)
         is ResponseItem.CustomToolCall -> toPendingToolEvent()
         is ResponseItem.ClientToolSearchCall -> toPendingToolEvent()
     }
 
-private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolCall {
+private fun ResponseItem.FunctionCall.toPendingToolEvent(timestamp: Instant): PendingToolCall {
     fun <Arguments> typed(
         deserializer: DeserializationStrategy<Arguments>,
         transform: (Arguments) -> PendingToolCall,
@@ -52,12 +53,16 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolCall {
             }
 
         namespace == null && name == AwaitEventTools.Name ->
-            typed(AwaitEventArguments.serializer()) { arguments ->
+            try {
+                val decoded = decodeAwaitEventArguments(arguments)
                 PendingAwait(
                     callId = callId,
                     itemId = id,
-                    arguments = arguments,
+                    arguments = decoded,
+                    timeoutAt = decoded.timeoutAt(timestamp),
                 )
+            } catch (failure: IllegalArgumentException) {
+                invalid(failure.message ?: "Invalid arguments for await_event.")
             }
 
         namespace == null && name == ReadMediaTools.Name ->

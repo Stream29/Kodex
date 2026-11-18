@@ -11,6 +11,7 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(libs.kotlinx.serialization.core)
+                implementation(libs.kotlinx.serialization.json)
                 api(project(":openai-models"))
                 api(libs.kotlinx.schema.json)
             }

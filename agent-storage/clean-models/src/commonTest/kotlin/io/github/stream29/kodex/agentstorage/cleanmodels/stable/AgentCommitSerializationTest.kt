@@ -6,6 +6,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventOutput
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
@@ -174,7 +175,7 @@ val agentCommitSerializationTest by testSuite {
             StableReasoning(ResponseItem.Reasoning(ResponseItemId("r1"), emptyList())),
             StableAwait(
                 callId = "call_await",
-                arguments = AwaitEventArguments(terminals = listOf(4)),
+                arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(4))),
                 result = StableAwaitEventResult.Output(AwaitEventOutput(Instant.parse("2026-11-15T10:00:00Z"))),
             ),
             KodexAgentSettings(model = OpenAiModelId("gpt-5")),
@@ -183,7 +184,7 @@ val agentCommitSerializationTest by testSuite {
             UnstableSnapshot(
                 listOf(
                     PendingPlanUpdate("c1", null, UpdatePlanArgs("plan", emptyList())),
-                    PendingAwait("c2", null, AwaitEventArguments(listOf(4))),
+                    PendingAwait("c2", null, AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(4)))),
                 ),
             ),
             AskUserSnapshot(

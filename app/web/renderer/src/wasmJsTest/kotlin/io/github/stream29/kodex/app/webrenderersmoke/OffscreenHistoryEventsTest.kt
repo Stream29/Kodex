@@ -34,6 +34,7 @@ import io.github.stream29.kodex.app.ui.compose.rememberComposeHistoryContentRend
 import io.github.stream29.kodex.cli.history.*
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventOutput
 import io.github.stream29.kodex.tool.readmedia.*
 import io.github.stream29.kodex.tool.unifiedexec.*
@@ -359,7 +360,11 @@ val offscreenHistoryEventsTest by testSuite {
             "Waiting for terminal session 77", "Tool: write_stdin"),
         Triple(PendingReadMedia("media", arguments = ReadMediaToolArguments("/image.png")),
             "Reading media: /image.png", "Tool: read_media"),
-        Triple(PendingAwait("await", arguments = AwaitEventArguments(listOf(3, 5))),
+        Triple(PendingAwait(
+            "await",
+            arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(3), AwaitEventInput.TerminalExited(5), AwaitEventInput.Timeout(3000))),
+            timeoutAt = Instant.fromEpochMilliseconds(3000),
+        ),
             "Waiting for events (terminals: 3, 5)", "Tool: await_event"),
         Triple(PendingInvalidToolCall("invalid", invocation = PendingInvalidToolInvocation.Function(
             name = "exec_command", arguments = "{BROKEN"), message = "Invalid"),
@@ -376,6 +381,11 @@ val offscreenHistoryEventsTest by testSuite {
                 scene.clickDescription("History tool: ${case.second}")
                 scene.settle { scene.hasText(case.third) }
                 if (index == 3) assertFalse(scene.hasText("Process"))
+                if (case.first is PendingAwait) {
+                    scene.click("Arguments")
+                    scene.settle { scene.containsHistoryText("Timeout after 3000 ms") }
+                    assertTrue(scene.containsHistoryText("Terminal #3 exits"))
+                }
                 scene.frame()
             } finally { scene.close() }
         } }
@@ -409,9 +419,15 @@ val offscreenHistoryEventsTest by testSuite {
             "Search first", "hosted_web_search",
         ),
         Triple(
-            StableAwait("await", arguments = AwaitEventArguments(listOf(7)),
+            StableAwait("await", arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(7))),
                 result = StableAwaitEventResult.Output(AwaitEventOutput(Instant.fromEpochMilliseconds(0)))),
             "Wait for events", "timestamp: 1970-01-01T00:00:00Z",
+        ),
+        Triple(
+            AgentCommitType.AwaitEventToolEvent.decodePayloadJson(
+                """{"type":"await_event_tool_event","call_id":"legacy","arguments":{"terminals":[]},"result":{"type":"output","value":{"timestamp":"1970-01-01T00:00:00Z"}}}""",
+            ),
+            "Wait for events", "events: User message\nAsk user answered\nSchedule triggered",
         ),
         Triple(
             StableTextTool("utility", name = "get_context_remaining", arguments = emptyHistoryArguments,

@@ -2,12 +2,16 @@
 
 package io.github.stream29.kodex.agentsession.sqlite
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
+import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
 import io.github.stream29.kodex.agentsession.contract.*
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.decodePayloadJson
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
 import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.sqlite.*
@@ -44,6 +48,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
     private val mutex: Mutex,
     private val ownsConnection: Boolean,
     initialEntries: List<Int>,
+    initialDeadlines: Map<Int, PendingAwaitDeadline>,
     sessionTtl: Duration,
     origin: TimeMark,
     onTurnActiveRenewal: suspend () -> Unit,
@@ -63,6 +68,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
     private val mirrorScope = CoroutineScope(scope.coroutineContext.minusKey(Job) + SupervisorJob())
     private val mirror = SequentialMirrorQueue(mirrorScope, reportMirrorFailure)
     private val mutableEntries = MutableStateFlow(initialEntries)
+    private val mutableAwaitDeadlines = MutableStateFlow(initialDeadlines)
     private val mutableStopEvents = MutableSharedFlow<IndexedAgentStopEvent>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -71,6 +77,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
 
     public actual override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
     public actual override val openSessions: StateFlow<Map<Int, KodexAgentSession>> = residency.openSessions
+    override val pendingAwaitDeadlines: StateFlow<Map<Int, PendingAwaitDeadline>> = mutableAwaitDeadlines.asStateFlow()
     public actual override val stopEvents: Flow<IndexedAgentStopEvent> = mutableStopEvents.asSharedFlow()
 
     private var closed = false
@@ -194,8 +201,20 @@ public actual class SqliteKodexSessionRepository internal constructor(
             )
             if (source != null) {
                 val emptySteerJson = SteerSnapshot(emptyList()).encodePayloadJson()
+                // An Agent ID can be reused; a nested Fork must not reactivate an ancestor's arming.
                 connection.execute(
-                    """INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at) SELECT ?, type, "index", CASE WHEN type = ? THEN ? ELSE payload_json END, created_at FROM agent_commits WHERE agent_id = ?""",
+                    """INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at)
+                        SELECT ?, type, "index", CASE
+                            WHEN type = ? THEN ?
+                            WHEN type = 'unstable' AND instr(payload_json, '"armed_for_agent_id"') > 0 THEN (
+                                SELECT json_group_array(
+                                    json(CASE WHEN json_extract(item.value, '$.type') = 'await_event'
+                                        THEN json_remove(item.value, '$.armed_for_agent_id') ELSE item.value END)
+                                    ORDER BY item.key
+                                ) FROM json_each(payload_json) AS item
+                            )
+                            ELSE payload_json
+                        END, created_at FROM agent_commits WHERE agent_id = ?""",
                     listOf(candidate, AgentCommitType.Steer.wireName, emptySteerJson, source.toLong()),
                 )
                 val snapshot = connection.query(
@@ -212,6 +231,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
         val fs = fileSystem
         val target = directory(index)
         val snapshotFiles = files
+        if (source != null) refreshDeadlineLocked(index)
         mirror.enqueue {
             // An index can be reused after deletion; discard any stale mirror first.
             deleteRecursively(fs, target)
@@ -226,11 +246,27 @@ public actual class SqliteKodexSessionRepository internal constructor(
             requireOpen()
             requireEntry(entryIndex)
         }
-        residency.reuseOrCleanupLocked(entryIndex)?.let { return@withLock it }
+        openLocked(entryIndex)
+    }
+
+    public actual suspend fun openForAwaitDeadline(entryIndex: Int, expected: PendingAwaitDeadline): KodexAgentSession? =
+        lifecycleMutex.withLock {
+            if (mutableAwaitDeadlines.value[entryIndex] != expected) return@withLock null
+            withDbLock {
+                requireOpen()
+                if (mutableAwaitDeadlines.value[entryIndex] != expected) return@withDbLock false
+                requireEntry(entryIndex)
+                true
+            }.let { if (!it) return@withLock null }
+            openLocked(entryIndex)
+        }
+
+    private suspend fun openLocked(entryIndex: Int): KodexAgentSession {
+        residency.reuseOrCleanupLocked(entryIndex)?.let { return it }
 
         val storageScope = CoroutineScope(coroutineContext.minusKey(Job) + SupervisorJob())
         val sessionScope = supervisorChildScope()
-        try {
+        return try {
             val cache = withDbLock {
                 requireOpen()
                 val targetDirectory = directory(entryIndex)
@@ -240,6 +276,11 @@ public actual class SqliteKodexSessionRepository internal constructor(
                     uri = targetDirectory.toStorageUri(),
                     mutex = mutex,
                     requireAccess = { check(storageScope.isActive) { "Session storage is closed" } },
+                    onHistoryChanged = { changedTypes ->
+                        if (changedTypes == null || AgentCommitType.Unstable in changedTypes) {
+                            refreshDeadlineLocked(entryIndex)
+                        }
+                    },
                 )
                 val initialLatestIndex = (
                     connection.query(
@@ -254,6 +295,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
                 client = dependencies.client,
                 storage = cache,
                 contextSettings = dependencies.contextSettings,
+                clock = dependencies.clock,
             )
             val runtime = state.buildMasterAgentRuntime(dependencies)
             sessionScope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -299,6 +341,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
                     onDeleteInTransaction(entryIndex)
                     connection.execute("DELETE FROM sessions WHERE session_id = ?", listOf(entryIndex.toLong()))
                 }
+                mutableAwaitDeadlines.value -= entryIndex
                 mutableEntries.value = inventory()
                 val fs = fileSystem
                 val target = directory(entryIndex)
@@ -308,6 +351,24 @@ public actual class SqliteKodexSessionRepository internal constructor(
     }
 
     public actual override suspend fun close(): Unit = closeAndJoin()
+
+    /** Called under the same DB lock that serialized the write, after it committed. */
+    private fun refreshDeadlineLocked(agentId: Int) {
+        val deadline = try {
+            connection.query(
+                """SELECT "index", payload_json FROM agent_commits
+                    WHERE agent_id = ? AND type = 'unstable' ORDER BY "index" DESC LIMIT 1""",
+                listOf(agentId.toLong()),
+            ).singleOrNull()?.let { row ->
+                decodeAwaitDeadline(agentId, (row[0] as Long).toInt(), row[1] as String)
+            }
+        } catch (error: Exception) {
+            AwaitProjectionLogger.error(error) { "Cannot refresh await_event deadline for Agent $agentId." }
+            return
+        }
+        mutableAwaitDeadlines.value = if (deadline == null) mutableAwaitDeadlines.value - agentId
+        else mutableAwaitDeadlines.value + (agentId to deadline)
+    }
 
     public actual suspend fun closeAndJoin() {
         withContext(NonCancellable) {
@@ -364,9 +425,9 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     val (resolvedRoot, openedConnection) = openVerifiedKodexDatabase(root, fileSystem)
     return openedConnection.closeOnFailure { connection ->
         supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
-            val initialEntries = withContext(Dispatchers.IO) {
+            val (initialEntries, initialDeadlines) = withContext(Dispatchers.IO) {
                 ensureSqlitePhaseOneSchema(connection)
-                querySessionInventory(connection)
+                querySessionInventory(connection) to queryAwaitDeadlines(connection)
             }
             currentCoroutineContext().ensureActive()
             scope.coroutineContext.ensureActive()
@@ -379,6 +440,7 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
                 mutex = Mutex(),
                 ownsConnection = true,
                 initialEntries = initialEntries,
+                initialDeadlines = initialDeadlines,
                 sessionTtl = sessionTtl,
                 origin = timeSource.markNow(),
                 onTurnActiveRenewal = onTurnActiveRenewal,
@@ -406,10 +468,10 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     fileSystem.createDirectories(root)
     val resolvedRoot = fileSystem.resolve(root)
     return supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
-        val initialEntries = mutex.withLock {
+        val (initialEntries, initialDeadlines) = mutex.withLock {
             withContext(Dispatchers.IO) {
                 ensureSqlitePhaseOneSchema(connection)
-                querySessionInventory(connection)
+                querySessionInventory(connection) to queryAwaitDeadlines(connection)
             }
         }
         currentCoroutineContext().ensureActive()
@@ -423,6 +485,7 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
             mutex = mutex,
             ownsConnection = false,
             initialEntries = initialEntries,
+            initialDeadlines = initialDeadlines,
             sessionTtl = sessionTtl,
             origin = timeSource.markNow(),
             onTurnActiveRenewal = onTurnActiveRenewal,
@@ -435,6 +498,40 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
 
 private fun querySessionInventory(connection: SqliteConnection): List<Int> =
     connection.query("SELECT session_id FROM sessions ORDER BY session_id").map { (it[0] as Long).toInt() }
+
+/** Keyset pages through Agents and reads at most one unstable row per Agent via the primary key. */
+private fun queryAwaitDeadlines(connection: SqliteConnection): Map<Int, PendingAwaitDeadline> = buildMap {
+    var after = -1L
+    while (true) {
+        val rows = connection.query(
+            """SELECT a.agent_id, c."index", c.payload_json
+                FROM (SELECT agent_id FROM agents WHERE agent_id > ? ORDER BY agent_id LIMIT 256) AS a
+                LEFT JOIN agent_commits AS c ON c.agent_id = a.agent_id AND c.type = 'unstable'
+                    AND c."index" = (SELECT u."index" FROM agent_commits AS u
+                        WHERE u.agent_id = a.agent_id AND u.type = 'unstable' ORDER BY u."index" DESC LIMIT 1)
+                ORDER BY a.agent_id""",
+            listOf(after),
+        )
+        for ((rawAgentId, rawIndex, payload) in rows) {
+            val agentId = (rawAgentId as Long).toInt()
+            if (rawIndex is Long && payload is String) {
+                decodeAwaitDeadline(agentId, rawIndex.toInt(), payload)?.let { put(agentId, it) }
+            }
+        }
+        if (rows.size < 256) break
+        after = rows.last()[0] as Long
+    }
+}
+
+private fun decodeAwaitDeadline(agentId: Int, index: Int, payload: String): PendingAwaitDeadline? =
+    try {
+        (AgentCommitType.Unstable.decodePayloadJson(payload) as UnstableSnapshot).pendingDeadline(agentId, index)
+    } catch (error: IllegalArgumentException) {
+        AwaitProjectionLogger.warn(error) { "Invalid current unstable snapshot for Agent $agentId at index $index." }
+        null
+    }
+
+private val AwaitProjectionLogger = KotlinLogging.logger {}
 
 private suspend fun deleteRecursively(fileSystem: CoroutineFileSystem, path: Path) {
     val metadata = fileSystem.metadataOrNull(path) ?: return

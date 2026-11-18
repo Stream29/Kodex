@@ -7,6 +7,7 @@ import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
@@ -161,7 +162,7 @@ val pendingToolEventSerializationTest by testSuite {
             ) to ("read_media" to null),
             PendingAwait(
                 callId = "call_await",
-                arguments = AwaitEventArguments(listOf(7)),
+                arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(7))),
             ) to ("await_event" to null),
             PendingCommandExecution(
                 callId = "call_exec",

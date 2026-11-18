@@ -8,10 +8,12 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.time.Clock
 
 /** Dependencies for session tests that do not execute external services. */
 public actual fun testKodexAgentDependencies(
     client: OpenAiClient,
+    clock: Clock,
 ): KodexAgentDependencies {
     val model = ModelInfo(
         slug = OpenAiModelId(TestModel),
@@ -24,6 +26,7 @@ public actual fun testKodexAgentDependencies(
         modelCatalog = TestModelCatalogStore(model),
         contextSettings = TestAgentContextSettings,
         shellSettings = TestAgentContextSettings,
+        clock = clock,
     )
 }
 

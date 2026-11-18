@@ -2,6 +2,7 @@
 
 package io.github.stream29.kodex.agentsession.sqlite
 
+import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentsession.contract.*
 import io.github.stream29.kodex.utils.coroutines.CoroutineCloseable
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
@@ -17,6 +18,8 @@ import kotlin.time.Duration
 import kotlin.time.TimeSource
 
 public expect class SqliteKodexSessionRepository : KodexSessionRepository, CoroutineCloseable {
+    /** Opens an existing entry only if it still has the expected armed deadline. */
+    public suspend fun openForAwaitDeadline(entryIndex: Int, expected: PendingAwaitDeadline): KodexAgentSession?
     override val coroutineContext: CoroutineContext
     override val entries: StateFlow<List<Int>>
     override val openSessions: StateFlow<Map<Int, KodexAgentSession>>

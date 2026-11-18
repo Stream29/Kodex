@@ -2,6 +2,7 @@ package io.github.stream29.kodex.agentsession.contract
 
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.AgentStopEvent
+import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -74,6 +75,9 @@ public interface KodexSessionRepository : CoroutineScope {
 
     /** Snapshot of currently open (active in-memory) root Sessions keyed by [entryIndex]. */
     public val openSessions: StateFlow<Map<Int, KodexAgentSession>>
+
+    /** The earliest armed timeout for each Agent, including nonresident Sessions. */
+    public val pendingAwaitDeadlines: StateFlow<Map<Int, PendingAwaitDeadline>>
 
     /** Aggregated [AgentRuntime.stopEvents] from all open Sessions in this repository. */
     public val stopEvents: Flow<IndexedAgentStopEvent>

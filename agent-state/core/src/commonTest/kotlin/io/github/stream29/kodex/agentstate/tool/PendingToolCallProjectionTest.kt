@@ -19,6 +19,7 @@ import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventTools
 import io.github.stream29.kodex.tool.readmedia.MediaDetail
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
@@ -33,6 +34,10 @@ import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Instant
+
+private val CallTimestamp = Instant.parse("2026-11-18T00:00:00.001Z")
 
 val pendingToolEventProjectionTest by testSuite {
     test("projects specialized function calls into direct pending branches") {
@@ -46,7 +51,7 @@ val pendingToolEventProjectionTest by testSuite {
             explanation = "Cut over model surface.",
             plan = listOf(PlanItemArg("Verify tools.", StepStatus.InProgress)),
         )
-        val awaitEvent = AwaitEventArguments(terminals = listOf(3, 9))
+        val awaitEvent = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(3), AwaitEventInput.Timeout(3000)))
         val cases: List<Pair<ResponseItem.FunctionCall, PendingToolCall>> = listOf(
             functionCall(
                 UnifiedExecTools.ExecCommandName,
@@ -65,6 +70,7 @@ val pendingToolEventProjectionTest by testSuite {
                 callId = "call_${AwaitEventTools.Name}",
                 itemId = ItemId,
                 arguments = awaitEvent,
+                timeoutAt = CallTimestamp + 3000.milliseconds,
             ),
             functionCall(
                 ReadMediaTools.Name,
@@ -87,7 +93,7 @@ val pendingToolEventProjectionTest by testSuite {
         )
 
         cases.forEach { (call, expected) ->
-            assertEquals(expected, call.toPendingToolEvent())
+            assertEquals(expected, call.toPendingToolEvent(CallTimestamp))
             val projected = assertIs<ResponseItem.FunctionCall>(
                 expected.toResponseHistoryItems().single(),
             )
@@ -95,7 +101,7 @@ val pendingToolEventProjectionTest by testSuite {
             assertEquals(call.callId, projected.callId)
             assertEquals(call.name, projected.name)
             assertEquals(call.namespace, projected.namespace)
-            assertEquals(expected, projected.toPendingToolEvent())
+            assertEquals(expected, projected.toPendingToolEvent(CallTimestamp))
         }
     }
 
@@ -132,11 +138,11 @@ val pendingToolEventProjectionTest by testSuite {
                 ),
                 message = "Client tool_search is no longer supported.",
             ),
-            searchCall.toPendingToolEvent(),
+            searchCall.toPendingToolEvent(CallTimestamp),
         )
         assertEquals(
             PendingPatch("call_patch", ItemId, patchText.parsePatch()),
-            patchCall.toPendingToolEvent(),
+            patchCall.toPendingToolEvent(CallTimestamp),
         )
     }
 
@@ -176,7 +182,7 @@ val pendingToolEventProjectionTest by testSuite {
 
         invalidCalls.forEach { call ->
             val event = assertIs<PendingInvalidToolCall>(
-                call.toPendingToolEvent(),
+                call.toPendingToolEvent(CallTimestamp),
                 "Expected PendingInvalidToolCall for ${call.callId}",
             )
             assertEquals(call.callId, event.callId)
@@ -201,13 +207,13 @@ val pendingToolEventProjectionTest by testSuite {
                 exec,
             )
             assertTrue(""""yield_time_ms":$yieldMillis""" in execCall.arguments)
-            val execPending = assertIs<PendingCommandExecution>(execCall.toPendingToolEvent())
+            val execPending = assertIs<PendingCommandExecution>(execCall.toPendingToolEvent(CallTimestamp))
             assertEquals(PendingCommandExecutionAction.ExecCommand(exec), execPending.action)
             val execProjected = assertIs<ResponseItem.FunctionCall>(
                 execPending.toResponseHistoryItems().single(),
             )
             assertTrue(""""yield_time_ms":$yieldMillis""" in execProjected.arguments)
-            assertEquals(execPending, execProjected.toPendingToolEvent())
+            assertEquals(execPending, execProjected.toPendingToolEvent(CallTimestamp))
 
             val write = WriteStdinArguments(sessionId = 9, chars = "", yieldTimeMillis = yieldMillis)
             val persistedWritePending = PendingCommandExecution(
@@ -227,7 +233,7 @@ val pendingToolEventProjectionTest by testSuite {
                     namespace = null,
                     arguments = OpenAiJsonCodec.parseToJsonElement(writeProjected.arguments),
                 ),
-                writeProjected.toPendingToolEvent(),
+                writeProjected.toPendingToolEvent(CallTimestamp),
             )
         }
     }
@@ -250,7 +256,7 @@ val pendingToolEventProjectionTest by testSuite {
                 namespace = function.namespace,
                 arguments = arguments,
             ),
-            function.toPendingToolEvent(),
+            function.toPendingToolEvent(CallTimestamp),
         )
     }
 }

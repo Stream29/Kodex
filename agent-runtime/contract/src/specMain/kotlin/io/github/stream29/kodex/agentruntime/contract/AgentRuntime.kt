@@ -4,6 +4,7 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
@@ -13,10 +14,18 @@ import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecClient
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.time.Instant
 
 /** Thrown when resume or explicit compaction attempts to enter an occupied runtime turn. */
 public class ConcurrentAgentRuntimeResumeException : IllegalStateException(
     "Concurrent AgentRuntime execution is not allowed.",
+)
+
+/** Identity of an armed timeout in the latest persisted unstable snapshot. */
+public data class PendingAwaitDeadline(
+    public val snapshotIndex: Int,
+    public val callId: String,
+    public val timeoutAt: Instant,
 )
 
 /**
@@ -69,11 +78,9 @@ public interface AgentRuntime : KodexAgentState {
      *   so the turn can continue instead of stalling in `ToolPending`.
      * - When `SteerSnapshot` is non-empty at a pending `await_event` boundary, completes
      *   `await_event` with `AwaitEventOutput` and continues the turn to consume the steer.
-     * - Otherwise validates `terminals` against [unifiedExecToolClient] (failing unknown or
-     *   evicted IDs immediately and continuing), steers `StableTerminalExitedEvent` for any
-     *   already-completed watched terminals (completing `await_event` and continuing), or
-     *   returns normally when all watched terminals are still running so [runningTurn]
-     *   becomes `null` (external wakeups and watched-terminal exits enter via `AgentEventBus`).
+     * - Otherwise validates watched terminals, handles terminal exits and due timeouts, and rejects
+     *   a still-running terminal as the sole condition before parking. Accepted timeouts are armed
+     *   in storage before [runningTurn] is released.
      *
      * Emits the corresponding [AgentStopEvent] onto [stopEvents] when an accepted turn finishes
      * at an assistant message or an unhandled failure.
@@ -89,6 +96,12 @@ public interface AgentRuntime : KodexAgentState {
      * any failed pending-tool cleanup remains available as a suppressed exception.
      */
     public suspend fun resume()
+
+    /** Rechecks a due, still-current deadline. The returned job belongs to this Runtime. */
+    public fun requestAwaitDeadlineCheck(expected: PendingAwaitDeadline): Job
+
+    /** Rechecks the watched terminal for the same pending call; never submits stale steer. */
+    public fun requestAwaitTerminalCheck(expected: PendingAwait, terminalId: Int): Job
 
     /**
      * Runs explicit compaction within the same turn slot used by [resume].

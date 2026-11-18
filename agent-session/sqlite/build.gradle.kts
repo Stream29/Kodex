@@ -16,6 +16,7 @@ kotlin {
             }
         }
         commonMain.dependencies {
+            implementation(libs.kotlin.logging)
             implementation(project(":agent-runtime-composition"))
             implementation(project(":openai-json-codec"))
             implementation(project(":agent-state-core"))

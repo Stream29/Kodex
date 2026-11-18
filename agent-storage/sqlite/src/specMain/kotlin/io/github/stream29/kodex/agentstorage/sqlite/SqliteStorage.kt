@@ -11,12 +11,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlin.time.Clock
 import kotlin.time.Instant
 
+/**
+ * [onHistoryChanged] runs after commit under the database mutex. It receives changed types
+ * or `null` for a revert. The callback must not suspend, reacquire the mutex, or throw.
+ */
 public expect class SqliteAgentStorage(
     connection: SqliteConnection,
     agentId: Int,
     uri: String = "db:agent/$agentId",
     mutex: Mutex = Mutex(),
     requireAccess: () -> Unit = {},
+    onHistoryChanged: ((Set<AgentCommitType>?) -> Unit)? = null,
 ) : MutableKodexAgentStorage {
     override val agentId: Int
     override val uri: String

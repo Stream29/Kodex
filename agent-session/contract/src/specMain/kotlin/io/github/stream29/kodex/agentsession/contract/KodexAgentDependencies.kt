@@ -5,6 +5,7 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.time.Clock
 
 /**
  * Owns the process-wide services shared by composed Agent sessions.
@@ -18,6 +19,7 @@ public class KodexAgentDependencies(
     public val modelCatalog: OpenAiModelCatalogStore,
     public val contextSettings: StateFlow<AgentContextSettings>,
     public val shellSettings: StateFlow<ShellSettings>,
+    public val clock: Clock = Clock.System,
 ) : AutoCloseable {
     /**
      * Stops higher-level consumers before closing the OpenAI client they use.

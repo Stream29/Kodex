@@ -75,10 +75,10 @@ internal fun renderToolCliInstructions(mode: RequestUserInputMode): String = bui
     appendLine("Direct model tools are fixed to: `exec_command`, `apply_patch`, `read_media`, `update_plan`, and `await_event`.")
     appendLine("Every `exec_command` subprocess automatically inherits `KODEX_AGENT_ID` and `KODEX_HOME`. Use the `kodex` CLI inside `exec_command` for extended capabilities:")
     appendLine("- `kodex tool list`: List all built-in CLI tools and enabled MCP server tools (`<command>\\t<summary>`). Filter with `grep` and run `<command> --help` to inspect options or MCP JSON schemas.")
-    appendLine("- `kodex terminal (list | read | write | kill)`: Inspect output, write stdin (`--stdin` / `--eof`), or terminate background shell sessions. Call `await_event(terminals = [<id>])` instead of polling with `sleep`.")
+    appendLine("- `kodex terminal (list | read | write | kill)`: Inspect output, write stdin (`--stdin` / `--eof`), or terminate background shell sessions. Instead of polling, call `await_event` with `{\"events\":[{\"type\":\"terminal_exited\",\"session_id\":123},{\"type\":\"timeout\",\"duration_ms\":300000}]}`, replacing 123 with the terminal ID.")
     when (mode) {
         RequestUserInputMode.AskUser -> {
-            appendLine("- `kodex ask (create | list | get)`: Create a non-blocking structured question for the user (`--json` / `--stdin`), then call `await_event` when you need the user's response before continuing.")
+            appendLine("- `kodex ask (create | list | get)`: Create a non-blocking structured question (`--json` / `--stdin`), then wait for the response with `await_event` and `{\"events\":[{\"type\":\"ask_user_answered\"}]}`.")
         }
         RequestUserInputMode.NoQuestion -> {
             appendLine("- User questions are disabled (`NoQuestion` mode): do NOT ask the user questions or invoke external question prompts; proceed autonomously using the best evidence available.")

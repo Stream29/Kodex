@@ -8,6 +8,7 @@ import io.github.stream29.kodex.backend.BackendInstance
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.FreeformTool
+import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelsResponse
@@ -42,6 +43,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.random.Random
 import kotlin.test.assertEquals
@@ -98,20 +101,17 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                         }
 
                         2 -> {
-                            val outputText = request.input.toString()
-                            val match = requireNotNull(
-                                Regex(""""session_id"\s*:\s*(\d+)""").find(outputText),
-                            ) {
-                                "Expected running session_id in tool output, got: $outputText"
-                            }
-                            val shellId = match.groupValues[1].toInt()
+                            val output = request.input.filterIsInstance<ResponseItem.FunctionCallOutput>()
+                                .single { it.callId == "exec_1" }.output.body
+                            val outputText = assertIs<FunctionCallOutputBody.Text>(output).text
+                            val shellId = Json.parseToJsonElement(outputText).jsonObject.getValue("session_id").jsonPrimitive.int
                             capturedShellId.complete(shellId)
                             flowOf(
                                 ResponsesStreamEvent.OutputItemDone(
                                     0,
                                     ResponseItem.FunctionCall(
                                         name = "await_event",
-                                        arguments = """{"terminals":[$shellId]}""",
+                                        arguments = """{"events":[{"type":"terminal_exited","session_id":$shellId},{"type":"user_message"}]}""",
                                         callId = "await_1",
                                     ),
                                 ),
@@ -139,7 +139,7 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                                 0,
                                 ResponseItem.FunctionCall(
                                     name = "await_event",
-                                    arguments = """{"terminals":[]}""",
+                                    arguments = """{"events":[{"type":"user_message"}]}""",
                                     callId = "await_2",
                                 ),
                             ),
@@ -187,7 +187,7 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
 
                 val parkedState = assertIs<AgentStateValue.ToolPending>(rpc.runtime.getState(index))
                 val parkedAwait = assertIs<PendingAwait>(parkedState.events.single())
-                assertEquals(listOf(shellId), parkedAwait.arguments.terminals)
+                assertEquals(setOf(shellId), parkedAwait.arguments.terminalIds)
                 assertTrue(
                     readStopNotifications(home, index).isEmpty(),
                     "Parking on await_event must not emit Stop notifications",
@@ -261,7 +261,7 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                 assertTrue(fullText.contains("READY"), "Expected READY in full output: $fullText")
                 assertTrue(fullText.contains("DONE:WORLD"), "Expected DONE:WORLD in full output: $fullText")
 
-                // Second turn: park in await_event([]) and wake directly via user submit over RPC.
+                // Second turn: park for user input and wake directly via user submit over RPC.
                 rpc.runtime.submit(index, listOf(ContentItem.InputText("Park until next message")))
                 step("awaiting second parked await_event") {
                     rpc.runtime.getStateFlow(index).first { state ->

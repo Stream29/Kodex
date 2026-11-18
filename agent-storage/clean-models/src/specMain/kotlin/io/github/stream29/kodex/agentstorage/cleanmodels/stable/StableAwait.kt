@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.StoredAwaitEventArgumentsSerializer
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
@@ -15,6 +16,7 @@ public data class StableAwait(
     public val callId: String,
     @SerialName("item_id")
     public val itemId: ResponseItemId? = null,
+    @Serializable(with = StoredAwaitEventArgumentsSerializer::class)
     public val arguments: AwaitEventArguments,
     public val result: StableAwaitEventResult,
 ) : WorkCommit, AgentCommit.CompletedTool {

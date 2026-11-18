@@ -10,6 +10,7 @@ import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventOutput
 import io.github.stream29.kodex.tool.readmedia.MediaDetail
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
@@ -49,7 +50,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
         val awaitEvent = StableAwait(
             callId = "call_await_event",
             itemId = ResponseItemId("item_await_event"),
-            arguments = AwaitEventArguments(terminals = listOf(1, 3)),
+            arguments = AwaitEventArguments(listOf(1, 3).map { AwaitEventInput.TerminalExited(it) }),
             result = StableAwaitEventResult.Output(
                 AwaitEventOutput(Instant.parse("2026-11-16T00:00:00Z")),
             ),

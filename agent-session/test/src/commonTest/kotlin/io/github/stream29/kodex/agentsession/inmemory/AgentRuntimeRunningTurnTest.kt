@@ -37,6 +37,7 @@ import io.github.stream29.kodex.openai.TokenUsage
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import kotlinx.serialization.json.Json
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
@@ -68,7 +69,7 @@ val agentRuntimeRunningTurnTest by testSuite {
         cancelAndJoin()
     } asContextForEach {
         test("root resume preserves cancellation when durable pending completion fails") {
-            val arguments = AwaitEventArguments()
+            val arguments = AwaitEventArguments(listOf(AwaitEventInput.UserMessage))
             val client = mockOpenAiClient {
                 createResponse {
                     flowOf(
@@ -148,7 +149,7 @@ val agentRuntimeRunningTurnTest by testSuite {
         }
 
         test("composed await_event interactions remain parked while unsupported calls auto-fail and continue") {
-            val awaitArgs = AwaitEventArguments()
+            val awaitArgs = AwaitEventArguments(listOf(AwaitEventInput.AskUserAnswered))
             var requests = 0
             val root = openTurnTestSession(mockOpenAiClient {
                 createResponse {

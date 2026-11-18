@@ -9,6 +9,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEv
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import kotlin.test.assertEquals
 
 val scheduleCompactionRetentionTest by testSuite {
@@ -17,7 +18,7 @@ val scheduleCompactionRetentionTest by testSuite {
         val first = StableScheduleEvent(1, "")
         val second = StableScheduleEvent(2, "next task")
         storage.commit(first)
-        storage.commit(StableAwait("await", null, AwaitEventArguments(listOf(37)), StableAwaitEventResult.Failure("fixture")))
+        storage.commit(StableAwait("await", null, AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(37))), StableAwaitEventResult.Failure("fixture")))
         val terminalIndex = storage.commit(StableTerminalExitedEvent(37, command = "fixture", exitCode = 0))
         val retained = storage.buildCompactionRetainedItems(terminalIndex)
         assertEquals(listOf<CompactionRetainedItem>(first), retained)

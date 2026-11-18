@@ -5,6 +5,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.AgentStopEvent
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
+import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -16,11 +17,14 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.callId
 import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
+import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
@@ -44,6 +48,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
@@ -92,6 +97,7 @@ public actual fun KodexAgentState.buildMasterAgentRuntime(
                 delegate = delegate,
                 unifiedExecToolClient = fixedTools.unifiedExecToolClient,
                 logger = logger,
+                clock = dependencies.clock,
             )
         } catch (failure: Throwable) {
             logger.error(failure) { "Agent runtime failed to open." }
@@ -117,6 +123,7 @@ private class AgentRuntimeImpl(
     private val delegate: ResumableAgentLayer,
     override val unifiedExecToolClient: UnifiedExecToolClient,
     private val logger: KLogger,
+    private val clock: Clock,
 ) : AgentRuntime, KodexAgentState by delegate {
     private val runningTurnSlot: MutableStateFlow<Job?> = MutableStateFlow(null)
     private val needsSubmittedSteerDrain: AtomicBoolean = AtomicBoolean(false)
@@ -129,13 +136,46 @@ private class AgentRuntimeImpl(
     override val runningTurn: StateFlow<Job?> = runningTurnSlot.asStateFlow()
     override val stopEvents: Flow<AgentStopEvent> = mutableStopEvents.asSharedFlow()
 
-    override suspend fun resume() {
+    override suspend fun resume(): Unit = runAdmittedTurn()
+
+    override fun requestAwaitDeadlineCheck(expected: PendingAwaitDeadline): Job =
+        launchAwaitCheck(AwaitWake.Deadline(expected))
+
+    override fun requestAwaitTerminalCheck(expected: PendingAwait, terminalId: Int): Job =
+        launchAwaitCheck(AwaitWake.Terminal(expected, terminalId))
+
+    private fun launchAwaitCheck(wake: AwaitWake): Job = launch(start = CoroutineStart.UNDISPATCHED) {
+        while (isActive) {
+            runningTurnSlot.first { it == null }
+            try {
+                runAdmittedTurn(wake)
+                break
+            } catch (_: ConcurrentAgentRuntimeResumeException) {
+                // A caller took the slot after the observer saw it idle. Wait for the next release.
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // The admitted turn logs and publishes failures; the host retains any still-persisted deadline.
+                break
+            }
+        }
+    }
+
+    private suspend fun runAdmittedTurn(wake: AwaitWake? = null) {
         var completedNormally = false
         withRunningTurn {
             val before = delegate.latestIndex.value
             val acceptedStart = isAcceptedResumeStart(before)
-            logger.info { "Agent turn started." }
+            var started = wake == null
             try {
+                if (wake != null) {
+                    if (resolvePendingAwaitEvents(wake) != AwaitResolution.Completed) {
+                        completedNormally = true
+                        return@withRunningTurn
+                    }
+                    started = true
+                }
+                logger.info { "Agent turn started." }
                 var parkedOnAwaitEvent = false
                 while (true) {
                     needsSubmittedSteerDrain.store(false)
@@ -158,7 +198,7 @@ private class AgentRuntimeImpl(
                     if (awaitEvents.isEmpty()) {
                         break
                     }
-                    if (!resolvePendingAwaitEvents(awaitEvents)) {
+                    if (resolvePendingAwaitEvents() == AwaitResolution.Parked) {
                         parkedOnAwaitEvent = true
                         break
                     }
@@ -169,9 +209,9 @@ private class AgentRuntimeImpl(
                 logger.info { "Agent turn completed." }
                 completedNormally = true
             } catch (cancellation: CancellationException) {
-                val cleanupFailure = withContext(NonCancellable) {
+                val cleanupFailure = if (started) withContext(NonCancellable) {
                     runCatching { delegate.clearPending() }.exceptionOrNull()
-                }
+                } else null
                 if (cleanupFailure != null && cleanupFailure !== cancellation) {
                     cancellation.addSuppressed(cleanupFailure)
                 }
@@ -246,80 +286,98 @@ private class AgentRuntimeImpl(
         }
     }
 
-    private suspend fun resolvePendingAwaitEvents(
-        awaitEvents: List<PendingAwait>,
-    ): Boolean {
-        val currentLatest = delegate.latestIndex.value
-        if (currentLatest >= 0 && delegate.storage.getSteerAt(currentLatest).isNotEmpty()) {
-            completeAllAwaitEventsWithTimestamp(awaitEvents)
-            return true
-        }
-
+    // Resolve and write inside the AgentState lock: a late observer must not win against clear/revert.
+    private suspend fun resolvePendingAwaitEvents(wake: AwaitWake? = null): AwaitResolution = delegate.modify { storage ->
+        val latest = storage.latestIndex()
+        val indexed = storage.getCommitAtOrBefore(latest, AgentCommitType.UnstableTypes)
+            ?: return@modify AwaitResolution.Inactive
+        var records = (indexed.commit as UnstableSnapshot).events
+        val tools = records.filterIsInstance<PendingToolCall>()
+        val awaits = tools.filterIsInstance<PendingAwait>()
+        if (awaits.isEmpty() || awaits.size != tools.size) return@modify AwaitResolution.Inactive
+        val now = clock.now()
         val activeSessions = unifiedExecToolClient.activeSessions.value
-        val invalidByCallId = awaitEvents.associate { pending ->
-            pending.callId to pending.arguments.terminals.filter { sessionId -> sessionId !in activeSessions }
-        }.filterValues { missing -> missing.isNotEmpty() }
-
-        if (invalidByCallId.isNotEmpty()) {
-            val timestamp = Clock.System.now()
-            for (pending in awaitEvents) {
-                val missing = invalidByCallId[pending.callId]
-                val result = if (missing != null) {
-                    StableAwaitEventResult.Failure(
-                        "Unknown or expired terminal session ID(s): ${missing.joinToString(", ")}",
-                    )
-                } else {
-                    StableAwaitEventResult.Output(AwaitEventOutput(timestamp = timestamp))
+        when (wake) {
+            is AwaitWake.Deadline -> {
+                val expected = wake.expected
+                if (indexed.index != expected.snapshotIndex || expected.timeoutAt > now || agentId == null ||
+                    awaits.none { it.callId == expected.callId && it.timeoutAt == expected.timeoutAt && it.armedForAgentId == agentId }
+                ) {
+                    return@modify AwaitResolution.Inactive
                 }
-                completeToolCall(
-                    StableAwait(
-                        callId = pending.callId,
-                        itemId = pending.itemId,
-                        arguments = pending.arguments,
-                        result = result,
-                    ),
-                )
             }
-            return true
+            is AwaitWake.Terminal -> {
+                val terminal = activeSessions[wake.terminalId]
+                if (wake.expected !in awaits || wake.terminalId !in wake.expected.arguments.terminalIds ||
+                    (terminal != null && terminal.exitCode.value == null)
+                ) {
+                    return@modify AwaitResolution.Inactive
+                }
+            }
+            null -> Unit
         }
 
-        val exitedTerminals = awaitEvents
-            .flatMap { pending -> pending.arguments.terminals }
-            .distinct()
-            .mapNotNull { sessionId ->
-                val session = activeSessions[sessionId] ?: return@mapNotNull null
+        val hasSteer = storage.getSteerAt(latest).isNotEmpty()
+        val missingByCall = if (hasSteer) emptyMap() else awaits.associate { pending ->
+            pending.callId to pending.arguments.terminalIds.filter { it !in activeSessions }
+        }.filterValues { it.isNotEmpty() }
+        val exited = if (hasSteer || missingByCall.isNotEmpty()) emptyList() else {
+            awaits.flatMap { it.arguments.terminalIds }.distinct().mapNotNull { id ->
+                val session = activeSessions[id] ?: return@mapNotNull null
                 val code = session.exitCode.value ?: return@mapNotNull null
-                StableTerminalExitedEvent(
-                    sessionId = session.sessionId,
-                    name = session.arguments.name,
-                    command = session.arguments.command,
-                    exitCode = code,
-                )
+                StableTerminalExitedEvent(id, session.arguments.name, session.arguments.command, code)
             }
+        }
+        val exitedIds = exited.mapTo(mutableSetOf()) { it.sessionId }
+        val completeBatch = hasSteer || missingByCall.isNotEmpty() || exited.isNotEmpty() ||
+            awaits.any { it.timeoutAt?.let { deadline -> deadline <= now } == true }
 
-        if (exitedTerminals.isNotEmpty()) {
-            delegate.steer(exitedTerminals)
-            completeAllAwaitEventsWithTimestamp(awaitEvents)
-            return true
+        if (exited.isNotEmpty()) storage.steer(exited)
+        for (pending in awaits) {
+            val missing = missingByCall[pending.callId]
+            val terminalIds = pending.arguments.terminalIds
+            val singleTerminalOnly = terminalIds.size == 1 && pending.arguments.events.all { it is AwaitEventInput.TerminalExited }
+            val result = when {
+                hasSteer -> StableAwaitEventResult.Output(AwaitEventOutput(now))
+                missing != null -> StableAwaitEventResult.Failure(
+                    "Unknown or expired terminal session ID(s): ${missing.joinToString(", ")}",
+                )
+                singleTerminalOnly && terminalIds.none { it in exitedIds } &&
+                    terminalIds.none { activeSessions[it]?.exitCode?.value != null } ->
+                    StableAwaitEventResult.Failure(
+                        "Awaiting only terminal ${terminalIds.single()} can wait indefinitely. Add a timeout event.",
+                    )
+                completeBatch -> StableAwaitEventResult.Output(AwaitEventOutput(now))
+                else -> null
+            }
+            if (result != null) {
+                records = records.filterNot { it is PendingToolCall && it.callId == pending.callId }
+                storage.commit(
+                    listOf(StableAwait(pending.callId, pending.itemId, pending.arguments, result), UnstableSnapshot(records)),
+                    now,
+                )
+                logger.tool("await_event", pending.callId).info { "Tool call completed by host." }
+            }
         }
 
-        return false
+        if (records.none { it is PendingAwait }) return@modify AwaitResolution.Completed
+        val owner = agentId
+        if (owner != null) {
+            val armed = records.map { record ->
+                if (record is PendingAwait && record.timeoutAt != null && record.armedForAgentId != owner) {
+                    record.copy(armedForAgentId = owner)
+                } else record
+            }
+            if (armed != records) storage.commit(listOf(UnstableSnapshot(armed)), now)
+        }
+        AwaitResolution.Parked
     }
 
-    private suspend fun completeAllAwaitEventsWithTimestamp(
-        awaitEvents: List<PendingAwait>,
-    ) {
-        val timestamp = Clock.System.now()
-        for (pending in awaitEvents) {
-            completeToolCall(
-                StableAwait(
-                    callId = pending.callId,
-                    itemId = pending.itemId,
-                    arguments = pending.arguments,
-                    result = StableAwaitEventResult.Output(AwaitEventOutput(timestamp = timestamp)),
-                ),
-            )
-        }
+    private enum class AwaitResolution { Inactive, Completed, Parked }
+
+    private sealed interface AwaitWake {
+        data class Deadline(val expected: PendingAwaitDeadline) : AwaitWake
+        data class Terminal(val expected: PendingAwait, val terminalId: Int) : AwaitWake
     }
 
     private suspend fun isAcceptedResumeStart(beforeIndex: Int): Boolean =
