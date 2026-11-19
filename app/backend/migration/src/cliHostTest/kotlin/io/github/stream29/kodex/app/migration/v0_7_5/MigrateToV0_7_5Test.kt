@@ -54,7 +54,7 @@ val migrateToV0_7_5Test by testSuite {
                 db.insertCommit(7, "user_message", 4, UserEvent)
                 db.insertCommit(42, "steer", 3, "[$UserEvent,$NullName,$Named]")
                 db.transaction {
-                    for (index in 5..140) db.insertCommit(42, "event_terminal_exited", index, NullName)
+                    for (index in 5L..140L) db.insertCommit(42, "event_terminal_exited", index, NullName)
                 }
             }
             val work = Path(home, "sessions", "12", "work")
