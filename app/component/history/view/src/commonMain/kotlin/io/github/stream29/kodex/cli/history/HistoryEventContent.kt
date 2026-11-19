@@ -96,13 +96,11 @@ public actual fun HistoryEventContent(
                 }
             }
             is StableTerminalExitedEvent -> renderer.TerminalExit(
-                summary = name.commandIntentDisplayName().let { title ->
-                    if (title.isEmpty()) "Terminal #$sessionId exit $exitCode" else "Exit $exitCode · $title"
-                },
+                summary = terminalExitSummary(),
                 status = if (exitCode == 0) "completed" else "failed",
                 expansionKey = this,
             ) {
-                name?.takeIf(String::isNotBlank)?.let { renderer.Text(it, TextStyle.Dim) }
+                name.takeIf(String::isNotBlank)?.let { renderer.Text(it, TextStyle.Dim) }
                 renderer.Text(command, TextStyle.Normal)
             }
             is StableAskUserEvent -> renderer.RequestUserInput(this, elapsed)
@@ -124,6 +122,9 @@ public actual fun HistoryEventContent(
         } }
     }
 }
+
+internal fun StableTerminalExitedEvent.terminalExitSummary(): String =
+    "${name.commandIntentDisplayName()} (exit $exitCode)".trimStart()
 
 internal val LocalHistoryRenderer = staticCompositionLocalOf<HistoryContentRenderer> {
     error("History content requires a renderer")

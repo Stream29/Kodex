@@ -18,13 +18,14 @@ import kotlinx.serialization.Serializable
 public data class StableTerminalExitedEvent(
     @SerialName("session_id")
     public val sessionId: Int,
-    public val name: String? = null,
+    /** The registered intent name; empty only if the stored event never had a name. */
+    public val name: String,
     public val command: String,
     @SerialName("exit_code")
     public val exitCode: Int,
 ) : WorkCommit, AgentCommit.Steerable {
     public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> {
-        val label = if (!name.isNullOrBlank()) "terminal #$sessionId ($name)" else "terminal #$sessionId"
+        val label = if (name.isNotBlank()) "terminal #$sessionId ($name)" else "terminal #$sessionId"
         return listOf(
             ResponseItem.Message(
                 role = MessageRole.User,

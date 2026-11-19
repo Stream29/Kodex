@@ -116,7 +116,7 @@ val sqliteRepositoryTest by testSuite {
         fixture { root ->
             fs.createDirectories(root)
             val terminalJson = """{"type":"event_terminal_exited","session_id":37,"command":"./fixture","exit_code":1}"""
-            val terminal = StableTerminalExitedEvent(37, command = "./fixture", exitCode = 1)
+            val terminal = StableTerminalExitedEvent(37, "Run fixture", command = "./fixture", exitCode = 1)
             val oldIndex = Path(root, "sessions", "0", "index")
             fs.createDirectories(oldIndex)
             fs.writeString(Path(oldIndex, "0.json"), terminalJson)

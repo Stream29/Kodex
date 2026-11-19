@@ -71,7 +71,7 @@ val offscreenHistoryItemsTest by testSuite {
             val code = if (grouped) 23 else 0
             val command = "first\n" + "x".repeat(120) + "\nlast"
             val name = if (grouped) "检查作业 🧪 " + "long name".repeat(20) else ""
-            val summary = if (grouped) "Exit $code · $name" else "Terminal #37 exit $code"
+            val summary = if (grouped) "$name (exit 23)" else "(exit 0)"
             val child = object : MessageHistoryItemViewModel {
                 override val index = 4
                 override val state = MutableStateFlow(

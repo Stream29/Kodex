@@ -23,7 +23,7 @@ val commandIntentNameTest by testSuite {
         assertEquals("", "\u0000 \u0085\u2029".commandIntentDisplayName())
     }
 
-    test("historical pending and completed calls and exit events keep the original nullable name") {
+    test("historical pending and completed command calls keep the original nullable name") {
         val json = Json
         for ((nameFragment, expected) in listOf(
             "" to null, ",\"name\":null" to null, ",\"name\":\"\"" to "",
@@ -35,15 +35,8 @@ val commandIntentNameTest by testSuite {
             val completed = json.decodeFromString<StableCommandExecution>(
                 """{"call_id":"call","action":$action,"result":{"type":"failure","message":"fixture"}}""",
             )
-            val exited = json.decodeFromString<StableTerminalExitedEvent>(
-                """{"session_id":2,"command":"pwd","exit_code":7$nameFragment}""",
-            )
             assertEquals(expected, (pending.action as PendingCommandExecutionAction.ExecCommand).arguments.name)
             assertEquals(expected, (completed.action as StableCommandExecutionAction.ExecCommand).arguments.name)
-            assertEquals(expected, exited.name)
-            assertEquals(exited, json.decodeFromString<StableTerminalExitedEvent>(
-                json.encodeToString(StableTerminalExitedEvent.serializer(), exited),
-            ))
         }
     }
 }

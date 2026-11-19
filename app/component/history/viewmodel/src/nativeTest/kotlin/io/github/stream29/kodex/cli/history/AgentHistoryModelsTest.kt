@@ -269,7 +269,7 @@ val agentHistoryModelsTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             try {
                 val runtime = repository.open(repository.create()).runtime
-                val terminal = StableTerminalExitedEvent(37, command = "./fixture", exitCode = 1)
+                val terminal = StableTerminalExitedEvent(37, "Run fixture", command = "./fixture", exitCode = 1)
                 val schedule = StableScheduleEvent(8, "next task")
                 runtime.modify { storage ->
                     storage.initialize(KodexAgentSettings(OpenAiModelId("test")))

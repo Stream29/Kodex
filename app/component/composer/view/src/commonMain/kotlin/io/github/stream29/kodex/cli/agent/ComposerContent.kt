@@ -123,7 +123,7 @@ private fun AgentCommit.Steerable.previewText(): String = when (this) {
     is StableScheduleEvent -> "Schedule #$scheduleId: ${description.singleLine()}"
     is StableSubagentCompletedEvent -> notice
     is StableTerminalExitedEvent ->
-        "Terminal ${name?.takeIf(String::isNotBlank) ?: "#$sessionId"} exited ($exitCode): ${command.singleLine()}"
+        "Terminal ${name.takeIf(String::isNotBlank) ?: "#$sessionId"} exited ($exitCode): ${command.singleLine()}"
 }.ifBlank { "[empty message]" }
 
 private fun List<ContentItem>.previewContentText(): String =

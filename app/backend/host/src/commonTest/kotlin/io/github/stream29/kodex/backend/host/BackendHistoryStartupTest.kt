@@ -145,7 +145,7 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
         }
     }
 
-    test("startup upgrades a 0.5.2 Home to the 0.7.3 data checkpoint before serving SQLite-backed RPC") {
+    test("startup upgrades a 0.5.2 Home to the terminal-name data checkpoint before serving SQLite-backed RPC") {
         withHost(prepareHome = { home ->
             val fs = SystemCoroutineFileSystem
             val session = Path(home, "sessions", "0")
@@ -159,7 +159,7 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
             fs.writeString(Path(session, "index", "latest.json"), "0")
             fs.writeString(Path(home, "version.json"), "\"0.5.2\"")
         }) { home, endpoint, _ ->
-            assertEquals("\"0.7.3\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+            assertEquals("\"0.7.5\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
             assertTrue(SystemCoroutineFileSystem.exists(Path(home, "kodex.db")))
             withLocalRpcClient(home, endpoint) { connection ->
                 val client = RestoringRpcClient(connection)

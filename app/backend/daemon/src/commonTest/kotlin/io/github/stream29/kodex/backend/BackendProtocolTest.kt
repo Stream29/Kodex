@@ -6,7 +6,7 @@ import kotlin.test.assertNotEquals
 
 val backendProtocolTest by testSuite {
     test("frontend capability parity advances only the business checkpoint and keeps management protocol one") {
-        assertEquals("0.7.4", BackendBusinessProtocol)
+        assertEquals("0.7.5", BackendBusinessProtocol)
         assertNotEquals("0.5.3", BackendBusinessProtocol)
         assertNotEquals("0.5.2", BackendBusinessProtocol)
         assertNotEquals("0.5.0", BackendBusinessProtocol)

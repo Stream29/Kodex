@@ -77,12 +77,7 @@ public actual fun HistoryMessageContent(
             is StableSubagentCreatedEvent -> heading(event.notice)
             is StableSubagentCompletedEvent -> heading(event.notice)
             is StableTerminalExitedEvent -> {
-                val label = if (!event.name.isNullOrBlank()) {
-                    "Terminal #${event.sessionId} (${event.name})"
-                } else {
-                    "Terminal #${event.sessionId}"
-                }
-                heading("$label exited (${event.exitCode})")
+                heading(event.terminalExitSummary())
                 if (event.command.isNotBlank()) body(event.command, false)
             }
         }

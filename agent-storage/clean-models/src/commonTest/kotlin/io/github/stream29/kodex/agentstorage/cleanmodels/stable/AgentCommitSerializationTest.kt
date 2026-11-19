@@ -25,21 +25,30 @@ import io.github.stream29.kodex.openai.TokenUsageOutputDetails
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.io.files.Path
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.time.Instant
 
 val agentCommitSerializationTest by testSuite {
-    test("old terminal payloads stay readable as work commits and queued steer") {
-        val input = """{"type":"event_terminal_exited","session_id":37,"command":"fixture","exit_code":0}"""
-        val terminal = StableTerminalExitedEvent(37, command = "fixture", exitCode = 0)
+    test("terminal work and steer payloads require an explicit name") {
         val type = AgentCommitType.EventTerminalExited
-        assertEquals(terminal, type.decodePayloadJson(input))
-        assertEquals(SteerSnapshot(listOf(terminal)), AgentCommitType.Steer.decodePayloadJson("[$input]"))
+        val old = """{"type":"event_terminal_exited","session_id":37,"command":"fixture","exit_code":0"""
+        for (suffix in listOf("}", ""","name":null}""")) {
+            assertFailsWith<SerializationException> { type.decodePayloadJson(old + suffix) }
+            assertFailsWith<SerializationException> { AgentCommitType.Steer.decodePayloadJson("[${old + suffix}]") }
+        }
+        for (name in listOf("Run tests", "")) {
+            val terminal = StableTerminalExitedEvent(37, name, command = "fixture", exitCode = 0)
+            val queued = SteerSnapshot(listOf(terminal))
+            assertEquals(terminal, type.decodePayloadJson(terminal.encodePayloadJson()))
+            assertEquals(queued, AgentCommitType.Steer.decodePayloadJson(queued.encodePayloadJson()))
+        }
         assertEquals("work", type.legacyTimelineName)
         assertEquals(false, type in AgentCommitType.IndexTypes)
         assertEquals(true, type in AgentCommitType.WorkTypes)

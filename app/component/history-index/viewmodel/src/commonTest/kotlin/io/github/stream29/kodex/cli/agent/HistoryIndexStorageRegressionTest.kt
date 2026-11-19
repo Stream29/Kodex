@@ -57,7 +57,7 @@ val historyIndexViewModelTest by testSuite {
     test("completion is independently locatable in the parent index without making other Work a boundary") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("fixture")))
         val entered = storage.commit(StableSubagentCreatedEvent(90, "Reviewer", "inspect the output"))
-        storage.commit(StableTerminalExitedEvent(18, command = "./fixture", exitCode = 0))
+        storage.commit(StableTerminalExitedEvent(18, "Run fixture", command = "./fixture", exitCode = 0))
         val completed = storage.commit(StableSubagentCompletedEvent(90))
         val scrolled = mutableListOf<Int>()
         val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
@@ -147,7 +147,7 @@ val historyIndexViewModelTest by testSuite {
                         content = listOf(ContentItem.InputText("question\nwith   spaces")),
                     ),
                 )
-                storage.commit(StableTerminalExitedEvent(37, command = "./fixture", exitCode = 0))
+                storage.commit(StableTerminalExitedEvent(37, "Run fixture", command = "./fixture", exitCode = 0))
                 latestIndex.value = 3
                 val firstWindow = viewModel.awaitIndexes(listOf(2))
                 assertNull(firstWindow.entryAtOrNull(3))

@@ -89,7 +89,7 @@ val agentHistoryEntryInteractionTest by testSuite {
         test("terminal exit is a one-line disclosure, grouped=$grouped") {
             val code = if (grouped) 23 else 0
             val child = FakeMessage(4, MessageHistoryItemState.Ready(
-                StableTerminalExitedEvent(37, if (grouped) "检查作业" else null, "first\n${"x".repeat(96)}\nlast", code),
+                StableTerminalExitedEvent(37, if (grouped) "检查作业" else "", "first\n${"x".repeat(96)}\nlast", code),
                 Duration.ZERO,
             ))
             val item = if (grouped) FakeWorkGroup(4..4, listOf(child)) else child
@@ -102,14 +102,14 @@ val agentHistoryEntryInteractionTest by testSuite {
                     }
                 }
                 val line = if (grouped) 1 else 0
-                val title = if (grouped) "Exit $code · 检查作业" else "Terminal #37 exit $code"
+                val title = if (grouped) "检查作业 (exit 23)" else "(exit 0)"
                 suspend fun waitUntil(predicate: (String) -> Boolean): String = kotlinx.coroutines.withTimeout(5_000) {
                     var draw: String
                     do { draw = awaitSnapshot() } while (!predicate(draw))
                     draw
                 }
                 if (grouped) {
-                    assertFalse("Terminal" in snapshot)
+                    assertFalse(title in snapshot)
                     sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
                     awaitSnapshot()
                     sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Release))
