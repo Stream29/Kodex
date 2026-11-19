@@ -6,6 +6,7 @@ import io.github.stream29.kodex.agentruntime.contract.AgentResumeNotAdmittedExce
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.contract.StoredAgent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAtOrNull
 import io.github.stream29.kodex.openai.ContentItem
@@ -24,7 +25,7 @@ internal class BackendSubagentSpawner(
     private val models: () -> List<ModelInfo>,
     private val allocate: suspend (Int, KodexAgentSession) -> StoredAgent,
     private val discardUninitialized: suspend (Int) -> Boolean,
-    private val record: suspend (KodexAgentSession, Int) -> Unit,
+    private val record: suspend (KodexAgentSession, StableSubagentCreatedEvent) -> Unit,
     private val submit: suspend (KodexAgentSession, List<ContentItem>) -> Unit,
 ) {
     suspend fun spawn(parent: KodexAgentSession, request: SubagentSpawnRequest): SubagentSpawnResult {
@@ -35,6 +36,10 @@ internal class BackendSubagentSpawner(
             return SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidSource)
         }
         if (request.message.isBlank()) return SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidMessage)
+        if (request.name.isBlank() || request.name.any { it.isISOControl() }) {
+            return SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidConfiguration)
+        }
+        val name = request.name.trim()
         val parentSettings = parent.storage.getSettingsAtOrNull(Int.MAX_VALUE)
             ?: return SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidSource)
         val settings = when (val decision = decideSubagentCreation(
@@ -57,7 +62,7 @@ internal class BackendSubagentSpawner(
             child = withContext(NonCancellable) { allocate(parentId, parent).also { allocated = it } }
             val instructions = subagentHierarchyInstructions(ancestry(child))
             childOwner = checkNotNull(repository.openAgent(child.agentId))
-            childOwner.runtime.modify { it.initialize(settings.copy(instructions = instructions)) }
+            childOwner.runtime.modify { it.initialize(settings.copy(instructions = instructions, threadName = name)) }
         } catch (_: AgentResumeNotAdmittedException) {
             check(allocated == null) { "Unexpected owner rejection after allocation." }
             return SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidSource)
@@ -70,7 +75,7 @@ internal class BackendSubagentSpawner(
             throw failure
         }
         try {
-            record(parent, child.agentId)
+            record(parent, StableSubagentCreatedEvent(child.agentId, name, request.message))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {

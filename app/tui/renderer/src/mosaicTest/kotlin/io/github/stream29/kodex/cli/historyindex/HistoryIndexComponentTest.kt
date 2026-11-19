@@ -54,17 +54,20 @@ val historyIndexRendererTest by testSuite {
     test("child parent rows appear once before and after sparse entries in a narrow Index") {
         val vm = RenderIndex(emptyList())
         val returned = mutableListOf<HistoryIndexParentAnchor>()
-        val navigation = HistoryIndexNavigation(vm, { _, _ -> error("No creation row") }, returned::add)
+        var completed by mutableStateOf(false)
+        val navigation = HistoryIndexNavigation(vm, { _, _ -> error("No creation row") }, returned::add) { completed }
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     HistoryIndexSidebarBody(vm, columns = 24, rows = 6, navigation = navigation)
                 }
             }
-            var snapshot = awaitContaining("Return to completion")
-            assertEquals(1, snapshot.lines().count { "Return to creation" in it })
+            val before = awaitContaining("Return to creation")
+            assertFalse("Return to completion" in before)
             vm.append(entry(3, "After pagination"))
-            snapshot = awaitContaining("After pagination")
+            assertFalse("Return to completion" in awaitContaining("After pagination"))
+            completed = true
+            val snapshot = awaitContaining("Return to completion")
             assertEquals(1, snapshot.lines().count { "Return to creation" in it })
             assertEquals(1, snapshot.lines().count { "Return to completion" in it })
             for (anchor in HistoryIndexParentAnchor.entries) {
@@ -78,27 +81,24 @@ val historyIndexRendererTest by testSuite {
         }
     }
 
-    test("the creation menu offers keyboard Enter subagent without scrolling the parent") {
+    test("the creation row offers a right-aligned Enter button without scrolling the parent") {
         val vm = RenderIndex(listOf(entry(7, "Created #91").copy(createdChildAgentId = 91)))
         val opened = mutableListOf<Pair<HistoryIndexTarget, Int>>()
         val navigation = HistoryIndexNavigation(vm, { target, child -> opened.add(target to child) })
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    TuiPopupHost(Modifier.width(60).height(12)) {
-                        val anchor = rememberTuiPopupAnchor()
-                        Text("entry", Modifier.tuiPopupAnchor(anchor))
-                        val request = remember(anchor) {
-                            mosaicIndexMenu(HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor), null))
-                        }
-                        HistoryIndexMenuContent(request, rememberMosaicIndexOverlayRenderer(0, 0), navigation) {}
-                    }
+                    HistoryIndexSidebarBody(vm, columns = 26, rows = 6, navigation = navigation)
                 }
             }
-            awaitContaining("Enter subagent")
-            sendKeyEvent(KeyboardEvent(codepoint = 9))
-            snapshotNow()
-            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            val snapshot = awaitContaining("[Enter]")
+            val y = snapshot.lines().indexOfFirst { "[Enter]" in it }
+            val row = snapshot.lines()[y]
+            assertTrue("Created #91" in row)
+            assertEquals(26, row.trimEnd().length)
+            val x = row.indexOf("[Enter]") + 2
+            sendMouseEvent(MouseEvent(x, y, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            sendMouseEvent(MouseEvent(x, y, MouseEvent.Type.Release, MouseEvent.Button.Left))
             snapshotNow()
             assertEquals(7, opened.single().first.index)
             assertSame(vm, opened.single().first.viewModel)

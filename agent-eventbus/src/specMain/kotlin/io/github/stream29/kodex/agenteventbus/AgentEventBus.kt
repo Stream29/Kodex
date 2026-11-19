@@ -2,6 +2,7 @@ package io.github.stream29.kodex.agenteventbus
 
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 
@@ -36,7 +37,7 @@ public interface AgentEventBus {
     public suspend fun submitUserMessage(session: KodexAgentSession, content: List<ContentItem>)
 
     /** Records creation on the captured calling parent without waking or steering it. */
-    public suspend fun recordSubagentCreation(parent: KodexAgentSession, childAgentId: Int)
+    public suspend fun recordSubagentCreation(parent: KodexAgentSession, event: StableSubagentCreatedEvent)
 
     /** Queues a completion notification for the child’s direct parent through normal steer. */
     public suspend fun submitSubagentCompletion(parentAgentId: Int, childAgentId: Int)

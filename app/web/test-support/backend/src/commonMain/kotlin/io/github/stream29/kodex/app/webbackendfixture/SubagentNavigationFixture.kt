@@ -41,7 +41,7 @@ internal class SubagentNavigationFixture(private val temporaryDirectory: Path) {
         val args = buildJsonObject {
             put("cmd", """
                 set -eu
-                '${Path(directory, "kodex")}' agent spawn --message $task > '${Path(directory, "$suffix.tmp")}'
+                '${Path(directory, "kodex")}' agent spawn --name 'Worker-$suffix' --message $task > '${Path(directory, "$suffix.tmp")}'
                 mv '${Path(directory, "$suffix.tmp")}' '${Path(directory, "$suffix.json")}'
             """.trimIndent())
             put("name", "Delegate navigation fixture")

@@ -3,6 +3,8 @@ package io.github.stream29.kodex.app.session.contract
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlin.time.Instant
 
 /**
@@ -58,6 +60,9 @@ public interface PersistedSessionViewModel : AgentSettingsViewModel, AutoCloseab
         source: AgentViewModel, index: Int, generation: Long, revision: Long, childAgentId: Int,
         isTabSelected: () -> Boolean,
     ): Unit = Unit
+
+    /** Whether this child's completion has a return target in its direct parent's history. */
+    public fun hasCompletionAnchor(source: AgentViewModel): Flow<Boolean> = flowOf(false)
 
     /** Pops one local view, then optionally scrolls its parent to the child's event. */
     public suspend fun returnToParent(

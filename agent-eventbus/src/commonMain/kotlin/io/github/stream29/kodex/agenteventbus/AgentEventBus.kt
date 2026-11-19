@@ -44,8 +44,8 @@ private class RepositoryAgentEventBus(
         if (content.isNotEmpty()) session.runtime.submitUserMessage(content)
     }
 
-    override suspend fun recordSubagentCreation(parent: KodexAgentSession, childAgentId: Int) {
-        parent.runtime.modify { it.commit(StableSubagentCreatedEvent(childAgentId)) }
+    override suspend fun recordSubagentCreation(parent: KodexAgentSession, event: StableSubagentCreatedEvent) {
+        parent.runtime.modify { it.commit(event) }
     }
 
     override suspend fun submitSubagentCompletion(parentAgentId: Int, childAgentId: Int) {

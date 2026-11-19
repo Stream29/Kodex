@@ -547,7 +547,7 @@ private suspend fun executeSessionAgentOperation(
                 phase = "spawn"
                 mutationStarted = true
                 when (val reply = services.runtime.spawnSubagent(
-                    SubagentSpawnRequest(source, text, command.model, command.reasoningEffort, directory?.toString()),
+                    SubagentSpawnRequest(source, text, command.name, command.model, command.reasoningEffort, directory?.toString()),
                 )) {
                     is SubagentSpawnResult.Created -> buildJsonObject {
                         put("session_id", reply.sessionId)
@@ -563,7 +563,7 @@ private suspend fun executeSessionAgentOperation(
                         SubagentSpawnRejection.InvalidDirectory ->
                             OperationRejected("invalid_directory", "The child's working directory is not a valid directory.")
                         SubagentSpawnRejection.InvalidConfiguration ->
-                            OperationRejected("invalid_configuration", "The selected model does not support the requested configuration.")
+                            OperationRejected("invalid_configuration", "The child's name or model configuration is invalid.")
                         SubagentSpawnRejection.InvalidMessage ->
                             OperationRejected("invalid_message", "A nonblank task is required.")
                     }

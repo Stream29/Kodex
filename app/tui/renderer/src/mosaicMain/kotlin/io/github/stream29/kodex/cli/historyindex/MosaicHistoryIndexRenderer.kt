@@ -7,6 +7,7 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Column
+import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
@@ -46,7 +47,7 @@ internal class MosaicHistoryIndexRenderer(
     override val canShowHover: Boolean get() = columns > 0 && rows > 0
 
     @Composable override fun List(
-        viewModel: HistoryIndexViewModel, window: HistoryIndexWindow, hasParentRows: Boolean, content: (HistoryIndexListScope) -> Unit,
+        viewModel: HistoryIndexViewModel, window: HistoryIndexWindow, parentRowCount: Int, content: (HistoryIndexListScope) -> Unit,
     ) {
         val list = checkNotNull(listState)
         val followsLatest = remember(viewModel) { mutableStateOf(true) }
@@ -63,7 +64,7 @@ internal class MosaicHistoryIndexRenderer(
         LaunchedEffect(viewModel, list) {
             snapshotFlow { list.canScrollForward }.collect { forward -> if (!forward) followsLatest.value = true }
         }
-        LaunchedEffect(viewModel, window.generation, window.revision, window.entries.lastOrNull()?.index, hasParentRows, followsLatest.value) {
+        LaunchedEffect(viewModel, window.generation, window.revision, window.entries.lastOrNull()?.index, parentRowCount, followsLatest.value) {
             if (followsLatest.value) list.requestScrollToEnd()
         }
         LazyColumn(
@@ -91,22 +92,25 @@ internal class MosaicHistoryIndexRenderer(
     }
     @Composable override fun Row(
         interaction: HistoryIndexRowInteraction, presentation: HistoryIndexRowPresentation,
-        onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit,
+        onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit, onEnterChild: (() -> Unit)?,
     ) {
         val origin = interaction as MosaicHistoryIndexRowInteraction
         val request = origin.request
-        TuiPressable(
-            onClick = {},
-            onSecondaryClick = { position -> origin.openingPosition = position; onOpenMenu() },
-            modifier = Modifier.fillMaxWidth().tuiPopupAnchor(request.anchor)
-                .onPointerEvent { event ->
-                    if (event.type == MouseEvent.Type.Motion) request.pointerPosition = event.position
-                    false
-                }
-                .onPointerHover(
-                    onPointerEnter = { onHoverChanged(true) }, onPointerExit = { onHoverChanged(false) },
-                ),
-        ) { _, hovered, pressed -> MosaicHistoryIndexRowText(presentation, hovered, pressed) }
+        Row(Modifier.fillMaxWidth().background(TuiTheme.colorScheme.surfaceContainer)) {
+            TuiPressable(
+                onClick = {},
+                onSecondaryClick = { position -> origin.openingPosition = position; onOpenMenu() },
+                modifier = Modifier.weight(1f).tuiPopupAnchor(request.anchor)
+                    .onPointerEvent { event ->
+                        if (event.type == MouseEvent.Type.Motion) request.pointerPosition = event.position
+                        false
+                    }
+                    .onPointerHover(
+                        onPointerEnter = { onHoverChanged(true) }, onPointerExit = { onHoverChanged(false) },
+                    ),
+            ) { _, hovered, pressed -> MosaicHistoryIndexRowText(presentation, hovered, pressed) }
+            if (onEnterChild != null) TuiButton("Enter", onClick = onEnterChild)
+        }
     }
     @Composable override fun Hover(
         interaction: HistoryIndexInteraction, presentation: HistoryIndexDetailPresentation, onHoverChanged: (Boolean) -> Unit,
@@ -130,7 +134,7 @@ internal class MosaicHistoryIndexRenderer(
     }
     @Composable override fun Menu(
         opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
-        onDismiss: () -> Unit, onEnterChild: (() -> Unit)?, onCheckOut: () -> Unit,
+        onDismiss: () -> Unit, onCheckOut: () -> Unit,
     ) {
         val origin = opening.interaction as MosaicHistoryIndexOrigin
         var details by remember(opening) { mutableStateOf(false) }
@@ -150,7 +154,7 @@ internal class MosaicHistoryIndexRenderer(
             } else {
                 HistoryIndexContextMenuPopup(
                     origin.request.anchor, origin.clickPosition, origin.target.index, onDismiss, onCheckOut, formatted,
-                    onDetails = { details = true }, state = menuState, onEnterChild = onEnterChild,
+                    onDetails = { details = true }, state = menuState,
                 )
             }
         }

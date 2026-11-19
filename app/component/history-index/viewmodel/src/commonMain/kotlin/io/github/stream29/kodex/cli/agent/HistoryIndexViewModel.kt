@@ -303,7 +303,7 @@ private fun IndexCommit.toHistoryIndexSummary(): String = when (this) {
     is StableAskUserEvent ->
         arguments.questions.joinToString(separator = " ") { it.question }.toSummary()
     is StableScheduleEvent -> "schedule #$scheduleId: $description".toSummary()
-    is StableSubagentCreatedEvent -> notice.toSummary()
+    is StableSubagentCreatedEvent -> if (childName.isEmpty()) notice.toSummary() else "$childName · Spawned".toSummary()
     is StableSubagentCompletedEvent -> notice.toSummary()
     is StablePlanUpdate -> {
         val selected = arguments.plan.lastOrNull { it.status != StepStatus.Pending } ?: arguments.plan.firstOrNull()

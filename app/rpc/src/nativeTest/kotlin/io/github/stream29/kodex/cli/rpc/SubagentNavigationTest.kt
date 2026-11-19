@@ -3,6 +3,8 @@ package io.github.stream29.kodex.cli.rpc
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
+import io.github.stream29.kodex.app.history.contract.HistoryScrollTarget
+import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
 import io.github.stream29.kodex.app.session.contract.AgentParentAnchor
 import io.github.stream29.kodex.rpc.local.BackendConnectionLost
 import io.github.stream29.kodex.rpc.models.SessionSpawnRequest
@@ -16,11 +18,42 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withTimeout
 import kotlinx.rpc.RpcCall
 import kotlinx.rpc.RpcClient
 import kotlin.test.*
 
 val subagentNavigationTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("an open child gains a completion return only when the parent indexes its notice") {
+        frontend(response = { awaitCancellation() }) {
+            SystemCoroutineFileSystem.createDirectories(home)
+            val root = assertIs<SessionSpawnResult.Created>(services.global.spawnSession(SessionSpawnRequest(home.toString())))
+            val view = views.open(root.sessionId)
+            val parent = assertNotNull(view.rootAgent.value)
+            val childId = spawn(root, "named child")
+            val window = parent.historyIndex.window.first { it.entries.any { row -> row.createdChildAgentId == childId } }
+            val spawn = window.entries.single { it.createdChildAgentId == childId }
+            view.enterChild(parent, spawn.index, window.generation, window.revision, childId) { true }
+            val child = assertIs<RpcAgentViewModel>(view.selectedAgent.value)
+            child.running.first { it }
+            withTimeout(10_000) {
+                val anchor = view.hasCompletionAnchor(child)
+                assertFalse(anchor.first())
+                val completionVisible = async { anchor.first { it } }
+                services.runtime.completeAgent(childId)
+                completionVisible.await()
+                val completion = parent.historyIndex.window.first { entries ->
+                    entries.entries.any { row -> row.summary == "Subagent #$childId completed" }
+                }.entries.single { it.summary == "Subagent #$childId completed" }
+                view.returnToParent(child, AgentParentAnchor.Completion) { true }
+                assertSame(parent, view.selectedAgent.value)
+                val effect = assertNotNull(parent.history.pendingScrollEffect.first { it != null })
+                val destination = assertIs<HistoryScrollTarget.Item>(effect.target)
+                assertEquals(completion.index, assertIs<MessageHistoryItemViewModel>(destination.item).index)
+            }
+        }
+    }
+
     test("selects only opened Agents; returns by typed anchor without stopping work") {
         lateinit var raw: RpcClient
         frontend(response = { awaitCancellation() }, decorate = { raw = it; it }) {
@@ -186,5 +219,5 @@ val subagentNavigationTest by testSuite(compartment = { TestCompartment.RealTime
 
 private suspend fun FrontendFixture.spawn(root: SessionSpawnResult.Created, message: String): Int =
     assertIs<SubagentSpawnResult.Created>(services.runtime.spawnSubagent(SubagentSpawnRequest(
-        SessionSpawnSource(root.rootAgentId, root.invocationId), message,
+        SessionSpawnSource(root.rootAgentId, root.invocationId), message, message,
     ))).agentId

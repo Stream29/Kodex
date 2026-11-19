@@ -82,6 +82,7 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                 val created = assertIs<SessionSpawnResult.Created>(response, response.toString())
                 val runtime = object : AgentRuntimeRpc by backend.runtime {
                     override suspend fun spawnSubagent(request: SubagentSpawnRequest): SubagentSpawnResult {
+                        assertEquals("CLI child", request.name)
                         val answer = backend.runtime.spawnSubagent(request)
                         // Simulate a known partial reply at the transport boundary, on a real allocated ID.
                         if (request.message != "partial fixture" || answer !is SubagentSpawnResult.Created) return answer
@@ -92,7 +93,7 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                     val services = RpcServices(RestoringRpcClient(raw))
                     suspend fun spawn(text: String, invocation: String?, expectedExit: Int): CliOperationEnvelope {
                         val lines = mutableListOf<String>()
-                        val exit = dispatchCli(listOf("agent", "spawn", "--stdin"), { diagnostic, _ -> error(diagnostic) }) {
+                        val exit = dispatchCli(listOf("agent", "spawn", "--name", "CLI child", "--stdin"), { diagnostic, _ -> error(diagnostic) }) {
                             executeCliToolCommand(assertIs<KodexToolLeafCommand>(it), services, env = { name ->
                                 when (name) {
                                     KodexAgentIdEnvironmentVariable -> created.rootAgentId.toString()

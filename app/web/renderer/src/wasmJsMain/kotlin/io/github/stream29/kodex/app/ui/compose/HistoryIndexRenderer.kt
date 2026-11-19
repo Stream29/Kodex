@@ -10,12 +10,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.nestedscroll.*
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
@@ -73,7 +76,7 @@ private class ComposeHistoryIndexRenderer(
     override val canShowHover: Boolean get() = true
 
     @Composable override fun List(
-        viewModel: HistoryIndexViewModel, window: HistoryIndexWindow, hasParentRows: Boolean, content: (HistoryIndexListScope) -> Unit,
+        viewModel: HistoryIndexViewModel, window: HistoryIndexWindow, parentRowCount: Int, content: (HistoryIndexListScope) -> Unit,
     ) {
         val list = rememberLazyListState()
         val scope = rememberCoroutineScope()
@@ -81,8 +84,8 @@ private class ComposeHistoryIndexRenderer(
         LaunchedEffect(viewModel, list) {
             snapshotFlow { list.canScrollForward }.collect { if (!it) follows = true }
         }
-        LaunchedEffect(viewModel, window.generation, window.revision, window.entries.lastOrNull()?.index, hasParentRows, follows) {
-            val last = window.entries.lastIndex + (if (hasParentRows) 2 else 0)
+        LaunchedEffect(viewModel, window.generation, window.revision, window.entries.lastOrNull()?.index, parentRowCount, follows) {
+            val last = window.entries.lastIndex + parentRowCount
             if (follows && last >= 0) list.requestScrollToItem(last)
         }
         val gesture = remember(viewModel, list) {
@@ -119,20 +122,30 @@ private class ComposeHistoryIndexRenderer(
 
     @Composable override fun Row(
         interaction: HistoryIndexRowInteraction, presentation: HistoryIndexRowPresentation,
-        onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit,
+        onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit, onEnterChild: (() -> Unit)?,
     ) {
         val origin = interaction as ComposeIndexRowOrigin
-        SidebarPopupRow(
-            origin = origin,
-            summary = presentation.summary,
-            rowDescription = "History index ${origin.target.index}",
-            rowStateDescription = "Read only",
-            menuActionDescription = "Open menu for history index ${origin.target.index}",
-            boldOnHover = true,
-            onFocused = LocalIndexRowFocused.current,
-            onHoverChanged = onHoverChanged,
-            onOpenMenu = onOpenMenu,
-        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) {
+                SidebarPopupRow(
+                    origin = origin,
+                    summary = presentation.summary,
+                    rowDescription = "History index ${origin.target.index}",
+                    rowStateDescription = "Read only",
+                    menuActionDescription = "Open menu for history index ${origin.target.index}",
+                    boldOnHover = true,
+                    onFocused = LocalIndexRowFocused.current,
+                    onHoverChanged = onHoverChanged,
+                    onOpenMenu = onOpenMenu,
+                )
+            }
+            if (onEnterChild != null) {
+                CompactTextButton(
+                    onClick = onEnterChild,
+                    modifier = Modifier.semantics { contentDescription = "Enter subagent" },
+                ) { Text("Enter", maxLines = 1) }
+            }
+        }
     }
 
     @Composable override fun Hover(
@@ -147,7 +160,7 @@ private class ComposeHistoryIndexRenderer(
 
     @Composable override fun Menu(
         opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
-        onDismiss: () -> Unit, onEnterChild: (() -> Unit)?, onCheckOut: () -> Unit,
+        onDismiss: () -> Unit, onCheckOut: () -> Unit,
     ) {
         val origin = opening.interaction as ComposeIndexPlacement
         val scroll = remember(opening) { ScrollState(0) }
@@ -182,13 +195,6 @@ private class ComposeHistoryIndexRenderer(
             actionLabel = "Check out",
             onDismiss = onDismiss,
             onAction = { onDismiss(); onCheckOut() },
-            afterAction = if (onEnterChild == null) null else {
-                {
-                    CompactTextButton(onClick = { onDismiss(); onEnterChild() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Enter subagent", Modifier.weight(1f))
-                    }
-                }
-            },
         ) {
             Text("Index: ${origin.target.index}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             formatted?.let { Text("Timestamp: $it", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }

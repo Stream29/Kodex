@@ -9,6 +9,7 @@ import kotlinx.serialization.Serializable
 public data class SubagentSpawnRequest(
     public val source: SessionSpawnSource,
     public val message: String,
+    public val name: String,
     public val model: OpenAiModelId? = null,
     public val reasoningEffort: ReasoningEffort? = null,
     public val workingDirectory: String? = null,

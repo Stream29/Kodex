@@ -57,6 +57,12 @@ internal class MosaicHistoryContentRenderer : HistoryContentRenderer {
     ) {
         HistoryEventDisclosure(summary, status, expansionKey, showElapsed = false, content = content)
     }
+
+    @Composable override fun SubagentSpawn(
+        summary: String, expansionKey: Any, content: @Composable () -> Unit,
+    ) {
+        HistoryEventDisclosure(summary, "created", expansionKey, content = content)
+    }
     @Composable override fun StablePatch(event: StablePatch) {
         val expansion = LocalHistoryExpansion.current
         StablePatchToolEventView(

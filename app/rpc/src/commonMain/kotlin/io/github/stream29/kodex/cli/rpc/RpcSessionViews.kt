@@ -24,6 +24,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
@@ -34,8 +35,12 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -377,6 +382,26 @@ public actual class RpcSessionView internal actual constructor(
         } finally {
             if (!attached) child.owner.cancel()
         }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun hasCompletionAnchor(source: AgentViewModel): Flow<Boolean> = flow {
+        val opened = path.value
+        val child = opened.lastOrNull()
+        if (child == null || child.agent.value !== source) {
+            emit(false)
+            return@flow
+        }
+        val parent = if (opened.size == 1) rootAgent else opened[opened.lastIndex - 1].agent
+        emitAll(parent.flatMapLatest { agent ->
+            flow bindingFlow@{
+                emit(false)
+                val binding = (agent as? RpcAgentViewModel)?.binding ?: return@bindingFlow
+                emitAll(binding.storage.observeSubagentCompletionAnchor(child.id) {
+                    child.agent.value === source && parent.value === agent && isOpenBinding(binding)
+                })
+            }
+        })
     }
 
     override suspend fun returnToParent(

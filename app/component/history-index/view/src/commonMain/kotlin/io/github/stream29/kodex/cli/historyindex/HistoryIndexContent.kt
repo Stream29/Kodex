@@ -18,24 +18,28 @@ public actual fun HistoryIndexContent(
     val window = viewModel.window.collectAsState().value
     val supplied = navigation ?: LocalHistoryIndexNavigation.current
     val currentNavigation = rememberUpdatedState(supplied)
-    val owned = supplied?.takeIf { it.owner === viewModel && it.returnToParent != null }
+    val owned = supplied?.takeIf { it.owner === viewModel }
+    val hasParent = owned?.returnToParent != null
+    val hasCompletion = hasParent && owned.hasCompletionAnchor()
     var mounted by remember(viewModel) { mutableStateOf(false) }
     DisposableEffect(viewModel) {
         mounted = true
         onDispose { mounted = false }
     }
-    renderer.List(viewModel, window, hasParentRows = owned != null) { list ->
+    renderer.List(viewModel, window, parentRowCount = if (hasCompletion) 2 else if (hasParent) 1 else 0) { list ->
         fun addParentAction(anchor: HistoryIndexParentAnchor) {
             if (owned == null) return
             list.ParentRow(anchor) {
                 renderer.ParentAction(anchor) {
-                    if (mounted && currentNavigation.value === owned && viewModel.isActive) {
+                    if (mounted && currentNavigation.value === owned && viewModel.isActive &&
+                        (anchor != HistoryIndexParentAnchor.Completion || owned.hasCompletionAnchor())
+                    ) {
                         owned.returnToParent?.invoke(anchor)
                     }
                 }
             }
         }
-        addParentAction(HistoryIndexParentAnchor.Creation)
+        if (hasParent) addParentAction(HistoryIndexParentAnchor.Creation)
         list.Rows(window) { index ->
             val target = remember(viewModel, window.generation, window.revision, index) {
                 HistoryIndexTarget(viewModel, window.generation, index, window.revision)
@@ -53,14 +57,25 @@ public actual fun HistoryIndexContent(
             if (position >= 0) {
                 val entry = window.entries[position]
                 val row = historyIndexRowPresentation(entry, historyIndexRowPosition(position, window.entries.size))
+                val childId = entry.createdChildAgentId
                 renderer.Row(
                     interaction, row,
                     onHoverChanged = { hovered -> if (!hovered || target.isCurrent()) interaction.emitHover(hovered) },
                     onOpenMenu = { if (target.isCurrent()) interaction.emitMenu() },
+                    onEnterChild = if (owned != null && childId != null) {
+                        {
+                            if (mounted && currentNavigation.value === owned && interaction.isPlaced &&
+                                target.isCurrent() &&
+                                viewModel.window.value.entryAtOrNull(index)?.createdChildAgentId == childId
+                            ) {
+                                owned.enterChild(target, childId)
+                            }
+                        }
+                    } else null,
                 )
             }
         }
-        addParentAction(HistoryIndexParentAnchor.Completion)
+        if (hasCompletion) addParentAction(HistoryIndexParentAnchor.Completion)
     }
 }
 
@@ -89,41 +104,15 @@ public actual fun HistoryIndexHoverContent(
 public actual fun HistoryIndexMenuContent(
     opening: HistoryIndexMenuOpening?, renderer: HistoryIndexRenderer, onDismiss: () -> Unit,
 ) {
-    HistoryIndexMenuContent(opening, renderer, LocalHistoryIndexNavigation.current, onDismiss)
-}
-
-@Composable
-public actual fun HistoryIndexMenuContent(
-    opening: HistoryIndexMenuOpening?, renderer: HistoryIndexRenderer, navigation: HistoryIndexNavigation?, onDismiss: () -> Unit,
-) {
     val current = opening ?: return
     val origin = current.interaction
     val target = origin.target
     val window = target.viewModel.window.collectAsState().value
     val entry = window.entryAtOrNull(target.index)
-    val capturedNavigation = remember(current) { navigation }
-    val latestNavigation = rememberUpdatedState(navigation)
-    var mounted by remember(current) { mutableStateOf(false) }
-    DisposableEffect(current) {
-        mounted = true
-        onDispose { mounted = false }
-    }
     val valid = window.revision == target.revision && target.isCurrent() && origin.isPlaced && entry != null
     LaunchedEffect(current, valid) { if (!valid) onDismiss() }
     if (!valid) return
-    val childId = entry.createdChildAgentId
-    val enter = if (childId != null && capturedNavigation?.owner === target.viewModel &&
-        latestNavigation.value === capturedNavigation
-    ) {
-        {
-            if (mounted && latestNavigation.value === capturedNavigation && origin.isPlaced &&
-                target.isCurrent() && target.viewModel.window.value.entryAtOrNull(target.index)?.createdChildAgentId == childId
-            ) {
-                capturedNavigation.enterChild(target, childId)
-            }
-        }
-    } else null
-    renderer.Menu(current, entry.messageTimestamp, historyIndexDetailPresentation(entry.detail), onDismiss, enter) {
+    renderer.Menu(current, entry.messageTimestamp, historyIndexDetailPresentation(entry.detail), onDismiss) {
         if (origin.isPlaced && target.isCurrent()) {
             target.viewModel.checkOut(target.generation, target.index)
         }

@@ -45,7 +45,8 @@ public actual suspend fun KodexAgentStorage.buildCompactionRetainedItems(
     fun tryRetain(item: CompactionRetainedItem): Boolean {
         usedTokens += item.approximateTokenCount().coerceAtLeast(1)
         if (usedTokens <= RemoteCompactionV2RetainedItemTokenBudget) {
-            retainedReversed += item
+            // The original history row owns the prompt; checkpoints retain the creation notice only.
+            retainedReversed += if (item is StableSubagentCreatedEvent && item.prompt.isNotEmpty()) item.copy(prompt = "") else item
             return true
         }
         return false

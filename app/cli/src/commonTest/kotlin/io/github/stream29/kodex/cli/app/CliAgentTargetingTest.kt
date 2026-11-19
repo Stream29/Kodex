@@ -46,7 +46,7 @@ val cliAgentTargetingTest by testSuite(compartment = { TestCompartment.RealTime 
                 )
                 val parent = newSession()
                 val child = assertIs<SubagentSpawnResult.Created>(backend.runtime.spawnSubagent(SubagentSpawnRequest(
-                    SessionSpawnSource(parent.rootAgentId, parent.invocationId), "initial child task",
+                    SessionSpawnSource(parent.rootAgentId, parent.invocationId), "initial child task", "Target fixture",
                 )))
                 val unrelated = List(3) { newSession() }.single { it.sessionId == child.agentId }
                 assertNotEquals(unrelated.rootAgentId, child.agentId)

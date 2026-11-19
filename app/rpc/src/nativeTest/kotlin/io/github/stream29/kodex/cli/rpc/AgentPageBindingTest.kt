@@ -37,7 +37,7 @@ val agentPageBindingTest by testSuite(compartment = { TestCompartment.RealTime }
             val owner = CoroutineScope(coroutineContext + Job(coroutineContext[Job]))
             suspend fun child(task: String): Pair<Int, AgentViewModel> {
                 val result = assertIs<SubagentSpawnResult.Created>(services.runtime.spawnSubagent(SubagentSpawnRequest(
-                    SessionSpawnSource(root.rootAgentId, root.invocationId), task,
+                    SessionSpawnSource(root.rootAgentId, root.invocationId), task, task,
                 )))
                 val binding = RpcSessionBinding.create(root.sessionId, services, owner, result.agentId) { throw it }
                 return result.agentId to createRpcAgentViewModel(binding, owner, global.models) { throw it }

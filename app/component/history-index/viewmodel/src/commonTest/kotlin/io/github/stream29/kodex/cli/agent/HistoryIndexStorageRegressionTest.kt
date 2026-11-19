@@ -56,7 +56,7 @@ import kotlin.time.Duration.Companion.seconds
 val historyIndexViewModelTest by testSuite {
     test("completion is independently locatable in the parent index without making other Work a boundary") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("fixture")))
-        val entered = storage.commit(StableSubagentCreatedEvent(90))
+        val entered = storage.commit(StableSubagentCreatedEvent(90, "Reviewer", "inspect the output"))
         storage.commit(StableTerminalExitedEvent(18, command = "./fixture", exitCode = 0))
         val completed = storage.commit(StableSubagentCompletedEvent(90))
         val scrolled = mutableListOf<Int>()
@@ -67,7 +67,10 @@ val historyIndexViewModelTest by testSuite {
         )
         try {
             val window = model.awaitIndexes(listOf(entered, completed))
-            assertEquals(90, window.entryAtOrNull(entered)?.createdChildAgentId)
+            val spawn = assertNotNull(window.entryAtOrNull(entered))
+            assertEquals(90, spawn.createdChildAgentId)
+            assertEquals("Reviewer · Spawned", spawn.summary)
+            assertFalse("inspect the output" in spawn.detail.content)
             val notice = assertNotNull(window.entryAtOrNull(completed))
             assertNull(notice.createdChildAgentId)
             assertEquals(HistoryIndexEntryKind.AgentMessage, notice.kind)

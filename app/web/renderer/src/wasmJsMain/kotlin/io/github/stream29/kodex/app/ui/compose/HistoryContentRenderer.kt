@@ -99,6 +99,12 @@ private class ComposeHistoryContentRenderer(
         Disclosure(summary, status, expansionKey, summary, singleLineWhenCollapsed = true,
             showElapsed = false, content = content)
     }
+
+    @Composable override fun SubagentSpawn(
+        summary: String, expansionKey: Any, content: @Composable () -> Unit,
+    ) {
+        Disclosure(summary, "created", expansionKey, summary, singleLineWhenCollapsed = true, content = content)
+    }
     @Composable private fun Disclosure(
         summary: String, status: String, expansionKey: Any, description: String,
         singleLineWhenCollapsed: Boolean, expandedSummary: String? = null,

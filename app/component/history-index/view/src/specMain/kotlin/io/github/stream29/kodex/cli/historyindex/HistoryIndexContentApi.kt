@@ -31,6 +31,7 @@ public class HistoryIndexNavigation(
     public val owner: HistoryIndexViewModel,
     public val enterChild: (HistoryIndexTarget, Int) -> Unit,
     public val returnToParent: ((HistoryIndexParentAnchor) -> Unit)? = null,
+    public val hasCompletionAnchor: () -> Boolean = { false },
 )
 
 /** One host selection shared by the two sidebars and the root-level overlay. */
@@ -82,13 +83,13 @@ public interface HistoryIndexListScope {
 public interface HistoryIndexRenderer {
     public val canShowHover: Boolean
     @Composable public fun List(
-        viewModel: HistoryIndexViewModel, window: HistoryIndexWindow, hasParentRows: Boolean, content: (HistoryIndexListScope) -> Unit,
+        viewModel: HistoryIndexViewModel, window: HistoryIndexWindow, parentRowCount: Int, content: (HistoryIndexListScope) -> Unit,
     )
     @Composable public fun ParentAction(anchor: HistoryIndexParentAnchor, onReturn: () -> Unit)
     @Composable public fun rememberInteraction(target: HistoryIndexTarget, side: HistoryIndexSide): HistoryIndexRowInteraction
     @Composable public fun Row(
         interaction: HistoryIndexRowInteraction, presentation: HistoryIndexRowPresentation,
-        onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit,
+        onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit, onEnterChild: (() -> Unit)?,
     )
     @Composable public fun Hover(
         interaction: HistoryIndexInteraction, presentation: HistoryIndexDetailPresentation, onHoverChanged: (Boolean) -> Unit,
@@ -96,7 +97,7 @@ public interface HistoryIndexRenderer {
     /** Detail is already redacted; null means loading. A command dismisses before onCheckOut. */
     @Composable public fun Menu(
         opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
-        onDismiss: () -> Unit, onEnterChild: (() -> Unit)?, onCheckOut: () -> Unit,
+        onDismiss: () -> Unit, onCheckOut: () -> Unit,
     )
 }
 
@@ -116,9 +117,4 @@ public expect fun HistoryIndexHoverContent(
 @Composable
 public expect fun HistoryIndexMenuContent(
     opening: HistoryIndexMenuOpening?, renderer: HistoryIndexRenderer, onDismiss: () -> Unit,
-)
-
-@Composable
-public expect fun HistoryIndexMenuContent(
-    opening: HistoryIndexMenuOpening?, renderer: HistoryIndexRenderer, navigation: HistoryIndexNavigation?, onDismiss: () -> Unit,
 )

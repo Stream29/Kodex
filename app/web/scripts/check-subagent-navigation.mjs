@@ -108,18 +108,37 @@ async function makeBrowser() {
         for (const type of ["rawKeyDown", "keyUp"]) await send("Input.dispatchKeyEvent",
             { type, key: name, code: name, windowsVirtualKeyCode: code });
     }
-    async function click(text) {
-        const node = await buttonNode(text);
+    async function center(node) {
         const model = (await send("DOM.getBoxModel", { backendNodeId: node.backendDOMNodeId })).model.content;
-        const x = (model[0] + model[4]) / 2, y = (model[1] + model[5]) / 2;
+        return { x: (model[0] + model[4]) / 2, y: (model[1] + model[5]) / 2 };
+    }
+    async function clickPoint({ x, y }) {
+        await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
         for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent",
             { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
     }
+    const click = async text => clickPoint(await center(await buttonNode(text)));
     await wait("browser connected", async () => { await nodes(); return diagnostic.includes("Backend: Connected"); });
     return {
         async type(text) { await click("Message"); await send("Input.insertText", { text }); },
         enter: () => key("Enter", 13),
         async showIndex() { await click("Expand left sidebar"); },
+        async enterChild(_label, index) {
+            const point = await wait(`browser Enter button for index ${index}`, async () => {
+                const tree = await nodes();
+                const row = tree.find(node => node.name?.value === `History index ${index}` && node.backendDOMNodeId);
+                if (!row) return null;
+                const rowCenter = await center(row);
+                for (const node of tree) {
+                    if (node.name?.value !== "Enter subagent" || node.role?.value !== "button" || !node.backendDOMNodeId) continue;
+                    const button = await center(node);
+                    if (button.x > rowCenter.x && Math.abs(button.y - rowCenter.y) < 4) return button;
+                }
+                return null;
+            });
+            await clickPoint(point);
+            await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 500, y: 12 });
+        },
         async menu(_text, index) {
             const node = await wait(`browser index ${index}`, async () => (await nodes()).find(node =>
                 node.name?.value === `History index ${index}` && node.backendDOMNodeId));
@@ -130,6 +149,7 @@ async function makeBrowser() {
             await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "right", clickCount: 1 });
         },
         click,
+        clickHistory: click,
         async visible(text) { await nodes(); return diagnostic.includes(text); },
         async hasOneSessionTab() {
             return (await nodes()).filter(node => node.role?.value === "tab" && node.name?.value?.includes("Session tab:")).length === 1;
@@ -177,6 +197,18 @@ async function makeTui() {
             await wait("PTY History Index", async () => (await capture()).includes("[History Index]"));
             await delay(350);
         },
+        async enterChild(label) {
+            const { x, y } = await wait(`PTY Enter button for ${label}`, async () => {
+                const lines = (await capture()).split("\n");
+                const y = lines.findIndex(line => {
+                    const start = line.indexOf(label);
+                    const button = line.indexOf("[Enter]", start);
+                    return start >= 0 && button > start && button < 30;
+                });
+                return y < 0 ? null : { x: lines[y].indexOf("[Enter]") + 2, y: y + 1 };
+            });
+            await raw(`\x1b[<0;${x};${y}M\x1b[<0;${x};${y}m`);
+        },
         async menu(text) {
             await click(text, 2, true);
             await delay(100);
@@ -187,6 +219,14 @@ async function makeTui() {
             }
         },
         click,
+        async clickHistory(text) {
+            const { x, y } = await wait(`PTY History control ${text}`, async () => {
+                const lines = (await capture()).split("\n");
+                const y = lines.findIndex(line => line.indexOf(text, 30) >= 0);
+                return y < 0 ? null : { x: lines[y].indexOf(text, 30) + 1, y: y + 1 };
+            });
+            await raw(`\x1b[<0;${x};${y}M\x1b[<0;${x};${y}m`);
+        },
         async visible(text) { return (await capture()).includes(text); },
         async hasOneSessionTab() {
             return ((await capture()).split("\n")[0].match(/\[Session \d+]/g) ?? []).length === 1;
@@ -228,21 +268,23 @@ try {
         .all("%NAV_ONLY_C%").map(row => row.agent_id);
     const completeRow = () => db.prepare("SELECT count(*) AS n FROM agent_commits WHERE agent_id=? AND type='event_subagent_completed' AND json_extract(payload_json, '$.child_agent_id')=?")
         .get(a.agent_id, c.agent_id).n;
+    const completionIndex = () => db.prepare('SELECT "index" AS n FROM agent_commits WHERE agent_id=? AND type=\'event_subagent_completed\' AND json_extract(payload_json, \'$.child_agent_id\')=?')
+        .get(a.agent_id, c.agent_id).n;
     const creation = child => db.prepare('SELECT "index" AS n FROM agent_commits WHERE agent_id=? AND type=\'event_subagent_created\' AND json_extract(payload_json, \'$.child_agent_id\')=?')
         .get(child.parent_agent_id, child.agent_id).n;
-    const createdA = `Subagent #${a.agent_id} created`, createdC = `Subagent #${c.agent_id} created`;
+    const createdC = "Subagent Worker-c created";
     const completedC = `Subagent #${c.agent_id} completed`;
     await ui.showIndex();
-    await ui.menu(createdA, creation(a));
+    await ui.menu("Worker-a", creation(a));
     await ui.click("Check out");
     await show("NAV_FIXTURE_ROOT");
     assert.ok(!await ui.visible("Return to creation"));
     async function enter(label, child, marker) {
-        await ui.menu(label, creation(child)); await ui.click("Enter subagent"); await show(marker);
+        await ui.enterChild(label, creation(child)); await show(marker);
     }
-    await enter(createdA, a, "NAV_A_READY");
+    await enter("Worker-a", a, "NAV_A_READY");
     await ui.type("NAV_DRAFT_A");
-    await enter(createdC, c, "NAV_C_READY");
+    await enter("Worker-c", c, "NAV_C_READY");
     assert.ok(!await ui.visible("NAV_DRAFT_A"));
     await ui.type("NAV_ONLY_C");
     await ui.enter();
@@ -251,21 +293,26 @@ try {
     await ui.click("Return to creation");
     await show("NAV_DRAFT_A");
     await wait("parent creation appears in History after return", () => ui.inHistory(createdC));
+    assert.ok(!await ui.inHistory("NAV_FIXTURE_C"));
+    await ui.clickHistory(createdC);
+    await wait("the delegated prompt is visible below the spawn heading", () => ui.inHistory("NAV_FIXTURE_C"));
+    await ui.clickHistory(createdC);
+    await wait("the delegated prompt is hidden again", async () => !await ui.inHistory("NAV_FIXTURE_C"));
     assert.equal((await command("agent", "status", "--agent", c.agent_id)).running, true);
-    await enter(createdC, c, "NAV_ONLY_C");
+    await enter("Worker-c", c, "NAV_ONLY_C");
     assert.equal(completeRow(), 0);
-    await ui.click("Return to completion");
-    await show("NAV_DRAFT_A");
-    assert.ok(!await ui.visible(completedC));
+    await show("Return to creation");
+    assert.ok(!await ui.visible("Return to completion"));
     await command("agent", "stop", "--agent", c.agent_id);
     const completion = await command("agent", "complete", "--agent", c.agent_id);
     assert.ok(completion.completed);
     await wait("parent consumed one completion", () => completeRow() === 1);
-    await show(completedC);
-    await enter(createdC, c, "NAV_ONLY_C");
     await ui.click("Return to completion");
     await show("NAV_DRAFT_A");
     await wait("parent completion appears in History after return", () => ui.inHistory(completedC));
+    await ui.menu(completedC, completionIndex());
+    await ui.click("Check out");
+    await wait("completion index menu closes", async () => !await ui.visible("Check out"));
     await ui.click("Return to creation");
     await show("NAV_ROOT_READY");
     assert.ok(!await ui.visible("NAV_DRAFT_A"));

@@ -72,9 +72,13 @@ public actual fun rememberApplicationIndexNavigation(
     val session = frame.navigation.selectedSession ?: return null
     val agent = frame.selectedAgent ?: return null
     val isChild = frame.tabs.tabs.firstOrNull { it.target === session }?.agent !== agent
+    val completion = if (isChild) key(ApplicationChildKey(session), ApplicationChildKey(agent)) {
+        val anchor = remember(session, agent) { session.hasCompletionAnchor(agent) }
+        anchor.collectAsState(initial = false)
+    } else null
     val scope = rememberCoroutineScope()
     val report = rememberUpdatedState(onOperationFailure)
-    return remember(viewModel, ApplicationChildKey(session), ApplicationChildKey(agent), isChild) {
+    return remember(viewModel, ApplicationChildKey(session), ApplicationChildKey(agent), isChild, completion) {
         fun command(block: suspend (() -> Boolean) -> Unit) {
             val selection = viewModel.navigation.value
             if (selection.selectedSession !== session || session.selectedAgent.value !== agent) return
@@ -101,6 +105,7 @@ public actual fun rememberApplicationIndexNavigation(
                     session.returnToParent(agent, type, selected)
                 }
             } else null,
+            hasCompletionAnchor = { completion?.value == true },
         )
     }
 }

@@ -65,7 +65,7 @@ private fun StoredContent(
             body = { text, supporting -> renderer.Text(text, if (supporting) HistoryTextStyle.Dim else HistoryTextStyle.Normal) },
             turnMarker = { renderer.TurnMarker(it) },
             assistantBody = { renderer.AssistantText(it) },
-            terminalExit = { event, elapsed -> renderer.Event(event, elapsed, null, shellSessions) },
+            renderEvent = { event, elapsed -> renderer.Event(event, elapsed, null, shellSessions) },
         )
         is RequestUserInputHistoryItemViewModel -> {
             val state by item.state.collectAsState()

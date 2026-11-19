@@ -30,15 +30,17 @@ internal fun HistoryMessageRow(
     body: @Composable (String, supporting: Boolean) -> Unit,
     turnMarker: @Composable (Duration) -> Unit,
     assistantBody: @Composable (String) -> Unit,
-    terminalExit: @Composable (StableTerminalExitedEvent, Duration) -> Unit,
+    renderEvent: @Composable (AgentCommit.ConversationMessage, Duration) -> Unit,
 ) {
     val state by model.state.collectAsState()
     when (val current = state) {
         MessageHistoryItemState.Failed -> UiText("Error", UiTextRole.Error)
         is MessageHistoryItemState.Ready -> UiColumn {
-            when (val event = current.event) {
-                is StableTerminalExitedEvent -> key(model) { terminalExit(event, current.elapsed) }
-                else -> HistoryMessageContent(event, { heading(it, current.elapsed) }, body, assistantBody)
+            val event = current.event
+            if (event is StableTerminalExitedEvent || (event is StableSubagentCreatedEvent && event.prompt.isNotEmpty())) {
+                key(model) { renderEvent(event, current.elapsed) }
+            } else {
+                HistoryMessageContent(event, { heading(it, current.elapsed) }, body, assistantBody)
             }
             current.turnDuration?.let { turnMarker(it) }
         }

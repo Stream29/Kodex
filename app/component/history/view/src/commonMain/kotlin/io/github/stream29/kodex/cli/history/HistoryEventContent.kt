@@ -80,7 +80,6 @@ public actual fun HistoryEventContent(
             is StableDeveloperMessage,
             is StableAgentMessage,
             is StableScheduleEvent,
-            is StableSubagentCreatedEvent,
             is StableSubagentCompletedEvent,
                 ->
                 HistoryMessageContent(
@@ -89,6 +88,13 @@ public actual fun HistoryEventContent(
                     body = { text, supporting -> DetailText(text, if (supporting) TextStyle.Dim else TextStyle.Normal) },
                     assistantBody = { renderer.AssistantText(it) },
                 )
+            is StableSubagentCreatedEvent -> if (prompt.isEmpty()) {
+                Header(notice, TextStyle.Bold)
+            } else {
+                renderer.SubagentSpawn(notice, this) {
+                    renderer.Text(prompt, TextStyle.Normal)
+                }
+            }
             is StableTerminalExitedEvent -> renderer.TerminalExit(
                 summary = name.commandIntentDisplayName().let { title ->
                     if (title.isEmpty()) "Terminal #$sessionId exit $exitCode" else "Exit $exitCode · $title"

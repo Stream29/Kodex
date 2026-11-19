@@ -8,11 +8,47 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCr
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlin.test.*
 import kotlin.time.Instant
 
+@OptIn(ExperimentalCoroutinesApi::class)
 val subagentReturnAnchorsTest by testSuite {
+    test("observing completion skips other children, reads new indexes, and resets on history replacement") {
+        runTest {
+            val store = ParentHistoryFixture()
+            val updates = Channel<Boolean>(Channel.UNLIMITED)
+            store.rows = listOf(created(3, 91))
+            store.latestIndexFlow.value = 3
+            backgroundScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                store.observeSubagentCompletionAnchor(91) { store.active }.collect { updates.send(it) }
+            }
+            runCurrent()
+            assertFalse(updates.tryReceive().getOrThrow())
+            store.rows = store.rows + completed(4, 92)
+            store.latestIndexFlow.value = 4
+            runCurrent()
+            assertTrue(updates.tryReceive().isFailure)
+            store.rows = store.rows + completed(5, 91)
+            store.latestIndexFlow.value = 5
+            runCurrent()
+            assertTrue(updates.tryReceive().getOrThrow())
+            assertEquals(listOf(0..3, 4..4, 5..5), store.requests.map { it.first })
+
+            store.rows = listOf(created(3, 91), completed(5, 92))
+            store.cacheNonce.value++
+            runCurrent()
+            assertFalse(updates.tryReceive().getOrThrow())
+            assertTrue(updates.tryReceive().isFailure)
+        }
+    }
+
     test("creation and completion search separate bounded pages on the supplied parent") {
         val store = ParentHistoryFixture()
         val a = 91

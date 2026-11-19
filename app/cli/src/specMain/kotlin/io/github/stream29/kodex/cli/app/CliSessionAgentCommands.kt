@@ -60,6 +60,7 @@ public class AgentStatusCommand : ExplicitAgentOperation(
 )
 
 public class AgentSpawnCommand : SessionAgentOperation("spawn", "Delegate one task as a new child of the calling Agent.") {
+    public val name: String by option("--name", metavar = "NAME", help = "Child name shown in the parent's history.").required()
     public val cwd: String? by option("--cwd", metavar = "DIR", help = "Initial directory, relative to this CLI process if needed.")
     public val model: OpenAiModelId? by option("--model", metavar = "MODEL", help = "Override the calling Agent's model.")
         .convert { require(it.isNotBlank()) { "Model must not be blank." }; OpenAiModelId(it) }
@@ -71,6 +72,9 @@ public class AgentSpawnCommand : SessionAgentOperation("spawn", "Delegate one ta
     public val message: CliPayloadInput<String> by textOperationInput("--message", "Self-contained task text.").required()
 
     override fun validate() {
+        if (name.isBlank() || name.any { it.isISOControl() }) {
+            throw UsageError("Name must be non-blank single-line text.", paramName = "--name")
+        }
         if (cwd?.isBlank() == true) throw UsageError("Working directory must not be blank.", paramName = "--cwd")
         if ((message as? CliPayloadInput.Inline)?.value?.isBlank() == true) {
             throw UsageError("Task text must not be blank.", paramName = "--message")

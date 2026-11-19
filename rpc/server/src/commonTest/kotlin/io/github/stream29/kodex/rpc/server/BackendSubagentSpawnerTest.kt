@@ -33,7 +33,7 @@ val backendSubagentSpawnerTest by testSuite(compartment = { TestCompartment.Real
             ))
             val root = checkNotNull(repo.openAgent(rootId))
             root.runtime.appendUserMessage(listOf(ContentItem.InputText("root-private")))
-            val request = SubagentSpawnRequest(SessionSpawnSource(rootId, root.runtime.invocationId), "first-task")
+            val request = SubagentSpawnRequest(SessionSpawnSource(rootId, root.runtime.invocationId), "first-task", "Review")
             assertEquals(
                 SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidSource),
                 rpc.spawnSubagent(request.copy(source = request.source.copy(invocationId = "stale"))),
@@ -42,6 +42,10 @@ val backendSubagentSpawnerTest by testSuite(compartment = { TestCompartment.Real
                 SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidMessage),
                 rpc.spawnSubagent(request.copy(message = " ")),
             )
+            assertEquals(
+                SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidConfiguration),
+                rpc.spawnSubagent(request.copy(name = " ")),
+            )
             val settings = root.storage.getSettingsAt(Int.MAX_VALUE)
             assertTrue(rpc.compareAndSetSettings(rootId, settings, settings.copy(subagentCreationMode = SubagentCreationMode.Reject)))
             assertEquals(SubagentSpawnResult.Rejected(SubagentSpawnRejection.CreationRejected), rpc.spawnSubagent(request))
@@ -49,7 +53,7 @@ val backendSubagentSpawnerTest by testSuite(compartment = { TestCompartment.Real
             val child = assertIs<SubagentSpawnResult.Created>(rpc.spawnSubagent(request))
             val childOwner = checkNotNull(repo.openAgent(child.agentId))
             val grandchild = assertIs<SubagentSpawnResult.Created>(rpc.spawnSubagent(SubagentSpawnRequest(
-                SessionSpawnSource(child.agentId, childOwner.runtime.invocationId), "second-task",
+                SessionSpawnSource(child.agentId, childOwner.runtime.invocationId), "second-task", "Check",
             )))
             assertEquals(rootId, child.parentAgentId)
             assertEquals(child.agentId, grandchild.parentAgentId)
@@ -67,11 +71,12 @@ val backendSubagentSpawnerTest by testSuite(compartment = { TestCompartment.Real
             val rootEvent = root.storage.getLastCommitsIn(
                 0..Int.MAX_VALUE, setOf(AgentCommitType.EventSubagentCreated), 1,
             ).single().commit
-            assertEquals(StableSubagentCreatedEvent(child.agentId), rootEvent)
+            assertEquals(StableSubagentCreatedEvent(child.agentId, "Review", "first-task"), rootEvent)
+            assertEquals("Review", childOwner.storage.getSettingsAt(Int.MAX_VALUE).threadName)
             val childEvent = childOwner.storage.getLastCommitsIn(
                 0..Int.MAX_VALUE, setOf(AgentCommitType.EventSubagentCreated), 1,
             ).single().commit
-            assertEquals(StableSubagentCreatedEvent(grandchild.agentId), childEvent)
+            assertEquals(StableSubagentCreatedEvent(grandchild.agentId, "Check", "second-task"), childEvent)
             val instructions = checkNotNull(repo.openAgent(grandchild.agentId)).storage.getSettingsAt(Int.MAX_VALUE).instructions
             assertContains(instructions, "$rootId → ${child.agentId} → ${grandchild.agentId}")
         }
@@ -82,14 +87,14 @@ val backendSubagentSpawnerTest by testSuite(compartment = { TestCompartment.Real
             val repo = repository as SqliteKodexSessionRepository
             val bus = AgentEventBus(repo)
             val root = checkNotNull(repo.openAgent(rootId))
-            val request = SubagentSpawnRequest(SessionSpawnSource(rootId, root.runtime.invocationId), "task")
+            val request = SubagentSpawnRequest(SessionSpawnSource(rootId, root.runtime.invocationId), "task", "Partial")
             for (stage in SubagentSpawnStage.entries) {
                 var submitCalled = false
                 val rpc = BackendAgentRuntimeRpc(repo, subagentSpawner = BackendSubagentSpawner(
                     repo, { emptyList() }, repo::createChild, repo::discardUninitializedChild,
-                    { parent, id ->
+                    { parent, event ->
                         if (stage == SubagentSpawnStage.Record) error("Fixture record failure")
-                        bus.recordSubagentCreation(parent, id)
+                        bus.recordSubagentCreation(parent, event)
                     },
                     { _, _ ->
                         submitCalled = true

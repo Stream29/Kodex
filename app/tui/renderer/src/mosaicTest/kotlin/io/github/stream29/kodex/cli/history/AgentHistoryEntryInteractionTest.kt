@@ -13,6 +13,8 @@ import com.jakewharton.mosaic.testing.SnapshotStrategy
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
@@ -51,6 +53,38 @@ private val ansiSnapshots = SnapshotStrategy { mosaic ->
 }
 
 val agentHistoryEntryInteractionTest by testSuite {
+    test("spawn in the parent History reveals the full prompt without hiding the completion marker") {
+        val spawn = FakeMessage(4, MessageHistoryItemState.Ready(
+            StableSubagentCreatedEvent(37, "Reviewer", "First prompt line\nSecond prompt line"), Duration.ZERO,
+        ))
+        val completion = FakeMessage(5, MessageHistoryItemState.Ready(StableSubagentCompletedEvent(37), Duration.ZERO))
+        runMosaicTest {
+            val collapsed = setContentAndSnapshot {
+                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    Column(Modifier.width(34)) {
+                        for (item in listOf(spawn, completion)) {
+                            HistoryItemContent(item, MosaicHistoryItemRenderer(item, 1, null, null))
+                        }
+                    }
+                }
+            }
+            assertTrue("Subagent Reviewer created" in collapsed)
+            assertTrue("Subagent #37 completed" in collapsed)
+            assertFalse("prompt line" in collapsed)
+            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            awaitSnapshot()
+            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Release))
+            val expanded = kotlinx.coroutines.withTimeout(5_000) {
+                var draw: String
+                do { draw = awaitSnapshot() } while ("Second prompt line" !in draw)
+                draw
+            }
+            val lines = expanded.lines().map(String::trimEnd).filter(String::isNotBlank)
+            assertEquals(listOf("First prompt line", "Second prompt line"), lines.subList(1, 3))
+            assertTrue(lines[3].contains("Subagent #37 completed"))
+        }
+    }
+
     for (grouped in listOf(false, true)) {
         test("terminal exit is a one-line disclosure, grouped=$grouped") {
             val code = if (grouped) 23 else 0

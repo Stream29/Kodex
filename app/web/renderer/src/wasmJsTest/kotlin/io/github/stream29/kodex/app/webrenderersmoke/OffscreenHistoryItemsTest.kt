@@ -38,6 +38,34 @@ import kotlin.time.Duration
 import kotlin.time.Instant
 
 val offscreenHistoryItemsTest by testSuite {
+    test("parent History toggles a named spawn prompt below its title and keeps the completion visible") { offscreenTest {
+        val spawn = StableSubagentCreatedEvent(37, "Reviewer", "First prompt line\nSecond prompt line")
+        val completion = StableSubagentCompletedEvent(37)
+        val scene = OffscreenScene.create(width = 280) {
+            androidx.compose.foundation.layout.Column {
+                listOf(spawn, completion).forEachIndexed { i, event ->
+                    val item = remember(event) { object : MessageHistoryItemViewModel {
+                        override val index = i + 4
+                        override val state = MutableStateFlow(MessageHistoryItemState.Ready(event, Duration.ZERO))
+                        override suspend fun readTimestamp(): Instant? = null
+                    } }
+                    HistoryItemContent(item, rememberComposeHistoryItemRenderer())
+                }
+            }
+        }
+        try {
+            val title = "Subagent Reviewer created"
+            scene.settle { scene.hasDescription(title) && scene.hasText("Subagent #37 completed") }
+            assertFalse(scene.hasText(spawn.prompt))
+            scene.clickDescription(title)
+            scene.settle { scene.hasText(spawn.prompt) }
+            assertTrue(scene.text(spawn.prompt).boundsInWindow.top >= scene.text(title).boundsInWindow.bottom)
+            assertTrue(scene.hasText("Subagent #37 completed"))
+            scene.clickDescription(title)
+            scene.settle { !scene.hasText(spawn.prompt) }
+        } finally { scene.close() }
+    } }
+
     for (grouped in listOf(false, true)) {
         test("terminal exit stays a single row and reveals the full command, grouped=$grouped") { offscreenTest {
             val code = if (grouped) 23 else 0
