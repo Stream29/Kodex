@@ -5,12 +5,12 @@ import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.sessiontabbar.contract.*
 
 /** Read-only observations of one exact tab child, not another registry or execution owner. */
 public data class SessionTabRenderState(
-    public val target: PersistedSessionViewModel,
+    public val target: AgentTabViewModel,
     public val selected: Boolean,
     public val sessionName: String,
     public val running: Boolean = false,
@@ -31,7 +31,7 @@ public expect fun <T : Any> applicationHistoryWidgetStateFor(
 public interface ApplicationTabBarProjection {
     public val tabs: List<SessionTabRenderState>
     public val state: SessionTabBarState
-    public fun targetFor(identity: SessionTabIdentity): PersistedSessionViewModel?
+    public fun targetFor(identity: SessionTabIdentity): AgentTabViewModel?
 }
 
 /** Retains renderer keys by exact child; an observed departure retires its key before readmission. */
@@ -40,7 +40,7 @@ public expect fun collectApplicationTabBar(navigation: ApplicationNavigationStat
 
 /** Object identity denotes one fresh menu opening, not a value-equal route or retained Session. */
 public class ApplicationTabMenuTarget(
-    public val target: PersistedSessionViewModel,
+    public val target: AgentTabViewModel,
     public val label: String,
     public val placement: SessionTabMenuPlacement,
 )
@@ -59,4 +59,5 @@ public expect fun ApplicationTabBarContent(
     onOperationFailure: (Throwable) -> Unit,
     onOpenTabMenu: (ApplicationTabMenuTarget) -> Unit,
     onBeforeNewOrCatalog: () -> Unit = {},
+    showSessions: Boolean = false,
 ): Unit

@@ -64,7 +64,7 @@ val sessionTabContextMenuTest by testSuite {
                 }
                 }
 
-                menuSnapshot = awaitSnapshotContaining("Close and archive")
+                menuSnapshot = awaitSnapshotContaining("Archive Session and close tab")
                 repeat(2) {
                     sendKeyEvent(KeyboardEvent(KeyboardEvent.Down))
                     awaitSnapshot()
@@ -74,12 +74,12 @@ val sessionTabContextMenuTest by testSuite {
             }
 
             assertEquals("close-and-archive", selection)
-            assertTrue("Index: ${target.sessionIndex}" in menuSnapshot, menuSnapshot)
+            assertTrue("Session #${target.sessionIndex}" in menuSnapshot, menuSnapshot)
             assertTrue("Created at: 2026-09-08 09:02:03 UTC+08:00" in menuSnapshot, menuSnapshot)
             assertTrue("Updated at: 2026-09-08 10:02:03 UTC+08:00" in menuSnapshot, menuSnapshot)
             assertTrue("Rename" in menuSnapshot, menuSnapshot)
             assertTrue("Close" in menuSnapshot, menuSnapshot)
-            assertTrue("Close and archive" in menuSnapshot, menuSnapshot)
+            assertTrue("Archive Session and close tab" in menuSnapshot, menuSnapshot)
             assertTrue("Delete" in menuSnapshot, menuSnapshot)
         } finally {
             fixture.close()
@@ -92,7 +92,7 @@ val sessionTabContextMenuTest by testSuite {
         val callbacks = object : SessionTabBarCallbacks {
             override fun select(identity: SessionTabIdentity) = Unit
             override fun selectNewSession() { selections++ }
-            override fun openSessions() = Unit
+            override val sessionsAction: () -> Unit = {}
         }
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
@@ -116,7 +116,7 @@ val sessionTabContextMenuTest by testSuite {
             sendMouseEvent(MouseEvent(46, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
             sendMouseEvent(MouseEvent(46, 0, MouseEvent.Type.Release))
             val latest = awaitSnapshot()
-            assertFalse("Rename" in latest || "Close and archive" in latest, latest)
+            assertFalse("Rename Session" in latest || "Archive Session" in latest, latest)
         }
         assertEquals(0, menus)
         assertEquals(1, selections)

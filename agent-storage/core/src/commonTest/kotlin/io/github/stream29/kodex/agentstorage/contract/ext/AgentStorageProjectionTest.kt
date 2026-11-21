@@ -24,7 +24,7 @@ val agentStorageProjectionTest by testSuite {
         val point = StableContextCompaction(encryptedContent = "fixture", retainedItems = listOf(prior))
         val settings = KodexAgentSettings(OpenAiModelId("fixture"))
         storage.commit(listOf(prior, settings), stamp)
-        storage.commit(listOf(point, settings, LlmRequestMeta.Response(totalTokens = 5L)), stamp)
+        storage.commit(listOf(point, settings, LlmRequestMeta.Response(totalTokens = 5L, elapsedNanoseconds = 1_000_000L, outputTokens = 0)), stamp)
         val end = storage.commit(
             listOf(after, UnstableSnapshot(emptyList()), SteerSnapshot(listOf(after)), AskUserSnapshot(emptyList())),
             stamp,

@@ -33,22 +33,29 @@ import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 val agentCommitSerializationTest by testSuite {
-    test("terminal work and steer payloads require an explicit name") {
+    test("terminal work and steer payloads require a nonblank single-line name") {
         val type = AgentCommitType.EventTerminalExited
         val old = """{"type":"event_terminal_exited","session_id":37,"command":"fixture","exit_code":0"""
         for (suffix in listOf("}", ""","name":null}""")) {
             assertFailsWith<SerializationException> { type.decodePayloadJson(old + suffix) }
             assertFailsWith<SerializationException> { AgentCommitType.Steer.decodePayloadJson("[${old + suffix}]") }
         }
-        for (name in listOf("Run tests", "")) {
-            val terminal = StableTerminalExitedEvent(37, name, command = "fixture", exitCode = 0)
-            val queued = SteerSnapshot(listOf(terminal))
-            assertEquals(terminal, type.decodePayloadJson(terminal.encodePayloadJson()))
-            assertEquals(queued, AgentCommitType.Steer.decodePayloadJson(queued.encodePayloadJson()))
+        for (name in listOf("", "  ", "Run\nfixture")) {
+            val invalid = old + ""","name":${JsonPrimitive(name)}}"""
+            assertFailsWith<IllegalArgumentException> { type.decodePayloadJson(invalid) }
+            assertFailsWith<IllegalArgumentException> { AgentCommitType.Steer.decodePayloadJson("[$invalid]") }
         }
+        val input = old + ""","name":"Run fixture"}"""
+        val terminal = StableTerminalExitedEvent(37, name = "Run fixture", command = "fixture", exitCode = 0)
+        val queued = SteerSnapshot(listOf(terminal))
+        assertEquals(terminal, type.decodePayloadJson(input))
+        assertEquals(queued, AgentCommitType.Steer.decodePayloadJson("[$input]"))
+        assertEquals(terminal, type.decodePayloadJson(terminal.encodePayloadJson()))
+        assertEquals(queued, AgentCommitType.Steer.decodePayloadJson(queued.encodePayloadJson()))
         assertEquals("work", type.legacyTimelineName)
         assertEquals(false, type in AgentCommitType.IndexTypes)
         assertEquals(true, type in AgentCommitType.WorkTypes)
@@ -57,7 +64,7 @@ val agentCommitSerializationTest by testSuite {
         assertEquals(false, type in AgentCommitType.CompactionRetainedTypes)
     }
 
-    test("agent settings serialize cwd as a string and use compatibility fallback") {
+    test("agent settings serialize cwd as a string and use their declared defaults") {
         val settings = KodexAgentSettings(
             model = OpenAiModelId("test-model"),
             cwd = Path("/workspace/project"),
@@ -79,7 +86,7 @@ val agentCommitSerializationTest by testSuite {
         assertEquals(RequestUserInputMode.AskUser, decoded.requestUserInputMode)
     }
 
-    test("legacy settings without reasoning or effort retain medium semantics and service tiers") {
+    test("settings without reasoning or effort retain medium defaults and serialize service tiers") {
         for (source in listOf(
             """{"model":"test-model"}""",
             """{"model":"test-model","reasoning":{}}""",
@@ -111,14 +118,33 @@ val agentCommitSerializationTest by testSuite {
             }
             assertEquals(
                 ServiceTier.Default,
-                codec.decodeFromString<KodexAgentSettings>("""{"model":"legacy"}""").serviceTier,
+                codec.decodeFromString<KodexAgentSettings>("""{"model":"fixture"}""").serviceTier,
             )
         }
+    }
+
+    test("stored settings use only the canonical name") {
+        val oldJson = """{"model":"test-model","threadName":"old"}"""
+        val legacy = AgentCommitType.Settings.decodePayloadJson(oldJson) as KodexAgentSettings
+        assertEquals("", legacy.name)
+        assertEquals(
+            "new",
+            (AgentCommitType.Settings.decodePayloadJson(
+                """{"model":"test-model","name":"new","threadName":"old"}""",
+            ) as KodexAgentSettings).name,
+        )
+        val named = legacy.copy(name = "canonical")
+        val encoded = OpenAiJsonCodec.parseToJsonElement(named.encodePayloadJson()).jsonObject
+        assertEquals(JsonPrimitive("canonical"), encoded["name"])
+        assertTrue("threadName" !in encoded)
+        assertEquals("", OpenAiJsonCodec.decodeFromString(KodexAgentSettings.serializer(), oldJson).name)
     }
 
     test("llm request meta snapshots round-trip across all four subtypes and preserve type discriminator") {
         val response = LlmRequestMeta.Response(
             totalTokens = 9_007_199_254_740_993L,
+            elapsedNanoseconds = 200_000_000L,
+            outputTokens = 20,
             usage = TokenUsage(
                 inputTokens = 100,
                 outputTokens = 20,
@@ -154,13 +180,23 @@ val agentCommitSerializationTest by testSuite {
             assertEquals(snapshot, OpenAiJsonCodec.decodeFromString(AgentCommit.serializer(), payload))
         }
 
-        val missing = Json.decodeFromString<LlmRequestMeta>("""{"type":"llm_request_meta_response","total_tokens":0}""")
+        val missing = Json.decodeFromString<LlmRequestMeta>(
+            """{"type":"llm_request_meta_response","total_tokens":0,"elapsed_ns":1000000,"output_tokens":0}""",
+        )
         val reported = (missing as LlmRequestMeta.Response).copy(
             usage = TokenUsage(0, 0, 0, TokenUsageInputDetails(0), TokenUsageOutputDetails(0)),
             diagnostics = TokenCountDiagnostics(turnStateSent = false),
         )
-        assertEquals(LlmRequestMeta.Response(0), missing)
+        assertEquals(LlmRequestMeta.Response(0, elapsedNanoseconds = 1_000_000L, outputTokens = 0), missing)
         assertNotEquals<LlmRequestMeta>(missing, reported)
+    }
+
+    test("measured response payloads cannot omit any required measurement field") {
+        val measurements = mapOf("total_tokens" to JsonPrimitive(20), "elapsed_ns" to JsonPrimitive(1_000_000), "output_tokens" to JsonPrimitive(1))
+        for (field in measurements.keys) {
+            val payload = JsonObject(measurements - field).toString()
+            assertFailsWith<SerializationException> { AgentCommitType.LlmRequestMetaResponse.decodePayloadJson(payload) }
+        }
     }
 
     test("all agent commit families round-trip through native AgentCommit polymorphism and payload helpers") {
@@ -184,16 +220,16 @@ val agentCommitSerializationTest by testSuite {
             StableReasoning(ResponseItem.Reasoning(ResponseItemId("r1"), emptyList())),
             StableAwait(
                 callId = "call_await",
-                arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(4))),
+                arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(4)), name = "Wait for server exit"),
                 result = StableAwaitEventResult.Output(AwaitEventOutput(Instant.parse("2026-11-15T10:00:00Z"))),
             ),
             KodexAgentSettings(model = OpenAiModelId("gpt-5")),
             LlmRequestMeta.Initialization(0),
-            LlmRequestMeta.Response(42),
+            LlmRequestMeta.Response(42, elapsedNanoseconds = 10_000_000L, outputTokens = 6),
             UnstableSnapshot(
                 listOf(
                     PendingPlanUpdate("c1", null, UpdatePlanArgs("plan", emptyList())),
-                    PendingAwait("c2", null, AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(4)))),
+                    PendingAwait("c2", null, AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(4)), name = "Wait for server exit")),
                 ),
             ),
             AskUserSnapshot(

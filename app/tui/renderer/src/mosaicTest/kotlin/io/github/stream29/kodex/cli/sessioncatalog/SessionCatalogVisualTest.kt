@@ -81,7 +81,6 @@ val sessionCatalogVisualTest by testSuite {
                             SessionCatalogContextMenuPopup(
                                 entry, it, null,
                                 onDismissRequest = { anchor = null },
-                                onFork = { result = "fork"; anchor = null },
                                 onArchive = { result = "archive"; anchor = null },
                                 onUnarchive = { result = "unarchive"; anchor = null },
                                 onDelete = { result = "delete"; anchor = null },
@@ -98,7 +97,7 @@ val sessionCatalogVisualTest by testSuite {
                 assertTrue("Updated at: 2026-01-02 03:04:05 UTC+00:00" in menu, menu)
                 assertFalse("Created at:" in menu, menu)
                 assertTrue("[Delete]" in menu, menu)
-                assertTrue("[Fork]" in menu, menu)
+                assertFalse("[Fork]" in menu, menu)
                 sendKeyEvent(KeyboardEvent(13))
                 visualSnapshot("result=unarchive")
             }

@@ -35,7 +35,7 @@ val subagentCreationPolicyTest by testSuite {
             serviceTier = ServiceTier.Ultrafast,
             cwd = parentDirectory,
             requestUserInputMode = RequestUserInputMode.NoQuestion,
-            threadName = "do not copy",
+            name = "do not copy",
             turnId = "parent-turn",
             turnState = "private provider state",
             windowId = "parent-window",
@@ -50,7 +50,7 @@ val subagentCreationPolicyTest by testSuite {
         assertEquals(parent.serviceTier, effective.serviceTier)
         assertEquals(parent.requestUserInputMode, effective.requestUserInputMode)
         assertEquals(SubagentCreationMode.AutoApprove, effective.subagentCreationMode)
-        assertEquals("", effective.threadName)
+        assertEquals("", effective.name)
         assertEquals("", effective.turnId)
         assertEquals("", effective.windowId)
         assertNull(effective.turnState)

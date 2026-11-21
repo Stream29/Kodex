@@ -12,6 +12,7 @@ kotlin {
                 api(project(":utils-shell-client"))
                 api(libs.kotlinx.coroutines.core)
                 api(libs.kotlinx.serialization.core)
+                implementation(project(":tool-intent-name"))
             }
         }
     }

@@ -8,7 +8,11 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.openai.*
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventOutput
 import io.github.stream29.kodex.tool.readmedia.MediaDetail
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolOutput
@@ -20,12 +24,14 @@ import kotlinx.serialization.json.JsonObject
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 val builtInToolEventViewTest by testSuite {
     test("commandShowsRecordedMetadataWithoutDefaultsOrIdentifiers") {
         val event = commandEvent(
             ExecCommandArguments(
                 "printf hello",
+                name = "Print greeting",
                 workdir = "/repo",
                 yieldTimeMillis = 10_000,
                 maxOutputTokens = 42,
@@ -47,7 +53,7 @@ val builtInToolEventViewTest by testSuite {
     test("onlyKnownInputDefaultsAreOmitted") {
         assertEquals(
             "exec_command; yield_time_ms=10000",
-            ExecCommandArguments("pwd", yieldTimeMillis = 10_000).expandedCommandContext(),
+            ExecCommandArguments("pwd", name = "Check cwd", yieldTimeMillis = 10_000).expandedCommandContext(),
         )
         assertEquals(
             "write_stdin; yield_time_ms=250",
@@ -55,7 +61,7 @@ val builtInToolEventViewTest by testSuite {
         )
         assertEquals(
             "exec_command; yield_time_ms=0; max_output_tokens=0",
-            ExecCommandArguments("pwd", yieldTimeMillis = 0, maxOutputTokens = 0)
+            ExecCommandArguments("pwd", name = "Check cwd", yieldTimeMillis = 0, maxOutputTokens = 0)
                 .expandedCommandContext(),
         )
     }
@@ -255,6 +261,33 @@ val builtInToolEventViewTest by testSuite {
         }
     }
 
+    test("await uses the same title when pending, completed, and failed") {
+        val arguments = AwaitEventArguments(
+            events = listOf(AwaitEventInput.TerminalExited(7), AwaitEventInput.Timeout(3000)),
+            name = "等待作业完成",
+        )
+        val pending = PendingAwait("await", arguments = arguments, timeoutAt = Instant.fromEpochMilliseconds(3000))
+        runMosaicTest {
+            val text = setContentAndSnapshot {
+                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    pending.render()
+                }
+            }
+            assertEquals("> ${arguments.name}", text)
+            for ((outcome, detail) in listOf(
+                StableAwaitEventResult.Output(AwaitEventOutput(Instant.fromEpochMilliseconds(0))) to "timestamp: 1970-01-01T00:00:00Z",
+                StableAwaitEventResult.Failure("fixture wait failed") to "error: fixture wait failed",
+            )) {
+                val event = StableAwait("await", arguments = arguments, result = outcome)
+                val expanded = setContentAndSnapshot {
+                    io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers { ExpandedEvent(event) }
+                }
+                assertEquals("v ${arguments.name}", expanded.lineSequence().first())
+                assertTrue(detail in expanded, expanded)
+            }
+        }
+    }
+
     test("invalidInternalInputIsNotReparsedButExternalFallbackIsPreserved") {
         val original = "{\"cmd\":\nBROKEN"
         val event = StableInvalidToolCall(
@@ -268,6 +301,12 @@ val builtInToolEventViewTest by testSuite {
             }
             assertTrue("exec_command\narguments: $original\nerror: invalid syntax" in text)
             assertFalse("> Invocation" in text)
+            val await = setContentAndSnapshot {
+                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    ExpandedEvent(event.copy(invocation = InvalidToolInvocation.Function("await_event", arguments = original)))
+                }
+            }
+            assertTrue("v Wait for events\nawait_event\narguments: $original\nerror: invalid syntax" in await)
             val external = setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     ExpandedEvent(

@@ -1,11 +1,13 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.application.contract.AgentPageActionTarget
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
+import io.github.stream29.kodex.app.application.contract.ApplicationSessionCatalog
 import io.github.stream29.kodex.app.sessiondelete.createSessionDeleteViewModel
 import io.github.stream29.kodex.app.sessiondelete.contract.SessionDeleteDependencies
 import io.github.stream29.kodex.app.sessionrename.createSessionRenameViewModel
@@ -18,11 +20,14 @@ import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryDe
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
+import io.github.stream29.kodex.app.session.contract.AgentParentAnchor
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogInteractions
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogDependencies
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupActions
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupsViewModel
+import io.github.stream29.kodex.app.sessioncatalog.contract.createSessionGroupsViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModelArguments
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModelFactory
@@ -38,17 +43,16 @@ import kotlinx.io.files.Path
 public actual fun createApplicationViewModel(
     sessions: PersistedSessionViewModelRegistry,
     newSessionFactory: NewSessionViewModelFactory,
-    catalogFactory: SessionCatalogViewModelFactory,
-    catalogDependencies: SessionCatalogDependencies,
     settingsFactory: SettingsViewModelFactory,
     loginFactory: OpenAiLoginViewModelFactory,
     createDirectoryPicker: (Path) -> DirectoryPickerViewModel,
     newSessionArguments: NewSessionViewModelArguments,
     ownerScope: CoroutineScope,
+    sessionGroups: ApplicationSessionCatalog?,
 ): ApplicationViewModel = ApplicationViewModelImpl(
-    sessions, newSessionFactory, catalogFactory, catalogDependencies,
+    sessions, newSessionFactory,
     settingsFactory, loginFactory, createDirectoryPicker, newSessionArguments,
-    ownerScope,
+    ownerScope, sessionGroups,
 )
 
 /**
@@ -61,15 +65,15 @@ public actual fun createApplicationViewModel(
 internal class ApplicationViewModelImpl(
     private val sessions: PersistedSessionViewModelRegistry,
     newSessionFactory: NewSessionViewModelFactory,
-    private val catalogFactory: SessionCatalogViewModelFactory,
-    private val catalogDependencies: SessionCatalogDependencies,
     private val settingsFactory: SettingsViewModelFactory,
     private val loginFactory: OpenAiLoginViewModelFactory,
     private val createDirectoryPicker: (Path) -> DirectoryPickerViewModel,
     newSessionArguments: NewSessionViewModelArguments,
     ownerScope: CoroutineScope,
+    private val sessionGroups: ApplicationSessionCatalog? = null,
 ) : ApplicationViewModel {
     private val commandMutex = Mutex()
+    private val historyMutex = Mutex()
     private val submissionGate = Mutex()
     private val parent = requireNotNull(ownerScope.coroutineContext[Job]) {
         "Application commands require a frontend owner."
@@ -77,6 +81,46 @@ internal class ApplicationViewModelImpl(
     override val newSession: NewSessionViewModel = newSessionFactory.create(newSessionArguments)
     private val commandOwner = SupervisorJob(parent)
     private val commands = CoroutineScope(ownerScope.coroutineContext + commandOwner)
+    private val lazyCatalog = lazy {
+        sessionGroups?.let { reads ->
+            createSessionGroupsViewModel(commands, reads, object : SessionGroupActions {
+                override suspend fun open(entry: SessionCatalogEntry) = commandMutex.withLock {
+                    ensureOpen()
+                    val tab = reads.open(entry)
+                    ensureOpen()
+                    selectOpened(tab)
+                    Unit
+                }
+
+                override suspend fun rename(entry: SessionCatalogEntry) = commandMutex.withLock {
+                    ensureOpen()
+                    check(reads.isCurrentRoot(entry)) { "The original Session no longer exists." }
+                    val tabOwner = navigation.value.tabs.filterIsInstance<PersistedSessionViewModel>()
+                        .firstOrNull { it.agentId == entry.rootAgentId }
+                    val child = createSessionRenameViewModel(entry.name.orEmpty(), SessionRenameDependencies { name ->
+                        reads.rename(entry, name)
+                    })
+                    val adapter = object : RenameSessionPopupViewModel, SessionRenameViewModel by child {
+                        override val target: PersistedSessionViewModel? = tabOwner
+                    }
+                    installPopup(ApplicationPopupState.RenameSession(adapter))
+                    Unit
+                }
+
+                override suspend fun setArchived(entry: SessionCatalogEntry, archived: Boolean) = commandMutex.withLock {
+                    ensureOpen()
+                    check(reads.isCurrentRoot(entry)) { "The original Session no longer exists." }
+                    if (archived) sessions.archive(entry.sessionIndex) else sessions.unarchive(entry.sessionIndex)
+                }
+
+                override suspend fun delete(entry: SessionCatalogEntry): Boolean = commandMutex.withLock {
+                    ensureOpen()
+                    reads.isCurrentRoot(entry) && deleteSessionLocked(entry.sessionIndex)
+                }
+            })
+        }
+    }
+    override val sessionCatalog: SessionGroupsViewModel? get() = lazyCatalog.value
     private val closed = MutableStateFlow(false)
     private val mutableNavigation = MutableStateFlow(
         ApplicationNavigationState(
@@ -86,7 +130,7 @@ internal class ApplicationViewModelImpl(
     )
     private val mutablePopup =
         MutableStateFlow<ApplicationPopupState>(ApplicationPopupState.Closed)
-    private var workingDirectoryOwner: Pair<ApplicationPopupState.WorkingDirectory, PersistedSessionViewModel>? = null
+    private var workingDirectoryOwner: Pair<ApplicationPopupState.WorkingDirectory, AgentTabViewModel>? = null
 
     override val navigation: StateFlow<ApplicationNavigationState> =
         mutableNavigation.asStateFlow()
@@ -99,26 +143,131 @@ internal class ApplicationViewModelImpl(
     override suspend fun openSession(sessionIndex: Int): PersistedSessionViewModel =
         commandMutex.withLock {
             ensureOpen()
-            val current = mutableNavigation.value
             val opened = sessions.open(sessionIndex)
             ensureOpen()
-            current.tabs.forEachIndexed { index, tab ->
-                if (tab.sessionIndex == sessionIndex) {
-                    check(tab === opened) {
-                        "Persisted Session registry returned a different handle for index $sessionIndex."
-                    }
-                    mutableNavigation.value = current.copy(selection = ApplicationTabSelection.SelectedTab(index))
-                    return@withLock opened
-                }
-            }
-            mutableNavigation.value = ApplicationNavigationState(
-                tabs = current.tabs + opened,
-                selection = ApplicationTabSelection.SelectedTab(current.tabs.size),
-            )
+            selectOpened(opened)
             opened
         }
 
-    override suspend fun selectTab(target: PersistedSessionViewModel): Boolean = commandMutex.withLock {
+    override suspend fun openAgent(agentId: Int): AgentTabViewModel {
+        val waiter = currentCoroutineContext()
+        waiter.ensureActive()
+        // Keep ownership of the in-flight local handle even if the renderer cancels
+        // its wait. A cancelled caller cannot select the result.
+        return commands.async {
+            commandMutex.withLock {
+                ensureOpen()
+                waiter.ensureActive()
+                val existing = mutableNavigation.value.tabs.firstOrNull { it.agentId == agentId }
+                val opened = existing ?: sessions.openAgent(agentId)
+                try {
+                    ensureOpen()
+                    waiter.ensureActive()
+                    selectOpened(opened)
+                    opened
+                } catch (failure: Throwable) {
+                    if (existing == null) withContext(NonCancellable) { sessions.releaseAgent(opened) }
+                    throw failure
+                }
+            }
+        }.await()
+    }
+
+    private fun selectOpened(opened: AgentTabViewModel, parentAgentId: Int? = null): ApplicationNavigationState {
+        val current = mutableNavigation.value
+        val index = current.tabs.indexOfFirst { it.agentId == opened.agentId }
+        check(index < 0 || current.tabs[index] === opened) { "Registry changed the open handle for Agent ${opened.agentId}." }
+        val next = current.copy(
+            tabs = if (index < 0) current.tabs + opened else current.tabs,
+            selection = ApplicationTabSelection.SelectedTab(if (index < 0) current.tabs.size else index),
+            parentAgentIds = if (parentAgentId == null) current.parentAgentIds
+                else current.parentAgentIds + (opened.agentId to parentAgentId),
+        )
+        mutableNavigation.value = next
+        return mutableNavigation.value
+    }
+
+    override suspend fun enterChild(
+        source: AgentPageActionTarget, index: Int, generation: Long, revision: Long, childAgentId: Int,
+    ) {
+        if (source.tab.agentId == childAgentId) return
+        fun matchesRow(): Boolean {
+            val parents = navigation.value.parentAgentIds
+            val knownParent = parents[childAgentId]
+            if (knownParent != null && knownParent != source.tab.agentId) return false
+            var ancestor = parents[source.tab.agentId]
+            val visited = mutableSetOf<Int>()
+            while (ancestor != null && visited.add(ancestor)) {
+                if (ancestor == childAgentId) return false
+                ancestor = parents[ancestor]
+            }
+            val history = source.agent.historyIndex
+            val window = history.window.value
+            return window.revision == revision && history.contains(generation, index) &&
+                window.entryAtOrNull(index)?.createdChildAgentId == childAgentId
+        }
+        navigateFromHistory(source, childAgentId, parentAgentId = source.tab.agentId, beforePublish = {
+            (source.tab as? PersistedSessionViewModel)?.requireOriginalRoot()
+        }, valid = ::matchesRow)
+    }
+
+    override suspend fun returnToParent(source: AgentPageActionTarget, anchor: AgentParentAnchor) {
+        val parentId = navigation.value.parentAgentIds[source.tab.agentId] ?: return
+        val selected = navigateFromHistory(source, parentId, parentAgentId = null) {
+            navigation.value.parentAgentIds[source.tab.agentId] == parentId
+        } ?: return
+        val parent = requireNotNull(selected.selectedTab)
+        val binding = parent.agent.value ?: return
+        parent.locateChildEvent(binding, source.tab.agentId, anchor) {
+            navigation.value === selected && source.tab.agent.value === source.agent &&
+                source.agent.lifecycle.value == AgentLifecycleState.Open && parent.agent.value === binding
+        }
+    }
+
+    /**
+     * Resolve outside the command lock: a slow activation must not block selection or close.
+     * Publish only against the original navigation snapshot, including an away-and-back switch.
+     */
+    private suspend fun navigateFromHistory(
+        source: AgentPageActionTarget,
+        agentId: Int,
+        parentAgentId: Int?,
+        beforePublish: suspend () -> Unit = {},
+        valid: () -> Boolean,
+    ): ApplicationNavigationState? {
+        val snapshot = navigation.value
+        val waiter = currentCoroutineContext()
+        fun isCurrent() = waiter.isActive && navigation.value === snapshot && isCurrentPage(source) && valid()
+        return commands.async {
+            historyMutex.withLock history@{
+                if (!isCurrent()) return@history null
+                var opened: AgentTabViewModel? = null
+                var retained = false
+                try {
+                    beforePublish()
+                    if (!isCurrent()) return@history null
+                    val target = snapshot.tabs.firstOrNull { it.agentId == agentId }
+                        ?: sessions.openAgent(agentId).also { opened = it }
+                    if (!isCurrent()) return@history null
+                    beforePublish()
+                    commandMutex.withLock publish@{
+                        if (!isCurrent()) return@publish null
+                        currentCoroutineContext().ensureActive()
+                        selectOpened(target, parentAgentId).also { retained = true }
+                    }
+                } finally {
+                    val unused = opened
+                    if (!retained && unused != null) withContext(NonCancellable) {
+                        commandMutex.withLock {
+                            if (navigation.value.tabs.none { it === unused }) sessions.releaseAgent(unused)
+                        }
+                    }
+                }
+            }
+        }.await()
+    }
+
+    override suspend fun selectTab(target: AgentTabViewModel): Boolean = commandMutex.withLock {
         ensureOpen()
         val current = mutableNavigation.value
         val index = current.tabs.indexOfFirst { child -> child === target }
@@ -134,7 +283,13 @@ internal class ApplicationViewModelImpl(
         mutableNavigation.value = mutableNavigation.value.copy(selection = ApplicationTabSelection.NewSession)
     }
 
-    override suspend fun closeTab(target: PersistedSessionViewModel): Boolean = commandMutex.withLock {
+    override suspend fun selectNewSessionInDirectory(cwd: Path): Unit = commandMutex.withLock {
+        ensureOpen()
+        newSession.updateWorkingDirectory(cwd)
+        mutableNavigation.value = mutableNavigation.value.copy(selection = ApplicationTabSelection.NewSession)
+    }
+
+    override suspend fun closeTab(target: AgentTabViewModel): Boolean = commandMutex.withLock {
         ensureOpen()
         closeTabLocked(target)
     }
@@ -146,6 +301,7 @@ internal class ApplicationViewModelImpl(
         if (mutableNavigation.value.tabs.none { child -> child === target }) {
             return@withLock false
         }
+        target.requireOriginalRoot()
         sessions.archive(target.sessionIndex)
         check(closeTabLocked(target)) {
             "Persisted Session tab disappeared during a serialized close-and-archive command."
@@ -156,11 +312,6 @@ internal class ApplicationViewModelImpl(
     private suspend fun deleteSession(sessionIndex: Int): Boolean = commandMutex.withLock {
         ensureOpen()
         deleteSessionLocked(sessionIndex)
-    }
-
-    internal suspend fun forkSession(sessionIndex: Int): Int = commandMutex.withLock {
-        ensureOpen()
-        sessions.fork(sessionIndex)
     }
 
     override suspend fun submitNewSession(expectedRevision: Long): PersistedSessionViewModel? {
@@ -177,11 +328,7 @@ internal class ApplicationViewModelImpl(
                 val persisted = newSession.submit(expectedRevision) ?: return@withLock null
                 currentCoroutineContext().ensureActive()
                 ensureOpen()
-                val current = mutableNavigation.value
-                mutableNavigation.value = ApplicationNavigationState(
-                    current.tabs + persisted,
-                    ApplicationTabSelection.SelectedTab(current.tabs.size),
-                )
+                selectOpened(persisted)
                 persisted
             }
         }
@@ -199,31 +346,6 @@ internal class ApplicationViewModelImpl(
             throw cancelled
         }
     }
-
-    override suspend fun openSessionCatalogPopup(): ApplicationPopupState.SessionCatalog =
-        commandMutex.withLock {
-            ensureOpen()
-            lateinit var opening: ApplicationPopupState.SessionCatalog
-            opening =
-                ApplicationPopupState.SessionCatalog(
-                    catalogFactory.create(
-                        dependencies = object : SessionCatalogDependencies by catalogDependencies {
-                            override suspend fun fork(sessionIndex: Int) =
-                                forkSession(sessionIndex)
-
-                            override suspend fun delete(sessionIndex: Int) =
-                                deleteSession(sessionIndex)
-                        },
-                        interactions = object : SessionCatalogInteractions {
-                            override suspend fun openSession(sessionIndex: Int) {
-                                this@ApplicationViewModelImpl.openSession(sessionIndex)
-                            }
-                            override fun dismissPopup() { this@ApplicationViewModelImpl.dismissPopup(opening) }
-                        },
-                    ),
-                )
-            installPopup(opening)
-        }
 
     override suspend fun openSettingsPopup(
         target: PersistedSessionViewModel?,
@@ -245,10 +367,12 @@ internal class ApplicationViewModelImpl(
         commandMutex.withLock {
             ensureOpen()
             if (!isCurrentPage(target)) return@withLock null
+            val session = target.tab as? PersistedSessionViewModel
             installPopup(ApplicationPopupState.Settings(
-                target = target.session,
+                target = session,
+                owner = target.tab,
                 viewModel = settingsFactory.create(SettingsViewModelArguments(
-                    target.session, SettingsPage.CurrentSession, target.agent, { isCurrentPage(target) },
+                    session, SettingsPage.CurrentSession, target.agent, { isCurrentPage(target) },
                 )),
             ))
         }
@@ -264,7 +388,7 @@ internal class ApplicationViewModelImpl(
                     if (isCurrentPage(target)) agent.updateWorkingDirectory(cwd)
                 },
             ))
-            workingDirectoryOwner = created to target.session
+            workingDirectoryOwner = created to target.tab
             installPopup(created)
         }
 
@@ -283,17 +407,38 @@ internal class ApplicationViewModelImpl(
     ): ApplicationPopupState.DeleteSession = commandMutex.withLock {
         ensureOpen()
         val target = mutableNavigation.value.tabs
+            .filterIsInstance<PersistedSessionViewModel>()
             .firstOrNull { child -> child.sessionIndex == sessionIndex }
+        installDeleteSessionPopup(sessionIndex, target?.name?.value, ::deleteSession)
+    }
+
+    override suspend fun openDeleteSessionPopup(
+        target: PersistedSessionViewModel,
+    ): ApplicationPopupState.DeleteSession? = commandMutex.withLock {
+        ensureOpen()
+        if (navigation.value.tabs.none { it === target }) return@withLock null
+        installDeleteSessionPopup(target.sessionIndex, target.name.value) { sessionIndex ->
+            commandMutex.withLock confirm@{
+                ensureOpen()
+                if (navigation.value.tabs.none { it === target }) return@confirm false
+                target.requireOriginalRoot()
+                deleteSessionLocked(sessionIndex)
+            }
+        }
+    }
+
+    private fun installDeleteSessionPopup(
+        sessionIndex: Int, name: String?, delete: suspend (Int) -> Boolean,
+    ): ApplicationPopupState.DeleteSession =
         installPopup(
             ApplicationPopupState.DeleteSession(
                 createSessionDeleteViewModel(
                     sessionIndex = sessionIndex,
-                    threadName = target?.name?.value,
-                    dependencies = SessionDeleteDependencies(::deleteSession),
+                    name = name,
+                    dependencies = SessionDeleteDependencies(delete),
                 ),
             ),
         )
-    }
 
     override suspend fun openLoginPopup(
         returnTo: ApplicationPopupState.Settings,
@@ -351,14 +496,14 @@ internal class ApplicationViewModelImpl(
         closeOwnedResources()
     }
 
-    private suspend fun closeTabLocked(target: PersistedSessionViewModel): Boolean {
+    private suspend fun closeTabLocked(target: AgentTabViewModel): Boolean {
         val current = mutableNavigation.value
         val index = current.tabs.indexOfFirst { child -> child === target }
         if (index < 0) return false
         closePopupOwnedBy(target)
         val remaining = current.tabs.toMutableList().apply { removeAt(index) }
         mutableNavigation.value = current.afterRemoval(remaining)
-        sessions.release(target.sessionIndex)
+        withContext(NonCancellable) { sessions.releaseAgent(target) }
         return true
     }
 
@@ -369,18 +514,16 @@ internal class ApplicationViewModelImpl(
         return created
     }
 
-    private fun closePopupOwnedBy(target: PersistedSessionViewModel) {
+    private fun closePopupOwnedBy(target: AgentTabViewModel) {
         val current = mutablePopup.value as? ApplicationPopupState.Open ?: return
         val ownsTarget = when (current) {
-            is ApplicationPopupState.Settings -> current.target === target
+            is ApplicationPopupState.Settings -> current.owner === target
             is ApplicationPopupState.RenameSession -> current.viewModel.target === target
             is ApplicationPopupState.WorkingDirectory ->
                 workingDirectoryOwner?.let { (popup, owner) -> popup === current && owner === target } == true
 
-            is ApplicationPopupState.Login -> current.returnTo.target === target
-            is ApplicationPopupState.DeleteSession,
-            is ApplicationPopupState.SessionCatalog,
-                -> false
+            is ApplicationPopupState.Login -> current.returnTo.owner === target
+            is ApplicationPopupState.DeleteSession -> false
         }
         if (ownsTarget) {
             mutablePopup.value = ApplicationPopupState.Closed
@@ -398,25 +541,23 @@ internal class ApplicationViewModelImpl(
 
     private suspend fun deleteSessionLocked(sessionIndex: Int): Boolean {
         val current = mutableNavigation.value
-        val removed = current.tabs.filter { child -> child.sessionIndex == sessionIndex }
+        val removed = current.tabs.filter { child -> (child as? PersistedSessionViewModel)?.sessionIndex == sessionIndex }
         removed.forEach(::closePopupOwnedBy)
         val deleted = sessions.delete(sessionIndex)
         if (!deleted) return false
-        val remaining = current.tabs.filterNot { child ->
-            child.sessionIndex == sessionIndex
-        }
+        val remaining = current.tabs.filterNot { child -> removed.any { it === child } }
         mutableNavigation.value = current.afterRemoval(remaining)
         closeDeletePopupFor(sessionIndex)
         return true
     }
 
     private fun ApplicationNavigationState.afterRemoval(
-        remaining: List<PersistedSessionViewModel>,
+        remaining: List<AgentTabViewModel>,
     ): ApplicationNavigationState {
         val next = when (val selected = selection) {
             ApplicationTabSelection.NewSession -> ApplicationTabSelection.NewSession
             is ApplicationTabSelection.SelectedTab -> {
-                val surviving = remaining.indexOfFirst { it === selectedSession }
+                val surviving = remaining.indexOfFirst { it === selectedTab }
                 when {
                     remaining.isEmpty() -> ApplicationTabSelection.NewSession
                     surviving >= 0 -> ApplicationTabSelection.SelectedTab(surviving)
@@ -424,11 +565,19 @@ internal class ApplicationViewModelImpl(
                 }
             }
         }
-        return ApplicationNavigationState(remaining, next)
+        // A closed parent may be reopened from a surviving child. Keep only the
+        // observed return links reachable from surviving tabs, never a binding.
+        val reachable = mutableSetOf<Int>()
+        for (tab in remaining) {
+            var id: Int? = tab.agentId
+            while (id != null && reachable.add(id)) id = parentAgentIds[id]
+        }
+        return ApplicationNavigationState(remaining, next, parentAgentIds.filterKeys { it in reachable })
     }
 
     private fun isCurrentPage(target: AgentPageActionTarget): Boolean =
-        !closed.value && mutableNavigation.value.selectedSession === target.session && target.isCurrent()
+        !closed.value && mutableNavigation.value.selectedTab === target.tab &&
+            target.tab.agent.value === target.agent && target.isCurrent()
 
     private fun requireOwned(target: PersistedSessionViewModel) {
         require(mutableNavigation.value.tabs.any { child -> child === target }) {
@@ -436,20 +585,21 @@ internal class ApplicationViewModelImpl(
         }
     }
 
-    private fun requireOwned(target: AgentSettingsViewModel): PersistedSessionViewModel? {
+    private fun requireOwned(target: AgentSettingsViewModel): AgentTabViewModel? {
         if (target === newSession) return null
         return requireNotNull(mutableNavigation.value.tabs.firstOrNull { child ->
-            child === target || child.rootAgent.value === target
+            child === target || child.agent.value === target
         }) { "Working-directory target is not owned by this application." }
     }
 
     private fun closeOwnedResources() {
         if (!closed.compareAndSet(false, true)) return
         commandOwner.cancel()
+        if (lazyCatalog.isInitialized()) lazyCatalog.value?.close()
         (mutablePopup.value as? ApplicationPopupState.Open)?.let(::closePopupChild)
         mutablePopup.value = ApplicationPopupState.Closed
         newSession.close()
-        mutableNavigation.value.tabs.asReversed().forEach(PersistedSessionViewModel::close)
+        mutableNavigation.value.tabs.asReversed().forEach(AgentTabViewModel::close)
     }
 
     private fun closePopupChild(popup: ApplicationPopupState.Open) {
@@ -463,7 +613,6 @@ internal class ApplicationViewModelImpl(
                 popup.returnTo.viewModel.close()
             }
             is ApplicationPopupState.RenameSession -> popup.viewModel.close()
-            is ApplicationPopupState.SessionCatalog -> popup.viewModel.close()
             is ApplicationPopupState.Settings -> popup.viewModel.close()
             is ApplicationPopupState.WorkingDirectory -> popup.viewModel.close()
         }

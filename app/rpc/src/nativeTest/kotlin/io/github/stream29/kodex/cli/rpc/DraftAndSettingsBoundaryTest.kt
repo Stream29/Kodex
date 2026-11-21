@@ -61,10 +61,10 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                     sibling.composer.update("still editable")
                     sibling.updateWorkingDirectory(SystemTemporaryDirectory)
                     sibling.editDefaults({ it.serviceTier }, { it.copy(serviceTier = ServiceTier.Fast) })
-                    assertTrue(services.runtime.getRunningTurn(index))
+                    assertTrue(services.runtime.getRunningTurn(persisted.agentId))
                     global.ensureActive()
                     finish.complete(Unit)
-                    services.runtime.getRunningTurnFlow(index).first { !it }
+                    services.runtime.getRunningTurnFlow(persisted.agentId).first { !it }
                     assertEquals(1, services.global.getSessionCatalog(true).size)
                 } finally { finish.complete(Unit) }
             } finally { finish.complete(Unit); first.close(); sibling.close(); parent.cancelAndJoin() }
@@ -225,7 +225,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                 try {
                     val revision = draft.composer.update(text)
                     val view = assertNotNull(draft.submit(revision, views::open))
-                    val message = readFirstUserMessage(services, view.sessionIndex)
+                    val message = readFirstUserMessage(services, view.agentId)
                     assertEquals(listOf(ContentItem.InputText(text)), message.content)
                     assertEquals("", draft.composer.state.value.text)
                 } finally { draft.close() }
@@ -299,7 +299,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                 val revision = draft.composer.update("accepted")
                 val view = assertNotNull(withTimeout(5.seconds) { draft.submit(revision, views::open) })
                 running.await()
-                assertTrue(services.runtime.getRunningTurn(view.sessionIndex))
+                assertTrue(services.runtime.getRunningTurn(view.agentId))
                 assertFalse(finish.isCompleted)
                 assertEquals("", draft.composer.state.value.text)
                 draft.settings.first { it.cwd == home }
@@ -411,15 +411,15 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
     }
 }
 
-private suspend fun readFirstUserMessage(services: RpcServices, sessionIndex: Int): StableUserMessage =
+private suspend fun readFirstUserMessage(services: RpcServices, agentId: Int): StableUserMessage =
     withTimeout(5.seconds) {
         while (true) {
             try {
-                val nonce = services.runtime.getCacheNonce(sessionIndex)
-                val latest = services.runtime.getLatestIndex(sessionIndex)
+                val nonce = services.runtime.getCacheNonce(agentId)
+                val latest = services.runtime.getLatestIndex(agentId)
                 val found = if (latest >= 0) {
                     services.runtime.getFirstCommitsIn(
-                        sessionIndex,
+                        agentId,
                         nonce,
                         0,
                         latest,

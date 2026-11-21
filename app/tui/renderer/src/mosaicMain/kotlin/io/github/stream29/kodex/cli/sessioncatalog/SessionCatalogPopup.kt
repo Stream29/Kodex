@@ -10,6 +10,7 @@ import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.layout.height
+import com.jakewharton.mosaic.layout.padding
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Arrangement
@@ -27,6 +28,7 @@ import io.github.stream29.kodex.cli.components.TuiCheckbox
 import io.github.stream29.kodex.cli.components.TuiContextMenu
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
+import io.github.stream29.kodex.cli.components.TuiInteractionStyle
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.TuiPopupMenuItem
 import io.github.stream29.kodex.cli.components.TuiTheme
@@ -96,7 +98,7 @@ private class MosaicCatalogRenderer(private val box: BoxScope) : SessionCatalogR
     @Composable
     override fun ContextMenu(
         entry: SessionCatalogEntry, origin: SessionCatalogMenuOrigin, onDismiss: () -> Unit,
-        onFork: () -> Unit, onArchive: () -> Unit, onUnarchive: () -> Unit, onDelete: () -> Unit,
+        onArchive: () -> Unit, onUnarchive: () -> Unit, onDelete: () -> Unit,
     ) = with(box) {
         val native = origin as MosaicCatalogOrigin
         val timeZone = TimeZone.currentSystemDefault()
@@ -107,7 +109,7 @@ private class MosaicCatalogRenderer(private val box: BoxScope) : SessionCatalogR
             createdAt = entry.createdAt?.let { formatPopupTimestamp(it, timeZone) },
             updatedAt = entry.updatedAt?.let { formatPopupTimestamp(it, timeZone) },
             onDismissRequest = onDismiss,
-            onFork = onFork, onArchive = onArchive, onUnarchive = onUnarchive, onDelete = onDelete,
+            onArchive = onArchive, onUnarchive = onUnarchive, onDelete = onDelete,
         )
     }
     @Composable
@@ -148,14 +150,23 @@ internal fun SessionCatalogRow(
     entry: SessionCatalogEntry,
     maximumLabelColumns: Int,
     runningIndicatorFrame: String = RunningIndicatorFrames.first(),
+    indentColumns: Int = 0,
+    selected: Boolean = false,
     onClick: () -> Unit,
     onOpenContextMenu: (TuiPopupAnchor, IntOffset?) -> Unit,
 ) {
     val anchor = rememberTuiPopupAnchor()
+    val colors = TuiTheme.colorScheme
     TuiButton(
         label = entry.sessionBrowserLabel(maximumLabelColumns, runningFrame = runningIndicatorFrame),
-        modifier = Modifier.fillMaxWidth().background(TuiTheme.colorScheme.surfaceContainer).tuiPopupAnchor(anchor),
-        color = TuiTheme.colorScheme.onSurface,
+        modifier = Modifier.fillMaxWidth()
+            .background(if (selected) colors.secondaryContainer else colors.surfaceContainer)
+            .then(if (indentColumns != 0) Modifier.height(1) else Modifier)
+            .padding(left = indentColumns)
+            .tuiPopupAnchor(anchor),
+        color = if (selected) colors.onSecondaryContainer else colors.onSurface,
+        selected = selected,
+        interactionStyle = if (selected) TuiInteractionStyle.PreserveColors else TuiInteractionStyle.TerminalInvert,
         onClick = onClick,
         onSecondaryClick = { onOpenContextMenu(anchor, it) },
     )
@@ -171,12 +182,12 @@ internal fun BoxScope.SessionCatalogContextMenuPopup(
     anchor: TuiPopupAnchor,
     clickPosition: IntOffset?,
     onDismissRequest: () -> Unit,
-    onFork: () -> Unit,
     onArchive: () -> Unit,
     onUnarchive: () -> Unit,
     onDelete: () -> Unit,
     createdAt: String? = null,
     updatedAt: String? = null,
+    onRename: (() -> Unit)? = null,
 ) {
     TuiContextMenu(
         expanded = true,
@@ -192,6 +203,9 @@ internal fun BoxScope.SessionCatalogContextMenuPopup(
                 if (updatedAt != null) Text("Updated at: $updatedAt")
             }
         }
+        if (onRename != null) {
+            TuiPopupMenuItem(key = "rename", onClick = onRename, dismissOnClick = false) { Text("Rename") }
+        }
         TuiPopupMenuItem(
             key = if (entry.archived) "unarchive" else "archive",
             onClick = if (entry.archived) onUnarchive else onArchive,
@@ -200,7 +214,6 @@ internal fun BoxScope.SessionCatalogContextMenuPopup(
         // Exact menu admission clears its own request. Generic pre-action dismissal
         // would clear that identity before consume() and reject every valid command.
         TuiPopupMenuItem(key = "delete", onClick = onDelete, dismissOnClick = false) { Text("Delete") }
-        TuiPopupMenuItem(key = "fork", onClick = onFork, dismissOnClick = false) { Text("Fork") }
     }
 }
 
@@ -211,11 +224,12 @@ internal fun SessionCatalogLoadingIndicator() {
     Text("$frame Loading sessions…", color = TuiTheme.colorScheme.onSurface)
 }
 
-private class MosaicCatalogOrigin(
+internal class MosaicCatalogOrigin(
     val anchor: TuiPopupAnchor,
     val clickPosition: IntOffset?,
+    private val isVisible: () -> Boolean = { true },
 ) : SessionCatalogMenuOrigin {
-    override val isPlaced: Boolean get() = anchor.isPlaced
+    override val isPlaced: Boolean get() = anchor.isPlaced && isVisible()
 }
 
 private const val SessionCatalogWidth: Int = 64

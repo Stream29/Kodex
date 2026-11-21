@@ -1,24 +1,17 @@
 package io.github.stream29.kodex.cli.historyindex
 
 import androidx.compose.runtime.*
-import com.jakewharton.mosaic.LocalTerminalState
 import com.jakewharton.mosaic.layout.*
 import com.jakewharton.mosaic.modifier.Modifier
-import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.ui.BoxScope
-import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
-import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexWindow
 import io.github.stream29.kodex.cli.app.SessionSidebarSide
 import io.github.stream29.kodex.cli.app.SidebarHoverPopupSurface
 import io.github.stream29.kodex.cli.components.*
-import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRow
-import kotlinx.datetime.TimeZone
-import kotlin.coroutines.cancellation.CancellationException
-import kotlin.time.Instant
+import io.github.stream29.kodex.openai.StepStatus
 
 internal open class MosaicHistoryIndexOrigin(
     val request: HistoryIndexInteractionRequest, val clickPosition: IntOffset? = null,
@@ -96,15 +89,12 @@ internal class MosaicHistoryIndexRenderer(
     ) {
         val origin = interaction as MosaicHistoryIndexRowInteraction
         val request = origin.request
-        Row(Modifier.fillMaxWidth().background(TuiTheme.colorScheme.surfaceContainer)) {
+        // The pressable and full row share a top-left; context menus use only that point.
+        Row(Modifier.fillMaxWidth().tuiPopupAnchor(request.anchor).background(TuiTheme.colorScheme.surfaceContainer)) {
             TuiPressable(
                 onClick = {},
                 onSecondaryClick = { position -> origin.openingPosition = position; onOpenMenu() },
-                modifier = Modifier.weight(1f).tuiPopupAnchor(request.anchor)
-                    .onPointerEvent { event ->
-                        if (event.type == MouseEvent.Type.Motion) request.pointerPosition = event.position
-                        false
-                    }
+                modifier = Modifier.weight(1f)
                     .onPointerHover(
                         onPointerEnter = { onHoverChanged(true) }, onPointerExit = { onHoverChanged(false) },
                     ),
@@ -113,19 +103,38 @@ internal class MosaicHistoryIndexRenderer(
         }
     }
     @Composable override fun Hover(
-        interaction: HistoryIndexInteraction, presentation: HistoryIndexDetailPresentation, onHoverChanged: (Boolean) -> Unit,
+        interaction: HistoryIndexInteraction, presentation: HistoryIndexDetailPresentation, timestamp: String?,
+        onHoverChanged: (Boolean) -> Unit,
     ) {
         val request = (interaction as MosaicHistoryIndexOrigin).request
         val sidebarSide = if (request.side == HistoryIndexSide.Left) SessionSidebarSide.Left else SessionSidebarSide.Right
+        val content = remember(presentation) {
+            val plan = presentation.plan
+            if (plan == null) presentation.content else buildString {
+                plan.explanation?.let { appendLine(it) }
+                plan.steps.forEach { item ->
+                    val marker = when (item.status) {
+                        StepStatus.Pending -> "[ ]"
+                        StepStatus.InProgress -> "[>]"
+                        StepStatus.Completed -> "[x]"
+                    }
+                    appendLine("$marker ${item.step}")
+                }
+                if (plan.steps.isEmpty()) plan.emptyLabel?.let { append(it) }
+            }.trimEnd('\n')
+        }
         with(checkNotNull(popupScope)) {
             SidebarHoverPopupSurface(
                 anchor = request.anchor,
                 side = sidebarSide,
-                pointerPosition = request.pointerPosition,
                 title = presentation.title,
-                content = presentation.content,
+                content = content,
                 contentColumns = columns,
                 contentRows = rows,
+                metadata = buildList {
+                    add("Index: ${interaction.target.index}")
+                    if (timestamp != null) add("Timestamp: $timestamp")
+                },
                 requestUserInputRows = presentation.questionRows,
                 titleColor = TuiTheme.colorScheme.onSurface,
                 onHoverChanged = onHoverChanged,
@@ -133,59 +142,14 @@ internal class MosaicHistoryIndexRenderer(
         }
     }
     @Composable override fun Menu(
-        opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
-        onDismiss: () -> Unit, onCheckOut: () -> Unit,
+        opening: HistoryIndexMenuOpening, timestamp: String?, actions: List<HistoryIndexMenuAction>, onDismiss: () -> Unit,
     ) {
         val origin = opening.interaction as MosaicHistoryIndexOrigin
-        var details by remember(opening) { mutableStateOf(false) }
         val menuState = remember(opening) { TuiPopupMenuState() }
-        val formatted = timestamp?.let {
-            try {
-                formatPopupTimestamp(it, TimeZone.currentSystemDefault())
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Throwable) {
-                null
-            }
-        }
         with(checkNotNull(popupScope)) {
-            if (details) {
-                HistoryIndexDetailsDialog(detail) { details = false }
-            } else {
-                HistoryIndexContextMenuPopup(
-                    origin.request.anchor, origin.clickPosition, origin.target.index, onDismiss, onCheckOut, formatted,
-                    onDetails = { details = true }, state = menuState,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun BoxScope.HistoryIndexDetailsDialog(detail: HistoryIndexDetailPresentation?, onBack: () -> Unit) {
-    val terminal = LocalTerminalState.current.size
-    val scroll = remember { ScrollState() }
-    val width = (terminal.columns - 4).coerceIn(1, 80)
-    val height = (terminal.rows - 4).coerceAtLeast(1)
-    TuiDialog(
-        onDismissRequest = onBack,
-        modifier = Modifier.width(width).height(height).background(TuiTheme.colorScheme.surfaceContainer),
-    ) {
-        Column(Modifier.fillMaxSize().scrollablePaging(scroll, { scroll.viewportSize })) {
-            Text(
-                detail?.title ?: "History entry",
-                Modifier.fillMaxWidth().background(TuiTheme.colorScheme.surfaceContainerHigh),
-                color = TuiTheme.colorScheme.onSurface,
+            HistoryIndexContextMenuPopup(
+                origin.request.anchor, origin.clickPosition, origin.target.index, timestamp, actions, onDismiss, menuState,
             )
-            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll)) {
-                val questions = detail?.questionRows
-                when {
-                    detail == null -> Text("Loading history entry…")
-                    questions != null -> questions.forEach { RequestUserInputHistoryRow(it) }
-                    else -> Text(detail.content)
-                }
-            }
-            TuiButton("Back", autoFocus = true, onClick = onBack)
         }
     }
 }

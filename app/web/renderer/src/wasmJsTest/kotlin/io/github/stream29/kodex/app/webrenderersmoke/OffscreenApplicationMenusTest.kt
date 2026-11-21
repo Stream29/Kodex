@@ -22,6 +22,7 @@ import io.github.stream29.kodex.app.application.contract.ApplicationNavigationSt
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.ui.UiText
 import io.github.stream29.kodex.app.ui.compose.*
 import io.github.stream29.kodex.cli.agent.*
@@ -123,7 +124,7 @@ val offscreenApplicationMenusTest by testSuite {
                 @Composable override fun Frame(inputs: AgentPageMeasureInputs, content: @Composable (AgentPageRenderScope) -> Unit) {
                     graphicalPage.Frame(inputs) { slots ->
                         content(object : AgentPageRenderScope by slots {
-                            @Composable override fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, enabled: Boolean) {
+                            @Composable override fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, autoFocus: Boolean) {
                                 UiText("Composer slot")
                             }
                         })
@@ -196,7 +197,7 @@ val offscreenApplicationMenusTest by testSuite {
         try {
             scene.settle { description.isNotEmpty() && scene.hasDescription(description) }
             scene.contextDescription(description)
-            scene.settle { retained != null && scene.hasText("Rename") }
+            scene.settle { retained != null && scene.hasText("Rename Session") }
             placed = false
             assertNotNull(retained).invoke()
             assertEquals(0, consumed)
@@ -216,10 +217,10 @@ val offscreenApplicationMenusTest by testSuite {
             override suspend fun readCreatedAt(): Instant { reads++; return created.await() }
             override suspend fun readUpdatedAt(): Instant? = error("optional read failure")
         }
-        val closedTargets = mutableListOf<PersistedSessionViewModel>()
+        val closedTargets = mutableListOf<AgentTabViewModel>()
         val app = object : NavigationApplication(listOf(session)) {
             override val popup = MutableStateFlow<ApplicationPopupState>(ApplicationPopupState.Closed)
-            override suspend fun closeTab(target: PersistedSessionViewModel): Boolean {
+            override suspend fun closeTab(target: AgentTabViewModel): Boolean {
                 closedTargets += target
                 return true
             }
@@ -253,7 +254,7 @@ val offscreenApplicationMenusTest by testSuite {
         try {
             scene.settle { scene.hasText(fullName) }
             scene.contextDescription(tabDescription)
-            scene.settle { scene.hasText("Index: 42") && scene.menuFocused("rename") }
+            scene.settle { scene.hasText("Session #42") && scene.menuFocused("rename") }
             assertEquals(2, scene.nodes().count {
                 it.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == fullName } == true
             }, "The existing keyboard menu exposes the complete untruncated name without hover.")
@@ -269,9 +270,9 @@ val offscreenApplicationMenusTest by testSuite {
             assertEquals(1, reads)
             scene.key(Key.DirectionDown)
             scene.settle { scene.menuFocused("close") }
-            val beforeMove = scene.text("Rename").boundsInWindow.top
+            val beforeMove = scene.text("Rename Session").boundsInWindow.top
             sourceOffset = 40
-            scene.settle { scene.text("Rename").boundsInWindow.top > beforeMove + 30 }
+            scene.settle { scene.text("Rename Session").boundsInWindow.top > beforeMove + 30 }
             assertTrue(scene.menuFocused("close"))
             created.complete(Instant.parse("2026-09-08T01:02:03Z"))
             scene.settle { scene.nodes().any { it.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text.startsWith("Created at: ") } == true } }
@@ -297,7 +298,7 @@ val offscreenApplicationMenusTest by testSuite {
             scene.settle { opening != null && scene.menuFocused("rename") }
             assertEquals(3, reads)
             sourceMounted = false
-            scene.settle { opening == null && !scene.hasText("Rename") }
+            scene.settle { opening == null && !scene.hasText("Rename Session") }
             assertTrue(failures.isEmpty())
             scene.frame()
         } finally { scene.close() }
@@ -331,7 +332,7 @@ val offscreenApplicationMenusTest by testSuite {
                 @Composable override fun Frame(inputs: AgentPageMeasureInputs, content: @Composable (AgentPageRenderScope) -> Unit) {
                     graphical.Frame(inputs) { slots ->
                         content(object : AgentPageRenderScope by slots {
-                            @Composable override fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, enabled: Boolean) {
+                            @Composable override fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, autoFocus: Boolean) {
                                 UiText("Composer slot")
                             }
                         })
@@ -369,7 +370,7 @@ val offscreenApplicationMenusTest by testSuite {
             assertEquals(2, scene.semanticsOwnerCount(), "Only the scene and its History menu should be present.")
             val first = assertNotNull(opening)
             assertSame(agent, first.agent)
-            assertSame(session, first.session)
+            assertSame(session, first.tab)
             assertEquals(1, first.storageIndex)
             assertEquals(agent.history.historyItems.value.generation, first.generation)
             scene.click("Revert and edit")

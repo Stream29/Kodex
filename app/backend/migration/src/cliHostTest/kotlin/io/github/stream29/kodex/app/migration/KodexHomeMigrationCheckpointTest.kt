@@ -1,170 +1,195 @@
 package io.github.stream29.kodex.app.migration
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.app.migration.v0_3_5.KodexHomeSkill
+import io.github.stream29.kodex.agentstorage.sqlite.SqliteSchemaVersion
+import io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException
+import io.github.stream29.kodex.utils.filesystemlease.FileSystemReadLease
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.sqlite.openExistingSqliteConnection
 import kotlinx.io.IOException
 import kotlinx.io.files.Path
-import kotlinx.io.files.SystemTemporaryDirectory
-import kotlin.random.Random
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
+private val fs = homeTestFileSystem
+private val latest = MigrationVersion("3.0.0")
+
 public val kodexHomeMigrationCheckpointTest by testSuite {
-    testFixture { checkpointHome() } closeWith {
-        deleteCheckpointHome(this)
-    } asParameterForEach {
-        for (stored in listOf("0.4.7", "0.4.10")) {
-            for (applications in listOf(listOf("0.4.10", "0.4.11"), listOf("0.4.11", "0.4.10"))) {
-                test("shares checkpoint $stored between applications ${applications.joinToString()}") { home ->
-                    val versionPath = Path(home, "version.json")
-                    SystemCoroutineFileSystem.writeString(versionPath, "\"$stored\"")
-                    // A compatible, versioned Home must not scan the Session layout.
-                    SystemCoroutineFileSystem.writeString(Path(home, "sessions"), "not-a-directory")
-                    val fileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
-                        override suspend fun writeString(
-                            path: Path,
-                            content: String,
-                            append: Boolean,
-                            mustCreate: Boolean,
-                        ) {
-                            check(path != versionPath && !path.name.endsWith(".write.lock")) {
-                                "Compatible Home must not acquire a writer or rewrite its checkpoint: $path"
-                            }
-                            SystemCoroutineFileSystem.writeString(path, content, append, mustCreate)
-                        }
-                    }
-                    val migrations = KodexHomeMigrations +
-                        Migration(MigrationVersion("99.0.0")) { _, _ -> error("Future migration ran") }
-                    var migrationStarted = false
-                    val first = prepareKodexHome(
-                        home, MigrationVersion(applications[0]), migrations, fileSystem,
-                    ) { _, _ -> migrationStarted = true }
-                    try {
-                        val second = prepareKodexHome(
-                            home, MigrationVersion(applications[1]), migrations, fileSystem,
-                        ) { _, _ -> migrationStarted = true }
-                        try {
-                            assertEquals(MigrationVersion(stored), first.version)
-                            assertEquals(MigrationVersion(stored), second.version)
-                            assertEquals("\"$stored\"", SystemCoroutineFileSystem.readString(versionPath))
-                            assertFalse(migrationStarted)
-                            first.closeAndJoin()
-                            assertEquals(
-                                1,
-                                SystemCoroutineFileSystem.list(Path(home, ".locks", "home"))
-                                    .count { it.name.endsWith(".read.lock") },
-                            )
-                        } finally {
-                            second.closeAndJoin()
-                        }
-                    } finally {
-                        first.closeAndJoin()
-                    }
-                    assertTrue(SystemCoroutineFileSystem.list(Path(home, ".locks", "home")).isEmpty())
+    testFixture { readyTestHome() } closeWith { deleteTestHome(this) } asParameterForEach {
+        test("no-op reopens retain the marker bytes and never acquire a writer or scan Session entries") { home ->
+            val versionPath = Path(home, HomeVersionFile)
+            val original = """{ "checkpoint": "1.0.0", "generation": 1 }"""
+            fs.writeString(versionPath, original)
+            fs.writeString(Path(home, "sessions"), "unknown content")
+            val guarded = object : CoroutineFileSystem by fs {
+                override suspend fun writeString(path: Path, content: String, append: Boolean, mustCreate: Boolean) {
+                    check(!path.name.endsWith(".write.lock"))
+                    fs.writeString(path, content, append, mustCreate)
+                }
+                override suspend fun atomicMove(source: Path, destination: Path) {
+                    check(destination != versionPath)
+                    fs.atomicMove(source, destination)
+                }
+                override suspend fun list(directory: Path): Collection<Path> {
+                    check(directory.name != "sessions")
+                    return fs.list(directory)
+                }
+            }
+            val future = Migration(MigrationVersion("4.0.0")) { _, _ -> error("Future migration ran") }
+            for (version in listOf(latest, MigrationVersion("2.0.0"))) {
+                val handle = prepareKodexHome(home, version, listOf(future), guarded)
+                try {
+                    assertEquals(MigrationVersion("1.0.0"), handle.version)
+                    assertEquals(original, fs.readString(versionPath))
+                } finally {
+                    handle.closeAndJoin()
                 }
             }
         }
 
-        test("registers only the validated baseline when no migration is activated") { home ->
-            val future = listOf(Migration(MigrationVersion("2.0.0")) { _, _ -> error("Future migration ran") })
-            val handle = prepareKodexHome(home, MigrationVersion("1.0.0"), future, SystemCoroutineFileSystem)
-            try {
-                assertEquals(MigrationVersion("0.3.2"), handle.version)
-                assertEquals("\"0.3.2\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
-                assertFalse(SystemCoroutineFileSystem.exists(Path(home, "sessions")))
-            } finally {
-                handle.closeAndJoin()
-            }
-            prepareKodexHome(home, MigrationVersion("1.1.0"), future, SystemCoroutineFileSystem).closeAndJoin()
-            assertEquals("\"0.3.2\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
-            assertTrue(SystemCoroutineFileSystem.list(Path(home, ".locks", "home")).isEmpty())
-        }
-
-        test("0.4.2 activates only the 0.3.5 skill and retains that migration checkpoint") { home ->
-            SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"0.3.4\"")
-            val activated = mutableListOf<MigrationVersion>()
-            val handle = prepareKodexHome(
-                home, MigrationVersion("0.4.2"), KodexHomeMigrations, SystemCoroutineFileSystem,
-            ) { _, target -> activated += target }
-            try {
-                assertEquals(listOf(MigrationVersion("0.3.5")), activated)
-                assertEquals(MigrationVersion("0.3.5"), handle.version)
-                assertEquals(
-                    KodexHomeSkill,
-                    SystemCoroutineFileSystem.readString(Path(home, "skills", "kodex-home", "SKILL.md")),
-                )
-                assertEquals("\"0.3.5\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
-            } finally {
-                handle.closeAndJoin()
-            }
-            assertTrue(SystemCoroutineFileSystem.list(Path(home, ".locks", "home")).isEmpty())
-        }
-
-        test("retains the baseline checkpoint when the first migration fails and retries its partial output") { home ->
-            val primary = IOException("first migration interrupted")
-            var attempts = 0
+        test("executes only eligible targets and resumes from the last atomic checkpoint") { home ->
+            writeFixtureCheckpoint(home, "1.0.0")
+            val calls = mutableListOf<String>()
+            val starts = mutableListOf<String>()
+            val primary = IOException("synthetic migration interrupted")
+            val interim = Path(home, "synthetic-migration-output")
             val migrations = listOf(
-                Migration(MigrationVersion("0.3.3")) { target, fileSystem ->
-                    attempts += 1
-                    fileSystem.createDirectories(Path(target, "sessions", "0"))
-                    if (attempts == 1) throw primary
-                    // This incomplete Session would fail baseline validation on a second unversioned start.
-                    fileSystem.writeString(Path(target, "migration-result.txt"), "completed")
+                Migration(MigrationVersion("0.9.0")) { _, _ -> error("Already completed target ran") },
+                Migration(MigrationVersion("1.1.0")) { _, _ -> calls += "1.1.0" },
+                Migration(MigrationVersion("2.0.0")) { _, fileSystem ->
+                    calls += "2.0.0"
+                    if (!fileSystem.exists(interim)) {
+                        fileSystem.writeString(interim, "in progress")
+                        throw primary
+                    }
+                    fileSystem.writeString(interim, "completed")
                 },
+                Migration(MigrationVersion("4.0.0")) { _, _ -> error("Future target ran") },
             )
-            assertSame(
-                primary,
-                assertFailsWith<IOException> {
-                    prepareKodexHome(home, MigrationVersion("0.3.4"), migrations, SystemCoroutineFileSystem)
-                },
-            )
-            assertEquals("\"0.3.2\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
-            assertTrue(SystemCoroutineFileSystem.list(Path(home, ".locks", "home")).isEmpty())
-
-            val handle = prepareKodexHome(home, MigrationVersion("0.3.4"), migrations, SystemCoroutineFileSystem)
+            val onStart: (MigrationVersion, MigrationVersion) -> Unit = { from, to -> starts += "$from -> $to" }
+            assertSame(primary, assertFailsWith<IOException> {
+                prepareKodexHome(home, latest, migrations, fs, onStart)
+            })
+            assertEquals(readyMarker("1.1.0"), fs.readString(Path(home, HomeVersionFile)))
+            assertTrue(fs.list(homeLeaseDirectory(home)).isEmpty())
+            val resumed = prepareKodexHome(home, latest, migrations, fs, onStart)
             try {
-                assertEquals(MigrationVersion("0.3.3"), handle.version)
-                assertEquals(2, attempts)
-                assertEquals("\"0.3.3\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
-                assertEquals("completed", SystemCoroutineFileSystem.readString(Path(home, "migration-result.txt")))
+                assertEquals(MigrationVersion("2.0.0"), resumed.version)
+                assertEquals(readyMarker("2.0.0"), fs.readString(Path(home, HomeVersionFile)))
+                assertEquals("completed", fs.readString(interim))
+                assertEquals(listOf("1.1.0", "2.0.0", "2.0.0"), calls)
+                assertEquals(listOf("1.0.0 -> 1.1.0", "1.1.0 -> 2.0.0", "1.1.0 -> 2.0.0"), starts)
+            } finally {
+                resumed.closeAndJoin()
+            }
+        }
+
+        test("a same-generation older schema can enter its migration, but not open with no action") { home ->
+            writeFixtureCheckpoint(home, "1.0.0")
+            val database = Path(home, HomeDatabaseFile)
+            openExistingSqliteConnection(database).use { it.execute("PRAGMA user_version=987") }
+            assertFailsWith<KodexHomeVersionException> { prepareKodexHome(home, latest, emptyList(), fs) }
+            val target = MigrationVersion("2.0.0")
+            val migration = Migration(target) { path, _ ->
+                openExistingSqliteConnection(Path(path, HomeDatabaseFile)).use { db ->
+                    assertEquals(listOf(listOf(987L)), db.query("PRAGMA user_version"))
+                    db.execute("PRAGMA user_version=$SqliteSchemaVersion")
+                }
+            }
+            val handle = prepareKodexHome(home, latest, listOf(migration), fs)
+            try {
+                assertEquals(target, handle.version)
             } finally {
                 handle.closeAndJoin()
             }
         }
 
-        test("rereads the checkpoint under the writer and skips a migration completed before acquisition") { home ->
-            val versionPath = Path(home, "version.json")
-            SystemCoroutineFileSystem.writeString(versionPath, "\"1.0.0\"")
-            val fileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
-                override suspend fun writeString(
-                    path: Path,
-                    content: String,
-                    append: Boolean,
-                    mustCreate: Boolean,
-                ) {
-                    SystemCoroutineFileSystem.writeString(path, content, append, mustCreate)
-                    if (path.name.endsWith(".write.lock")) {
-                        SystemCoroutineFileSystem.writeString(versionPath, "\"2.0.0\"")
-                    }
+        test("a last action that returns without producing the current schema cannot advance its checkpoint") { home ->
+            writeFixtureCheckpoint(home, "1.0.0")
+            val migration = Migration(MigrationVersion("2.0.0")) { path, _ ->
+                openExistingSqliteConnection(Path(path, HomeDatabaseFile)).use { it.execute("PRAGMA user_version=987") }
+            }
+            assertFailsWith<KodexHomeVersionException> { prepareKodexHome(home, latest, listOf(migration), fs) }
+            assertEquals(readyMarker("1.0.0"), fs.readString(Path(home, HomeVersionFile)))
+        }
+
+        test("a failing start callback cannot run the action or advance the checkpoint") { home ->
+            writeFixtureCheckpoint(home, "1.0.0")
+            val primary = IOException("migration callback failed")
+            val migration = Migration(MigrationVersion("2.0.0")) { _, _ -> error("Action ran") }
+            assertSame(primary, assertFailsWith<IOException> {
+                prepareKodexHome(home, latest, listOf(migration), fs) { _, _ -> throw primary }
+            })
+            assertEquals(readyMarker("1.0.0"), fs.readString(Path(home, HomeVersionFile)))
+            assertTrue(fs.list(homeLeaseDirectory(home)).isEmpty())
+        }
+
+        test("an interrupted checkpoint publication preserves the previous marker and retries the action") { home ->
+            writeFixtureCheckpoint(home, "1.0.0")
+            val primary = IOException("isolated checkpoint publication failure")
+            var attempts = 0
+            val interrupted = object : CoroutineFileSystem by fs {
+                override suspend fun atomicMove(source: Path, destination: Path) {
+                    if (destination.name == HomeVersionFile) throw primary
+                    fs.atomicMove(source, destination)
                 }
             }
-            var actions = 0
-            var callbacks = 0
-            val handle = prepareKodexHome(
-                home, MigrationVersion("3.0.0"),
-                listOf(Migration(MigrationVersion("2.0.0")) { _, _ -> actions += 1 }),
-                fileSystem,
-            ) { _, _ -> callbacks += 1 }
+            val migration = Migration(MigrationVersion("2.0.0")) { _, _ -> attempts++ }
+            assertSame(primary, assertFailsWith<IOException> {
+                prepareKodexHome(home, latest, listOf(migration), interrupted)
+            })
+            assertEquals(readyMarker("1.0.0"), fs.readString(Path(home, HomeVersionFile)))
+            assertTrue(fs.list(homeLeaseDirectory(home)).isEmpty())
+            prepareKodexHome(home, latest, listOf(migration), fs).closeAndJoin()
+            assertEquals(readyMarker("2.0.0"), fs.readString(Path(home, HomeVersionFile)))
+            assertEquals(2, attempts)
+        }
+
+        test("rejects out-of-order and duplicate registry targets") { home ->
+            val migrations = listOf("2.0.0", "1.0.0").map { version ->
+                Migration(MigrationVersion(version)) { _, _ -> error("Invalid registry ran") }
+            }
+            for (registry in listOf(migrations, listOf(migrations.first(), migrations.first()))) {
+                val error = assertFailsWith<IllegalStateException> { prepareKodexHome(home, latest, registry, fs) }
+                assertContains(error.message.orEmpty(), "unique and strictly ordered")
+            }
+        }
+
+        test("a retained ready reader blocks exclusive migration and sees the original marker") { home ->
+            writeFixtureCheckpoint(home, "1.0.0")
+            val reader = prepareKodexHome(home, latest, emptyList(), fs)
+            val migration = Migration(MigrationVersion("2.0.0")) { _, _ -> }
             try {
-                assertEquals(0, actions)
-                assertEquals(0, callbacks)
+                val failure = assertFailsWith<KodexHomeInUseException> {
+                    prepareKodexHome(home, latest, listOf(migration), fs)
+                }
+                assertContains(failure.message.orEmpty(), "needs data migration from 1.0.0 to 2.0.0")
+                assertContains(failure.message.orEmpty(), "Close all other Kodex instances")
+                assertTrue(failure.cause is FileSystemLeaseInUseException)
+                assertEquals(readyMarker("1.0.0"), fs.readString(Path(home, HomeVersionFile)))
+            } finally {
+                reader.closeAndJoin()
+            }
+            prepareKodexHome(home, latest, listOf(migration), fs).closeAndJoin()
+            assertEquals(readyMarker("2.0.0"), fs.readString(Path(home, HomeVersionFile)))
+        }
+
+        test("rereads the checkpoint under the writer and skips an already completed action") { home ->
+            writeFixtureCheckpoint(home, "1.0.0")
+            val duringWriteAcquisition = object : CoroutineFileSystem by fs {
+                override suspend fun writeString(path: Path, content: String, append: Boolean, mustCreate: Boolean) {
+                    fs.writeString(path, content, append, mustCreate)
+                    if (path.name.endsWith(".write.lock")) writeFixtureCheckpoint(home, "2.0.0")
+                }
+            }
+            val migration = Migration(MigrationVersion("2.0.0")) { _, _ -> error("Already completed action ran") }
+            val handle = prepareKodexHome(home, latest, listOf(migration), duringWriteAcquisition)
+            try {
                 assertEquals(MigrationVersion("2.0.0"), handle.version)
-                assertEquals("\"2.0.0\"", SystemCoroutineFileSystem.readString(versionPath))
             } finally {
                 handle.closeAndJoin()
             }
@@ -172,48 +197,59 @@ public val kodexHomeMigrationCheckpointTest by testSuite {
 
         for (handoffVersion in listOf("1.2.0", "1.0.0", "4.0.0", null)) {
             test("rechecks checkpoint ${handoffVersion ?: "missing"} after writer handoff") { home ->
-                val versionPath = Path(home, "version.json")
-                SystemCoroutineFileSystem.writeString(versionPath, "\"1.0.0\"")
-                val fileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
+                writeFixtureCheckpoint(home, "1.0.0")
+                val duringWriteRelease = object : CoroutineFileSystem by fs {
                     override suspend fun delete(path: Path, mustExist: Boolean) {
-                        SystemCoroutineFileSystem.delete(path, mustExist)
+                        fs.delete(path, mustExist)
                         if (path.name.endsWith(".write.lock")) {
-                            if (handoffVersion == null) {
-                                SystemCoroutineFileSystem.delete(versionPath)
-                            } else {
-                                SystemCoroutineFileSystem.writeString(versionPath, "\"$handoffVersion\"")
-                            }
+                            if (handoffVersion == null) fs.delete(Path(home, HomeVersionFile))
+                            else writeFixtureCheckpoint(home, handoffVersion)
                         }
                     }
                 }
                 val migrations = listOf(Migration(MigrationVersion("1.1.0")) { _, _ -> })
                 if (handoffVersion == "1.2.0") {
-                    val handle = prepareKodexHome(home, MigrationVersion("3.0.0"), migrations, fileSystem)
+                    val handle = prepareKodexHome(home, latest, migrations, duringWriteRelease)
                     try {
-                        assertEquals(MigrationVersion(handoffVersion), handle.version)
+                        assertEquals(MigrationVersion("1.2.0"), handle.version)
                     } finally {
                         handle.closeAndJoin()
                     }
                 } else {
                     assertFailsWith<KodexHomeVersionException> {
-                        prepareKodexHome(home, MigrationVersion("3.0.0"), migrations, fileSystem)
+                        prepareKodexHome(home, latest, migrations, duringWriteRelease)
                     }
                 }
-                assertTrue(SystemCoroutineFileSystem.list(Path(home, ".locks", "home")).isEmpty())
+                assertTrue(fs.list(homeLeaseDirectory(home)).isEmpty())
             }
         }
     }
-}
 
-private suspend fun checkpointHome(): Path =
-    Path(SystemTemporaryDirectory, "kodex-home-checkpoint-${Random.nextLong()}").also {
-        SystemCoroutineFileSystem.createDirectories(it)
-    }
+    testFixture { newTestHome() } closeWith { deleteTestHome(this) } asParameterForEach {
+        test("fresh initializes directly at the running version without replaying earlier migrations") { home ->
+            val migrations = listOf("1.0.0", "4.0.0").map { version ->
+                Migration(MigrationVersion(version)) { _, _ -> error("Fresh Home replayed migration $version") }
+            }
+            val handle = prepareKodexHome(home, latest, migrations, fs)
+            try {
+                assertEquals(latest, handle.version)
+                assertEquals(readyMarker("$latest"), fs.readString(Path(home, HomeVersionFile)))
+            } finally {
+                handle.closeAndJoin()
+            }
+        }
 
-private suspend fun deleteCheckpointHome(path: Path) {
-    val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
-    if (metadata.isDirectory) {
-        SystemCoroutineFileSystem.list(path).forEach { child -> deleteCheckpointHome(child) }
+        test("reader of a fresh root blocks initialization without publishing any data") { home ->
+            val lease = FileSystemReadLease(homeLeaseDirectory(home))
+            try {
+                val failure = assertFailsWith<KodexHomeInUseException> { prepareKodexHome(home) }
+                assertContains(failure.message.orEmpty(), "needs initialization")
+                assertFalse(fs.exists(Path(home, HomeVersionFile)))
+                assertFalse(fs.exists(Path(home, HomeDatabaseFile)))
+            } finally {
+                lease.closeAndJoin()
+            }
+            prepareKodexHome(home).closeAndJoin()
+        }
     }
-    SystemCoroutineFileSystem.delete(path, mustExist = false)
 }

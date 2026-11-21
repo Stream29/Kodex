@@ -5,7 +5,6 @@ package io.github.stream29.kodex.utils.sqlite
 import cnames.structs.sqlite3
 import cnames.structs.sqlite3_stmt
 import co.touchlab.sqliter.DatabaseConfiguration
-import co.touchlab.sqliter.DatabaseConnection
 import co.touchlab.sqliter.NO_VERSION_CHECK
 import co.touchlab.sqliter.SynchronousFlag
 import co.touchlab.sqliter.createDatabaseManager
@@ -20,6 +19,32 @@ public actual fun openSqliteConnection(
 
 public actual fun openInMemorySqliteConnection(): SqliteConnection =
     openConnection(path = null, inMemory = true, readOnly = false)
+
+public actual fun openExistingSqliteConnection(path: Path): SqliteConnection = memScoped {
+    val name = path.toString()
+    require('\u0000' !in name) { "SQLite paths cannot contain NUL." }
+    val database = alloc<CPointerVar<sqlite3>>()
+    val code = sqlite3_open_v2(name, database.ptr, SQLITE_OPEN_READWRITE, null)
+    val pointer = database.value
+    if (code != SQLITE_OK || pointer == null) {
+        val failure = sqliteFailure("open existing", code, pointer)
+        pointer?.let { sqlite3_close(it) }
+        throw failure
+    }
+    val result = NativeConnection(pointer) {
+        val closeCode = sqlite3_close(pointer)
+        if (closeCode != SQLITE_OK) throw sqliteFailure("close", closeCode, pointer)
+    }
+    try {
+        val timeout = sqlite3_busy_timeout(pointer, 1000)
+        if (timeout != SQLITE_OK) throw sqliteFailure("busy timeout", timeout, pointer)
+        result.execute("PRAGMA foreign_keys=ON")
+        result
+    } catch (primary: Throwable) {
+        try { result.close() } catch (cleanup: Throwable) { primary.addSuppressed(cleanup) }
+        throw primary
+    }
+}
 
 private fun openConnection(
     path: String?,
@@ -45,7 +70,11 @@ private fun openConnection(
     } catch (cause: Throwable) {
         throw sqliteFailure("open", SQLITE_CANTOPEN, cause = cause)
     }
-    val result = NativeConnection(connection)
+    val result = NativeConnection(connection.getDbPointer()) {
+        try { connection.close() } catch (cause: Throwable) {
+            throw sqliteFailure("close", SQLITE_ERROR, cause = cause)
+        }
+    }
     try {
         if (readOnly) result.execute("PRAGMA query_only=ON")
         result.execute("PRAGMA foreign_keys=ON")
@@ -73,8 +102,10 @@ private fun sqliteFailure(
     )
 }
 
-private class NativeConnection(private val delegate: DatabaseConnection) : SqliteConnection {
-    private val pointer = delegate.getDbPointer()
+private class NativeConnection(
+    private val pointer: CPointer<sqlite3>,
+    private val closeHandle: () -> Unit,
+) : SqliteConnection {
     private val statements = mutableSetOf<NativeStatement>()
     private var closed = false
     private var inTransaction = false
@@ -148,8 +179,7 @@ private class NativeConnection(private val delegate: DatabaseConnection) : Sqlit
             }
         }
         closed = true
-        try { delegate.close() } catch (cause: Throwable) {
-            val failure = sqliteFailure("close", SQLITE_ERROR, cause = cause)
+        try { closeHandle() } catch (failure: Throwable) {
             if (primary == null) primary = failure else primary.addSuppressed(failure)
         }
         primary?.let { throw it }

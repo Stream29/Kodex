@@ -13,6 +13,7 @@ import io.github.stream29.kodex.app.ui.UiColumn
 import io.github.stream29.kodex.app.ui.UiText
 import io.github.stream29.kodex.cli.agent.ComposerContent
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.cli.app.ApplicationPageContent
 import io.github.stream29.kodex.cli.app.KodexApplication
 import io.github.stream29.kodex.cli.app.NewSessionDraft
@@ -87,7 +88,7 @@ internal fun RpcFixture(token: String, onBack: () -> Unit) {
             val navigation by app.viewModel.navigation.collectAsState()
             val newLineKey by app.newLineKey.collectAsState()
             UiText("Open fixture tabs: ${navigation.tabs.size}")
-            for (tab in navigation.tabs) key(tab) {
+            for (tab in navigation.tabs.filterIsInstance<PersistedSessionViewModel>()) key(tab) {
                 UiAction("Select retained Session ${tab.sessionIndex}", onClick = {
                     scope.launch { app.viewModel.selectTab(tab) }
                 })
@@ -100,9 +101,9 @@ internal fun RpcFixture(token: String, onBack: () -> Unit) {
                     NewSessionDraft(draft.composer, newLineKey, submit)
                     UiText("Singleton projection: cursor=${state.cursorOffset}; text=${state.text}")
                 },
-                persistedSession = { selected ->
+                agentTab = { selected ->
                     val name by selected.name.collectAsState()
-                    val agent by selected.rootAgent.collectAsState()
+                    val agent by selected.agent.collectAsState()
                     val lifecycle by selected.lifecycle.collectAsState()
                     UiText("Persisted fixture Session: $name")
                     UiText("Persisted lifecycle: $lifecycle")

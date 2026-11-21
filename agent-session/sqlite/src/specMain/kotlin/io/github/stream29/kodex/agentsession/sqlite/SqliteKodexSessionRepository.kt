@@ -15,7 +15,21 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.io.files.Path
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration
+import kotlin.time.Instant
 import kotlin.time.TimeSource
+
+public data class StoredSessionGroup(
+    public val cwd: String?,
+    public val groupNonce: Long,
+    public val latestUpdatedAt: Instant?,
+    public val hasRunning: Boolean,
+)
+
+public data class StoredSessionGroupPage(
+    public val groupNonce: Long,
+    public val entries: List<KodexSessionEntry>,
+    public val hiddenCount: Int,
+)
 
 public expect class SqliteKodexSessionRepository : KodexSessionRepository, CoroutineCloseable {
     /** Opens an existing Agent only if it still has the expected armed deadline. */
@@ -36,10 +50,15 @@ public expect class SqliteKodexSessionRepository : KodexSessionRepository, Corou
     override val stopEvents: Flow<IndexedAgentStopEvent>
     override suspend fun list(): List<Int>
     override suspend fun listEntries(includeArchived: Boolean): List<KodexSessionEntry>
+    public val sessionGroupsNonce: Flow<Long>
+    public fun sessionGroupNonce(cwd: String?): Flow<Long>
+    public suspend fun listSessionGroups(): List<StoredSessionGroup>
+    public suspend fun listSessionsInGroup(cwd: String?, includeArchived: Boolean, limit: Int?): StoredSessionGroupPage
     override suspend fun getEntry(entryIndex: Int): KodexSessionEntry
     override suspend fun getRootAgentId(entryIndex: Int): Int
     override suspend fun create(): Int
     override suspend fun createFork(sourceEntryIndex: Int): Int
+    override suspend fun createAgentFork(sourceAgentId: Int, expectedOwner: KodexAgentSession?, untilExclusive: Int?): AgentForkCopy?
     override suspend fun open(entryIndex: Int): KodexAgentSession
     override suspend fun closeSession(entryIndex: Int)
     override suspend fun closeAllSessions()
@@ -49,12 +68,14 @@ public expect class SqliteKodexSessionRepository : KodexSessionRepository, Corou
 }
 
 /**
- * Resolves [root], verifies that an existing Kodex Home has not lost an initialized `kodex.db`,
- * and opens a writable [SqliteConnection] on `kodex.db`.
+ * Opens the existing, signed current `kodex.db` under [root]. Production callers hold an
+ * already-prepared Home lease. [allowFresh] is only for isolated storage without Home state.
+ * @throws kotlinx.io.IOException if the required database is missing or incompatible.
  */
 public expect suspend fun openVerifiedKodexDatabase(
     root: Path,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    allowFresh: Boolean = false,
 ): Pair<Path, SqliteConnection>
 
 public expect suspend fun CoroutineScope.SqliteKodexSessionRepository(

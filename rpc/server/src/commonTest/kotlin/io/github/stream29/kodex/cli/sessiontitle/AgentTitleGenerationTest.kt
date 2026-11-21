@@ -77,7 +77,7 @@ val agentTitleGenerationTest by testSuite(compartment = { TestCompartment.RealTi
             assertEquals("Use the first nonblank text", withTimeout(5.seconds) { captured.await() })
             job.await().join()
             withTimeout(5.seconds) {
-                while (root.storage.getSettingsAt(root.runtime.latestIndex.value).threadName != "Name accepted user text") {
+                while (root.storage.getSettingsAt(root.runtime.latestIndex.value).name != "Name accepted user text") {
                     delay(10)
                 }
             }
@@ -101,10 +101,10 @@ val agentTitleGenerationTest by testSuite(compartment = { TestCompartment.RealTi
                 yield()
                 titleSettings = SessionTitleSettings(enabled = true)
                 val current = root.storage.getSettingsAt(root.runtime.latestIndex.value)
-                assertTrue(root.runtime.compareAndSetSettings(current, current.copy(threadName = "Session 99")))
+                assertTrue(root.runtime.compareAndSetSettings(current, current.copy(name = "Session 99")))
                 root.runtime.appendUserMessage(listOf(ContentItem.InputText("Second text after re-enable")))
                 yield()
-                assertEquals("Session 99", root.storage.getSettingsAt(root.runtime.latestIndex.value).threadName)
+                assertEquals("Session 99", root.storage.getSettingsAt(root.runtime.latestIndex.value).name)
             }
         }
 
@@ -130,7 +130,7 @@ val agentTitleGenerationTest by testSuite(compartment = { TestCompartment.RealTi
                 )
                 withTimeout(5.seconds) { job.await() }.join()
                 assertEquals(accepted, root.runtime.latestIndex.value)
-                assertTrue(root.storage.getSettingsAt(accepted).threadName.startsWith("Session "))
+                assertTrue(root.storage.getSettingsAt(accepted).name.startsWith("Session "))
                 root.runtime.appendUserMessage(listOf(ContentItem.InputText("Do not retry")))
                 yield()
                 assertEquals(1, calls)
@@ -158,10 +158,10 @@ val agentTitleGenerationTest by testSuite(compartment = { TestCompartment.RealTi
             )
             val titleIndex = withTimeout(5.seconds) {
                 root.runtime.latestIndex.first { index ->
-                    root.storage.getSettingsAt(index).threadName == "Plan agent title handoff"
+                    root.storage.getSettingsAt(index).name == "Plan agent title handoff"
                 }
             }
-            assertEquals("Plan agent title handoff", root.storage.getSettingsAt(titleIndex).threadName)
+            assertEquals("Plan agent title handoff", root.storage.getSettingsAt(titleIndex).name)
         }
 
         test("an explicit Agent rename wins over an in-flight generated title") {
@@ -189,12 +189,12 @@ val agentTitleGenerationTest by testSuite(compartment = { TestCompartment.RealTi
             root.runtime.appendUserMessage(listOf(ContentItem.InputText("Keep this explicit title.")))
             withTimeout(5.seconds) { generationStarted.await() }
             val renamedAt = root.runtime.updateSettings(
-                root.storage.getSettingsAt(root.runtime.latestIndex.value).copy(threadName = "Manual title"),
+                root.storage.getSettingsAt(root.runtime.latestIndex.value).copy(name = "Manual title"),
             )
             release.complete(Unit)
             job.await().join()
-            assertEquals("Manual title", root.storage.getSettingsAt(renamedAt).threadName)
-            assertEquals("Manual title", root.storage.getSettingsAt(root.runtime.latestIndex.value).threadName)
+            assertEquals("Manual title", root.storage.getSettingsAt(renamedAt).name)
+            assertEquals("Manual title", root.storage.getSettingsAt(root.runtime.latestIndex.value).name)
         }
 
         test("history replacement restores eligibility when no accepted text remains") {
@@ -227,7 +227,7 @@ val agentTitleGenerationTest by testSuite(compartment = { TestCompartment.RealTi
             withTimeout(5.seconds) { secondAttempt.await() }
             withTimeout(5.seconds) {
                 root.runtime.latestIndex.first { index ->
-                    root.storage.getSettingsAt(index).threadName == "Replacement title"
+                    root.storage.getSettingsAt(index).name == "Replacement title"
                 }
             }
             assertEquals(2, calls)
@@ -271,7 +271,7 @@ private suspend fun CoroutineScope.initializedTitleSession(
     val index = repository.create()
     val session = repository.open(index)
     session.runtime.modify { storage ->
-        storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = name(index)))
+        storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model"), name = name(index)))
     }
     return session
 }

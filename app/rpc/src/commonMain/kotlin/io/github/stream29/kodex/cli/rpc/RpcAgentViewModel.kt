@@ -155,6 +155,11 @@ internal class RpcAgentViewModel(
         return request
     }
 
+    override suspend fun forkHistory(untilExclusive: Int, expectedGeneration: Long): Int {
+        validateHistory(untilExclusive, expectedGeneration)
+        return binding.forkHistory(untilExclusive, expectedGeneration)
+    }
+
     override fun dismissHistoryRevert(requestId: Long) {
         val current = mutableHistoryAction.value as? AgentHistoryActionState.ConfirmRevert ?: return
         if (current.requestId == requestId) mutableHistoryAction.compareAndSet(current, AgentHistoryActionState.None)
@@ -232,9 +237,9 @@ internal class RpcAgentViewModel(
     ): Unit = edit({ Triple(it.model, it.reasoning.effort, it.serviceTier) }, {
         it.copy(model = model, reasoning = it.reasoning.copy(effort = reasoningEffort), serviceTier = serviceTier)
     })
-    override suspend fun renameThread(threadName: String) {
-        require(threadName.isNotBlank())
-        edit({ it.threadName }, { it.copy(threadName = threadName) })
+    override suspend fun rename(name: String) {
+        require(name.isNotBlank())
+        edit({ it.name }, { it.copy(name = name) })
     }
     override suspend fun revertHistory(untilExclusive: Int, expectedGeneration: Long) {
         owner.ensureActive()

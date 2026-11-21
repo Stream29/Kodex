@@ -180,14 +180,14 @@ public interface AgentViewModel :
     public fun forceCompact(): Unit
 
     /**
-     * Updates only the thread name on the latest persisted settings snapshot.
+     * Updates only the Agent name on the latest persisted settings snapshot.
      *
-     * @throws IllegalArgumentException when [threadName] is blank.
+     * @throws IllegalArgumentException when [name] is blank.
      * @throws CancellationException when this owner/binding is closed or the caller stops waiting.
      * @throws IllegalStateException when the edited baseline changed.
      * @throws Exception when the settings write fails.
      */
-    public suspend fun renameThread(threadName: String): Unit
+    public suspend fun rename(name: String): Unit
 
     /**
      * Opens an Agent-owned confirmation for an exclusive storage boundary.
@@ -198,6 +198,14 @@ public interface AgentViewModel :
      * @throws IllegalArgumentException when [untilExclusive] fails to preserve initialization or exceeds latest + 1.
      */
     public fun requestHistoryRevert(untilExclusive: Int, expectedGeneration: Long): Long
+
+    /**
+     * Copies this exact Agent's history through the exclusive boundary into a new
+     * independent Session. Returns the new Session ID without navigating.
+     * [expectedGeneration] is the backend cache nonce captured with the boundary.
+     * A stale binding or nonce is rejected, never refreshed and retried.
+     */
+    public suspend fun forkHistory(untilExclusive: Int, expectedGeneration: Long): Int
 
     /**
      * Removes records at or after [untilExclusive], without requesting confirmation.

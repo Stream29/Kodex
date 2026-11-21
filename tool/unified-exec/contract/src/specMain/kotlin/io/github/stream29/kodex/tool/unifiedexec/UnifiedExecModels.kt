@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.tool.unifiedexec
 
+import io.github.stream29.kodex.tool.intentname.isValidIntentName
 import io.github.stream29.kodex.utils.shellclient.Shell
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -12,6 +13,8 @@ public const val UnifiedExecDefaultMaxOutputTokens: Long = 10_000L
  * pseudoterminal; terminal allocation is not a caller-selectable option.
  *
  * @property command Nonblank command text to execute in the selected shell.
+ * @property name Required nonblank, single-line intent shown to the user.
+ * C0/C1 control characters and Unicode line separators are invalid.
  * @property workdir Nullable because a command normally uses the session
  * working directory; `null` or an empty path uses that directory, while a
  * relative path resolves against it.
@@ -28,14 +31,18 @@ public const val UnifiedExecDefaultMaxOutputTokens: Long = 10_000L
 public data class ExecCommandArguments(
     @SerialName("cmd")
     public val command: String,
-    public val name: String? = null,
+    public val name: String,
     public val workdir: String? = null,
     public val shell: Shell? = null,
     @SerialName("yield_time_ms")
     public val yieldTimeMillis: Long,
     @SerialName("max_output_tokens")
     public val maxOutputTokens: Long = UnifiedExecDefaultMaxOutputTokens,
-)
+) {
+    init {
+        require(name.isValidIntentName()) { "`name` must be nonblank, single-line text." }
+    }
+}
 
 /**
  * Historical arguments recorded by legacy `write_stdin` tool commits.

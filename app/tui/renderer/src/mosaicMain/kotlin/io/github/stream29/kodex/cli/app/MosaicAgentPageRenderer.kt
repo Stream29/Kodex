@@ -97,10 +97,10 @@ private class MosaicAgentPageScope(
     }
 
     @Composable
-    override fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, enabled: Boolean) {
+    override fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, autoFocus: Boolean) {
         ComposerView(
             viewModel, columns, layout.composerRows, newLineKey,
-            autoFocus = enabled, enabled = enabled, focusRequester = composerFocusRequester,
+            autoFocus = autoFocus, focusRequester = composerFocusRequester,
         )
     }
 }

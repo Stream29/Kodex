@@ -5,10 +5,6 @@ import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 
 /** Called under the repository's connection mutex. Never changes a database's schema. */
 internal class SqliteAgentRecords(private val db: SqliteConnection) {
-    // The application build can still target 0.7.2 before the separate release bump.
-    // Only the migration (or standalone fresh schema setup) enables independent allocation.
-    private val hasIndependentIds = db.query("PRAGMA table_info(agents)").any { it[1] == "completed" }
-
     fun rootId(sessionId: Int): Int = requireNotNull(findRootId(sessionId)) {
         "Session $sessionId does not have a unique root Agent."
     }
@@ -25,26 +21,29 @@ internal class SqliteAgentRecords(private val db: SqliteConnection) {
     ).map { it.single().agentIdInt() }
 
     fun get(agentId: Int): StoredAgent? = db.query(
-        "SELECT agent_id, session_id, parent_agent_id, ${if (hasIndependentIds) "completed" else "0"} FROM agents WHERE agent_id = ?",
+        "SELECT agent_id, session_id, parent_agent_id, completed FROM agents WHERE agent_id = ?",
         listOf(agentId.toLong()),
     ).singleOrNull()?.toAgentRecord()
 
     fun createRoot(sessionId: Int): Int {
-        if (!hasIndependentIds) {
-            db.execute(
-                "INSERT INTO agents(agent_id, session_id) VALUES (?, ?)",
-                listOf(sessionId.toLong(), sessionId.toLong()),
-            )
-            return sessionId
-        }
-        return db.query(
+        val rootId = db.query(
             "INSERT INTO agents(session_id) VALUES (?) RETURNING agent_id",
             listOf(sessionId.toLong()),
         ).single().single().agentIdInt()
+        db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES (?)", listOf(rootId.toLong()))
+        return rootId
+    }
+
+    fun archiveRoot(sessionId: Int, archived: Boolean): Boolean {
+        val requested = if (archived) 1L else 0L
+        db.execute(
+            "UPDATE agents SET completed = ? WHERE session_id = ? AND parent_agent_id IS NULL AND completed != ?",
+            listOf(requested, sessionId.toLong(), requested),
+        )
+        return db.changes() != 0
     }
 
     fun createChild(parentAgentId: Int): StoredAgent {
-        requireIndependentIds()
         val row = db.query(
             """INSERT INTO agents(session_id, parent_agent_id)
                 SELECT session_id, agent_id FROM agents WHERE agent_id = ?
@@ -55,7 +54,6 @@ internal class SqliteAgentRecords(private val db: SqliteConnection) {
     }
 
     fun discardUninitializedChild(agentId: Int): Int? {
-        requireIndependentIds()
         return db.query(
             """DELETE FROM agents AS target
                 WHERE target.agent_id = ? AND target.parent_agent_id IS NOT NULL AND target.completed = 0
@@ -67,7 +65,6 @@ internal class SqliteAgentRecords(private val db: SqliteConnection) {
     }
 
     fun markChildCompleted(agentId: Int): Int? {
-        requireIndependentIds()
         return db.query(
             """UPDATE agents SET completed = 1
                 WHERE agent_id = ? AND parent_agent_id IS NOT NULL AND completed = 0
@@ -76,9 +73,6 @@ internal class SqliteAgentRecords(private val db: SqliteConnection) {
         ).singleOrNull()?.single()?.agentIdInt()
     }
 
-    private fun requireIndependentIds() {
-        check(hasIndependentIds) { "Subagent storage requires the 0.7.3 Home migration." }
-    }
 }
 
 private fun Any?.agentIdInt(): Int = (this as Long).toInt()

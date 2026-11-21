@@ -54,7 +54,7 @@ public sealed interface SessionCatalogState {
  * the failure propagates. A later refresh is required to observe new data.
  *
  * The renderer initiates [refresh] when opening the component and renders
- * [SessionCatalogEntry.threadName], archive state, running state and timestamps
+ * [SessionCatalogEntry.name], archive state, running state and timestamps
  * from the same snapshot. Owner residency is sampled metadata, not a spinner
  * criterion or an extra live indicator. It routes row actions through
  * this interface. Failures escape suspending commands to their owner; there
@@ -84,7 +84,7 @@ public interface SessionCatalogViewModel : AutoCloseable {
      * this does not add permanent identity across backend index reuse.
      * After successful navigation, terminal dismissal may close this catalog child without
      * cancelling the already-completed navigation caller.
-     * Failure/cancellation leaves the popup open; fork never invokes this operation.
+     * Failure/cancellation leaves the popup open.
      *
      * @throws IllegalStateException when navigation ports were omitted for data-only use.
      * @throws CancellationException when the caller or component is cancelled.
@@ -155,13 +155,6 @@ public interface SessionCatalogViewModel : AutoCloseable {
      * @throws Exception when unarchive or subsequent reload fails, without rollback/replay.
      */
     public suspend fun unarchive(sessionIndex: Int): Unit
-
-    /**
-     * Forks one complete root Session, reloads, and returns its new index. Does not open it.
-     * @throws CancellationException when the caller or component is cancelled.
-     * @throws Exception when fork or subsequent reload fails, without rollback/replay.
-     */
-    public suspend fun fork(sessionIndex: Int): Int
 
     /**
      * Cancels owned work. Subsequent commands throw [CancellationException].

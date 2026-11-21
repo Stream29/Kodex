@@ -4,6 +4,8 @@ package io.github.stream29.kodex.rpc.contract
 
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupPage
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupSummary
 import io.github.stream29.kodex.rpc.models.SessionSpawnRequest
 import io.github.stream29.kodex.rpc.models.SessionSpawnResult
 import io.github.stream29.kodex.rpc.models.AgentSqlQueryResult
@@ -277,6 +279,16 @@ public interface GlobalRpc {
      */
     public suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry>
 
+    /** Emits the current invalidation token, then conflates changes to the group headers. */
+    public fun getSessionGroupsNonceFlow(): Flow<Long>
+
+    public suspend fun listSessionGroups(): List<SessionGroupSummary>
+
+    /** Emits the current process-local token for this exact nullable cwd. */
+    public fun getSessionGroupNonceFlow(cwd: String?): Flow<Long>
+
+    public suspend fun listSessionsInGroup(cwd: String?, includeArchived: Boolean, limit: Int? = null): SessionGroupPage
+
     /**
      * Allocates and initializes a persisted Session, returning its index without submitting content.
      *
@@ -359,38 +371,35 @@ public interface GlobalRpc {
     public suspend fun unarchiveSession(sessionIndex: Int): Unit
 
     /**
-     * Forks the complete initialized Session and returns the new persisted Session index.
+     * Forks the latest effective context of the exact initialized [agentId] (root or child).
      *
-     * Uses the existing not-running and fork-capability checks, fork-title handling and cleanup
-     * of a newly reserved target on failure. Does not change the source's archived state or
-     * frontend navigation, and does not leave the target open as a frontend Session.
-     * History-range fork semantics are not part of this operation.
-     * A confirmed missing persisted source fails with SessionNotFound, not an empty new Session.
+     * Returns the new Session ID. The new Session has one root Agent, with no copied children
+     * or navigable child-creation rows. The source need not be active but cannot be running.
+     * A missing source fails with AgentNotFound. The source history and archive state do not change.
      *
      * A lost response may mean a new Session was created; do not blindly replay this command.
      */
-    public suspend fun forkSession(sessionIndex: Int): Int
+    public suspend fun forkAgent(agentId: Int): Int
 
     /**
-     * Forks history before [untilExclusive] into a new persisted Session and returns its index.
+     * Forks the effective context before [untilExclusive] of the exact [agentId] and returns
+     * the new Session ID. Compactions at or after the boundary do not affect the copy.
      *
-     * Resolves the source root Agent from [sessionIndex]. [expectedCacheNonce] belongs to its
-     * backend index timeline and is captured with the frontend target, not a local window
-     * counter. Validate the cache nonce and original not-running/fork admission when capturing the
-     * source for this operation. Stale targets fail with CacheNonceMismatch instead of being
+     * The source must have an active owner and be idle. [expectedCacheNonce] belongs to that
+     * owner's backend storage, not a frontend window counter. The nonce and the admission are
+     * checked when capturing the source. Stale targets fail with CacheNonceMismatch instead of being
      * silently rebound; a valid target must be reselected or reconfirmed, not automatically
      * retried with a replacement cache nonce.
      *
      * Preserves initialization, accepts sparse exclusive boundaries within the source storage,
-     * and retains the original boundary settings, fork-title handling and failed-target cleanup.
-     * Does not modify source history or navigate the frontend. This differs from [forkSession],
-     * which copies the complete Session.
+     * and uses the settings and title at that boundary. The same single-root, no-children
+     * and source-preservation rules as [forkAgent] apply. A failed target is cleaned up.
      *
      * Accepted work is backend-owned and does not renew TTL. Cancelling the caller's wait is not
      * cancellation of that work. A lost reply may hide successful creation; do not blindly retry.
      */
-    public suspend fun forkSessionHistory(
-        sessionIndex: Int,
+    public suspend fun forkAgentHistory(
+        agentId: Int,
         untilExclusive: Int,
         expectedCacheNonce: Long,
     ): Int

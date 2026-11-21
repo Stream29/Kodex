@@ -45,7 +45,7 @@ val stableTimelineGoldenTest by testSuite {
         for (source in listOf(
             """{"type":"text_tool_event","call_id":"tool","name":"fixture","arguments":{},"result":"OK","success":true}""",
             """{"type":"read_media_tool_event","call_id":"media","arguments":{"path":"/tmp/image.png","detail":"original"},"result":{"type":"success","output":{"image_url":"data:image/png;base64,aW1hZ2U=","detail":"original"}}}""",
-            """{"type":"command_execution_tool_event","call_id":"command","action":{"type":"exec_command","arguments":{"cmd":"echo synthetic","yield_time_ms":10000,"max_output_tokens":10000}},"result":{"type":"failure","message":"Synthetic failure"}}""",
+            """{"type":"command_execution_tool_event","call_id":"command","action":{"type":"exec_command","arguments":{"cmd":"echo synthetic","name":"Check synthetic output","yield_time_ms":10000,"max_output_tokens":10000}},"result":{"type":"failure","message":"Synthetic failure"}}""",
             """{"type":"command_execution_tool_event","call_id":"command","action":{"type":"write_stdin","arguments":{"session_id":42,"chars":"","yield_time_ms":250,"max_output_tokens":10000}},"result":{"type":"output","value":{"chunk_id":"chunk","wall_time_seconds":0.5,"exit_code":0,"original_token_count":1,"output":"OK"}}}""",
         )) {
             val event = OpenAiJsonCodec.decodeFromString(WorkCommit.serializer(), source)

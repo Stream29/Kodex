@@ -19,8 +19,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.io.IOException
 import kotlinx.io.files.Path
-import kotlinx.io.files.SystemTemporaryDirectory
-import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -28,9 +26,8 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 public val kodexHomeHandleLifecycleTest by testSuite {
-    testFixture { lifecycleHome() } closeWith {
-        val home = this
-        withContext(NonCancellable) { deleteLifecycleHome(home) }
+    testFixture { readyTestHome() } closeWith {
+        deleteTestHome(this)
     } asParameterForEach {
         test("real public factory returns the sole interface and repeated close permits restart") { home ->
             withHomeOwner { owner ->
@@ -144,7 +141,7 @@ public val kodexHomeHandleLifecycleTest by testSuite {
         }
 
         test("migration cancellation preserves the stored version and releases its write lease") { home ->
-            SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"1.0.0\"")
+            writeFixtureCheckpoint(home, "1.0.0")
             val actionStarted = CompletableDeferred<Unit>()
             withHomeOwner { owner ->
                 coroutineScope {
@@ -164,13 +161,13 @@ public val kodexHomeHandleLifecycleTest by testSuite {
                     actionStarted.await()
                     preparation.cancelAndJoin()
                 }
-                assertEquals("\"1.0.0\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+                assertEquals(readyMarker("1.0.0"), SystemCoroutineFileSystem.readString(Path(home, HomeVersionFile)))
                 assertTrue(SystemCoroutineFileSystem.list(homeLocks(home)).isEmpty())
                 assertWriteAvailable(owner, home)
             }
         }
 
-        test("public factory exposes version read failure cause and releases its read lease") { home ->
+        test("public factory exposes preflight version read failure without acquiring a lease") { home ->
             val readFailure = IOException("isolated version read failure")
             val fileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
                 override suspend fun readBytes(path: Path, maxByteCount: Long): ByteArray {
@@ -190,19 +187,19 @@ public val kodexHomeHandleLifecycleTest by testSuite {
         }
 
         test("public factory rejects a noncanonical version through the real exception contract") { home ->
-            SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"01.0.0\"")
+            writeFixtureCheckpoint(home, "01.0.0")
             withHomeOwner { owner ->
                 val failure = assertFailsWith<KodexHomeVersionException> {
                     owner.prepareKodexHome(home)
                 }
                 assertTrue(failure.cause is IllegalArgumentException)
-                assertEquals("\"01.0.0\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+                assertEquals(readyMarker("01.0.0"), SystemCoroutineFileSystem.readString(Path(home, HomeVersionFile)))
                 assertTrue(readOwners(home).isEmpty())
                 assertWriteAvailable(owner, home)
             }
         }
 
-        test("public factory rejects a non-directory version without rewriting it") { home ->
+        test("public factory rejects a directory marker without rewriting it") { home ->
             SystemCoroutineFileSystem.delete(Path(home, "version.json"))
             SystemCoroutineFileSystem.createDirectories(Path(home, "version.json"))
             withHomeOwner { owner ->
@@ -222,7 +219,6 @@ public val kodexHomeHandleLifecycleTest by testSuite {
                 }
                 val versionFailure: KodexHomeVersionException = failure
                 assertSame(failure, versionFailure)
-                assertTrue(failure.cause != null)
                 assertFalse(SystemCoroutineFileSystem.exists(Path(home, "version.json")))
                 assertTrue(SystemCoroutineFileSystem.list(homeLocks(home)).isEmpty())
                 assertWriteAvailable(owner, home)
@@ -230,7 +226,7 @@ public val kodexHomeHandleLifecycleTest by testSuite {
         }
 
         test("migration primary failure retains identity and suppresses cleanup failure") { home ->
-            SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"1.0.0\"")
+            writeFixtureCheckpoint(home, "1.0.0")
             val primary = IOException("isolated migration primary")
             val cleanup = IOException("isolated write-owner cleanup")
             val backgroundFailure = CompletableDeferred<Throwable>()
@@ -255,7 +251,7 @@ public val kodexHomeHandleLifecycleTest by testSuite {
                 assertEquals(1, failure.suppressedExceptions.size)
                 assertSame(cleanup, failure.suppressedExceptions.single())
                 assertFalse(backgroundFailure.isCompleted)
-                assertEquals("\"1.0.0\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+                assertEquals(readyMarker("1.0.0"), SystemCoroutineFileSystem.readString(Path(home, HomeVersionFile)))
                 assertTrue(SystemCoroutineFileSystem.list(homeLocks(home)).any { it.name.endsWith(".write.lock") })
             }
         }
@@ -288,14 +284,14 @@ public val kodexHomeHandleLifecycleTest by testSuite {
                 assertTrue(readOwners(home).isEmpty())
                 assertFalse(SystemCoroutineFileSystem.exists(Path(homeLocks(home), "guard.lock")))
                 assertEquals(
-                    "\"$CurrentKodexApplicationVersion\"",
+                    readyMarker("$CurrentKodexApplicationVersion"),
                     SystemCoroutineFileSystem.readString(Path(home, "version.json")),
                 )
             }
         }
 
         test("successful migration action exposes write cleanup failure instead of returning a handle") { home ->
-            SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"1.0.0\"")
+            writeFixtureCheckpoint(home, "1.0.0")
             val cleanup = IOException("successful action write cleanup")
             var actions = 0
             var deletions = 0
@@ -319,7 +315,7 @@ public val kodexHomeHandleLifecycleTest by testSuite {
                 assertSame(cleanup, failure)
                 assertEquals(1, actions)
                 assertEquals(1, deletions)
-                assertEquals("\"1.1.0\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+                assertEquals(readyMarker("1.1.0"), SystemCoroutineFileSystem.readString(Path(home, HomeVersionFile)))
                 assertTrue(SystemCoroutineFileSystem.list(homeLocks(home)).any { it.name.endsWith(".write.lock") })
                 assertTrue(readOwners(home).isEmpty())
             }
@@ -356,9 +352,10 @@ public val kodexHomeHandleLifecycleTest by testSuite {
         test("version read primary retains cause and suppresses its read lease cleanup failure") { home ->
             val primary = IOException("version read")
             val cleanup = IOException("version read lease cleanup")
+            var markerReads = 0
             val fileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
                 override suspend fun readBytes(path: Path, maxByteCount: Long): ByteArray {
-                    if (path.name == "version.json") throw primary
+                    if (path.name == HomeVersionFile && ++markerReads == 2) throw primary
                     return SystemCoroutineFileSystem.readBytes(path, maxByteCount)
                 }
                 override suspend fun delete(path: Path, mustExist: Boolean) {
@@ -379,9 +376,10 @@ public val kodexHomeHandleLifecycleTest by testSuite {
             val allowRead = CompletableDeferred<Unit>()
             val rejected = CompletableDeferred<Unit>()
             var returnedHandle = false
+            var markerReads = 0
             val fileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
                 override suspend fun readBytes(path: Path, maxByteCount: Long): ByteArray {
-                    if (path.name == "version.json") {
+                    if (path.name == HomeVersionFile && ++markerReads == 2) {
                         readStarted.complete(Unit)
                         allowRead.await()
                     }
@@ -437,18 +435,4 @@ private suspend fun readOwners(home: Path): List<Path> =
 private suspend fun assertWriteAvailable(owner: CoroutineScope, home: Path) {
     val lease = owner.FileSystemWriteLease(homeLocks(home))
     lease.closeAndJoin()
-}
-
-private suspend fun lifecycleHome(): Path =
-    Path(SystemTemporaryDirectory, "kodex-home-lifecycle-${Random.nextLong()}").also { home ->
-        SystemCoroutineFileSystem.createDirectories(home)
-        SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"$CurrentKodexApplicationVersion\"")
-    }
-
-private suspend fun deleteLifecycleHome(path: Path) {
-    val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
-    if (metadata.isDirectory) {
-        SystemCoroutineFileSystem.list(path).forEach { deleteLifecycleHome(it) }
-    }
-    SystemCoroutineFileSystem.delete(path, mustExist = false)
 }

@@ -43,7 +43,7 @@ public actual class BackendInstance private constructor(
         public actual suspend fun acquire(home: Path): BackendInstance {
             val directory = Path(home, ".locks", "backend")
             SystemCoroutineFileSystem.createDirectories(directory)
-            val lock = openBackendPlatformLock(Path(directory, "instance.lock").toString())
+            val lock = openBackendPlatformLock(Path(directory, "instance.lock").toString(), create = true)
                 ?: error("A backend already holds this user's instance lock.")
             return BackendInstance(lock, directory)
         }
@@ -52,7 +52,7 @@ public actual class BackendInstance private constructor(
             val directory = Path(home, ".locks", "backend")
             val path = Path(directory, "instance.lock")
             if (!SystemCoroutineFileSystem.exists(path)) return null
-            val probe = openBackendPlatformLock(path.toString())
+            val probe = openBackendPlatformLock(path.toString(), create = false)
             if (probe != null) {
                 probe.close()
                 return null
@@ -72,6 +72,6 @@ internal interface BackendPlatformLock {
     fun close()
 }
 
-internal expect fun openBackendPlatformLock(path: String): BackendPlatformLock?
+internal expect fun openBackendPlatformLock(path: String, create: Boolean): BackendPlatformLock?
 
 private val EndpointJson = Json { encodeDefaults = true; ignoreUnknownKeys = true }

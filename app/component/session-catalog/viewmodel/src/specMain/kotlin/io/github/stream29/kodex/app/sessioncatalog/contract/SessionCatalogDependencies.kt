@@ -45,13 +45,6 @@ public interface SessionCatalogDependencies {
     public suspend fun unarchive(sessionIndex: Int): Unit
 
     /**
-     * Forks one complete root Session through the owner and returns the new index.
-     * @throws CancellationException when the operation is cancelled.
-     * @throws Exception when fork admission, persistence or transport fails; never replay automatically.
-     */
-    public suspend fun fork(sessionIndex: Int): Int
-
-    /**
      * Deletes one persisted root Session through the owner.
      * Return false if it did not exist. The owner handles affected tabs and
      * children; the catalog must not dispose those resources itself.

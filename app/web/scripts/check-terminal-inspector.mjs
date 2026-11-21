@@ -7,18 +7,20 @@ import { promisify } from "node:util";
 import { cleanupSteps, privateEnvironment, spawnOwned, stopOwned } from "./local-entry-tools.mjs";
 
 // Takes only build outputs. Every process, profile, backend Home and fixed shell fixture is private.
-const [mode, fixturePath, binaryPath, intentScenario] = process.argv.slice(2);
+const [mode, fixturePath, binaryPath, scenario] = process.argv.slice(2);
+const preview = scenario === "preview";
+const intentScenario = preview ? undefined : scenario;
 assert.ok(process.platform === "linux" && ["browser", "tui"].includes(mode),
-    "Usage: node check-terminal-inspector.mjs browser|tui FIXTURE PRODUCTION_WEBSITE|NATIVE_CLI [watch|no-watch|legacy]");
+    "Usage: node check-terminal-inspector.mjs browser|tui FIXTURE PRODUCTION_WEBSITE|NATIVE_CLI [preview|watch|no-watch|reopen]");
 assert.ok(process.argv.length === 5 || process.argv.length === 6 &&
-    (["watch", "no-watch"].includes(intentScenario) || mode === "browser" && intentScenario === "legacy"));
+    (preview || ["watch", "no-watch"].includes(intentScenario) || mode === "browser" && intentScenario === "reopen"));
 const intent = "Inspect fixture output";
-const exitTitle = `Exit 23 · ${intent}`;
+const exitTitle = `${intent} (exit 23)`;
 const commandMarker = "emit-terminal-inspector";
 const fixture = await realpath(fixturePath);
 const binary = await realpath(binaryPath);
 const chrome = mode === "browser" ? await realpath(process.env.CHROME_BIN) : null;
-const root = await mkdtemp("/tmp/kodex-terminal-inspector-");
+const root = await mkdtemp(preview ? "/tmp/kodex-terminal-preview-" : "/tmp/kodex-terminal-inspector-");
 await chmod(root, 0o700);
 const home = join(root, "os-home"), tmp = join(root, "tmp"), project = join(root, "project"), runtime = join(root, "runtime");
 for (const dir of [home, tmp, project, runtime]) await mkdir(dir, { mode: 0o700 });
@@ -35,7 +37,13 @@ await writeFile(join(tmp, "emit-terminal-inspector"), [
     'i=0; while [ ! -f "$TMPDIR/start-terminal-output" ]; do',
     '  [ "$i" -lt 300 ] || exit 91; i=$((i+1)); sleep .1',
     "done",
-    ...(intentScenario ? [] : [
+    ...(preview ? [
+        'i=1; while [ "$i" -le 24 ]; do printf "%s\\n" "PREVIEW_LINE_$i"; i=$((i+1)); done',
+        'printf "%s\\\\n" PREVIEW_LIVE',
+        'i=0; while [ ! -f "$TMPDIR/finish-terminal-preview" ]; do',
+        '  [ "$i" -lt 650 ] || exit 92; i=$((i+1)); sleep .1',
+        "done",
+    ] : intentScenario ? [] : [
     "i=1; while [ \"$i\" -le 24 ]; do",
     '  stamp=$(/usr/bin/date +%s%3N)',
     '  printf "\\033[32mT%02d@%s\\033[0m\\n" "$i" "$stamp"',
@@ -92,6 +100,65 @@ async function releaseFixture() {
     await writeFile(join(tmp, "start-terminal-output"), "", { mode: 0o600 });
 }
 
+async function checkSidebarPreview({
+    screen, rowPresent, moveToRow, crossIntoPreview, scrollEarlierOutput, moveAway, primary, openMenu, openOutput, back, reads,
+}) {
+    const previewFields = value => [
+        "Workdir: " + tmp, "Shell: /bin/sh", `exec /bin/sh ./${commandMarker}`, "PREVIEW_COMMAND_END",
+    ].every(text => value.includes(text)) && /Terminal #[1-9]\d*/.test(value);
+    const noPreview = value => !value.includes("PREVIEW_COMMAND_END") && !value.includes("Workdir: " + tmp);
+    const isMenu = value => value.includes("View output") && value.includes("Close session") && /Terminal #[1-9]\d*/.test(value);
+    const waitScreen = (label, predicate) => wait(label, async () => predicate(await screen()));
+    const readCount = () => reads?.();
+    async function expectNoMoreReads() {
+        if (!reads) return;
+        const previous = readCount();
+        await delay(425, undefined, { signal: stopped.signal });
+        assert.equal(readCount(), previous, "Closed preview/inspector must not keep polling");
+    }
+
+    assert.ok(noPreview(await screen()), "Preview must not mount without hover");
+    await primary();
+    assert.ok(!(await screen()).includes("View output"), "Primary click must not open a menu or inspector");
+    await moveToRow();
+    await waitScreen("delayed hover shows title, exact metadata, full command and the first output", value =>
+        value.includes(intent) && previewFields(value) && value.includes("FIXTURE_BOOT") && value.includes("Reading output"));
+    await crossIntoPreview();
+    await waitScreen("preview remains under the pointer", value => previewFields(value) && value.includes("FIXTURE_BOOT"));
+    if (reads) assert.ok(readCount() > 0, "Live hover must use actual Terminal output RPC");
+    await releaseFixture();
+    await waitScreen("a later process flush reaches the same hover", value => previewFields(value) && value.includes("PREVIEW_LIVE"));
+    await scrollEarlierOutput();
+    await waitScreen("hover output scrolls back from the live tail", value =>
+        previewFields(value) && /PREVIEW_LINE_(?:[1-9]|1\d)\b/.test(value));
+    await moveAway();
+    await waitScreen("pointer exit dismisses preview", noPreview);
+    await expectNoMoreReads();
+    assert.ok(await rowPresent(), "Dismissing hover must not close the process");
+
+    await openMenu();
+    await waitScreen("compact Terminal menu", isMenu);
+    const menuScreen = await screen();
+    assert.ok(noPreview(menuScreen) && !menuScreen.includes(commandMarker) && !menuScreen.includes("PREVIEW_LIVE"),
+        "Menu must not duplicate the preview or show live output");
+    await expectNoMoreReads();
+    await openOutput();
+    await waitScreen("independent View output opens", value => value.includes("PREVIEW_LIVE") && value.includes("Back"));
+    await back();
+    await waitScreen("View output returns to the running process menu", value => isMenu(value) && noPreview(value));
+    await back();
+    await waitScreen("Escape dismisses the restored menu", value => !value.includes("Close session"));
+
+    await moveAway();
+    await moveToRow();
+    await waitScreen("reopen preview against the same running process", value => previewFields(value) && value.includes("PREVIEW_LIVE"));
+    await writeFile(join(tmp, "finish-terminal-preview"), "", { mode: 0o600 });
+    await wait("process exit drops preview and the running row", async () => !await rowPresent() && noPreview(await screen()));
+    await expectNoMoreReads();
+    evidence = { liveOutput: true, stableRowEdge: true, scrolledHoverOutput: true, metadata: true, primaryNoAction: true, compactMenu: true,
+        independentViewOutput: true, dismissOnExit: true, rpcStoppedAfterDismissal: reads ? true : null };
+}
+
 async function validateIntentCommits() {
     const commits = await wait("terminal history and both follow-up calls recorded", () => {
         const rows = readCommits();
@@ -110,6 +177,9 @@ async function validateIntentCommits() {
         assert.equal(events[0].name, intent);
         assert.equal(events[0].exit_code, 23);
         assert.equal(events[0].command, call.action.arguments.cmd);
+        const awaitCall = commits.find(({kind, value}) =>
+            kind === "await_event_tool_event" && value.call_id === "terminal-intent-await-call");
+        assert.equal(awaitCall?.value.arguments.name, "Wait for fixture exit");
     }
     const quick = commits.find(({value}) => value.call_id === "intent-quick-call").value;
     assert.equal(quick.result.value.exit_code, 0);
@@ -171,10 +241,17 @@ async function browser() {
     };
     const names = async () => observe((await nodes()).map(node => node.name?.value).filter(Boolean).join("\n"));
     const title = (name, text = name) => wait(name, async () => (await names()).includes(text));
-    async function click(label, filter = node => node.role?.value === "button" && node.name?.value === label, button = "left") {
+    async function bounds(label, filter) {
         const target = await wait(label, async () => (await nodes()).find(node => node.backendDOMNodeId && filter(node)));
         const box = (await send("DOM.getBoxModel", { backendNodeId: target.backendDOMNodeId })).model.content;
-        const x = (box[0] + box[4]) / 2, y = (box[1] + box[5]) / 2;
+        return { left: box[0], top: box[1], right: box[4], bottom: box[5] };
+    }
+    async function position(label, filter) {
+        const box = await bounds(label, filter);
+        return { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 };
+    }
+    async function click(label, filter = node => node.role?.value === "button" && node.name?.value === label, button = "left") {
+        const { x, y } = await position(label, filter);
         await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, buttons: button === "right" ? 2 : 1, clickCount: 1 });
         await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button, clickCount: 1 });
     }
@@ -186,37 +263,76 @@ async function browser() {
     try {
         await send("Page.navigate", { url });
         await title("browser backend connected", "Backend: Connected");
-        if (intentScenario === "legacy") {
-            const raw = Object.fromEntries(readCommits().filter(({value}) => value.call_id?.startsWith("intent-legacy-")).map(
-                ({value}) => [value.call_id.slice("intent-legacy-".length), value.action.arguments]));
-            assert.ok(!Object.hasOwn(raw.missing, "name") && raw.null.name === null && raw.empty.name === "" &&
-                raw.named.name === "Read legacy output");
+        if (intentScenario === "reopen") {
+            const prefix = "intent-reopen-";
+            const namesByCall = Object.fromEntries(readCommits()
+                .filter(({value}) => value.call_id?.startsWith(prefix))
+                .map(({value}) => [value.call_id.slice(prefix.length), value.action.arguments.name]));
+            assert.deepEqual(namesByCall, {scan: "Scan recorded output", read: "Read recorded output"});
             await click("Sessions");
-            await click("reopen legacy Session", node => node.name?.value?.includes("Command intent legacy fixture"));
-            await title("reopened legacy History", "LEGACY_INTENT_REPLAY_READY");
-            await click("open legacy History group", node => node.role?.value === "button" && /^History group: Take/.test(node.name?.value ?? ""));
-            const fallback = node => node.role?.value === "button" &&
-                /^(Expand History item|History tool): Run a command$/.test(node.name?.value ?? "");
-            const named = node => node.role?.value === "button" &&
-                /^(Expand History item|History tool): Read legacy output$/.test(node.name?.value ?? "");
-            await wait("named and three generic legacy disclosures", async () => {
+            await click("reopen Session", node => node.name?.value?.includes("Command intent reopen fixture"));
+            await title("reopened History", "CURRENT_INTENT_REPLAY_READY");
+            await click("open History group", node => node.role?.value === "button" && /^History group: Take/.test(node.name?.value ?? ""));
+            const scan = node => node.role?.value === "button" &&
+                /^(Expand History item|History tool): Scan recorded output$/.test(node.name?.value ?? "");
+            const read = node => node.role?.value === "button" &&
+                /^(Expand History item|History tool): Read recorded output$/.test(node.name?.value ?? "");
+            await wait("two recorded command disclosures", async () => {
                 const current = await nodes();
-                return current.filter(fallback).length === 3 && current.some(named);
+                return current.some(scan) && current.some(read);
             });
-            assert.ok(!(await names()).includes("LEGACY_COMMAND_"));
-            await click("open named legacy command", named);
-            await title("full legacy command is in details", "LEGACY_COMMAND_named");
-            evidence = { reopenedLegacyShapes: ["missing", "null", "empty", "named"], unnamedTitles: 3 };
+            assert.ok(!(await names()).includes("RECORDED_COMMAND_"));
+            await click("open recorded command", read);
+            await title("full recorded command is in details", "RECORDED_COMMAND_read");
+            evidence = { replayedCurrentRows: 2 };
             return;
         }
-        await click("Expand left sidebar");
         await title("browser terminals sidebar", "Terminal sessions");
         await click("new session composer", node => node.role?.value === "textbox" && node.name?.value === "Message");
         await send("Input.insertText", { text: "Run offline terminal inspector fixture" });
         const submitted = Date.now();
         await key("Enter", 13);
         await title("terminal row intent", intent);
-        await click("running shell row", node => /^(Shell session \d+)$/.test(node.name?.value ?? ""), "right");
+        const isShellRow = node => /^Shell session \d+$/.test(node.name?.value ?? "");
+        if (preview) {
+            assert.equal(reads, 0, "Initial sidebar must not poll");
+            const move = point => send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+            let rowBounds;
+            await checkSidebarPreview({
+                screen: names, rowPresent: async () => (await nodes()).some(isShellRow),
+                moveToRow: async () => {
+                    rowBounds = await bounds("running shell row", isShellRow);
+                    await move({ x: (rowBounds.left + rowBounds.right) / 2, y: (rowBounds.top + rowBounds.bottom) / 2 });
+                },
+                crossIntoPreview: async () => {
+                    const row = rowBounds;
+                    const from = { x: (row.left + row.right) / 2, y: (row.top + row.bottom) / 2 };
+                    const metadata = () => bounds("Terminal preview metadata", node => /^Terminal #\d+$/.test(node.name?.value ?? ""));
+                    const before = await metadata();
+                    assert.ok(before.left >= 0 && before.right < row.left,
+                        "Preview stays within the viewport, to the left of the right Terminal row");
+                    await move({ x: from.x + 24, y: from.y });
+                    await delay(60);
+                    assert.deepEqual(await metadata(), before);
+                    await move({ x: before.right - 2, y: from.y });
+                    await delay(230);
+                    assert.deepEqual(await metadata(), before);
+                },
+                scrollEarlierOutput: async () => {
+                    const point = await position("live preview tail", node => node.name?.value === "PREVIEW_LIVE");
+                    await move(point);
+                    await send("Input.dispatchMouseEvent", { type: "mouseWheel", ...point, deltaX: 0, deltaY: -250 });
+                },
+                moveAway: () => move({ x: 0, y: 0 }),
+                primary: () => click("primary click on running shell", isShellRow),
+                openMenu: () => click("open running shell context menu", isShellRow, "right"),
+                openOutput: () => click("View output"),
+                back: () => key("Escape", 27), reads: () => reads,
+            });
+            assert.equal(exceptions, 0, "Browser runtime exceptions");
+            return;
+        }
+        await click("running shell row", isShellRow, "right");
         assert.equal(reads, 0, "Ordinary menu must not start polling");
         await click("View output");
         await title("browser output before initial yield", "FIXTURE_BOOT");
@@ -337,7 +453,40 @@ async function tui(recordPath) {
     await keys("-l", "Run offline terminal inspector fixture");
     const submitted = Date.now();
     await keys("Enter");
-    await click("[→]");
+    if (preview) {
+        await displayed("● Inspect fixture");
+        const move = (x, y) => raw(`\x1b[<35;${x};${y}M`);
+        await checkSidebarPreview({
+            screen: capture, rowPresent: async () => Boolean(await position("● Inspect fixture")),
+            moveToRow: async () => { const { x, y } = await displayed("● Inspect fixture"); await move(x, y); },
+            crossIntoPreview: async () => {
+                const from = await displayed("● Inspect fixture");
+                const before = await displayed("Terminal #");
+                const mainColumns = columns - Math.floor(columns / 4);
+                const terminalStart = mainColumns + 1; // Zero-based, after the splitter.
+                const previewWidth = Math.min(mainColumns,
+                    Math.max(36, `Workdir: ${tmp}`.length, `exec /bin/sh ./${commandMarker}`.length));
+                assert.equal(from.x, terminalStart + 1, "The running row is in the right Terminal tool window");
+                assert.equal(before.x + previewWidth, terminalStart, "Preview ends before the one-cell splitter");
+                await move(from.x + 5, from.y);
+                await delay(60);
+                assert.deepEqual(await position("Terminal #"), before);
+                await move(before.x + previewWidth - 1, from.y);
+                await delay(230);
+                assert.deepEqual(await position("Terminal #"), before);
+            },
+            scrollEarlierOutput: async () => {
+                const { x, y } = await displayed("PREVIEW_LIVE");
+                await move(x, y);
+                for (let i = 0; i < 4; i++) await raw(`\x1b[<64;${x};${y}M`);
+            },
+            moveAway: () => move(columns, rows),
+            primary: () => click("● Inspect fixture"),
+            openMenu: () => click("● Inspect fixture", 2),
+            openOutput: () => keys("Enter"), back: () => keys("Escape"),
+        });
+        return;
+    }
     await click("● Inspect fixture", 2);
     await displayed("View output");
     await keys("Enter");
@@ -382,6 +531,7 @@ async function tui(recordPath) {
 }
 
 try {
+    if (preview) await writeFile(join(tmp, "terminal-sidebar-preview"), "", { mode: 0o600 });
     backend = spawnOwned(fixture, [], { cwd: project, env, stdio: ["pipe", "pipe", "ignore"] });
     backend.child.stdin.on("error", () => {});
     backend.child.stdout.on("data", bytes => { serverText = (serverText + bytes).slice(-8192); });
@@ -399,7 +549,9 @@ try {
         };
     }
     if (mode === "browser") await browser(); else await tui(recordPath);
-    if (intentScenario === "legacy") {
+    if (preview) {
+        console.log(JSON.stringify({ mode, scenario, ...evidence }));
+    } else if (intentScenario === "reopen") {
         console.log(JSON.stringify({ mode, intentScenario, ...evidence }));
     } else if (intentScenario) {
         console.log(JSON.stringify({ mode, intentScenario, intent, outputExitCode: 23, ...evidence }));
@@ -427,7 +579,7 @@ try {
     } catch (error) { failure ??= error; }
 }
 if (failure) {
-    console.error(`FAIL terminal inspector ${mode} at ${stage}: ${failure.message}`);
+    console.error(`FAIL terminal ${preview ? "sidebar preview" : "inspector"} ${mode} at ${stage}: ${failure.message}`);
     if (ttySnapshot && process.env.KODEX_TERMINAL_SMOKE_DIAGNOSTIC === "1") console.error(ttySnapshot());
     if (browserSnapshot) console.error(browserSnapshot);
     process.exitCode = 1;

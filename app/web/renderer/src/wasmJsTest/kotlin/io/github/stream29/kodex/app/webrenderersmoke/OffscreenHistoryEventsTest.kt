@@ -231,22 +231,24 @@ val offscreenHistoryEventsTest by testSuite {
             } finally { scene.close() }
         } }
     }
-    for (dark in listOf(false, true)) for (pending in listOf(false, true)) for (kind in 0..2) {
+    for (dark in listOf(false, true)) for (pending in listOf(false, true)) for (kind in 0..3) {
         test("internal invalid recorded error uses theme color dark=$dark pending=$pending kind=$kind") { offscreenTest {
             val message = "  Bad input [preserve]\n  second line  "
             val json = Json.parseToJsonElement("""{"query":[1,2],"private":"recorded"}""").toString()
             val stableInput = when (kind) {
                 0 -> InvalidToolInvocation.Function("exec_command", arguments = "{BROKEN")
                 1 -> InvalidToolInvocation.Custom("apply_patch", input = "  RAW\n  INPUT")
+                3 -> InvalidToolInvocation.Function("await_event", arguments = "{BROKEN")
                 else -> InvalidToolInvocation.Function("tool_search", arguments = json)
             }
             val pendingInput = when (kind) {
                 0 -> PendingInvalidToolInvocation.Function("exec_command", arguments = "{BROKEN")
                 1 -> PendingInvalidToolInvocation.Custom("apply_patch", input = "  RAW\n  INPUT")
+                3 -> PendingInvalidToolInvocation.Function("await_event", arguments = "{BROKEN")
                 else -> PendingInvalidToolInvocation.Function("tool_search", arguments = json)
             }
             val expectedInput = when (kind) {
-                0 -> "arguments: {BROKEN"
+                0, 3 -> "arguments: {BROKEN"
                 1 -> "input:   RAW\n  INPUT"
                 else -> "arguments: $json"
             }
@@ -263,7 +265,11 @@ val offscreenHistoryEventsTest by testSuite {
                 }
             }
             try {
-                val title = if (kind == 0) "Run a command" else "Model emitted an invalid tool call"
+                val title = when (kind) {
+                    0 -> "Run a command"
+                    3 -> "Wait for events"
+                    else -> "Model emitted an invalid tool call"
+                }
                 scene.settle { scene.hasDescription("History tool: $title") }
                 scene.key(Key.Tab)
                 scene.key(Key.Enter)
@@ -355,23 +361,29 @@ val offscreenHistoryEventsTest by testSuite {
             "Running external", "Tool: external"),
         Triple(PendingCustomToolCall("custom", name = "external", input = "raw input"),
             "Running external", "Tool: external"),
-        Triple(PendingCommandExecution("exec", action = PendingCommandExecutionAction.ExecCommand(ExecCommandArguments("pwd", yieldTimeMillis = 10_000))),
-            "Run a command", "Tool: exec_command"),
+        Triple(PendingCommandExecution("exec", action = PendingCommandExecutionAction.ExecCommand(
+            ExecCommandArguments("pwd", name = "Check cwd", yieldTimeMillis = 10_000))),
+            "Check cwd", "Tool: exec_command"),
         Triple(PendingCommandExecution("poll", action = PendingCommandExecutionAction.WriteStdin(WriteStdinArguments(77, yieldTimeMillis = 250))),
             "Waiting for terminal session 77", "Tool: write_stdin"),
         Triple(PendingReadMedia("media", arguments = ReadMediaToolArguments("/image.png")),
             "Reading media: /image.png", "Tool: read_media"),
         Triple(PendingAwait(
             "await",
-            arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(3), AwaitEventInput.TerminalExited(5), AwaitEventInput.Timeout(3000))),
+            arguments = AwaitEventArguments(
+                events = listOf(AwaitEventInput.TerminalExited(3), AwaitEventInput.TerminalExited(5), AwaitEventInput.Timeout(3000)),
+                name = "等待作业完成 🧪",
+            ),
             timeoutAt = Instant.fromEpochMilliseconds(3000),
         ),
-            "Waiting for events (terminals: 3, 5)", "Tool: await_event"),
+            "等待作业完成 🧪", "Tool: await_event"),
         Triple(PendingInvalidToolCall("invalid", invocation = PendingInvalidToolInvocation.Function(
             name = "exec_command", arguments = "{BROKEN"), message = "Invalid"),
             "Run a command", "error: Invalid"),
         Triple(PendingServerToolSearch(ResponseItem.ServerToolSearchCall(arguments = emptyHistoryArguments)),
             "Searching cloud tools", "Tool: server_tool_search"),
+        Triple(PendingFunctionToolCall("unresolved", name = "exec_command", arguments = emptyHistoryArguments),
+            "Run a command", "Tool: exec_command"),
     )
     for ((index, case) in pending.withIndex()) {
         test("shared pending dispatch uses real graphical disclosure branch=$index") { offscreenTest {
@@ -420,15 +432,23 @@ val offscreenHistoryEventsTest by testSuite {
             "Search first", "hosted_web_search",
         ),
         Triple(
-            StableAwait("await", arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(7))),
+            StableAwait("await", arguments = AwaitEventArguments(
+                events = listOf(AwaitEventInput.TerminalExited(7)), name = "Wait for fixture exit",
+            ),
                 result = StableAwaitEventResult.Output(AwaitEventOutput(Instant.fromEpochMilliseconds(0)))),
-            "Wait for events", "timestamp: 1970-01-01T00:00:00Z",
+            "Wait for fixture exit", "timestamp: 1970-01-01T00:00:00Z",
         ),
         Triple(
             AgentCommitType.AwaitEventToolEvent.decodePayloadJson(
-                """{"type":"await_event_tool_event","call_id":"legacy","arguments":{"terminals":[]},"result":{"type":"output","value":{"timestamp":"1970-01-01T00:00:00Z"}}}""",
+                """{"type":"await_event_tool_event","call_id":"migrated","arguments":{"name":"Wait for events","events":[{"type":"user_message"},{"type":"ask_user_answered"},{"type":"schedule_triggered"}]},"result":{"type":"output","value":{"timestamp":"1970-01-01T00:00:00Z"}}}""",
             ),
             "Wait for events", "events: User message\nAsk user answered\nSchedule triggered",
+        ),
+        Triple(
+            StableAwait("await-failed", arguments = AwaitEventArguments(
+                events = listOf(AwaitEventInput.TerminalExited(7)), name = "Wait for fixture exit",
+            ), result = StableAwaitEventResult.Failure("fixture wait failed")),
+            "Wait for fixture exit", "error: fixture wait failed",
         ),
         Triple(
             StableTextTool("utility", name = "get_context_remaining", arguments = emptyHistoryArguments,

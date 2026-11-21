@@ -103,7 +103,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
                 assertSame(agent, session.rootAgent.value)
-                assertEquals(AgentStateValue.Empty, services.runtime.getState(view.sessionIndex))
+                assertEquals(AgentStateValue.Empty, services.runtime.getState(view.agentId))
             }
         }
     }
@@ -133,18 +133,18 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertFalse("injected resume failure" in snapshot, snapshot)
                 assertFalse("Session operation failed." in snapshot, snapshot)
                 assertFalse("Unable to submit:" in snapshot, snapshot)
-                assertEquals(AgentStateValue.UserMessage, services.runtime.getState(view.sessionIndex))
+                assertEquals(AgentStateValue.UserMessage, services.runtime.getState(view.agentId))
                 assertEquals(1, resumes)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
                 assertSame(agent, view.rootAgent.value)
                 assertSame(agent, session.rootAgent.value)
                 assertIs<AgentLifecycleState.Open>(agent.lifecycle.value)
-                assertEquals(1, services.runtime.getLatestIndex(view.sessionIndex)) // No retry or compensating append.
+                assertEquals(1, services.runtime.getLatestIndex(view.agentId)) // No retry or compensating append.
                 // The binding is still usable, not merely a transient Ready snapshot.
-                agent.renameThread("usable after failure")
-                agent.settings.first { it.threadName == "usable after failure" }
-                assertEquals(2, services.runtime.getLatestIndex(view.sessionIndex))
+                agent.rename("usable after failure")
+                agent.settings.first { it.name == "usable after failure" }
+                assertEquals(2, services.runtime.getLatestIndex(view.agentId))
             }
         }
     }
@@ -204,11 +204,11 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 finish.complete(Unit)
             }
             withTimeout(5.seconds) { agent.running.first { !it } }
-            val index = session.sessionIndex
-            val nonce = services.runtime.getCacheNonce(index)
-            val latest = services.runtime.getLatestIndex(index)
+            val agentId = view.agentId
+            val nonce = services.runtime.getCacheNonce(agentId)
+            val latest = services.runtime.getLatestIndex(agentId)
             val messages = services.runtime.getFirstCommitsIn(
-                index,
+                agentId,
                 nonce,
                 1,
                 latest,
@@ -293,7 +293,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertEquals("retained on cancellation", agent.composer.state.value.text)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
-                assertEquals(AgentStateValue.Empty, services.runtime.getState(view.sessionIndex))
+                assertEquals(AgentStateValue.Empty, services.runtime.getState(view.agentId))
             }
         }
     }

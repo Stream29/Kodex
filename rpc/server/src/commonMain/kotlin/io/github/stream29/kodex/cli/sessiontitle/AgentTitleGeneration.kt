@@ -154,8 +154,8 @@ private class SessionTitleGenerationController(
         if (latestIndex < 0) return
         val currentSettings = settings()
         if (!currentSettings.enabled) return
-        val expectedThreadName = agentState.storage.getSettingsAt(latestIndex).threadName
-        if (!expectedThreadName.isDefaultSessionTitle()) return
+        val expectedName = agentState.storage.getSettingsAt(latestIndex).name
+        if (!expectedName.isDefaultSessionTitle()) return
 
         val attemptId = nextAttemptId++
         activeAttemptId = attemptId
@@ -170,7 +170,7 @@ private class SessionTitleGenerationController(
                 persistIfCurrent(
                     attemptId = attemptId,
                     expectedNonce = expectedNonce,
-                    expectedThreadName = expectedThreadName,
+                    expectedName = expectedName,
                     title = generated.title,
                 )
             } catch (cancelled: CancellationException) {
@@ -191,7 +191,7 @@ private class SessionTitleGenerationController(
     private suspend fun persistIfCurrent(
         attemptId: Long,
         expectedNonce: Long,
-        expectedThreadName: String,
+        expectedName: String,
         title: String,
     ) {
         mutex.withLock {
@@ -201,8 +201,8 @@ private class SessionTitleGenerationController(
                 val latest = agentState.latestIndex.value
                 if (latest < 0) return
                 val current = agentState.storage.getSettingsAt(latest)
-                if (current.threadName != expectedThreadName) return
-                if (agentState.compareAndSetSettings(current, current.copy(threadName = title))) return
+                if (current.name != expectedName) return
+                if (agentState.compareAndSetSettings(current, current.copy(name = title))) return
                 yield()
             }
         }

@@ -25,6 +25,22 @@ public interface SidebarShellRowInteraction : SidebarShellInteraction {
 
 public class SidebarShellMenuOpening(public val interaction: SidebarShellInteraction)
 
+/** Metadata and command captured from the exact Terminal registration. */
+public class SidebarShellPreview(
+    public val title: String,
+    public val sessionId: Int,
+    public val workdir: String?,
+    public val shell: String?,
+    public val command: String,
+) {
+    public val metadataLines: List<String> = buildList {
+        val id = "Terminal #$sessionId"
+        if (title != id) add(id)
+        if (!workdir.isNullOrBlank()) add("Workdir: $workdir")
+        if (!shell.isNullOrBlank()) add("Shell: $shell")
+    }
+}
+
 /** Renderer-owned placement captured at the menu-to-output transition. */
 public interface SidebarShellOutputPlacement
 
@@ -35,12 +51,15 @@ public interface SidebarShellRenderer {
         interaction: SidebarShellRowInteraction, title: String,
         onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit,
     )
+    /** Renders the preview; the shared composition owns the output read lifetime. */
     @Composable public fun ShellHover(
-        interaction: SidebarShellInteraction, title: String, command: String, onHoverChanged: (Boolean) -> Unit,
+        interaction: SidebarShellInteraction, preview: SidebarShellPreview,
+        output: StateFlow<TerminalOutputState>, onHoverChanged: (Boolean) -> Unit,
     )
     /** View Output replaces the menu; the shared close action dismisses before terminating. */
     @Composable public fun ShellMenu(
-        opening: SidebarShellMenuOpening, label: String, onDismiss: () -> Unit, onClose: () -> Unit, onViewOutput: (() -> Unit)?,
+        opening: SidebarShellMenuOpening, sessionId: Int, label: String, onDismiss: () -> Unit,
+        onClose: () -> Unit, onViewOutput: (() -> Unit)?,
     )
     public fun captureShellOutputPlacement(opening: SidebarShellMenuOpening): SidebarShellOutputPlacement?
     @Composable public fun ShellOutput(
@@ -82,10 +101,10 @@ public expect fun ShellSessionSidebarContent(
     side: SessionSidebarSide, session: AgentShellSession, renderer: SidebarShellRenderer,
 )
 
-/** Host filters selected-child matching requests and owns shared Shell/Index popup priority/grace. */
+/** The host supplies the exact registry; output is observed only while the delayed preview is mounted. */
 @Composable
 public expect fun SidebarShellHoverContent(
-    interaction: SidebarShellInteraction?, renderer: SidebarShellRenderer,
+    interaction: SidebarShellInteraction?, registry: AgentShellSessionRegistry, renderer: SidebarShellRenderer,
     onHoverChanged: (Boolean) -> Unit, onDismiss: () -> Unit,
 )
 

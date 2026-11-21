@@ -125,13 +125,12 @@ public expect class RpcSessionCatalogDependencies(
     override suspend fun load(showArchived: Boolean): List<SessionCatalogEntry>
     override suspend fun archive(sessionIndex: Int): Unit
     override suspend fun unarchive(sessionIndex: Int): Unit
-    override suspend fun fork(sessionIndex: Int): Int
     override suspend fun delete(sessionIndex: Int): Boolean
 }
 
 /** A disposable frontend read/command binding. It is neither AgentRuntime nor AgentState. */
 public expect class RpcSessionBinding {
-    public val sessionIndex: Int
+    public val sessionIndex: Int?
     public val storage: ObservableKodexAgentStorage
     public val latestIndex: StateFlow<Int>
     public val state: StateFlow<AgentStateValue>
@@ -185,7 +184,6 @@ public expect class RpcSessionViews(
     override suspend fun release(sessionIndex: Int): Unit
     override suspend fun archive(sessionIndex: Int): Unit
     override suspend fun unarchive(sessionIndex: Int): Unit
-    override suspend fun fork(sessionIndex: Int): Int
     override suspend fun delete(sessionIndex: Int): Boolean
     override suspend fun shutdown(): Unit
 
@@ -200,14 +198,7 @@ public expect class RpcSessionViews(
  * The coordinator outlives an individual subscription binding, not the frontend owner.
  * Recovery only repeats activation/reads; no failed or unacknowledged command is replayed.
  */
-public expect class RpcSessionView internal constructor(
-    sessionIndex: Int,
-    services: RpcServices,
-    scope: CoroutineScope,
-    models: StateFlow<List<ModelInfo>>,
-    reportUnhandledError: (Throwable) -> Unit,
-    connectionAvailable: () -> Boolean,
-) : PersistedSessionViewModel {
+public expect class RpcSessionView : PersistedSessionViewModel {
     override val sessionIndex: Int
     public val binding: StateFlow<RpcSessionBinding?>
     public val status: StateFlow<SessionViewStatus>
@@ -221,11 +212,6 @@ public expect class RpcSessionView internal constructor(
     public fun current(): RpcSessionBinding
     override suspend fun readCreatedAt(): Instant?
     override suspend fun readUpdatedAt(): Instant?
-    override suspend fun fork(
-        source: AgentViewModel,
-        untilExclusive: Int,
-        expectedGeneration: Long,
-    ): Int
     override suspend fun rename(name: String): Unit
     override suspend fun updateModel(model: OpenAiModelId): Unit
     override suspend fun updateWorkingDirectory(workingDirectory: Path): Unit

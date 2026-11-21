@@ -1,12 +1,11 @@
 package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
+import io.github.stream29.kodex.app.application.contract.ApplicationSessionCatalog
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogDependencies
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModelFactory
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -22,11 +21,10 @@ import kotlinx.io.files.Path
 public expect fun createApplicationViewModel(
     sessions: PersistedSessionViewModelRegistry,
     newSessionFactory: NewSessionViewModelFactory,
-    catalogFactory: SessionCatalogViewModelFactory,
-    catalogDependencies: SessionCatalogDependencies,
     settingsFactory: SettingsViewModelFactory,
     loginFactory: OpenAiLoginViewModelFactory,
     createDirectoryPicker: (Path) -> DirectoryPickerViewModel,
     newSessionArguments: NewSessionViewModelArguments,
     ownerScope: CoroutineScope,
+    sessionGroups: ApplicationSessionCatalog? = null,
 ): ApplicationViewModel

@@ -16,7 +16,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExe
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
-import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.*
 import kotlinx.io.files.Path
@@ -56,7 +55,7 @@ internal suspend fun CoroutineScope.seedHistoryProductFixture(home: Path) {
             val output = (0 until 100).joinToString("\n") { "HISTORY_TOOL_OUTPUT_$it" }
             storage.commit(
                 Json.decodeFromString<WorkCommit>(
-                    """{"type":"command_execution_tool_event","call_id":"history-tool","action":{"type":"exec_command","arguments":{"cmd":"history-fixture-not-executed","yield_time_ms":1000,"max_output_tokens":10000}},"result":{"type":"output","value":{"chunk_id":"history","wall_time_seconds":0.12,"exit_code":0,"original_token_count":100,"output":${Json.encodeToString(output)}}}}""",
+                    """{"type":"command_execution_tool_event","call_id":"history-tool","action":{"type":"exec_command","arguments":{"cmd":"history-fixture-not-executed","name":"Read recorded fixture output","yield_time_ms":1000,"max_output_tokens":10000}},"result":{"type":"output","value":{"chunk_id":"history","wall_time_seconds":0.12,"exit_code":0,"original_token_count":100,"output":${Json.encodeToString(output)}}}}""",
                 ),
             )
             storage.commit(UnstableSnapshot(emptyList()))
@@ -68,39 +67,27 @@ internal suspend fun CoroutineScope.seedHistoryProductFixture(home: Path) {
 internal fun historyProductStreamParts(): List<String> =
     (0 until 80).map { "HISTORY_STREAM_${it.toString().padStart(3, '0')}\n" }
 
-/** Seed both distinct nullable wire forms before the test's actual Backend opens the Session. */
-internal suspend fun CoroutineScope.seedCommandIntentLegacyProductFixture(home: Path) {
+/** Record current command intents before a browser reopens the Session. */
+internal suspend fun CoroutineScope.seedCommandIntentReopenFixture(home: Path) {
     prepareKodexHome(home).closeAndJoin()
     val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies())
     try {
         val session = repository.create()
         repository.open(session).runtime.modify { storage ->
-            storage.initialize(testSettings("Command intent legacy fixture", home))
+            storage.initialize(testSettings("Command intent reopen fixture", home))
             storage.commit(UnstableSnapshot(emptyList()))
-            storage.commit(StableUserMessage(listOf(ContentItem.InputText("Legacy intent replay fixture"))))
-            for ((shape, name) in listOf("missing" to null, "null" to null, "empty" to "", "named" to "Read legacy output")) {
+            storage.commit(StableUserMessage(listOf(ContentItem.InputText("Current intent replay fixture"))))
+            for ((id, name) in listOf("scan" to "Scan recorded output", "read" to "Read recorded output")) {
                 storage.commit(StableCommandExecution(
-                    "intent-legacy-$shape",
+                    "intent-reopen-$id",
                     action = StableCommandExecutionAction.ExecCommand(ExecCommandArguments(
-                        command = "LEGACY_COMMAND_$shape", name = name, yieldTimeMillis = 1_000,
+                        command = "RECORDED_COMMAND_$id", name = name, yieldTimeMillis = 1_000,
                     )),
                     result = StableCommandExecutionResult.Failure("Isolated fixture was not executed"),
                 ))
             }
             storage.commit(UnstableSnapshot(emptyList()))
-            storage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("LEGACY_INTENT_REPLAY_READY"))))
+            storage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("CURRENT_INTENT_REPLAY_READY"))))
         }
     } finally { withContext(NonCancellable) { repository.cancelAndJoin() } }
-    openSqliteConnection(Path(home, "kodex.db")).use { db ->
-        db.execute("""
-            UPDATE agent_commits SET payload_json = json_set(payload_json, '$.action.arguments.name', NULL)
-            WHERE type = 'command_execution_tool_event' AND json_extract(payload_json, '$.call_id') = 'intent-legacy-null'
-        """.trimIndent())
-        check(db.changes() == 1)
-        db.execute("""
-            UPDATE agent_commits SET payload_json = json_remove(payload_json, '$.action.arguments.name')
-            WHERE type = 'command_execution_tool_event' AND json_extract(payload_json, '$.call_id') = 'intent-legacy-missing'
-        """.trimIndent())
-        check(db.changes() == 1)
-    }
 }

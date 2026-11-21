@@ -44,13 +44,14 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
             val popup = RpcGlobalEditor(globalSettings, services.global, this, home.toString())
             try {
                 val index = services.global.createSession(home)
+                val agentId = services.global.getRootAgentId(index)
                 val origin = views.open(index)
                 val other = otherViews.open(index)
-                val nonce = services.runtime.getCacheNonce(index)
-                assertEquals("Session $index", other.current().settings.value.threadName)
+                val nonce = services.runtime.getCacheNonce(agentId)
+                assertEquals("Session $index", other.current().settings.value.name)
                 origin.current().submit(listOf(ContentItem.InputText("Name this accepted message")))
                 entered.await()
-                services.runtime.getRunningTurnFlow(index).first { !it }
+                services.runtime.getRunningTurnFlow(agentId).first { !it }
 
                 views.release(origin)
                 views.close()
@@ -63,25 +64,25 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
 
                 release.complete(Unit)
                 job.await().join()
-                val observed = other.current().settings.first { it.threadName == "Keep backend naming alive" }
-                assertEquals("Keep backend naming alive", observed.threadName)
-                val tail = services.runtime.getLatestIndexFlow(index).first { position ->
+                val observed = other.current().settings.first { it.name == "Keep backend naming alive" }
+                assertEquals("Keep backend naming alive", observed.name)
+                val tail = services.runtime.getLatestIndexFlow(agentId).first { position ->
                     val settings = services.runtime.getLastCommitsIn(
-                        index, nonce, 0, position, AgentCommitType.SettingsTypes, 1,
+                        agentId, nonce, 0, position, AgentCommitType.SettingsTypes, 1,
                     ).lastOrNull()?.commit as? KodexAgentSettings
-                    settings?.threadName == observed.threadName
+                    settings?.name == observed.name
                 }
                 assertEquals(
                     observed,
                     services.runtime.getLastCommitsIn(
-                        index, nonce, 0, tail, AgentCommitType.SettingsTypes, 1,
+                        agentId, nonce, 0, tail, AgentCommitType.SettingsTypes, 1,
                     ).last().commit as KodexAgentSettings,
                 )
                 val catalog = services.global.getSessionCatalog(false).single()
-                assertEquals(observed.threadName, catalog.threadName)
+                assertEquals(observed.name, catalog.name)
                 assertTrue(catalog.isActive)
                 assertFalse(catalog.running)
-                assertTrue(services.runtime.getLatestIndex(index) >= 2)
+                assertTrue(services.runtime.getLatestIndex(agentId) >= 2)
             } finally {
                 release.complete(Unit)
                 withContext(NonCancellable) {
@@ -111,18 +112,19 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
             val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()), { throw it })
             try {
                 val index = services.global.createSession(Path("."))
+                val agentId = services.global.getRootAgentId(index)
                 val view = views.open(index)
                 view.current().submit(listOf(ContentItem.InputText("First text")))
                 entered.await()
-                services.runtime.getRunningTurnFlow(index).first { !it }
-                val old = checkNotNull(view.current().storage.getSettingsAt(services.runtime.getLatestIndex(index)))
-                assertTrue(view.current().settings.compareAndSet(old, old.copy(threadName = "Explicit name wins")))
+                services.runtime.getRunningTurnFlow(agentId).first { !it }
+                val old = checkNotNull(view.current().storage.getSettingsAt(services.runtime.getLatestIndex(agentId)))
+                assertTrue(view.current().settings.compareAndSet(old, old.copy(name = "Explicit name wins")))
                 release.complete(Unit)
                 job.await().join()
-                view.current().settings.first { it.threadName == "Explicit name wins" }
-                assertEquals("Explicit name wins", services.global.getSessionCatalog(false).single().threadName)
+                view.current().settings.first { it.name == "Explicit name wins" }
+                assertEquals("Explicit name wins", services.global.getSessionCatalog(false).single().name)
                 view.current().submit(listOf(ContentItem.InputText("Second text")))
-                services.runtime.getRunningTurnFlow(index).first { !it }
+                services.runtime.getRunningTurnFlow(agentId).first { !it }
                 assertEquals(1, calls)
             } finally {
                 release.complete(Unit)
@@ -155,22 +157,23 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
             val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()), { throw it })
             try {
                 val index = services.global.createSession(Path("."))
+                val agentId = services.global.getRootAgentId(index)
                 val view = views.open(index)
                 view.current().submit(listOf(ContentItem.InputText("Obsolete text")))
                 entered.await()
-                services.runtime.getRunningTurnFlow(index).first { !it }
-                val oldNonce = services.runtime.getCacheNonce(index)
+                services.runtime.getRunningTurnFlow(agentId).first { !it }
+                val oldNonce = services.runtime.getCacheNonce(agentId)
                 view.current().revertHistory(1, oldNonce)
-                assertNotEquals(oldNonce, services.runtime.getCacheNonce(index))
+                assertNotEquals(oldNonce, services.runtime.getCacheNonce(agentId))
                 release.complete(Unit)
                 oldJob.await().join()
-                assertEquals(0, services.runtime.getLatestIndex(index))
-                assertEquals("Session $index", checkNotNull(view.current().storage.getSettingsAt(0)).threadName)
-                assertEquals("Session $index", services.global.getSessionCatalog(false).single().threadName)
+                assertEquals(0, services.runtime.getLatestIndex(agentId))
+                assertEquals("Session $index", checkNotNull(view.current().storage.getSettingsAt(0)).name)
+                assertEquals("Session $index", services.global.getSessionCatalog(false).single().name)
                 view.current().submit(listOf(ContentItem.InputText("Replacement text")))
-                view.current().settings.first { it.threadName == "Name replacement history" }
-                services.runtime.getRunningTurnFlow(index).first { !it }
-                assertEquals("Name replacement history", services.global.getSessionCatalog(false).single().threadName)
+                view.current().settings.first { it.name == "Name replacement history" }
+                services.runtime.getRunningTurnFlow(agentId).first { !it }
+                assertEquals("Name replacement history", services.global.getSessionCatalog(false).single().name)
                 assertEquals(2, calls)
             } finally {
                 release.complete(Unit)

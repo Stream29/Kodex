@@ -50,7 +50,7 @@ val compactionSettingsConsistencyTest by testSuite {
         for (forced in listOf(false, true)) {
             test("latest full settings survive multiple writes with forced=$forced and request stays fixed") {
                 val storage = InMemoryKodexAgentStorage(
-                    KodexAgentSettings(OpenAiModelId("initial"), threadName = "before", serviceTier = ServiceTier.Ultrafast),
+                    KodexAgentSettings(OpenAiModelId("initial"), name = "before", serviceTier = ServiceTier.Ultrafast),
                 )
                 val entered = CompletableDeferred<Unit>()
                 val release = CompletableDeferred<Unit>()
@@ -81,7 +81,7 @@ val compactionSettingsConsistencyTest by testSuite {
                 try {
                     entered.await()
                     assertEquals(KodexAgentStateValue.Compacting, agent.state.value)
-                    val renamed = initial.copy(threadName = "automatic title")
+                    val renamed = initial.copy(name = "automatic title")
                     assertTrue(agent.compareAndSetSettings(initial.copy(), renamed))
                     assertEquals(snapshotIndex + 1, agent.latestIndex.value)
                     val selected = renamed.copy(
@@ -95,11 +95,11 @@ val compactionSettingsConsistencyTest by testSuite {
                         turnState = "latest-routing",
                     )
                     assertEquals(snapshotIndex + 2, agent.updateSettings(selected))
-                    val latest = selected.copy(threadName = "manual title", serviceTier = ServiceTier.Flex)
+                    val latest = selected.copy(name = "manual title", serviceTier = ServiceTier.Flex)
                     assertTrue(agent.compareAndSetSettings(selected, latest))
                     val acceptedIndex = agent.latestIndex.value
                     assertTrue(agent.compareAndSetSettings(latest.copy(), latest.copy()))
-                    assertFalse(agent.compareAndSetSettings(initial, initial.copy(threadName = "stale")))
+                    assertFalse(agent.compareAndSetSettings(initial, initial.copy(name = "stale")))
                     assertEquals(acceptedIndex, agent.latestIndex.value)
                     assertEquals(KodexAgentStateValue.Compacting, agent.state.value)
                     assertEquals(initial, storage.getSettingsAt(snapshotIndex))
@@ -135,7 +135,7 @@ val compactionSettingsConsistencyTest by testSuite {
                         ResponseItem.CompactionTrigger,
                     ), request.input)
                     // A write after the checkpoint is a new transition, not another checkpoint.
-                    val after = committed.copy(threadName = "after")
+                    val after = committed.copy(name = "after")
                     assertTrue(agent.compareAndSetSettings(committed, after))
                     assertEquals(checkpoint + 1, agent.latestIndex.value)
                     assertEquals(latest, storage.getSettingsExact(acceptedIndex))
@@ -168,7 +168,7 @@ val compactionSettingsConsistencyTest by testSuite {
                 }
                 try {
                     entered.await()
-                    val latest = before.copy(threadName = "accepted", model = OpenAiModelId("latest"))
+                    val latest = before.copy(name = "accepted", model = OpenAiModelId("latest"))
                     assertTrue(agent.compareAndSetSettings(before, latest))
                     val acceptedIndex = agent.latestIndex.value
                     if (cancelled) {
@@ -184,7 +184,7 @@ val compactionSettingsConsistencyTest by testSuite {
                     assertEquals(latest, storage.getSettingsAt(acceptedIndex))
                     assertEquals(0, storage.countCommitsIn(0..Int.MAX_VALUE, AgentCommitType.WorkTypes))
                     assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
-                    assertTrue(agent.compareAndSetSettings(latest, latest.copy(threadName = "next")))
+                    assertTrue(agent.compareAndSetSettings(latest, latest.copy(name = "next")))
                 } finally {
                     release.complete(Unit)
                     running.cancelAndJoin()

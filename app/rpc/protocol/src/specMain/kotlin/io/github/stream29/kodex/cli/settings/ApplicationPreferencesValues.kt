@@ -12,12 +12,14 @@ import kotlinx.serialization.Serializable
  * @throws IllegalArgumentException if either width is below [MinimumSidebarWidthColumns].
  */
 public data class SidebarSettings(
-    public val left: SidebarContent = SidebarContent.HistoryIndex,
-    public val right: SidebarContent = SidebarContent.TerminalSessions,
+    public val activeLeft: ToolWindowId? = null,
+    public val activeRight: ToolWindowId? = null,
     public val leftWidth: Int = DefaultSidebarWidthColumns,
     public val rightWidth: Int = DefaultSidebarWidthColumns,
 ) {
     init {
+        require(activeLeft == null || activeLeft.side == ToolWindowSide.Left)
+        require(activeRight == null || activeRight.side == ToolWindowSide.Right)
         require(leftWidth >= MinimumSidebarWidthColumns) {
             "The left sidebar width must be at least $MinimumSidebarWidthColumns columns."
         }

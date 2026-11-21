@@ -61,8 +61,7 @@ public enum class BackendControlCommand(
 public data class CliAgentStatusOutput(
     @SerialName("agent_id")
     public val agentId: Int,
-    @SerialName("thread_name")
-    public val threadName: String,
+    public val name: String,
     public val cwd: String,
     public val model: OpenAiModelId,
     @SerialName("reasoning_effort")

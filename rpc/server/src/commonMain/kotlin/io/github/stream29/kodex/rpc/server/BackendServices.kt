@@ -64,6 +64,7 @@ public actual suspend fun <R> withBackendServices(
     renewBackend: suspend () -> Unit,
     backendRenewalInterval: () -> Duration,
     checkAdmission: () -> Unit,
+    requiresPreparedHome: Boolean,
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R = withBackendServicesWithTitleGenerator(
     home = home,
@@ -76,6 +77,7 @@ public actual suspend fun <R> withBackendServices(
     renewBackend = renewBackend,
     backendRenewalInterval = backendRenewalInterval,
     checkAdmission = checkAdmission,
+    requiresPreparedHome = requiresPreparedHome,
     block = block,
 )
 
@@ -90,6 +92,7 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
     renewBackend: suspend () -> Unit = {},
     backendRenewalInterval: () -> Duration = { 20.seconds },
     checkAdmission: () -> Unit = {},
+    requiresPreparedHome: Boolean = false,
     clock: Clock = Clock.System,
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R = coroutineScope {
@@ -162,11 +165,12 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                 renewBackend = renewBackend,
                 backendRenewalInterval = backendRenewalInterval,
                 checkAdmission = checkAdmission,
+                requiresPreparedHome = requiresPreparedHome,
             )
             var operationFailure: Throwable? = null
             try {
                 val existingDbMeta = SystemCoroutineFileSystem.metadataOrNull(Path(home, "kodex.db"))
-                if (existingDbMeta != null && existingDbMeta.isRegularFile && existingDbMeta.size > 0L) {
+                if (requiresPreparedHome || existingDbMeta != null && existingDbMeta.isRegularFile && existingDbMeta.size > 0L) {
                     persistence.acquire(requireExternalAdmission = false)
                 }
                 val eventBus = AgentEventBus(persistence.sessionRepository)
@@ -203,6 +207,7 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                     account = account,
                     effects = effects,
                     sessions = management,
+                    catalogRepository = { persistence.acquire().first },
                     schedules = persistence.scheduleRepository,
                     home = home,
                     checkAdmission = persistence::ensureAdmission,
@@ -298,6 +303,7 @@ internal class LazySqliteBackendPersistence(
     private val renewBackend: suspend () -> Unit,
     private val backendRenewalInterval: () -> Duration,
     private val checkAdmission: () -> Unit,
+    private val requiresPreparedHome: Boolean = false,
     private val sessionTtl: Duration = DefaultKodexSessionTtl,
 ) {
     private val persistenceScope: CoroutineScope =
@@ -362,6 +368,16 @@ internal class LazySqliteBackendPersistence(
         override suspend fun createFork(sourceEntryIndex: Int): Int {
             val sessions = acquire().first
             return sessions.createFork(sourceEntryIndex).also { lazyEntries.value = sessions.entries.value }
+        }
+
+        override suspend fun createAgentFork(
+            sourceAgentId: Int,
+            expectedOwner: KodexAgentSession?,
+            untilExclusive: Int?,
+        ) = acquire().first.let { sessions ->
+            sessions.createAgentFork(sourceAgentId, expectedOwner, untilExclusive).also {
+                lazyEntries.value = sessions.entries.value
+            }
         }
 
         override suspend fun open(entryIndex: Int): KodexAgentSession {
@@ -449,7 +465,8 @@ internal class LazySqliteBackendPersistence(
             if (existingSessions != null && existingSchedules != null) {
                 return@withLock existingSessions to existingSchedules
             }
-            val (resolvedHome, connection) = openVerifiedKodexDatabase(home, SystemCoroutineFileSystem)
+            val (resolvedHome, connection) =
+                openVerifiedKodexDatabase(home, SystemCoroutineFileSystem, allowFresh = !requiresPreparedHome)
             try {
                 lateinit var schedules: SqliteScheduleRepository
                 val sessions = persistenceScope.SqliteKodexSessionRepository(

@@ -505,7 +505,7 @@ val compactionSteerTest by testSuite {
                 },
             ) {
                 state.appendUserMessage(content("initial"))
-                storage.commit(LlmRequestMeta.Response(20L))
+                storage.commit(LlmRequestMeta.Response(20L, elapsedNanoseconds = 1_000_000L, outputTokens = 0))
                 val running = async { runtime.resume() }
                 compacting.await()
                 state.steer(listOf(user("during compact")))

@@ -63,7 +63,7 @@ val sessionTabBarRendererTest by testSuite {
         val recording = RecordingCallbacks()
         val callbacks = object : SessionTabBarCallbacks by recording {
             override fun selectNewSession() { recording.selectNewSession(); revision++ }
-            override fun openSessions() { recording.openSessions(); revision++ }
+            override val sessionsAction: () -> Unit = { recording.sessionsAction(); revision++ }
         }
         runMosaicTest {
             val initial = setContentAndSnapshot {
@@ -275,7 +275,7 @@ private class RecordingCallbacks : SessionTabBarCallbacks {
         newSessionCount++
     }
 
-    override fun openSessions() {
+    override val sessionsAction: () -> Unit = {
         sessionsCount++
     }
 }

@@ -120,7 +120,7 @@ internal class BackendAgentRuntimeRpc(
 
     private suspend fun requireIncompleteAgent(agentId: Int): StoredAgent {
         val record = repository.getAgentRecord(agentId) ?: throw AgentNotFound()
-        if (record.completed) throw AgentCompleted()
+        if (record.parentAgentId != null && record.completed) throw AgentCompleted()
         return record
     }
 

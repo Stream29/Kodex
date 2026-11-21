@@ -7,7 +7,7 @@ import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.cli.settings.NewLineKey
-import io.github.stream29.kodex.cli.settings.SidebarContent
+import io.github.stream29.kodex.cli.settings.ToolWindowId
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem as Fs
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -61,25 +61,26 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                     "rendered"
                 }
                 assertEquals("rendered", value)
-                assertEquals("\"$CurrentKodexApplicationVersion\"", Fs.readString(Path(home, "version.json")))
+                val reopened = prepareKodexHome(home)
+                assertEquals(CurrentKodexApplicationVersion, reopened.version)
+                reopened.closeAndJoin()
                 assertHomeReleased(home)
             } finally { deleteTestDirectory(home) }
         }
     }
-    test("prepared custom Home migrates legacy settings before the production frontend reads them") {
+    test("prepared custom Home reads current settings and persists a Session") {
         coroutineScope {
             val home = Path(SystemTemporaryDirectory, "kodex-cutover-upgrade-${Random.nextLong()}")
             try {
-                Fs.createDirectories(home)
-                Fs.writeString(Path(home, "version.json"), "\"0.4.6\"")
-                Fs.writeString(Path(home, "settings.yml"), """
-                    new_line_key: enter
-                    new_session: {model: fixture-migrated-model}
-                    session_title: {enabled: false}
-                    sidebars: {left: none, right: history_index, left_width: 45, right_width: 60}
-                    hooks: {discarded: {type: stop, command: echo should-never-run}}
-                """.trimIndent())
                 val handle = prepareKodexHome(home)
+                Fs.writeString(Path(home, "settings.yml"), """
+                    backend:
+                      new_session: {model: configured-model}
+                      session_title: {enabled: false}
+                    frontend:
+                      new_line_key: enter
+                      sidebars: {active_left: null, active_right: history_index}
+                """.trimIndent())
                 withKodexApplication(
                     handle, home, Path(home, "codex"), Path(home, "agents"), applicationWidth = 120,
                     createClient = { applicationClient() }, createLoginClient = { ApplicationLoginClient },
@@ -87,35 +88,28 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                     assertTrue(Fs.exists(Path(home, "settings.yml")))
                     assertFalse(Fs.exists(Path(home, "settings.backend.yml")))
                     assertFalse(Fs.exists(Path(home, "settings.frontend.cli.yml")))
-                    assertEquals("fixture-migrated-model", it.viewModel.newSession.settings.value.model.value)
+                    assertEquals("configured-model", it.viewModel.newSession.settings.value.model.value)
                     assertEquals(NewLineKey.Enter, it.newLineKey.value)
-                    assertEquals(SidebarContent.None, it.sidebarSettings.state.value.left)
-                    assertEquals(SidebarContent.HistoryIndex, it.sidebarSettings.state.value.right)
+                    assertEquals(null, it.sidebarSettings.state.value.activeLeft)
+                    assertEquals(ToolWindowId.HistoryIndex, it.sidebarSettings.state.value.activeRight)
                     assertEquals(30, it.sidebarSettings.state.value.leftWidth)
-                    val encoded = Fs.readString(Path(home, "settings.yml"))
-                    assertFalse("should-never-run" in encoded)
-                    assertFalse("left_width" in encoded)
-                    // The migration assertion uses a deliberately custom model; select the
-                    // mock catalog's model before starting the first real backend turn.
+                    // Select the mock catalog's model before starting the first real backend turn.
                     it.viewModel.newSession.updateModel(OpenAiModelId("test-model"))
                     it.viewModel.newSession.settings.first { value -> value.model == OpenAiModelId("test-model") }
                     val session = it.viewModel.submitTestSession()
                     assertTrue(session.sessionIndex >= 0)
                     assertTrue(Fs.exists(Path(home, "sessions")))
                 }
-                assertEquals("\"$CurrentKodexApplicationVersion\"", Fs.readString(Path(home, "version.json")))
                 assertHomeReleased(home)
             } finally { withContext(NonCancellable) { deleteTestDirectory(home) } }
         }
     }
-    for (checkpoint in listOf("0.4.7", "0.4.10")) {
-        test("legacy checkpoint $checkpoint migrates before another prepared Home reader stays alive") {
+    test("frontend release retains another current Home reader and the same checkpoint") {
             coroutineScope {
                 val home = Path(SystemTemporaryDirectory, "kodex-cutover-checkpoint-${Random.nextLong()}")
                 try {
-                    Fs.createDirectories(home)
-                    Fs.writeString(Path(home, "version.json"), "\"$checkpoint\"")
                     val otherReader = prepareKodexHome(home)
+                    val marker = Fs.readString(Path(home, "version.json"))
                     try {
                         val handle = prepareKodexHome(home)
                         assertEquals(CurrentKodexApplicationVersion, handle.version)
@@ -125,7 +119,7 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                             createLoginClient = { ApplicationLoginClient },
                         ) { "rendered" }
                         assertEquals("rendered", value)
-                        assertEquals("\"$CurrentKodexApplicationVersion\"", Fs.readString(Path(home, "version.json")))
+                        assertEquals(marker, Fs.readString(Path(home, "version.json")))
                         assertTrue(Fs.list(Path(home, ".locks/home")).any { it.name.endsWith(".read.lock") })
                     } finally {
                         otherReader.closeAndJoin()
@@ -135,7 +129,6 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                     withContext(NonCancellable) { deleteTestDirectory(home) }
                 }
             }
-        }
     }
     test("cancelling the renderer releases Home before the host job completes") {
         // Exercise immediate host cancellation with independently prepared real Homes.

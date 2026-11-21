@@ -28,7 +28,7 @@ val offscreenWheelRaceProbeTest by testSuite {
         val callbacks = object : SessionTabBarCallbacks {
             override fun select(identity: SessionTabIdentity) { commands++ }
             override fun selectNewSession() { commands++ }
-            override fun openSessions() { commands++ }
+            override val sessionsAction: () -> Unit = { commands++ }
         }
         val scene = OffscreenScene.create(width = 320) {
             SessionTabBarContent(SessionTabBarState(tabs, null), callbacks, rememberComposeSessionTabBarRenderer(), {})
@@ -297,7 +297,7 @@ val offscreenWheelRaceProbeTest by testSuite {
         val callbacks = object : SessionTabBarCallbacks {
             override fun select(identity: SessionTabIdentity) {}
             override fun selectNewSession() {}
-            override fun openSessions() {}
+            override val sessionsAction: () -> Unit = {}
         }
         val scene = OffscreenScene.create(width = 320) {
             SessionTabBarContent(state, callbacks, rememberComposeSessionTabBarRenderer(), {})
@@ -325,5 +325,5 @@ val offscreenWheelRaceProbeTest by testSuite {
 private fun noOpCallbacks(): SessionTabBarCallbacks = object : SessionTabBarCallbacks {
     override fun select(identity: SessionTabIdentity) {}
     override fun selectNewSession() {}
-    override fun openSessions() {}
+    override val sessionsAction: () -> Unit = {}
 }

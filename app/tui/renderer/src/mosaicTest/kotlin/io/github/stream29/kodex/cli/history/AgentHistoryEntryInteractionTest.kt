@@ -88,8 +88,9 @@ val agentHistoryEntryInteractionTest by testSuite {
     for (grouped in listOf(false, true)) {
         test("terminal exit is a one-line disclosure, grouped=$grouped") {
             val code = if (grouped) 23 else 0
+            val name = if (grouped) "检查作业" else "Inspect job"
             val child = FakeMessage(4, MessageHistoryItemState.Ready(
-                StableTerminalExitedEvent(37, if (grouped) "检查作业" else "", "first\n${"x".repeat(96)}\nlast", code),
+                StableTerminalExitedEvent(37, name, "first\n${"x".repeat(96)}\nlast", code),
                 Duration.ZERO,
             ))
             val item = if (grouped) FakeWorkGroup(4..4, listOf(child)) else child
@@ -102,7 +103,7 @@ val agentHistoryEntryInteractionTest by testSuite {
                     }
                 }
                 val line = if (grouped) 1 else 0
-                val title = if (grouped) "检查作业 (exit 23)" else "(exit 0)"
+                val title = "$name (exit $code)"
                 suspend fun waitUntil(predicate: (String) -> Boolean): String = kotlinx.coroutines.withTimeout(5_000) {
                     var draw: String
                     do { draw = awaitSnapshot() } while (!predicate(draw))
@@ -122,6 +123,7 @@ val agentHistoryEntryInteractionTest by testSuite {
                 sendMouseEvent(MouseEvent(1, line, MouseEvent.Type.Release))
                 val expanded = waitUntil { "first" in it && "last" in it }
                 assertTrue("first" in expanded && "last" in expanded, expanded)
+                assertEquals(name, expanded.lines().filter(String::isNotBlank)[line + 1].trim())
                 assertEquals(97, expanded.count { it == 'x' }) // command plus the x in the title
                 sendMouseEvent(MouseEvent(1, line, MouseEvent.Type.Press, MouseEvent.Button.Left))
                 awaitSnapshot()
@@ -367,7 +369,7 @@ val agentHistoryEntryInteractionTest by testSuite {
     test("collapsed command header ignores live terminal session changes") {
         val session = FakeShellSession(
             sessionId = 7,
-            arguments = ExecCommandArguments(command = "tail -f build.log", yieldTimeMillis = 10_000),
+            arguments = ExecCommandArguments(command = "tail -f build.log", name = "Follow build log", yieldTimeMillis = 10_000),
         )
         val sessions = FakeShellSessions(mapOf(session.sessionId to session))
         var width by mutableIntStateOf(60)

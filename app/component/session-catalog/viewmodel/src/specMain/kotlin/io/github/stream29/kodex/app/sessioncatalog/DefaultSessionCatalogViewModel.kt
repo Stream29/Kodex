@@ -27,6 +27,5 @@ public expect class DefaultSessionCatalogViewModel(
     override suspend fun setShowArchived(showArchived: Boolean): Unit
     override suspend fun archive(sessionIndex: Int): Unit
     override suspend fun unarchive(sessionIndex: Int): Unit
-    override suspend fun fork(sessionIndex: Int): Int
     override fun close(): Unit
 }

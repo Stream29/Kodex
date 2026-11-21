@@ -20,25 +20,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.time.Instant
 
-// language=SQL
-internal const val SqliteSchedulesSchema: String = """
-CREATE TABLE IF NOT EXISTS schedules (
-    schedule_id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (schedule_id >= 1),
-    agent_id INTEGER NOT NULL CHECK (agent_id BETWEEN 0 AND 2147483647),
-    trigger_at_epoch_seconds INTEGER NOT NULL,
-    trigger_at_nanoseconds INTEGER NOT NULL CHECK (trigger_at_nanoseconds BETWEEN 0 AND 999999999),
-    cron TEXT,
-    description TEXT NOT NULL,
-    created_at TEXT NOT NULL
-) STRICT;
-
-CREATE INDEX IF NOT EXISTS idx_schedules_trigger_at
-    ON schedules(trigger_at_epoch_seconds, trigger_at_nanoseconds, schedule_id);
-
-CREATE INDEX IF NOT EXISTS idx_schedules_agent_id
-    ON schedules(agent_id, trigger_at_epoch_seconds, trigger_at_nanoseconds, schedule_id);
-"""
-
 public actual class SqliteScheduleRepository internal constructor(
     private val connection: SqliteConnection,
     private val mutex: Mutex,
@@ -196,17 +177,9 @@ public actual suspend fun SqliteScheduleRepository(
 ): SqliteScheduleRepository {
     currentCoroutineContext().ensureActive()
     val earliest = mutex.withLock {
-        withContext(NonCancellable) {
-            withContext(Dispatchers.IO) {
-                requireAccess()
-                connection.transaction {
-                    SqliteSchedulesSchema.split(';')
-                        .map(String::trim)
-                        .filter(String::isNotEmpty)
-                        .forEach(connection::execute)
-                    queryEarliestTriggerUnsafe(connection)
-                }
-            }
+        withContext(Dispatchers.IO) {
+            requireAccess()
+            queryEarliestTriggerUnsafe(connection)
         }
     }
     return SqliteScheduleRepository(

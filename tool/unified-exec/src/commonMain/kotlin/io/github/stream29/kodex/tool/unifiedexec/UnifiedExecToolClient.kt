@@ -244,7 +244,6 @@ private suspend fun ProcessSession.awaitInitialOutput(yieldTime: Duration): Proc
 }
 
 private fun ExecCommandArguments.validate() {
-    if (!name.isValidCommandIntentName()) throw UnifiedExecToolException("`name` must be nonblank, single-line text.")
     if (command.isBlank()) throw UnifiedExecToolException("`cmd` must not be blank.")
     if (yieldTimeMillis < 0) throw UnifiedExecToolException("`yield_time_ms` must not be negative.")
     if (maxOutputTokens < 0) throw UnifiedExecToolException("`max_output_tokens` must not be negative.")

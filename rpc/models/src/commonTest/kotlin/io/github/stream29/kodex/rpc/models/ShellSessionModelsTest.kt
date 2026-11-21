@@ -19,6 +19,7 @@ val shellSessionModelsTest by testSuite {
     test("registry snapshots retain original arguments and completed entries") {
         val arguments = ExecCommandArguments(
             command = "fixture command\nsecond line",
+            name = "Run the fixture 🧪",
             workdir = "/fixture/work",
             shell = Shell(ShellType.Bash, Path("/fixture/bin/bash")),
             yieldTimeMillis = 1234,
@@ -27,7 +28,7 @@ val shellSessionModelsTest by testSuite {
         val snapshot = linkedMapOf(
             7 to ShellSessionState(arguments = arguments, registrationNonce = "registration-a", exitCode = null),
             Int.MAX_VALUE to ShellSessionState(
-                arguments = ExecCommandArguments(command = "completed fixture", yieldTimeMillis = 10_000),
+                arguments = ExecCommandArguments(command = "completed fixture", name = "Run completed fixture", yieldTimeMillis = 10_000),
                 registrationNonce = "registration-b",
                 exitCode = 0,
             ),
@@ -40,7 +41,7 @@ val shellSessionModelsTest by testSuite {
 
     test("completion changes the value without changing registry membership") {
         val running = ShellSessionState(
-            arguments = ExecCommandArguments(command = "fixture", yieldTimeMillis = 10_000),
+            arguments = ExecCommandArguments(command = "fixture", name = "Run a fixture", yieldTimeMillis = 10_000),
             registrationNonce = "registration-a",
             exitCode = null,
         )
@@ -57,25 +58,27 @@ val shellSessionModelsTest by testSuite {
         assertNotEquals(before, mapOf(1 to running.copy(registrationNonce = "registration-b")))
     }
 
-    test("arguments and registration nonce are required; exitCode can be absent") {
+    test("arguments include a required intent name; registration nonce is required but exitCode can be absent") {
         val decoded = json.decodeFromString<ShellSessionState>(
-            """{"arguments":{"cmd":"fixture","yield_time_ms":10000},"registrationNonce":"registration-a"}""",
+            """{"arguments":{"cmd":"fixture","name":"Run a fixture","yield_time_ms":10000},"registrationNonce":"registration-a"}""",
         )
         assertEquals(
             ShellSessionState(
-                arguments = ExecCommandArguments(command = "fixture", yieldTimeMillis = 10_000),
+                arguments = ExecCommandArguments(command = "fixture", name = "Run a fixture", yieldTimeMillis = 10_000),
                 registrationNonce = "registration-a",
             ),
             decoded,
         )
         for (invalid in listOf(
-            """{"arguments":{"cmd":"fixture","yield_time_ms":10000}}""",
-            """{"arguments":{"cmd":"fixture"},"registrationNonce":"registration-a"}""",
-            """{"arguments":{"cmd":"fixture","yield_time_ms":null},"registrationNonce":"registration-a"}""",
-            """{"arguments":{"cmd":"fixture","yield_time_ms":"not-a-number"},"registrationNonce":"registration-a"}""",
+            """{"arguments":{"cmd":"fixture","name":"Run a fixture","yield_time_ms":10000}}""",
+            """{"arguments":{"cmd":"fixture","yield_time_ms":10000},"registrationNonce":"registration-a"}""",
+            """{"arguments":{"cmd":"fixture","name":null,"yield_time_ms":10000},"registrationNonce":"registration-a"}""",
+            """{"arguments":{"cmd":"fixture","name":"Run a fixture"},"registrationNonce":"registration-a"}""",
+            """{"arguments":{"cmd":"fixture","name":"Run a fixture","yield_time_ms":null},"registrationNonce":"registration-a"}""",
+            """{"arguments":{"cmd":"fixture","name":"Run a fixture","yield_time_ms":"not-a-number"},"registrationNonce":"registration-a"}""",
             """{}""",
             """{"arguments":null,"registrationNonce":"registration-a"}""",
-            """{"arguments":{"cmd":"fixture","yield_time_ms":10000},"registrationNonce":"registration-a","exitCode":"not-an-int"}""",
+            """{"arguments":{"cmd":"fixture","name":"Run a fixture","yield_time_ms":10000},"registrationNonce":"registration-a","exitCode":"not-an-int"}""",
         )) {
             assertFailsWith<SerializationException> {
                 json.decodeFromString<ShellSessionState>(invalid)

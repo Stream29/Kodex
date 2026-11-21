@@ -4,10 +4,7 @@ package io.github.stream29.kodex.cli.historyindex
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
@@ -36,7 +33,6 @@ public actual class HistoryIndexInteractionRequest actual constructor(
     public actual val anchor: TuiPopupAnchor,
     public actual val revision: Long,
 ) {
-    public actual var pointerPosition: IntOffset? by mutableStateOf(null)
     internal val sharedTarget = HistoryIndexTarget(viewModel, generation, index, revision)
 
     public actual fun isCurrent(): Boolean = sharedTarget.isCurrent()
@@ -83,10 +79,9 @@ internal fun BoxScope.HistoryIndexContextMenuPopup(
     anchor: TuiPopupAnchor,
     clickPosition: IntOffset?,
     index: Int,
+    timestamp: String?,
+    actions: List<HistoryIndexMenuAction>,
     onDismissRequest: () -> Unit,
-    onCheckOut: () -> Unit,
-    timestamp: String? = null,
-    onDetails: (() -> Unit)? = null,
     state: TuiPopupMenuState = rememberTuiPopupMenuState(),
 ) {
     TuiContextMenu(
@@ -99,9 +94,8 @@ internal fun BoxScope.HistoryIndexContextMenuPopup(
                 if (timestamp != null) Text("Timestamp: $timestamp")
             }
         }
-        TuiPopupMenuItem(key = "history-index-check-out", onClick = onCheckOut) { Text("Check out") }
-        if (onDetails != null) {
-            TuiPopupMenuItem(key = "history-index-details", onClick = onDetails, dismissOnClick = false) { Text("Details") }
+        actions.forEach { action ->
+            TuiPopupMenuItem(key = action.key, onClick = action.onClick, dismissOnClick = false) { Text(action.label) }
         }
     }
 }

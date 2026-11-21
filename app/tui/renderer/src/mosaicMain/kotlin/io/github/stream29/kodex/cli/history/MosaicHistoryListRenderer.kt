@@ -109,6 +109,10 @@ internal class MosaicHistoryListRenderer(
             if (expected.generation != historyItems.generation || model.pendingScrollEffect.value !== expected) {
                 return@LaunchedEffect
             }
+            if (!expected.isCurrent()) {
+                model.acknowledgeScrollEffect(expected)
+                return@LaunchedEffect
+            }
             when (val target = expected.target) {
                 HistoryScrollTarget.Latest -> {
                     listState.requestScrollToStart()

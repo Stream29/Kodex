@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.rpc.models
 
-import io.github.stream29.kodex.cli.settings.SidebarContent
+import io.github.stream29.kodex.cli.settings.ToolWindowId
+import io.github.stream29.kodex.cli.settings.ToolWindowSide
 import kotlinx.serialization.Serializable
 
 /**
@@ -11,6 +12,11 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 public data class CliSidebarSettings(
-    public val left: SidebarContent = SidebarContent.HistoryIndex,
-    public val right: SidebarContent = SidebarContent.TerminalSessions,
-)
+    public val activeLeft: ToolWindowId? = null,
+    public val activeRight: ToolWindowId? = null,
+) {
+    init {
+        require(activeLeft == null || activeLeft.side == ToolWindowSide.Left)
+        require(activeRight == null || activeRight.side == ToolWindowSide.Right)
+    }
+}

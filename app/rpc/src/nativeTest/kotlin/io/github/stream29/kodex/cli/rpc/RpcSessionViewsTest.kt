@@ -8,12 +8,17 @@ import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
+import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
+import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
+import io.github.stream29.kodex.cli.app.createApplicationViewModel
+import io.github.stream29.kodex.cli.newsession.DefaultNewSessionViewModelFactory
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import io.github.stream29.kodex.openai.client.test.withFixtureResponseReadTiming
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.client.update
 import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
@@ -114,8 +119,8 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val secondView = views.open(second)
             assertEquals(firstRoot, firstView.current().storage.agentId)
             assertEquals(secondRoot, secondView.current().storage.agentId)
-            assertEquals("Session $first", firstView.current().settings.value.threadName)
-            assertEquals("Session $second", secondView.current().settings.value.threadName)
+            assertEquals("Session $first", firstView.current().settings.value.name)
+            assertEquals("Session $second", secondView.current().settings.value.name)
         }
     }
 
@@ -319,10 +324,10 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertEquals(0L, binding.tokenCount.value?.totalTokens)
             assertTrue(binding.settings.compareAndSet(initial, initial.copy(instructions = "edited")))
             binding.settings.first { it.instructions == "edited" }
-            assertFalse(binding.settings.compareAndSet(initial, initial.copy(threadName = "stale")))
+            assertFalse(binding.settings.compareAndSet(initial, initial.copy(name = "stale")))
             assertEquals(
                 "Session ${view.sessionIndex}",
-                checkNotNull(binding.storage.getSettingsAt(binding.latestIndex.value)).threadName,
+                checkNotNull(binding.storage.getSettingsAt(binding.latestIndex.value)).name,
             )
         }
     }
@@ -355,7 +360,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             assertFalse(agent.historyIndex.contains(old.generation, committed))
             assertFalse(agent.historyIndex.checkOut(old.generation, committed))
             assertFailsWith<CacheNonceMismatch> { binding.forkHistory(committed, old.generation) }
-            binding.settings.first { it.threadName == "Session ${view.sessionIndex}" }
+            binding.settings.first { it.name == "Session ${view.sessionIndex}" }
         }
     }
 
@@ -373,11 +378,12 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 catalog.setShowArchived(true)
                 assertTrue(catalog.state.value.sessions.single().archived)
                 catalog.unarchive(index)
-                val fork = catalog.fork(index)
-                assertNotEquals(index, fork)
+                assertFalse(catalog.state.value.sessions.single().archived)
+                val otherIndex = services.global.createSession(home)
+                catalog.refresh()
                 assertTrue(
                     requireNotNull(
-                        catalog.requestDelete(catalog.state.value.sessions.single { it.sessionIndex == fork }),
+                        catalog.requestDelete(catalog.state.value.sessions.single { it.sessionIndex == otherIndex }),
                     ).viewModel.delete(),
                 )
                 assertEquals(index, catalog.state.value.sessions.single().sessionIndex)
@@ -389,11 +395,11 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend {
             val view = views.open(services.global.createSession(home))
             val initial = view.current().settings
-            initial.update { it.copy(threadName = "fixed", instructions = "keep") }
-            initial.first { it.threadName == "fixed" && it.instructions == "keep" }
+            initial.update { it.copy(name = "fixed", instructions = "keep") }
+            initial.first { it.name == "fixed" && it.instructions == "keep" }
             val other = views.open(services.global.createSession(home))
-            other.current().settings.update { it.copy(threadName = "other") }
-            other.current().settings.first { it.threadName == "other" }
+            other.current().settings.update { it.copy(name = "other") }
+            other.current().settings.first { it.name == "other" }
             val agent = requireNotNull(view.rootAgent.value)
             try {
                 val child = agent.runtimeConfiguration
@@ -403,7 +409,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 agent.settings.first { it.model == OpenAiModelId("edited") }
                 assertEquals(ReasoningEffort.Max, agent.settings.value.reasoning.effort)
                 assertEquals(ServiceTier.Fast, agent.settings.value.serviceTier)
-                assertEquals(before.threadName, agent.settings.value.threadName)
+                assertEquals(before.name, agent.settings.value.name)
                 assertEquals(before.instructions, agent.settings.value.instructions)
                 assertEquals(OpenAiModelId("test-model"), other.current().settings.value.model)
                 child.updateRequestUserInputMode(RequestUserInputMode.NoQuestion)
@@ -670,7 +676,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             oldAgent.lifecycle.first { it == io.github.stream29.kodex.app.agent.contract.AgentLifecycleState.Closed }
             assertEquals(ComposerLifecycle.Closed, oldComposer.state.value.lifecycle)
             oldComposer.submit(oldComposer.state.value.revision)
-            assertFailsWith<CancellationException> { oldAgent.renameThread("expired binding") }
+            assertFailsWith<CancellationException> { oldAgent.rename("expired binding") }
             assertSame(recoveredAgent, view.rootAgent.value)
             assertEquals(2, keepalives)
             assertEquals(1, submits)
@@ -888,7 +894,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
     }
 
     test("shell completion is a projection and completed entries remain until the registry removes them") {
-        val arguments = ExecCommandArguments("not executed", yieldTimeMillis = 10_000)
+        val arguments = ExecCommandArguments("not executed", name = "Inspect terminal fixture", yieldTimeMillis = 10_000)
         val snapshot = MutableStateFlow(mapOf(9 to ShellSessionState(arguments, "first")))
         val closed = CompletableDeferred<Unit>()
         frontend(decorate = { delegate ->
@@ -926,7 +932,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
     }
 
     test("a read from a replaced registration is discarded and cancellation stays in the read scope") {
-        val arguments = ExecCommandArguments("identical command", yieldTimeMillis = 10_000)
+        val arguments = ExecCommandArguments("identical command", name = "Inspect identical registrations", yieldTimeMillis = 10_000)
         val snapshot = MutableStateFlow(mapOf(9 to ShellSessionState(arguments, "first")))
         val started = CompletableDeferred<Unit>()
         val resume = CompletableDeferred<Unit>()
@@ -1044,11 +1050,25 @@ internal class FrontendFixture(
     val home: Path,
     val failures: StateFlow<List<Throwable>>,
 ) : CoroutineScope {
+    private val navigationApp = lazy {
+        createApplicationViewModel(
+            views, DefaultNewSessionViewModelFactory(views, views, global, this),
+            { error("Fixture did not install a Settings editor.") },
+            { error("Fixture did not install Login.") },
+            { error("Fixture did not install a directory picker.") },
+            NewSessionViewModelArguments(home),
+            this,
+            sessionGroups = RpcApplicationSessionCatalog(services, views),
+        )
+    }
+    val application: ApplicationViewModel get() = navigationApp.value
+    fun releaseApplication() { if (navigationApp.isInitialized()) application.close() }
+
     suspend fun create(name: String = "Test Session"): RpcSessionView {
         val session = views.open(services.global.createSession(home))
         session.rename(name)
         session.name.first { it == name }
-        session.settings.first { it.threadName == name }
+        session.settings.first { it.name == name }
         return session
     }
 }
@@ -1059,6 +1079,7 @@ internal suspend fun frontend(
     login: OpenAiLoginClient = FixtureLoginClient(),
     onRequest: (ResponsesApiRequest) -> Unit = {},
     connectionAvailable: () -> Boolean = { true },
+    responseReadElapsed: kotlin.time.Duration? = null,
     block: suspend FrontendFixture.() -> Unit,
 ) = withContext(Dispatchers.Default.limitedParallelism(1)) { withTimeout(40.seconds) {
     // Interaction commands and child observations share a serialized owner dispatcher,
@@ -1068,7 +1089,11 @@ internal suspend fun frontend(
         listModels { OpenAiResult.Success(ModelsResponse(listOf(ModelInfo(
             OpenAiModelId("test-model"), "Test Model", contextWindow = 100_000, maxContextWindow = 100_000,
         )))) }
-        createResponse { request -> onRequest(request); flow { response() } }
+        createResponse { request ->
+            onRequest(request)
+            val events = flow<ResponsesStreamEvent> { response() }
+            responseReadElapsed?.let(events::withFixtureResponseReadTiming) ?: events
+        }
     }
     try {
         withBackendServices(
@@ -1089,8 +1114,10 @@ internal suspend fun frontend(
                 val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()),
                     connectionAvailable = connectionAvailable,
                     reportUnhandledError = { error -> failures.update { it + error } })
-                try { FrontendFixture(coroutineContext, services, views, global, root, failures).block() }
+                val fixture = FrontendFixture(coroutineContext, services, views, global, root, failures)
+                try { fixture.block() }
                 finally {
+                    fixture.releaseApplication()
                     views.close()
                     global.close()
                     withContext(NonCancellable) { try { views.join() } finally { global.join() } }

@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.rpc.RpcCall
 import kotlinx.rpc.RpcClient
 import kotlin.test.*
+import kotlin.time.Duration.Companion.milliseconds
 
 val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("real JSON RPC preserves Ultrafast through defaults draft submission CAS reopen and fork") {
@@ -39,7 +40,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
                 val current = binding.settings.value
                 assertFalse(binding.settings.compareAndSet(current.copy(serviceTier = ServiceTier.Default), current))
-                val forked = services.global.forkSession(view.sessionIndex)
+                val forked = services.global.forkAgent(view.agentId)
                 val fork = views.open(forked)
                 assertEquals(ServiceTier.Ultrafast, fork.current().settings.value.serviceTier)
                 views.release(view)
@@ -53,7 +54,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
     test("returned tier remains captured diagnostics after settings change without warning or error on reopen") {
         val started = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()
-        frontend(response = {
+        frontend(responseReadElapsed = 5.milliseconds, response = {
             started.complete(Unit)
             finish.await()
             tierAnswer("different", "default")
@@ -74,6 +75,8 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 binding.state.first { it == AgentStateValue.AssistantMessage }
                 binding.running.first { !it }
                 val snapshot = binding.tokenCount.first { it is LlmRequestMeta.Response } as LlmRequestMeta.Response
+                assertEquals(5_000_000L, snapshot.elapsedNanoseconds)
+                assertEquals(3L, snapshot.outputTokens)
                 assertEquals("ultrafast", snapshot.diagnostics?.requestedServiceTier)
                 assertEquals("default", snapshot.diagnostics?.serviceTier)
                 assertEquals("captured", snapshot.diagnostics?.requestedModel)
@@ -95,6 +98,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
         val finish = CompletableDeferred<Unit>()
         frontend(
             response = { started.complete(Unit); finish.await(); tierAnswer("different", "priority") },
+            responseReadElapsed = 5.milliseconds,
             decorate = { delegate ->
                 object : RpcClient by delegate {
                     override suspend fun <T> call(call: RpcCall): T {
@@ -131,7 +135,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
     for (actual in listOf(null, "", "default", "priority", "future-tier", "ultrafast")) {
         test("successful Ultrafast response with reported tier '$actual' is diagnostics only") {
             val requests = mutableListOf<ResponsesApiRequest>()
-            frontend(onRequest = requests::add, response = { tierAnswer("successful", actual) }) {
+            frontend(onRequest = requests::add, responseReadElapsed = 5.milliseconds, response = { tierAnswer("successful", actual) }) {
                 val old = services.global.getSettings()
                 assertTrue(services.global.compareAndSetSettings(old, old.copy(
                     newSession = old.newSession.copy(model = OpenAiModelId("captured"), serviceTier = ServiceTier.Ultrafast),
@@ -154,6 +158,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
 }
 
 private suspend fun FlowCollector<ResponsesStreamEvent>.tierAnswer(id: String, actual: String?) {
+    emit(ResponsesStreamEvent.Created(Response(id = id)))
     emit(ResponsesStreamEvent.OutputItemDone(0, ResponseItem.Message(
         id = ResponseItemId("answer-$id"), role = MessageRole.Assistant,
         content = listOf(ContentItem.OutputText("answer")),

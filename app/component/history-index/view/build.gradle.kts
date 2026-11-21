@@ -13,5 +13,8 @@ kotlin {
             api(project(":app-component-history-view"))
             api(compose.runtime)
         }
+        commonMain.dependencies {
+            implementation(project(":app-component-widgets"))
+        }
     }
 }

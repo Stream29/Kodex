@@ -81,10 +81,10 @@ public actual fun SessionSidebar(
     side: SessionSidebarSide,
     content: SidebarContent,
     selectedAgent: AgentViewModel?,
-    dropdownState: TuiDropdownState,
+    dropdownState: TuiDropdownState?,
     columns: Int,
     rows: Int,
-    onHoverChanged: (Boolean) -> Unit,
+    onHoverChanged: ((Boolean) -> Unit)?,
     onToggleExpanded: () -> Unit,
     onOpenShellSessionMenu: (ShellSessionMenuRequest) -> Unit,
     onShellSessionHoverChanged: (ShellSessionInteractionRequest, Boolean) -> Unit,
@@ -95,16 +95,47 @@ public actual fun SessionSidebar(
     onResize: (Int) -> Unit,
     onResizeEnd: (Int) -> Unit,
 ) {
+    val hoverModifier = if (onHoverChanged == null) Modifier else Modifier.onPointerHover(
+        onPointerEnter = { onHoverChanged(true) },
+        onPointerExit = { onHoverChanged(false) },
+    )
+    SessionSidebarFrame(
+        side, columns, rows, hoverModifier, resizable, onResizeStart, onResize, onResizeEnd,
+    ) { contentColumns ->
+        SessionSidebarContent(
+            side = side,
+            content = content,
+            selectedAgent = selectedAgent,
+            dropdownState = dropdownState,
+            columns = contentColumns,
+            rows = rows,
+            onToggleExpanded = onToggleExpanded,
+            onOpenShellSessionMenu = onOpenShellSessionMenu,
+            onShellSessionHoverChanged = onShellSessionHoverChanged,
+            onHistoryIndexHoverChanged = onHistoryIndexHoverChanged,
+            onOpenHistoryIndexMenu = onOpenHistoryIndexMenu,
+        )
+    }
+}
+
+@Composable
+public actual fun SessionSidebarFrame(
+    side: SessionSidebarSide,
+    columns: Int,
+    rows: Int,
+    modifier: Modifier,
+    resizable: Boolean,
+    onResizeStart: (Int) -> Unit,
+    onResize: (Int) -> Unit,
+    onResizeEnd: (Int) -> Unit,
+    content: @Composable (Int) -> Unit,
+) {
     val contentColumns = (columns - SessionSidebarSplitterColumns).coerceAtLeast(0)
     Row(
-        modifier = Modifier
+        modifier = modifier
             .width(columns)
             .height(rows)
-            .background(SettingsDialogNavigationBackground)
-            .onPointerHover(
-                onPointerEnter = { onHoverChanged(true) },
-                onPointerExit = { onHoverChanged(false) },
-            ),
+            .background(SettingsDialogNavigationBackground),
     ) {
         if (side == SessionSidebarSide.Right) {
             SessionSidebarSplitter(
@@ -117,21 +148,7 @@ public actual fun SessionSidebar(
                 onResizeEnd = onResizeEnd,
             )
         }
-        if (contentColumns > 0) {
-            SessionSidebarContent(
-                side = side,
-                content = content,
-                selectedAgent = selectedAgent,
-                dropdownState = dropdownState,
-                columns = contentColumns,
-                rows = rows,
-                onToggleExpanded = onToggleExpanded,
-                onOpenShellSessionMenu = onOpenShellSessionMenu,
-                onShellSessionHoverChanged = onShellSessionHoverChanged,
-                onHistoryIndexHoverChanged = onHistoryIndexHoverChanged,
-                onOpenHistoryIndexMenu = onOpenHistoryIndexMenu,
-            )
-        }
+        if (contentColumns > 0) content(contentColumns)
         if (side == SessionSidebarSide.Left) {
             SessionSidebarSplitter(
                 side = side,
@@ -151,7 +168,7 @@ private fun SessionSidebarContent(
     side: SessionSidebarSide,
     content: SidebarContent,
     selectedAgent: AgentViewModel?,
-    dropdownState: TuiDropdownState,
+    dropdownState: TuiDropdownState?,
     columns: Int,
     rows: Int,
     onToggleExpanded: () -> Unit,
@@ -166,6 +183,7 @@ private fun SessionSidebarContent(
             columns, rows, dropdownState,
             onOpenShellSessionMenu = onOpenShellSessionMenu, onShellSessionHoverChanged = onShellSessionHoverChanged,
             onHistoryIndexHoverChanged = onHistoryIndexHoverChanged, onOpenHistoryIndexMenu = onOpenHistoryIndexMenu,
+            showNoAgent = dropdownState == null && selectedAgent == null && content != SidebarContent.None,
         ),
         onToggleExpanded,
     )
@@ -294,10 +312,19 @@ private data class SessionSidebarDragStart(
 private fun SessionSidebarHeader(
     side: SessionSidebarSide,
     label: String,
-    dropdownState: TuiDropdownState,
+    dropdownState: TuiDropdownState?,
     columns: Int,
     onToggleExpanded: () -> Unit,
 ) {
+    if (dropdownState == null) {
+        Row(Modifier.fillMaxWidth().height(1).background(SettingsDialogHeaderBackground)) {
+            EllipsizedText(label, Modifier.weight(1f), color = SettingsDialogForeground)
+            if (columns >= SessionSidebarCollapsedButtonColumns) {
+                TuiButton(label = "—", color = SettingsDialogForeground, onClick = onToggleExpanded)
+            }
+        }
+        return
+    }
     val collapseButtonColumns = minOf(SessionSidebarCollapsedButtonColumns, columns)
     val titleColumns = columns - collapseButtonColumns
     Row(modifier = Modifier.fillMaxWidth().background(SettingsDialogHeaderBackground)) {
@@ -390,7 +417,7 @@ public actual fun BoxScope.SessionSidebarContentMenu(
 }
 
 public actual fun mosaicShellHover(request: ShellSessionInteractionRequest): SidebarShellInteraction =
-    MosaicSidebarShellOrigin(request.session, request.anchor, request.side, point = { request.pointerPosition })
+    MosaicSidebarShellOrigin(request.session, request.anchor, request.side)
 
 public actual fun mosaicShellMenu(request: ShellSessionMenuRequest): SidebarShellMenuOpening =
     SidebarShellMenuOpening(MosaicSidebarShellOrigin(request.session, request.anchor, clickPosition = request.clickPosition))
@@ -403,44 +430,37 @@ public actual fun BoxScope.rememberMosaicSidebarOverlayRenderer(columns: Int, ro
 internal fun BoxScope.SidebarHoverPopupSurface(
     anchor: TuiPopupAnchor,
     side: SessionSidebarSide,
-    pointerPosition: IntOffset?,
     title: String,
     content: String,
     contentColumns: Int,
     contentRows: Int,
+    metadata: List<String>,
     requestUserInputRows: List<RequestUserInputHistoryRowModel>? = null,
     titleColor: Color = SettingsDialogForeground,
     onHoverChanged: (Boolean) -> Unit,
 ) {
+    if (contentColumns <= 0 || contentRows <= 0) return
     val popupWidth = maxOf(
         title.terminalCellWidth(),
+        metadata.maxOfOrNull(String::terminalCellWidth) ?: 0,
         requestUserInputRows
             ?.flatMap { row -> formatHistoryFormRowForTerminal(row).lineSequence().toList() }
             ?.maxOfOrNull(String::terminalCellWidth)
             ?: content.lineSequence().maxOfOrNull(String::terminalCellWidth)
             ?: 0,
     ).coerceIn(1, contentColumns)
-    val lines = content.wrapToTerminalWidth(popupWidth)
+    val lines = if (requestUserInputRows == null) content.wrapToTerminalWidth(popupWidth) else emptyList()
+    val metadataLines = metadata.flatMap { it.wrapToTerminalWidth(popupWidth) }
     val bodyHeight = requestUserInputRows?.sumOf { row ->
         formatHistoryFormRowForTerminal(row).wrapToTerminalWidth(popupWidth).size.coerceAtLeast(1)
     } ?: lines.size
-    val popupHeight = (bodyHeight + 1).coerceIn(1, contentRows)
+    val popupHeight = (bodyHeight + metadataLines.size + 1).coerceIn(1, contentRows)
     val listState = remember(anchor, content, requestUserInputRows) { LazyListState() }
     TuiPopup(
         anchor = anchor,
         onDismissRequest = null,
-        positionProvider = remember(
-            side,
-            pointerPosition,
-            contentColumns,
-            contentRows,
-        ) {
-            SidebarHoverPopupPositionProvider(
-                side = side,
-                contentColumns = contentColumns,
-                contentRows = contentRows,
-                pointerPosition = pointerPosition,
-            )
+        positionProvider = remember(side, contentColumns, contentRows) {
+            SidebarHoverPopupPositionProvider(side, contentColumns, contentRows)
         },
         modifier = Modifier
             .widthIn(max = popupWidth)
@@ -475,6 +495,9 @@ internal fun BoxScope.SidebarHoverPopupSurface(
                         .background(SettingsDialogHomeBackground),
                     state = listState,
                 ) {
+                    items(metadataLines) { line ->
+                        Text(line, Modifier.fillMaxWidth(), color = SettingsDialogForeground, textStyle = TextStyle.Dim)
+                    }
                     if (requestUserInputRows == null) {
                         items(lines) { line ->
                             Text(
@@ -501,15 +524,12 @@ public actual class ShellSessionInteractionRequest actual constructor(
     public actual val side: SessionSidebarSide,
     public actual val session: AgentShellSession,
     public actual val anchor: TuiPopupAnchor,
-) {
-    public actual var pointerPosition: IntOffset? by mutableStateOf(null)
-}
+)
 
 internal class SidebarHoverPopupPositionProvider(
     private val side: SessionSidebarSide,
     private val contentColumns: Int,
     private val contentRows: Int,
-    private val pointerPosition: IntOffset?,
 ) : TuiPopupPositionProvider {
     override fun calculateMaximumSize(
         anchorBounds: TuiPopupAnchorBounds,
@@ -524,48 +544,17 @@ internal class SidebarHoverPopupPositionProvider(
         surfaceSize: IntSize,
         popupContentSize: IntSize,
     ): IntOffset {
-        val localPointer = pointerPosition ?: IntOffset(
-            x = 0,
-            y = anchorBounds.size.height - 1,
-        )
-        val pointer = anchorBounds.position + localPointer
-        val afterPointerX = pointer.x + 1
-        val beforePointerX = pointer.x - popupContentSize.width
+        val maxX = (surfaceSize.width - popupContentSize.width).coerceAtLeast(0)
+        val maxY = (surfaceSize.height - popupContentSize.height).coerceAtLeast(0)
+        val after = anchorBounds.position.x + anchorBounds.size.width + SessionSidebarSplitterColumns
+        val before = anchorBounds.position.x - popupContentSize.width - SessionSidebarSplitterColumns
         val requestedX = when (side) {
-            SessionSidebarSide.Left -> if (
-                afterPointerX + popupContentSize.width <= surfaceSize.width
-            ) {
-                afterPointerX
-            } else {
-                beforePointerX
-            }
-
-            SessionSidebarSide.Right -> if (beforePointerX >= 0) {
-                beforePointerX
-            } else {
-                afterPointerX
-            }
-        }
-        val belowPointerY = pointer.y + 1
-        val abovePointerY = pointer.y - popupContentSize.height
-        val requestedY = if (
-            belowPointerY + popupContentSize.height <= surfaceSize.height
-        ) {
-            belowPointerY
-        } else {
-            abovePointerY
+            SessionSidebarSide.Left -> if (after <= maxX) after else before
+            SessionSidebarSide.Right -> if (before >= 0) before else after
         }
         return IntOffset(
-            x = requestedX.coerceIn(
-                0,
-                (surfaceSize.width - popupContentSize.width).coerceAtLeast(0),
-            ),
-            y = requestedY.coerceIn(
-                SidebarHoverPopupTopRow.coerceAtMost(
-                    (surfaceSize.height - popupContentSize.height).coerceAtLeast(0),
-                ),
-                (surfaceSize.height - popupContentSize.height).coerceAtLeast(0),
-            ),
+            x = requestedX.coerceIn(0, maxX),
+            y = anchorBounds.position.y.coerceIn(SidebarHoverPopupTopRow.coerceAtMost(maxY), maxY),
         )
     }
 }
@@ -682,7 +671,6 @@ public actual fun resolveSessionSidebarColumns(
     )
 }
 
-internal const val SessionSidebarSplitterColumns: Int = 1
 internal const val SessionSidebarMinimumContentColumns: Int = 1
 private const val SidebarHoverPopupTopRow: Int = 1
 
@@ -693,7 +681,6 @@ private val SessionSidebarSide.resizeDirection: Int get() = if (this == SessionS
 private open class MosaicSidebarShellOrigin(
     override val session: AgentShellSession, val anchor: TuiPopupAnchor,
     val side: SessionSidebarSide? = null, val clickPosition: IntOffset? = null,
-    val point: () -> IntOffset? = { null },
 ) : SidebarShellInteraction {
     override val isPlaced: Boolean get() = anchor.isPlaced
 }
@@ -702,7 +689,7 @@ private class MosaicSidebarShellRowInteraction(
     val request: ShellSessionInteractionRequest,
     private val hover: State<(ShellSessionInteractionRequest, Boolean) -> Unit>,
     private val menu: State<(ShellSessionMenuRequest) -> Unit>,
-) : MosaicSidebarShellOrigin(request.session, request.anchor, request.side, point = { request.pointerPosition }), SidebarShellRowInteraction {
+) : MosaicSidebarShellOrigin(request.session, request.anchor, request.side), SidebarShellRowInteraction {
     var openingPosition: IntOffset? = null
     override fun emitHover(hovered: Boolean) { hover.value(request, hovered) }
     override fun emitMenu() { menu.value(ShellSessionMenuRequest(session, anchor, openingPosition)) }
@@ -715,16 +702,20 @@ private class MosaicSessionSidebarRenderer(
     private val onHistoryIndexHoverChanged: (HistoryIndexInteractionRequest, Boolean) -> Unit = { _, _ -> },
     private val onOpenHistoryIndexMenu: (HistoryIndexMenuRequest) -> Unit = {},
     private val popupScope: BoxScope? = null,
+    private val showNoAgent: Boolean = false,
 ) : SessionSidebarRenderer {
     override val canShowHover: Boolean get() = columns > 0 && rows > 0
     @Composable override fun Frame(side: SessionSidebarSide, header: @Composable () -> Unit, body: @Composable () -> Unit) {
         Column(Modifier.width(columns).height(rows)) {
             header()
-            if (rows > 1) Box(Modifier.width(columns).height(rows - 1)) { body() }
+            if (rows > 1) Box(Modifier.width(columns).height(rows - 1)) {
+                if (showNoAgent) EllipsizedText("No Agent selected", color = TuiTheme.colorScheme.onSurfaceVariant)
+                else body()
+            }
         }
     }
     @Composable override fun Header(side: SessionSidebarSide, content: SidebarContent, label: String, onToggleExpanded: () -> Unit) {
-        SessionSidebarHeader(side, label, checkNotNull(dropdownState), columns, onToggleExpanded)
+        SessionSidebarHeader(side, label, dropdownState, columns, onToggleExpanded)
     }
     @Composable override fun Shells(sessions: List<AgentShellSession>, content: (SidebarShellListScope) -> Unit) {
         LazyColumn(Modifier.width(columns).height((rows - 1).coerceAtLeast(0))) { content(MosaicSidebarShellListScope(this)) }
@@ -745,16 +736,11 @@ private class MosaicSessionSidebarRenderer(
         interaction: SidebarShellRowInteraction, title: String, onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit,
     ) {
         val origin = interaction as MosaicSidebarShellRowInteraction
-        val request = origin.request
         val summary = remember(title, columns) { shellSessionSidebarSummary(title, columns) }
         TuiPressable(
             onClick = {},
             onSecondaryClick = { position -> origin.openingPosition = position; onOpenMenu() },
             modifier = Modifier.fillMaxWidth().tuiPopupAnchor(origin.anchor)
-                .onPointerEvent { event ->
-                    if (event.type == MouseEvent.Type.Motion) request.pointerPosition = event.position
-                    false
-                }
                 .onPointerHover(onPointerEnter = { onHoverChanged(true) }, onPointerExit = { onHoverChanged(false) }),
         ) { _, hovered, pressed ->
             EllipsizedText(
@@ -764,18 +750,19 @@ private class MosaicSessionSidebarRenderer(
         }
     }
     @Composable override fun ShellHover(
-        interaction: SidebarShellInteraction, title: String, command: String, onHoverChanged: (Boolean) -> Unit,
+        interaction: SidebarShellInteraction, preview: SidebarShellPreview,
+        output: StateFlow<TerminalOutputState>, onHoverChanged: (Boolean) -> Unit,
     ) {
         val origin = interaction as MosaicSidebarShellOrigin
         with(checkNotNull(popupScope)) {
-            SidebarHoverPopupSurface(
-                origin.anchor, checkNotNull(origin.side), origin.point(), title, command, columns, rows,
-                onHoverChanged = onHoverChanged,
+            MosaicTerminalHover(
+                origin.anchor, checkNotNull(origin.side), columns, rows, preview, output, onHoverChanged,
             )
         }
     }
     @Composable override fun ShellMenu(
-        opening: SidebarShellMenuOpening, label: String, onDismiss: () -> Unit, onClose: () -> Unit, onViewOutput: (() -> Unit)?,
+        opening: SidebarShellMenuOpening, sessionId: Int, label: String, onDismiss: () -> Unit,
+        onClose: () -> Unit, onViewOutput: (() -> Unit)?,
     ) {
         val origin = opening.interaction as MosaicSidebarShellOrigin
         with(checkNotNull(popupScope)) {
@@ -783,6 +770,9 @@ private class MosaicSessionSidebarRenderer(
                 expanded = true, anchor = origin.anchor, clickPosition = origin.clickPosition,
                 onDismissRequest = onDismiss, backgroundColor = SettingsDialogHomeBackground,
             ) {
+                TuiPopupMenuItem(key = "shell-information", onClick = {}, enabled = false) {
+                    Text("Terminal #$sessionId")
+                }
                 if (onViewOutput != null) {
                     TuiPopupMenuItem(key = "view-shell-output", onClick = onViewOutput, dismissOnClick = false) {
                         Text("View output")

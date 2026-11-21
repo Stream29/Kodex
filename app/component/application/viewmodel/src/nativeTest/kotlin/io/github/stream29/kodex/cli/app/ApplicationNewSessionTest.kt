@@ -5,7 +5,6 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.openai.*
@@ -27,9 +26,7 @@ val applicationNewSessionTest by testSuite(compartment = { TestCompartment.RealT
             assertEquals(ApplicationTabSelection.NewSession, vm.navigation.value.selection)
             repeat(3) { vm.selectNewSession() }
             assertNull(vm.submitNewSession(singleton.composer.state.value.revision))
-            val popup = vm.openSessionCatalogPopup()
-            popup.viewModel.refresh()
-            assertTrue(assertIs<SessionCatalogState.Loaded>(popup.viewModel.state.value).sessions.isEmpty())
+            vm.withMountedCatalog { catalog -> assertTrue(catalog.state.value.groups.orEmpty().isEmpty()) }
             assertSame(singleton, vm.newSession)
             assertEquals(ComposerLifecycle.Open, singleton.composer.state.value.lifecycle)
         }
@@ -62,6 +59,29 @@ val applicationNewSessionTest by testSuite(compartment = { TestCompartment.RealT
             singleton.settings.first { it.cwd == Fs.resolve(home) }
             assertEquals(ComposerLifecycle.Open, composer.state.value.lifecycle)
             assertFalse(configuration.state.value.closed)
+        }
+    }
+    test("selecting a directory prefills only the existing draft without opening or changing any tab") {
+        applicationFixture { app, home ->
+            val vm = app.viewModel
+            val root = vm.submitTestSession()
+            val draft = vm.newSession
+            draft.composer.update("still being drafted")
+            val input = draft.composer.state.value
+            val target = Path(home, "another-directory")
+            Fs.createDirectories(target)
+            val originalCwd = root.settings.value.cwd
+            vm.selectNewSessionInDirectory(target)
+            draft.settings.first { it.cwd == target }
+            assertSame(draft, vm.newSession)
+            assertEquals(input, draft.composer.state.value)
+            assertEquals(ApplicationTabSelection.NewSession, vm.navigation.value.selection)
+            assertEquals(listOf(root), vm.navigation.value.tabs)
+            assertEquals(originalCwd, root.settings.value.cwd)
+            val created = assertNotNull(vm.submitNewSession(input.revision))
+            assertEquals(target, created.settings.value.cwd)
+            // The same draft resets to the launch directory, not the selected group's directory.
+            draft.settings.first { it.cwd == Fs.resolve(home) }
         }
     }
     test("no-target Settings stays unavailable through later selection close and Login returnTo") {

@@ -61,7 +61,7 @@ val awaitDeadlineRunnerTest by testSuite(
                                 ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
                                     name = "await_event",
                                     callId = "deadline",
-                                    arguments = """{"events":[{"type":"timeout","duration_ms":90000}]}""",
+                                    arguments = """{"name":"Wait for the deadline","events":[{"type":"timeout","duration_ms":90000}]}""",
                                 )),
                                 ResponsesStreamEvent.Completed(Response(id = "await", endTurn = false)),
                             )
@@ -150,7 +150,7 @@ val awaitDeadlineRunnerTest by testSuite(
                             flowOf(
                                 ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
                                     name = "await_event", callId = "expiry",
-                                    arguments = """{"events":[{"type":"timeout","duration_ms":1000}]}""",
+                                    arguments = """{"name":"Wait for the deadline","events":[{"type":"timeout","duration_ms":1000}]}""",
                                 )),
                                 ResponsesStreamEvent.Completed(Response(id = "wait", endTurn = false)),
                             )

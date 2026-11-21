@@ -11,19 +11,21 @@ val sidebarSettingsViewModelTest by testSuite {
         applicationFixture { app, home ->
             val vm = app.sidebarSettings
             assertEquals(30, vm.state.value.leftWidth)
-            vm.selectRight(SidebarContent.TerminalSessions)
-            vm.selectLeft(SidebarContent.None)
+            vm.toggle(ToolWindowId.HistoryIndex)
+            vm.toggle(ToolWindowId.TerminalSessions)
+            vm.toggle(ToolWindowId.Sessions)
+            vm.collapse(ToolWindowSide.Left)
             vm.resizeLeft(19)
             vm.resizeRight(17)
             val result = vm.state.first {
-                it.left == SidebarContent.None && it.right == SidebarContent.TerminalSessions &&
+                it.activeLeft == null && it.activeRight == ToolWindowId.TerminalSessions &&
                     it.leftWidth == 19 && it.rightWidth == 17
             }
             vm.initializeViewport(200) // Later resizes must not reset the user's widths.
             assertEquals(result, vm.state.value)
             val persisted = UnifiedSettingsStore.open(home, defaultBackendSettings()).frontendSettings.value
-            assertEquals(SidebarContent.None, persisted.sidebars.left)
-            assertEquals(SidebarContent.TerminalSessions, persisted.sidebars.right)
+            assertNull(persisted.sidebars.activeLeft)
+            assertEquals(ToolWindowId.TerminalSessions, persisted.sidebars.activeRight)
         }
     }
 }

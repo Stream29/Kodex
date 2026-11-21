@@ -16,11 +16,11 @@ val historyFormattingTest by testSuite {
         assertEquals(" +Infinity", Duration.INFINITE.historyElapsedSuffix())
     }
     test("recorded command context omits known defaults but preserves explicit zero and whitespace") {
-        assertEquals("exec_command; yield_time_ms=10000", ExecCommandArguments("pwd", yieldTimeMillis = 10_000).expandedCommandContext())
+        assertEquals("exec_command; yield_time_ms=10000", ExecCommandArguments("pwd", name = "Check cwd", yieldTimeMillis = 10_000).expandedCommandContext())
         assertEquals("write_stdin; yield_time_ms=250", WriteStdinArguments(7, yieldTimeMillis = 250).expandedCommandContext())
         assertEquals(
             "exec_command; cwd= ; yield_time_ms=0; max_output_tokens=0",
-            ExecCommandArguments("pwd", workdir = " ", yieldTimeMillis = 0, maxOutputTokens = 0).expandedCommandContext(),
+            ExecCommandArguments("pwd", name = "Check cwd", workdir = " ", yieldTimeMillis = 0, maxOutputTokens = 0).expandedCommandContext(),
         )
         assertEquals("tool; zero=0; false=false; empty=", compactToolLine("tool", "zero" to 0, "false" to false, "empty" to "", "absent" to null))
     }

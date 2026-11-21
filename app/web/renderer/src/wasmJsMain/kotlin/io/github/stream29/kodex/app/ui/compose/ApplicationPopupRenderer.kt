@@ -12,7 +12,6 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.app.ui.compose.EditorDialog as Dialog
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
 import io.github.stream29.kodex.app.sessiondelete.SessionDeleteContent
 import io.github.stream29.kodex.app.sessiondelete.contract.SessionDeleteViewModel
 import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameViewModel
@@ -23,8 +22,6 @@ import io.github.stream29.kodex.app.ui.UiTextRole
 import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryViewModel
 import io.github.stream29.kodex.cli.app.ApplicationPopupRenderer
 import io.github.stream29.kodex.cli.pathpicker.DirectoryPickerRenderer
-import io.github.stream29.kodex.cli.sessioncatalog.SessionCatalogContent
-import io.github.stream29.kodex.cli.sessioncatalog.SessionCatalogRenderer
 import io.github.stream29.kodex.cli.settings.OpenAiLoginContent
 import io.github.stream29.kodex.cli.settings.SettingsContent
 import io.github.stream29.kodex.cli.settings.SettingsRootRenderer
@@ -36,21 +33,15 @@ internal fun rememberComposeApplicationPopupRenderer(
 ): ApplicationPopupRenderer {
     val open = rememberUpdatedState(openExternalUrl)
     val settings = rememberComposeSettingsRootRenderer()
-    val catalog = rememberComposeSessionCatalogRenderer()
     val directory = rememberComposeDirectoryPickerRenderer()
-    return remember(open, settings, catalog, directory) { ComposeApplicationPopups(open, settings, catalog, directory) }
+    return remember(open, settings, directory) { ComposeApplicationPopups(open, settings, directory) }
 }
 
 private class ComposeApplicationPopups(
     private val open: State<suspend (String) -> Boolean>,
     private val settings: SettingsRootRenderer,
-    private val catalog: SessionCatalogRenderer,
     private val directory: DirectoryPickerRenderer,
 ) : ApplicationPopupRenderer {
-    @Composable
-    override fun Catalog(viewModel: SessionCatalogViewModel, onFailure: (Throwable) -> Unit) {
-        SessionCatalogContent(viewModel, catalog, onFailure)
-    }
     @Composable
     override fun Settings(viewModel: SettingsViewModel, onClose: () -> Unit, onLogin: () -> Unit) {
         SettingsContent(viewModel, settings, onClose, onLogin, LocalGraphicalHostCapabilities.current)

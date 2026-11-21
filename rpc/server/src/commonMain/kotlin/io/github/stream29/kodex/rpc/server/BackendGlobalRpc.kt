@@ -5,7 +5,11 @@ package io.github.stream29.kodex.rpc.server
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRepository
+import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
+import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupPage
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupSummary
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
@@ -45,6 +49,7 @@ internal class BackendGlobalRpc(
     private val account: BackendAccountState,
     private val effects: BackendFrontendEffects,
     private val sessions: BackendSessionManagement,
+    private val catalogRepository: suspend () -> SqliteKodexSessionRepository,
     private val schedules: ScheduleRepository? = null,
     private val home: Path? = null,
     private val checkAdmission: () -> Unit = {},
@@ -146,6 +151,29 @@ internal class BackendGlobalRpc(
     override suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> =
         sessions.getSessionCatalog(includeArchived)
 
+    override fun getSessionGroupsNonceFlow(): Flow<Long> = flow {
+        ensureAdmission()
+        emitAll(catalogRepository().sessionGroupsNonce)
+    }
+
+    override suspend fun listSessionGroups(): List<SessionGroupSummary> {
+        ensureAdmission()
+        return catalogRepository().listSessionGroups().map {
+            SessionGroupSummary(it.cwd, it.groupNonce, it.latestUpdatedAt, it.hasRunning)
+        }
+    }
+
+    override fun getSessionGroupNonceFlow(cwd: String?): Flow<Long> = flow {
+        ensureAdmission()
+        emitAll(catalogRepository().sessionGroupNonce(cwd))
+    }
+
+    override suspend fun listSessionsInGroup(cwd: String?, includeArchived: Boolean, limit: Int?): SessionGroupPage {
+        ensureAdmission()
+        val page = catalogRepository().listSessionsInGroup(cwd, includeArchived, limit)
+        return SessionGroupPage(cwd, page.groupNonce, page.entries.map { it.toCatalogEntry() }, page.hiddenCount)
+    }
+
     override suspend fun createSession(cwd: Path): Int = sessions.createSession(cwd)
 
     override suspend fun spawnSession(request: SessionSpawnRequest): SessionSpawnResult =
@@ -225,15 +253,26 @@ internal class BackendGlobalRpc(
     override suspend fun getRootAgentId(sessionIndex: Int): Int = sessions.getRootAgentId(sessionIndex)
     override suspend fun archiveSession(sessionIndex: Int): Unit = sessions.archiveSession(sessionIndex)
     override suspend fun unarchiveSession(sessionIndex: Int): Unit = sessions.unarchiveSession(sessionIndex)
-    override suspend fun forkSession(sessionIndex: Int): Int = sessions.forkSession(sessionIndex)
-    override suspend fun forkSessionHistory(
-        sessionIndex: Int,
+    override suspend fun forkAgent(agentId: Int): Int = sessions.forkAgent(agentId)
+    override suspend fun forkAgentHistory(
+        agentId: Int,
         untilExclusive: Int,
         expectedCacheNonce: Long,
-    ): Int = sessions.forkSessionHistory(sessionIndex, untilExclusive, expectedCacheNonce)
+    ): Int = sessions.forkAgentHistory(agentId, untilExclusive, expectedCacheNonce)
 
     override suspend fun deleteSession(sessionIndex: Int): Boolean = sessions.deleteSession(sessionIndex)
 }
+
+internal fun KodexSessionEntry.toCatalogEntry(): SessionCatalogEntry = SessionCatalogEntry(
+    sessionIndex = entryIndex,
+    name = name,
+    createdAt = createdAt,
+    updatedAt = lastActivityAt,
+    archived = archived,
+    running = running,
+    isActive = isActive,
+    rootAgentId = rootAgentId,
+)
 
 private suspend fun CallToolResult.materializeImageBlocks(
     mediaRoot: Path,

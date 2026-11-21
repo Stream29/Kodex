@@ -16,19 +16,16 @@ import kotlinx.io.files.Path
  * lease without rewriting the version or scanning Session layout, even when
  * the application version differs.
  *
- * Preparation rejects an unreadable or malformed version file, a stored version
- * newer than the application, or a version that is missing or still requires
- * migration at the final read check with [KodexHomeVersionException]. Invalid
- * unversioned Session layout is rejected with [KodexHomeLayoutException]. Registry ordering
- * failures are [IllegalStateException]. Exclusive lease conflicts during
+ * Preparation rejects incompatible Home generations, versions, layouts, and
+ * databases with [KodexHomeVersionException]. Registry ordering failures are
+ * [IllegalStateException]. Exclusive lease conflicts during
  * initialization or data migration throw [KodexHomeInUseException] with
  * preparation context and the underlying cause. Other filesystem, lease,
  * migration action and migration-start callback failures propagate.
- * Preparation registers a validated unversioned baseline before migrating and
- * records each completed migration target without advancing to releases that
- * require no migration. Legacy application-version checkpoints are accepted
- * without normalization when supported. Preparation is cancellable and does
- * not roll back completed filesystem changes.
+ * Preparation records the current version for a freshly initialized Home and
+ * records each completed target in a same-generation migration. Reopening a
+ * ready Home without migrations does not advance the checkpoint. Preparation
+ * is cancellable and does not roll back completed filesystem changes.
  *
  * The receiver scope of the factory owns the lease as a structured child;
  * cancelling that owner initiates release even if this handle is not closed.
@@ -47,7 +44,7 @@ import kotlinx.io.files.Path
  * an invalid/unreadable, newer or missing Home version, or remaining migrations
  * at its final read check.
  * @throws KodexHomeLayoutException The actual preparation factory rejects
- * an unversioned Home's Session layout or latest pointers.
+ * unexpected data in a Home that has no ready marker.
  * @throws KodexHomeInUseException Initialization or data migration cannot
  * acquire the exclusive Home lease.
  * @throws IllegalStateException The actual preparation factory rejects

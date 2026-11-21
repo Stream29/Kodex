@@ -120,7 +120,11 @@ public sealed interface HistoryScrollTarget {
 public class HistoryScrollEffect(
     public val generation: Long,
     public val target: HistoryScrollTarget,
-)
+    private val isTargetCurrent: () -> Boolean = { true },
+) {
+    /** A cross-page anchor may expire after the effect was published but before it is rendered. */
+    public fun isCurrent(): Boolean = isTargetCurrent()
+}
 
 /**
  * History data and interaction owner for one materialized Agent.
@@ -224,6 +228,11 @@ public interface AgentHistoryViewModel : AutoCloseable {
      * scroll. No-op after close; no synchronous throws.
      */
     public fun requestScrollToStorageIndex(storageIndex: Int)
+
+    /** A borrowed cross-page anchor must never seek in a replacement generation or after leaving its selection. */
+    public fun requestScrollToAnchor(storageIndex: Int, generation: Long, isCurrent: () -> Boolean) {
+        if (historyItems.value.generation == generation && isCurrent()) requestScrollToStorageIndex(storageIndex)
+    }
 
     /**
      * Releases cached payloads and Work Group children, closes the command loop, and cancels the

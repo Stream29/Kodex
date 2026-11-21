@@ -11,13 +11,19 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.app.agent.contract.*
+import io.github.stream29.kodex.app.ui.compose.ComposeSidebarMenuPlacement
+import io.github.stream29.kodex.app.ui.compose.PointerPopupPosition
 import io.github.stream29.kodex.app.ui.compose.rememberComposeHistoryIndexRenderer
 import io.github.stream29.kodex.cli.agent.createHistoryIndexViewModel
+import io.github.stream29.kodex.cli.components.formatPopupTimestamp
 import io.github.stream29.kodex.cli.historyindex.*
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.PlanItemArg
@@ -27,6 +33,7 @@ import io.github.stream29.kodex.tool.requestuserinput.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.datetime.TimeZone
 import kotlin.test.*
 import kotlin.time.Instant
 
@@ -97,11 +104,12 @@ val offscreenHistoryIndexTest by testSuite {
             scene.settle { scene.hasDescription("Enter subagent") }
             assertEquals(1, scene.indexTexts().count { it == "Enter" })
             scene.secondaryIndex(1)
-            scene.settle { scene.hasText("Check out") }
+            scene.settle { scene.hasText("Go to") }
             assertEquals(1, scene.indexTexts().count { it == "Enter" })
-            scene.key(Key.Escape)
-            opening = null
-            scene.settle { !scene.hasText("Check out") }
+            assertFalse(scene.hasText("Enter subagent"))
+            assertFalse(scene.hasText("Details"))
+            scene.escape()
+            scene.settle { opening == null && !scene.hasText("Go to") }
             val old = assertNotNull(callback)
             scene.click("Enter")
             val (target, child) = entries.single()
@@ -112,6 +120,74 @@ val offscreenHistoryIndexTest by testSuite {
             model.window.value = model.window.value.copy(revision = 1)
             old()
             assertEquals(1, entries.size)
+        } finally { scene.close(); model.close() }
+    } }
+
+    test("child-row hover is stable outside Enter; mouse and keyboard menus retain separate origins") { offscreenTest {
+        val model = IndexRenderFixture(listOf(1))
+        val entry = model.window.value.entries.single().copy(createdChildAgentId = 91)
+        model.window.value = model.window.value.copy(entries = listOf(entry))
+        model.setDetail(1, HistoryIndexEntryDetail(HistoryIndexEntryKind.UserMessage, "Opening preview"))
+        val entered = mutableListOf<Int>()
+        val navigation = HistoryIndexNavigation(model, { _, child -> entered.add(child) })
+        var hovering by mutableStateOf<HistoryIndexInteraction?>(null)
+        var opening by mutableStateOf<HistoryIndexMenuOpening?>(null)
+        val scene = OffscreenScene.create(width = 420, height = 240) {
+            val renderer = rememberComposeHistoryIndexRenderer(
+                onHoverChanged = { origin, visible -> if (visible) hovering = origin },
+                onOpenMenu = { opening = it; hovering = null },
+            )
+            Box(Modifier.width(260.dp).height(120.dp)) {
+                HistoryIndexContent(model, HistoryIndexSide.Left, renderer, navigation)
+            }
+            HistoryIndexHoverContent(hovering, renderer, {}, { hovering = null })
+            val current = opening
+            HistoryIndexMenuContent(current, renderer) { if (opening === current) opening = null }
+        }
+        try {
+            scene.settle { scene.hasDescription("Enter subagent") }
+            val row = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("History index 1") == true
+            }
+            val initialPoint = row.boundsInWindow.center
+            val movedPoint = initialPoint.copy(x = initialPoint.x - 30)
+            scene.scene.sendPointerEvent(PointerEventType.Move, initialPoint)
+            scene.settle { scene.hasText("Opening preview") }
+            val first = scene.text("Opening preview").boundsInWindow
+            assertTrue(first.left > scene.text("Enter").boundsInWindow.right)
+            assertTrue(first.right <= 420f)
+            scene.scene.sendPointerEvent(PointerEventType.Move, movedPoint)
+            scene.settle { scene.hasText("Opening preview") }
+            assertEquals(first, scene.text("Opening preview").boundsInWindow)
+            scene.click("Enter")
+            assertEquals(listOf(91), entered)
+
+            val mousePoint = scene.indexPosition(1)
+            scene.secondaryIndex(1)
+            scene.settle { scene.hasText("Go to") }
+            val mouse = assertIs<ComposeSidebarMenuPlacement>(opening?.interaction)
+            val click = assertNotNull(mouse.point)
+            val mouseBounds = assertNotNull(mouse.bounds)
+            assertEquals(mousePoint.x, mouseBounds.left + click.x, absoluteTolerance = 1f)
+            assertEquals(mousePoint.y, mouseBounds.top + click.y, absoluteTolerance = 1f)
+            scene.escape()
+            scene.settle { !scene.hasText("Go to") }
+            assertTrue(assertNotNull(row.config.getOrNull(SemanticsActions.RequestFocus)?.action).invoke())
+            scene.settle { scene.nodes().any {
+                it.id == row.id && it.config.getOrNull(SemanticsProperties.Focused) == true
+            } }
+            scene.key(Key.F10, shift = true)
+            scene.settle { scene.hasText("Go to") }
+            val keyboard = assertIs<ComposeSidebarMenuPlacement>(opening?.interaction)
+            assertNull(keyboard.point)
+            assertEquals(click, mouse.point, "A later keyboard opening must not rewrite the captured click.")
+            val keyboardBounds = assertNotNull(keyboard.bounds)
+            assertEquals(mouseBounds, keyboardBounds)
+            fun popupX(placement: ComposeSidebarMenuPlacement): Int =
+                PointerPopupPosition(assertNotNull(placement.bounds), placement.preferAfter, placement.point)
+                    .calculatePosition(IntRect.Zero, IntSize(420, 240), LayoutDirection.Ltr, IntSize(160, 80)).x
+            assertEquals(4, popupX(keyboard))
+            assertTrue(popupX(mouse) > 40, "The mouse menu's requested x follows the captured click.")
         } finally { scene.close(); model.close() }
     } }
 
@@ -162,7 +238,7 @@ val offscreenHistoryIndexTest by testSuite {
         } }
     }
 
-    test("Index menu renders typed plan without terminal markers or editable controls") { offscreenTest {
+    test("Index hover renders typed plan without terminal markers or editable controls") { offscreenTest {
         val model = IndexRenderFixture(listOf(1))
         val plan = StablePlanUpdate("plan", arguments = UpdatePlanArgs(
             "Explanation", listOf(PlanItemArg("Complete step", StepStatus.Completed)),
@@ -170,25 +246,26 @@ val offscreenHistoryIndexTest by testSuite {
         model.setDetail(1, HistoryIndexEntryDetail(
             HistoryIndexEntryKind.PlanUpdate, "[x] Complete step", plan = plan,
         ))
-        var opening by mutableStateOf<HistoryIndexMenuOpening?>(null)
-        val scene = OffscreenScene.create(width = 320, height = 240) {
-            val renderer = rememberComposeHistoryIndexRenderer(onOpenMenu = { opening = it })
+        var hovering by mutableStateOf<HistoryIndexInteraction?>(null)
+        val scene = OffscreenScene.create(width = 640, height = 240) {
+            val renderer = rememberComposeHistoryIndexRenderer(
+                onHoverChanged = { origin, entered -> if (entered) hovering = origin },
+            )
             Box(Modifier.width(320.dp).height(120.dp)) { HistoryIndexContent(model, HistoryIndexSide.Left, renderer) }
-            val current = opening
-            HistoryIndexMenuContent(current, renderer) { if (opening === current) opening = null }
+            HistoryIndexHoverContent(hovering, renderer, {}, { hovering = null })
         }
         try {
             scene.settle { scene.hasDescription("History index 1") }
-            scene.secondaryIndex(1)
-            scene.settle { scene.hasText("Complete step") && scene.hasText("Check out") }
+            scene.scene.sendPointerEvent(PointerEventType.Move, scene.indexPosition(1))
+            scene.settle { scene.hasText("Complete step") }
+            assertTrue(scene.hasText("Plan update"))
+            assertTrue(scene.hasText("Index: 1"))
             assertTrue(scene.hasText("Explanation"))
             assertFalse(scene.hasText("[x] Complete step"))
             val status = scene.nodes().single {
                 it.config.getOrNull(SemanticsProperties.StateDescription) == "Completed"
             }
             assertNull(status.config.getOrNull(SemanticsActions.OnClick))
-            scene.escape()
-            scene.settle { opening == null }
         } finally { scene.close(); model.close() }
     } }
 
@@ -215,19 +292,38 @@ val offscreenHistoryIndexTest by testSuite {
         } finally { scene.close(); model.close() }
     } }
 
-    test("Index row keyboard menu owns scrollable detail without a fake row click") { offscreenTest {
+    test("Index hover scrolls full Agent message; keyboard menu stays compact and restores focus") { offscreenTest {
         val model = IndexRenderFixture(listOf(1))
-        val content = (0..100).joinToString("\n") { "complete detail line $it" }
-        model.setDetail(1, HistoryIndexEntryDetail(HistoryIndexEntryKind.UserMessage, content))
+        val content = "Author: root\nRecipient: child\n" + (0..100).joinToString("\n") { "complete detail line $it" }
+        model.setDetail(1, HistoryIndexEntryDetail(HistoryIndexEntryKind.AgentMessage, content))
         var opening by mutableStateOf<HistoryIndexMenuOpening?>(null)
-        val scene = OffscreenScene.create(width = 320, height = 240) {
-            val renderer = rememberComposeHistoryIndexRenderer(onOpenMenu = { opening = it })
+        var hovering by mutableStateOf<HistoryIndexInteraction?>(null)
+        val scene = OffscreenScene.create(width = 640, height = 500) {
+            val renderer = rememberComposeHistoryIndexRenderer(
+                onHoverChanged = { origin, entered -> if (entered) hovering = origin },
+                onOpenMenu = { opening = it; hovering = null },
+            )
             Box(Modifier.width(320.dp).height(120.dp)) { HistoryIndexContent(model, HistoryIndexSide.Left, renderer) }
             val current = opening
             HistoryIndexMenuContent(current, renderer) { if (opening === current) opening = null }
+            HistoryIndexHoverContent(hovering, renderer, {}, { hovering = null })
         }
         try {
             scene.settle { scene.hasDescription("Open menu for history index 1") }
+            scene.scene.sendPointerEvent(PointerEventType.Move, scene.indexPosition(1))
+            scene.settle { scene.hasText(content) }
+            assertTrue(scene.hasText("Agent message"))
+            val scrollNode = scene.nodes().single {
+                it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)?.maxValue()?.let { max -> max > 0f } == true
+            }
+            val scroll = assertNotNull(scrollNode.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange))
+            assertEquals(0f, scroll.value())
+            scene.scene.sendPointerEvent(
+                PointerEventType.Scroll, scrollNode.boundsInWindow.center, scrollDelta = Offset(0f, 200f),
+            )
+            scene.settle { scroll.value() > 0f }
+            hovering = null
+            scene.settle { !scene.hasText(content) }
             assertFalse(scene.hasDescription("Actions for history index 1"))
             val row = scene.nodes().single {
                 it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("History index 1") == true
@@ -242,15 +338,9 @@ val offscreenHistoryIndexTest by testSuite {
             } }
             assertFalse(unfocused.contentEquals(scene.frame()), "Keyboard focus must be visible on the row.")
             scene.key(Key.F10, shift = true)
-            scene.settle { scene.hasText(content) && scene.hasText("Check out") }
-            val scroll = scene.nodes().mapNotNull { it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) }
-                .single { it.maxValue() > 0 }
-            assertEquals(0f, scroll.value())
-            scene.key(Key.PageDown)
-            scene.settle { scroll.value() > 0 }
-            assertTrue(scene.text("Check out").boundsInWindow.bottom <= 240)
-            scene.key(Key.PageUp)
-            scene.settle { scroll.value() == 0f }
+            scene.settle { scene.hasText("Go to") }
+            assertFalse(scene.hasText(content))
+            assertFalse(scene.hasText("Details"))
             scene.escape()
             scene.settle { opening == null &&
                 scene.nodes().any {
@@ -338,6 +428,8 @@ val offscreenHistoryIndexTest by testSuite {
         model.setDetail(1, HistoryIndexEntryDetail(
             HistoryIndexEntryKind.RequestUserInput, "SECRET raw fallback", question,
         ))
+        val timestamp = Instant.parse("2026-10-03T01:02:03Z")
+        model.setTimestamp(1, timestamp)
         var hovering by mutableStateOf<HistoryIndexInteraction?>(null)
         var opening by mutableStateOf<HistoryIndexMenuOpening?>(null)
         val scene = OffscreenScene.create {
@@ -362,6 +454,8 @@ val offscreenHistoryIndexTest by testSuite {
             scene.settle { scene.hasText("[hidden]") }
             assertFalse(scene.indexTexts().any { "SECRET" in it })
             assertTrue(scene.hasText("Request user input"))
+            assertTrue(scene.hasText("Index: 1"))
+            assertTrue(scene.hasText("Timestamp: ${formatPopupTimestamp(timestamp, TimeZone.currentSystemDefault())}"))
             assertFalse(before.contentEquals(scene.frame()))
             hovering = null
             scene.settle { !scene.hasText("Request user input") }
@@ -370,7 +464,9 @@ val offscreenHistoryIndexTest by testSuite {
                 it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Open menu for history index 1") == true
             }
             assertTrue(assertNotNull(action.config.getOrNull(SemanticsActions.OnClick)?.action).invoke())
-            scene.settle { scene.hasText("Check out") && scene.hasText("[hidden]") }
+            scene.settle { scene.hasText("Go to") }
+            assertFalse(scene.hasText("[hidden]"))
+            assertFalse(scene.hasText("Request user input"))
             assertFalse(scene.indexTexts().any { "SECRET" in it })
             scene.escape()
             scene.settle { opening == null }
@@ -378,7 +474,7 @@ val offscreenHistoryIndexTest by testSuite {
     } }
 
     for ((branch, timestamp) in listOf(null, Instant.fromEpochMilliseconds(0)).withIndex()) {
-        test("menu renders optional timestamp and scroll-only Check out branch=$branch") { offscreenTest {
+        test("menu renders optional timestamp and scroll-only Go to branch=$branch") { offscreenTest {
             val model = IndexRenderFixture(listOf(1))
             model.setTimestamp(1, timestamp)
             var opening by mutableStateOf<HistoryIndexMenuOpening?>(null)
@@ -386,17 +482,22 @@ val offscreenHistoryIndexTest by testSuite {
                 val renderer = rememberComposeHistoryIndexRenderer(onOpenMenu = { opening = it })
                 Box(Modifier.width(320.dp).height(160.dp)) { HistoryIndexContent(model, HistoryIndexSide.Left, renderer) }
                 val current = opening
-                HistoryIndexMenuContent(current, renderer, { if (opening === current) opening = null })
+                HistoryIndexMenuContent(current, renderer) { if (opening === current) opening = null }
             }
             try {
                 scene.settle { scene.hasDescription("History index 1") }
                 scene.secondaryIndex(1)
-                scene.settle { scene.hasText("Check out") }
+                scene.settle { scene.hasText("Go to") }
                 assertTrue(scene.hasText("Index: 1"))
                 assertEquals(timestamp != null, scene.indexTexts().any { it.startsWith("Timestamp: ") })
+                if (timestamp != null) {
+                    assertTrue(scene.hasText("Timestamp: ${formatPopupTimestamp(timestamp, TimeZone.currentSystemDefault())}"))
+                }
+                assertFalse(scene.hasText("Revert to here"))
+                assertFalse(scene.hasText("Fork from here"))
                 val bounds = scene.text("Index: 1").boundsInWindow
                 assertTrue(bounds.left >= 0 && bounds.right <= 800 && bounds.top >= 0 && bounds.bottom <= 900)
-                scene.click("Check out")
+                scene.click("Go to")
                 scene.settle { opening == null }
                 assertEquals(listOf(7L to 1), model.scrolled)
                 scene.frame()
@@ -404,48 +505,91 @@ val offscreenHistoryIndexTest by testSuite {
         } }
     }
 
+    test("editable Index menu shows only applicable actions and delegates dismissal to its owner") { offscreenTest {
+        val model = IndexRenderFixture(listOf(1))
+        var opening by mutableStateOf<HistoryIndexMenuOpening?>(null)
+        var editedText: String? = null
+        val scene = OffscreenScene.create {
+            val renderer = rememberComposeHistoryIndexRenderer(onOpenMenu = { opening = it })
+            Box(Modifier.width(320.dp).height(160.dp)) { HistoryIndexContent(model, HistoryIndexSide.Left, renderer) }
+            val current = opening
+            HistoryIndexMenuContent(
+                current, renderer, canEdit = true,
+                admit = { current != null && current === opening },
+                edit = { command, target, text ->
+                    assertSame(current, opening)
+                    assertSame(model, target.viewModel)
+                    assertEquals(1, target.index)
+                    assertEquals(HistoryIndexCommand.RevertAndEdit, command)
+                    editedText = text
+                    opening = null
+                },
+            ) { if (opening === current) opening = null }
+        }
+        try {
+            scene.settle { scene.hasDescription("History index 1") }
+            scene.secondaryIndex(1)
+            scene.settle { scene.hasText("Fork from here") }
+            assertTrue(scene.hasText("Go to"))
+            assertTrue(scene.hasText("Revert to here"))
+            assertFalse(scene.hasText("Revert and edit"))
+            assertFalse(scene.hasText("Detail"))
+            scene.escape()
+            scene.settle { opening == null }
+
+            val window = model.window.value
+            model.window.value = window.copy(entries = listOf(window.entries.single().copy(editableUserText = "Original text")))
+            scene.secondaryIndex(1)
+            scene.settle { scene.hasText("Revert and edit") }
+            scene.click("Revert and edit")
+            scene.settle { opening == null }
+            assertEquals("Original text", editedText)
+            assertTrue(model.scrolled.isEmpty())
+        } finally { scene.close(); model.close() }
+    } }
+
     test("old menu callbacks cannot retarget a replacement revision or dismiss a fresh opening") { offscreenTest {
         val model = IndexRenderFixture(listOf(1))
         var opening by mutableStateOf<HistoryIndexMenuOpening?>(null)
-        var capturedCheckOut: (() -> Unit)? = null
+        var capturedGoTo: (() -> Unit)? = null
         var capturedDismiss: (() -> Unit)? = null
         val scene = OffscreenScene.create {
             val graphical = rememberComposeHistoryIndexRenderer(onOpenMenu = { opening = it })
             val renderer = object : HistoryIndexRenderer by graphical {
                 @Composable override fun Menu(
-                    opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
-                    onDismiss: () -> Unit, onCheckOut: () -> Unit,
+                    opening: HistoryIndexMenuOpening, timestamp: String?, actions: List<HistoryIndexMenuAction>,
+                    onDismiss: () -> Unit,
                 ) {
-                    capturedCheckOut = onCheckOut
+                    capturedGoTo = actions.first().onClick
                     capturedDismiss = onDismiss
-                    graphical.Menu(opening, timestamp, detail, onDismiss, onCheckOut)
+                    graphical.Menu(opening, timestamp, actions, onDismiss)
                 }
             }
             Box(Modifier.width(320.dp).height(160.dp)) { HistoryIndexContent(model, HistoryIndexSide.Left, renderer) }
             val current = opening
-            HistoryIndexMenuContent(current, renderer, { if (opening === current) opening = null })
+            HistoryIndexMenuContent(current, renderer) { if (opening === current) opening = null }
         }
         try {
             scene.settle { scene.hasDescription("History index 1") }
             scene.secondaryIndex(1)
-            scene.settle { scene.hasText("Check out") }
+            scene.settle { scene.hasText("Go to") }
             val old = assertNotNull(opening)
-            val checkOut = assertNotNull(capturedCheckOut)
+            val goTo = assertNotNull(capturedGoTo)
             val dismiss = assertNotNull(capturedDismiss)
             model.window.value = model.window.value.copy(revision = 1)
-            checkOut()
+            goTo()
             assertTrue(model.scrolled.isEmpty(), "Revision admission must reject even before UI disposal runs.")
             scene.settle { opening == null }
             scene.secondaryIndex(1)
-            scene.settle { scene.hasText("Check out") }
+            scene.settle { scene.hasText("Go to") }
             val fresh = assertNotNull(opening)
             assertNotSame(old, fresh)
             assertEquals(1L, fresh.interaction.target.revision)
             dismiss()
             assertSame(fresh, opening)
-            checkOut()
+            goTo()
             assertTrue(model.scrolled.isEmpty())
-            scene.click("Check out")
+            scene.click("Go to")
             scene.settle { opening == null }
             assertEquals(listOf(7L to 1), model.scrolled)
         } finally { scene.close(); model.close() }
@@ -531,7 +675,7 @@ internal class IndexRenderFixture(indexes: List<Int>) : HistoryIndexViewModel {
     }
     fun setTimestamp(index: Int, timestamp: Instant?) {
         window.value = window.value.copy(
-            entries = window.value.entries.map { if (it.index == index) it.copy(messageTimestamp = timestamp) else it },
+            entries = window.value.entries.map { if (it.index == index) it.copy(timestamp = timestamp) else it },
         )
     }
 }

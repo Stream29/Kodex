@@ -38,6 +38,7 @@ internal val frontendBootstrapTransportTest by testSuite {
                         val info = bootstrapLocalFrontend(LaunchOrigin, LaunchPath, LaunchTicket)
                         assertEquals("direct-test", info.endpoint.instanceId)
                         assertEquals(1234, info.endpoint.port)
+                        assertEquals("0.7.8", info.endpoint.businessProtocol)
                         assertEquals("/project", info.workingDirectory)
                     }
                     assertEquals(1, bootstrapFetchCount(state))
@@ -52,6 +53,15 @@ internal val frontendBootstrapTransportTest by testSuite {
             try {
                 assertFailsWith<IllegalStateException> { bootstrapLocalFrontend(LaunchOrigin, LaunchPath, LaunchTicket) }
                 withTimeout(5_000) { while (!bootstrapStreamStopped(state)) delay(1) }
+                assertEquals(1, bootstrapFetchCount(state))
+            } finally { restoreBootstrapFetch(state) }
+        } }
+    }
+    test("bootstrap refuses the previous business version before opening a connection") {
+        withContext(Dispatchers.Default) { bootstrapFetchOwner.withLock {
+            val state = interceptBootstrapFetch("oldBusiness")
+            try {
+                assertFailsWith<IllegalStateException> { bootstrapLocalFrontend(LaunchOrigin, LaunchPath, LaunchTicket) }
                 assertEquals(1, bootstrapFetchCount(state))
             } finally { restoreBootstrapFetch(state) }
         } }
@@ -92,7 +102,8 @@ internal val frontendBootstrapTransportTest by testSuite {
         const result = {
             protocol: mode === 'old' ? 2 : 3,
             workingDirectory: '/project',
-            endpoint: {instanceId: 'direct-test', port: 1234, password: 'c'.repeat(64), businessProtocol: '0.7.4'}
+            endpoint: {instanceId: 'direct-test', port: 1234, password: 'c'.repeat(64),
+                businessProtocol: mode === 'oldBusiness' ? '0.7.7' : '0.7.8'}
         };
         if (mode === 'extra') result.host = {};
         return new Response(JSON.stringify(result));

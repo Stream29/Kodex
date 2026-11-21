@@ -5,6 +5,6 @@ import io.github.stream29.kodex.app.sessiondelete.contract.SessionDeleteViewMode
 
 public expect fun createSessionDeleteViewModel(
     sessionIndex: Int,
-    threadName: String?,
+    name: String?,
     dependencies: SessionDeleteDependencies,
 ): SessionDeleteViewModel

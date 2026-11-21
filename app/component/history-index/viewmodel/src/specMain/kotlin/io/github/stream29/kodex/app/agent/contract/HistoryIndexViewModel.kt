@@ -2,6 +2,7 @@ package io.github.stream29.kodex.app.agent.contract
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.coroutines.cancellation.CancellationException
@@ -65,10 +66,14 @@ public data class HistoryIndexEntry(
     public val kind: HistoryIndexEntryKind,
     public val summary: String,
     public val detail: HistoryIndexEntryDetail = HistoryIndexEntryDetail(kind, summary),
-    public val messageTimestamp: Instant? = null,
+    public val timestamp: Instant? = null,
     /** Present only on a committed subagent creation row; not derived from the summary. */
     public val createdChildAgentId: Int? = null,
+    public val editableUserText: String? = null,
 )
+
+/** Text content only, preserving whitespace and segment boundaries without separators. */
+public expect fun StableUserMessage.editableHistoryText(): String?
 
 /**
  * Borrowed lightweight ports bound to ONE captured Agent, not an Application/Agent service locator.

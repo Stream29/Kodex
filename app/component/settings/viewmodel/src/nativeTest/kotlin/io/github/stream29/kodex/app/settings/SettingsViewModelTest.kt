@@ -42,7 +42,7 @@ val settingsViewModelTest by testSuite {
                 assertEquals(SettingsPage.OpenAi, vm.selectedPage.value)
                 assertEquals(1, refreshes.value)
                 assertSame(session, vm.session)
-                assertEquals("initial OpenAI", view.current().settings.value.threadName)
+                assertEquals("initial OpenAI", view.current().settings.value.name)
             } finally { vm.close(); global.close() }
         }
     }
@@ -102,7 +102,7 @@ val settingsViewModelTest by testSuite {
                 vm.close()
                 editor.applicationPreferences.setNewLineKey(NewLineKey.ShiftEnter)
                 assertEquals(NewLineKey.Enter, services.global.getFrontendSettings().newLineKey)
-                assertEquals("target", view.current().settings.value.threadName)
+                assertEquals("target", view.current().settings.value.name)
                 assertNotNull(services.global.getSettings())
             } finally { vm.close(); global.close() }
         }
@@ -175,8 +175,8 @@ val settingsViewModelTest by testSuite {
                 editor.state.first { (it as? SessionSettingsState.Available)?.snapshot?.sessionName == "renamed" }
                 editor.requestRename(revision)
                 assertNull(editor.rename.value)
-                assertEquals("B", b.settings.value.threadName)
-                assertEquals("renamed", view.current().settings.value.threadName)
+                assertEquals("B", b.settings.value.name)
+                assertEquals("renamed", view.current().settings.value.name)
                 sessions.release(a.sessionIndex)
                 editor.state.first { it == SessionSettingsState.Unavailable }
                 editor.requestRename(revision)

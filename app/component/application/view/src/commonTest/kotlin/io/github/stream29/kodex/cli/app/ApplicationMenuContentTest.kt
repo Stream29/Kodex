@@ -15,10 +15,10 @@ val applicationMenuContentTest by testSuite {
             42, "created", null, { calls += "rename" }, { calls += "close" },
             { calls += "archive" }, { calls += "delete" },
         )
-        assertEquals(listOf("Index: 42", "Created at: created"), assertIs<ApplicationMenuEntry.Information>(entries.first()).lines)
+        assertEquals(listOf("Session #42", "Created at: created"), assertIs<ApplicationMenuEntry.Information>(entries.first()).lines)
         val actions = entries.filterIsInstance<ApplicationMenuEntry.Action>()
         assertEquals(listOf("rename", "close", "close-and-archive", "delete"), actions.map { it.key })
-        assertEquals(listOf("Rename", "Close", "Close and archive", "Delete"), actions.map { it.label })
+        assertEquals(listOf("Rename Session", "Close Agent tab", "Archive Session and close tab", "Delete Session"), actions.map { it.label })
         actions.forEach { it.onClick() }
         assertEquals(listOf("rename", "close", "archive", "delete"), calls)
     }

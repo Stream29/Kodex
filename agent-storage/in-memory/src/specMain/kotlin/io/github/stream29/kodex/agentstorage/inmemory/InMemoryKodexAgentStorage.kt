@@ -30,5 +30,8 @@ public expect class InMemoryKodexAgentStorage(
     public companion object {
         /** Creates the uninitialized storage backing a freshly spawned AgentSession. */
         public fun empty(agentId: Int? = null): InMemoryKodexAgentStorage
+
+        /** Creates storage from existing batches, preserving their original sparse indices. */
+        public fun importCommits(agentId: Int?, commits: List<IndexedAgentCommit>): InMemoryKodexAgentStorage
     }
 }

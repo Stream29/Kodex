@@ -28,7 +28,6 @@ public actual fun ApplicationPopupContent(
     key(PopupOwnerKey(popup)) {
         when (popup) {
             ApplicationPopupState.Closed -> Unit
-            is ApplicationPopupState.SessionCatalog -> renderer.Catalog(popup.viewModel, onOperationFailure)
             is ApplicationPopupState.Settings -> renderer.Settings(
                 popup.viewModel,
                 onClose = { viewModel.dismissPopup(popup) },

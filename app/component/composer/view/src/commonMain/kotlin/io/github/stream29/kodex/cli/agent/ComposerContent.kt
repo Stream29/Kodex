@@ -56,7 +56,7 @@ public actual fun ComposerContent(
                     maximumLines = maximumEditorLines,
                     submitKey = newLineKey.submitKey,
                     autoFocus = autoFocus && state.mode != ComposerMode.RequestInput,
-                    enabled = enabled && state.mode != ComposerMode.RequestInput,
+                    enabled = enabled,
                     readOnly = state.submission is ComposerSubmissionState.Submitting,
                     onSubmit = { text, cursor ->
                         composerSubmissionRevision(state.ownerId, text, cursor, viewModel.state.value)?.let { revision ->

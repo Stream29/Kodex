@@ -23,7 +23,7 @@ internal val frontendBootstrapValidationTest by testSuite {
         for (invalid in listOf(
             bootstrap(protocol = 2), bootstrap(directory = "relative"),
             bootstrap(directory = "/project\u0000"), bootstrap(instance = ""), bootstrap(port = 0),
-            bootstrap(password = "non-scoped".repeat(8)), bootstrap(business = "old"),
+            bootstrap(password = "non-scoped".repeat(8)), bootstrap(business = "0.7.6"),
         )) {
             assertFailsWith<IllegalArgumentException> { validateFrontendBootstrap(invalid) }
         }

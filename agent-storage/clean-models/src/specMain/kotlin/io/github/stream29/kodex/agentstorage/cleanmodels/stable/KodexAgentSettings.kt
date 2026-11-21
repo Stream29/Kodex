@@ -51,7 +51,7 @@ public data class KodexAgentSettings(
     @Serializable(with = PathAsStringSerializer::class)
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val cwd: Path = Path("."),
-    public val threadName: String = "",
+    public val name: String = "",
     public val autoCompactionTokenLimit: Long? = null,
     public val requestUserInputMode: RequestUserInputMode = RequestUserInputMode.AskUser,
     public val plan: UpdatePlanArgs = UpdatePlanArgs(plan = emptyList()),

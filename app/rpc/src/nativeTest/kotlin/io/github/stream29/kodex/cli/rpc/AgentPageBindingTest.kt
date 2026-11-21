@@ -5,8 +5,8 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.getAskUsersAt
-import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsDataState
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -33,20 +33,25 @@ val agentPageBindingTest by testSuite(compartment = { TestCompartment.RealTime }
                 home.toString(), requestUserInputMode = RequestUserInputMode.AskUser,
             ))
             val root = assertIs<SessionSpawnResult.Created>(spawned, spawned.toString())
-            val rootView = views.open(root.sessionId)
+            val rootView = application.openSession(root.sessionId)
             val owner = CoroutineScope(coroutineContext + Job(coroutineContext[Job]))
-            suspend fun child(task: String): Pair<Int, AgentViewModel> {
+            suspend fun child(task: String): AgentTabViewModel {
                 val result = assertIs<SubagentSpawnResult.Created>(services.runtime.spawnSubagent(SubagentSpawnRequest(
                     SessionSpawnSource(root.rootAgentId, root.invocationId), task, task,
                 )))
-                val binding = RpcSessionBinding.create(root.sessionId, services, owner, result.agentId) { throw it }
-                return result.agentId to createRpcAgentViewModel(binding, owner, global.models) { throw it }
+                return application.openAgent(result.agentId)
             }
-            val (aid, a) = child("fixture A")
-            val (bid, b) = child("fixture B")
+            val aTab = child("fixture A")
+            val bTab = child("fixture B")
+            val aid = aTab.agentId
+            val bid = bTab.agentId
+            val a = assertIs<RpcAgentViewModel>(aTab.agent.value)
+            val b = assertIs<RpcAgentViewModel>(bTab.agent.value)
             val rootAgent = assertNotNull(rootView.rootAgent.value)
-            var selected = a
-            val settings = RpcSessionSettingsSource(a as RpcAgentViewModel, owner, { selected === a }, canRenameSession = false)
+            assertTrue(application.selectTab(aTab))
+            val settings = RpcSessionSettingsSource(a, owner, {
+                application.navigation.value.selectedTab === aTab && aTab.agent.value === a
+            }, canRenameSession = false)
             try {
                 a.running.first { it }
                 b.running.first { it }
@@ -82,7 +87,7 @@ val agentPageBindingTest by testSuite(compartment = { TestCompartment.RealTime }
                 a.requestUserInput.submit(edited.askId, edited.revision)
                 a.latestIndex.first { index -> a.binding.storage.getAskUsersAt(index).single().answer != null }
                 a.requestUserInput.state.first { it == RequestUserInputState.Idle }
-                val bStorage = (b as RpcAgentViewModel).binding.storage
+                val bStorage = b.binding.storage
                 assertNull(bStorage.getAskUsersAt(b.latestIndex.value).single().answer)
                 a.cancel()
                 a.running.first { !it }
@@ -92,7 +97,7 @@ val agentPageBindingTest by testSuite(compartment = { TestCompartment.RealTime }
                 assertNotEquals(a.composer.state.value.ownerId, b.composer.state.value.ownerId)
                 assertNotEquals(rootAgent.composer.state.value.ownerId, a.composer.state.value.ownerId)
                 val sent = async(start = CoroutineStart.UNDISPATCHED) { a.composer.submit(oldA) }
-                selected = b
+                assertTrue(application.selectTab(bTab))
                 sent.await()
                 assertEquals("", a.composer.state.value.text)
                 a.latestIndex.first { index ->
@@ -123,8 +128,8 @@ val agentPageBindingTest by testSuite(compartment = { TestCompartment.RealTime }
                 }
             } finally {
                 settings.close()
-                b.close()
-                a.close()
+                application.closeTab(bTab)
+                application.closeTab(aTab)
                 owner.coroutineContext[Job]?.cancelAndJoin()
             }
         }

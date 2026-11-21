@@ -2,7 +2,7 @@ package io.github.stream29.kodex.cli.history
 
 /**
  * Canonical stable tool summary mapping shared across collapsed headers and expanded tool views,
- * preserving legacy migrated tool names for historical sessions.
+ * using the intent recorded by the tool call.
  */
 public expect fun functionToolSummary(
     name: String,

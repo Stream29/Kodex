@@ -29,13 +29,20 @@ kodex session list --include-archived
 kodex session spawn --cwd ./project
 printf '%s\n' 'Run the test suite' | kodex agent submit --agent 12 --stdin
 kodex agent status --agent 12
+kodex agent fork --agent 12
 ```
 
-Use the `root_agent_id` returned by `spawn` for `agent` commands and `session_id`
-for Session management commands. `spawn` optionally submits a first message.
+`session spawn` optionally submits a first message. Its receipt includes the
+`root_agent_id` for Agent commands and the `session_id` for Session management.
 `submit` and `resume` return when the backend accepts the work, not when it
 finishes. Inside an Agent shell, `spawn` inherits the calling Session's model
 configuration and working directory; explicit options override those values.
+
+`agent fork` copies the explicitly selected root or child Agent's current effective
+history into a new independent Session. The JSON result contains the new
+`session_id` and `root_agent_id`. Forking does not start a turn. When replacing
+`session fork` in a script, pass the source Agent ID to `--agent`, not the old
+`--session` value. There is no `session fork` alias.
 
 Successful calls print `{"ok":true,"result":...}`. Execution failures return a
 nonzero exit code and one JSON error on stdout. If the result is `unknown`, check
@@ -47,7 +54,7 @@ and `kodex ask answer --help` for the full argument list.
 
 ```sh
 kodex agent sql --schema
-printf '%s\n' 'SELECT session_id, thread_name FROM session_catalog LIMIT 20' | kodex agent sql --stdin
+printf '%s\n' 'SELECT root_agent_id, name, cwd FROM session_catalog_view LIMIT 20' | kodex agent sql --stdin
 ```
 
 SQL uses the selected local backend and does not take an Agent ID. `--schema`

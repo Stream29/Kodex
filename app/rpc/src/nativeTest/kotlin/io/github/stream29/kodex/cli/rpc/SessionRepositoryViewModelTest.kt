@@ -13,7 +13,7 @@ val sessionRepositoryViewModelTest by testSuite {
             try {
                 catalog.refresh()
                 val before = assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.single()
-                assertEquals("Session $index", before.threadName)
+                assertEquals("Session $index", before.name)
                 assertNotNull(before.createdAt)
                 assertNotNull(before.updatedAt)
                 catalog.archive(index)
@@ -23,13 +23,14 @@ val sessionRepositoryViewModelTest by testSuite {
                 assertFalse(before.archived)
                 catalog.unarchive(index)
                 assertFalse(assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.single().archived)
-                val fork = catalog.fork(index)
+                val otherIndex = services.global.createSession(home)
+                catalog.refresh()
                 assertEquals(2, assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.size)
-                val forkEntry = catalog.state.value.sessions.single { it.sessionIndex == fork }
-                assertTrue(requireNotNull(catalog.requestDelete(forkEntry)).viewModel.delete())
+                val otherEntry = catalog.state.value.sessions.single { it.sessionIndex == otherIndex }
+                assertTrue(requireNotNull(catalog.requestDelete(otherEntry)).viewModel.delete())
             } finally { catalog.close() }
             // Disposal never closes the backend repository.
-            assertEquals(1, services.global.getSessionCatalog(true).size)
+            assertEquals(listOf(index), services.global.getSessionCatalog(true).map { it.sessionIndex })
         }
     }
     test("catalog delegates delete confirmation exactly once to the application callback") {

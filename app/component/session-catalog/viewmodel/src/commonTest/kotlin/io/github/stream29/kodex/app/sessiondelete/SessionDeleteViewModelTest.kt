@@ -19,7 +19,7 @@ val sessionDeleteViewModelTest by testSuite {
             try {
                 assertTrue(calls.isEmpty())
                 assertEquals(41, vm.sessionIndex)
-                assertEquals("captured", vm.threadName)
+                assertEquals("captured", vm.name)
                 assertEquals(result, vm.delete())
                 assertEquals(listOf(41), calls)
                 assertTrue(vm.isActive)

@@ -20,10 +20,10 @@ public fun interface SessionDeleteDependencies {
 
 /**
  * One confirmation interaction for a captured persisted session. Construction
- * binds [sessionIndex], [threadName] and [SessionDeleteDependencies]; no live
+ * binds [sessionIndex], [name] and [SessionDeleteDependencies]; no live
  * Application/Catalog lookup or mutable target selection occurs in the component.
  *
- * Render "Delete <title>?" using [threadName], or "Session <index>" when null,
+ * Render "Delete <title>?" using [name], or "Session <index>" when null,
  * and warn that persisted data will be removed. Cancel is initially focused;
  * Delete is a destructive action. Cancel/dismiss performs no deletion.
  *
@@ -43,7 +43,7 @@ public interface SessionDeleteViewModel : AutoCloseable {
     public val sessionIndex: Int
 
     /** Optional title snapshot; does not track subsequent external renames. */
-    public val threadName: String?
+    public val name: String?
 
     /** Whether new deletion calls are accepted. */
     public val isActive: Boolean

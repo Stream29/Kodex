@@ -2,6 +2,8 @@ package io.github.stream29.kodex.utils.sqlite
 
 import de.infix.testBalloon.framework.core.testSuite
 import kotlinx.io.files.Path
+import kotlinx.io.files.SystemFileSystem
+import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.test.*
 
@@ -115,6 +117,25 @@ val sqliteDriverTest by testSuite {
     test("transactionRollbackNestingAndChanges") { SqliteTest().transactionRollbackNestingAndChanges() }
     test("rawFailuresPreserveSqliteDetail") { SqliteTest().rawFailuresPreserveSqliteDetail() }
     test("walReadOnlyConnectionIsolation") { SqliteTest().walReadOnlyConnectionIsolation() }
+    test("existing-only open never creates missing files or changes the journal mode") {
+        val path = Path(SystemTemporaryDirectory, "kodex-sqlite-existing-${Random.nextLong().toULong()}.db")
+        try {
+            assertFailsWith<SqliteFailure> { openExistingSqliteConnection(path).close() }
+            assertFalse(SystemFileSystem.exists(path))
+            openSqliteConnection(path).use { db ->
+                assertEquals(listOf(listOf("delete")), db.query("PRAGMA journal_mode=DELETE"))
+                db.execute("CREATE TABLE t(x)")
+            }
+            openExistingSqliteConnection(path).use { db ->
+                assertEquals(listOf(listOf("delete")), db.query("PRAGMA journal_mode"))
+                assertEquals(listOf(listOf(1L)), db.query("PRAGMA foreign_keys"))
+                db.execute("INSERT INTO t VALUES(1)")
+                assertEquals(listOf(listOf(1L)), db.query("SELECT x FROM t"))
+            }
+        } finally {
+            deleteSqliteTestFiles(path)
+        }
+    }
     test("close cleans active statements idempotently") {
         val db = openInMemorySqliteConnection()
         val statement = db.prepare("SELECT 1 UNION ALL SELECT 2")

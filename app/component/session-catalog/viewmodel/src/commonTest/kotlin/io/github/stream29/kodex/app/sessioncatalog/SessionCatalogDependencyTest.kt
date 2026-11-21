@@ -10,6 +10,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -35,11 +36,11 @@ val sessionCatalogDependencyTest by testSuite {
                 catalog.setShowArchived(true)
                 assertTrue(catalog.state.value.sessions.single().archived)
                 catalog.unarchive(1)
-                assertEquals(2, catalog.fork(1))
+                assertFalse(catalog.state.value.sessions.single().archived)
                 assertTrue(catalog.requestDelete(catalog.state.value.sessions.single())!!.viewModel.delete())
                 assertEquals(
                     listOf("load:false", "archive:1", "load:false", "load:true",
-                        "unarchive:1", "load:true", "fork:1", "load:true", "delete:1", "load:true"),
+                        "unarchive:1", "load:true", "delete:1", "load:true"),
                     backend.calls,
                 )
             } finally {
@@ -116,11 +117,6 @@ private class CatalogBackend : SessionCatalogDependencies {
     override suspend fun unarchive(sessionIndex: Int) {
         calls += "unarchive:$sessionIndex"
         entry = entry.copy(archived = false)
-    }
-
-    override suspend fun fork(sessionIndex: Int): Int {
-        calls += "fork:$sessionIndex"
-        return 2
     }
 
     override suspend fun delete(sessionIndex: Int): Boolean {

@@ -5,6 +5,8 @@ package io.github.stream29.kodex.agentsession.inmemory
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
+import io.github.stream29.kodex.agentsession.contract.AgentForkCopy
+import io.github.stream29.kodex.agentsession.contract.AgentForkSourceChanged
 import io.github.stream29.kodex.agentsession.contract.IndexedAgentStopEvent
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
@@ -15,8 +17,13 @@ import io.github.stream29.kodex.agentsession.contract.SessionResidencyTable
 import io.github.stream29.kodex.agentsession.contract.StoredAgent
 import io.github.stream29.kodex.agentsession.contract.pendingDeadline
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
+import io.github.stream29.kodex.agentstate.impl.ForkContextRecovery
+import io.github.stream29.kodex.agentstate.impl.StablePhaseTransitionTypes
+import io.github.stream29.kodex.agentstate.impl.stablePhaseAt
+import io.github.stream29.kodex.agentstate.impl.startsNewTurnAt
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
@@ -155,11 +162,46 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         requireOpen()
         val source = requireSession(sourceEntryIndex).storage
         val index = nextSessionIndex()
-        val storage = trackedStorage(index)
-        cloneStorage(source, storage)
-        sessions[index] = SessionNode(storage)
+        val commits = source.getCommitsIn(0..source.latestIndex())
+        sessions[index] = SessionNode(forkStorage(index, commits, source.forkRecoveryAt(Int.MAX_VALUE)))
         mutableEntries.value = (entries.value + index).sorted()
         index
+    }
+
+    actual override suspend fun createAgentFork(
+        sourceAgentId: Int,
+        expectedOwner: KodexAgentSession?,
+        untilExclusive: Int?,
+    ): AgentForkCopy? = entriesMutex.withLock {
+        requireOpen()
+        val source = sessions[sourceAgentId]?.storage ?: return@withLock null
+        val activeOwner = residency.activeSessionOrNullLocked(sourceAgentId)
+        if (activeOwner !== expectedOwner) throw AgentForkSourceChanged()
+        require(activeOwner?.runtime?.runningTurn?.value == null) { "Cannot fork a running Agent." }
+        val latest = source.latestIndex()
+        require(latest >= 0 && source.getSettingsAtOrNull(0) != null) { "Cannot fork an uninitialized Agent." }
+        require(untilExclusive == null || untilExclusive > 0 && untilExclusive - 1 <= latest) { "Invalid fork boundary." }
+        val last = untilExclusive?.minus(1) ?: latest
+        val settings = checkNotNull(source.getSettingsAtOrNull(last))
+        val point = source.getCommitAtOrBefore(last, setOf(AgentCommitType.ContextCompaction))
+        val from = point?.index ?: 0
+        val recovery = point?.takeIf { from > 0 }?.let { source.captureForkRecovery(from) }
+        val commits = buildList {
+            if (from > 0) addAll(source.getCommitsIn(0..0))
+            addAll(source.getCommitsIn(from..last))
+            if (from > 0 && point != null) {
+                for (type in listOf(AgentCommitType.Settings, AgentCommitType.AskUser, AgentCommitType.Unstable)) {
+                    if (none { it.index == from && it.commit.commitType == type }) {
+                        source.getCommitAtOrBefore(from - 1, setOf(type))
+                            ?.let { add(it.copy(index = from, createdAt = point.createdAt)) }
+                    }
+                }
+            }
+        }
+        val index = nextSessionIndex()
+        sessions[index] = SessionNode(forkStorage(index, commits, recovery))
+        mutableEntries.value = (entries.value + index).sorted()
+        AgentForkCopy(index, settings)
     }
 
     actual override suspend fun getAgentRecord(agentId: Int): StoredAgent? = entriesMutex.withLock {
@@ -195,6 +237,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
                 storage = storage,
                 contextSettings = dependencies.contextSettings,
                 clock = dependencies.clock,
+                readForkContextRecovery = root.storage::forkRecoveryAt,
             ).buildMasterAgentRuntime(dependencies)
             sessionScope.launch(start = CoroutineStart.UNDISPATCHED) {
                 runtime.stopEvents.collect { event ->
@@ -258,6 +301,27 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         DeadlineTrackingStorage(agentId, InMemoryKodexAgentStorage.empty(agentId)) { deadline ->
             mutableAwaitDeadlines.update { if (deadline == null) it - agentId else it + (agentId to deadline) }
         }
+
+    private fun forkStorage(
+        agentId: Int,
+        commits: List<IndexedAgentCommit>,
+        recovery: ForkContextRecovery?,
+    ): DeadlineTrackingStorage {
+        val filtered = commits.mapNotNull { row ->
+            val commit = when (val original = row.commit) {
+                is SteerSnapshot -> SteerSnapshot(emptyList())
+                is UnstableSnapshot -> UnstableSnapshot(original.events.map {
+                    if (it is PendingAwait) it.copy(armedForAgentId = null) else it
+                })
+                else -> original.takeUnless { it.commitType == AgentCommitType.EventSubagentCreated }
+            }
+            commit?.let { row.copy(commit = it) }
+        }
+        val source = InMemoryKodexAgentStorage.importCommits(agentId, filtered)
+        return DeadlineTrackingStorage(agentId, source, recovery) { deadline ->
+            mutableAwaitDeadlines.update { if (deadline == null) it - agentId else it + (agentId to deadline) }
+        }
+    }
 }
 
 private class InMemoryKodexAgentSession(
@@ -295,6 +359,7 @@ private class SessionNode(
 private class DeadlineTrackingStorage(
     override val agentId: Int,
     private val source: InMemoryKodexAgentStorage,
+    private var forkRecovery: ForkContextRecovery? = null,
     private val publish: (PendingAwaitDeadline?) -> Unit,
 ) : MutableKodexAgentStorage by source {
     private val writeMutex = Mutex()
@@ -314,6 +379,7 @@ private class DeadlineTrackingStorage(
     override suspend fun revert(untilExclusive: Int): Unit = writeMutex.withLock {
         check(!detached) { "Agent storage was deleted." }
         source.revert(untilExclusive)
+        if (forkRecovery?.checkpointIndex?.let { it >= untilExclusive } == true) forkRecovery = null
         val index = source.getCommitAtOrBefore(source.latestIndex(), AgentCommitType.UnstableTypes)
         publish(index?.let { (it.commit as UnstableSnapshot).pendingDeadline(agentId, it.index) })
     }
@@ -321,6 +387,23 @@ private class DeadlineTrackingStorage(
     suspend fun detach(): Unit = writeMutex.withLock {
         detached = true
         publish(null)
+    }
+
+    suspend fun forkRecoveryAt(upToIndex: Int): ForkContextRecovery? = writeMutex.withLock {
+        forkRecovery?.takeIf { it.checkpointIndex <= upToIndex }
+    }
+
+    suspend fun captureForkRecovery(checkpoint: Int): ForkContextRecovery {
+        val old = forkRecoveryAt(checkpoint)
+        if (old?.checkpointIndex == checkpoint) return old
+        val before = checkpoint - 1
+        val lastTransition = source.getCommitAtOrBefore(before, StablePhaseTransitionTypes)
+        val lastBoundary = source.getCommitAtOrBefore(before, AgentCommitType.TurnStartBoundaryTypes)
+        return ForkContextRecovery(
+            checkpoint,
+            stablePhaseAt(lastTransition?.let { it.index to it.commit.commitType }, old),
+            startsNewTurnAt(lastBoundary?.let { it.index to it.commit.commitType }, old),
+        )
     }
 }
 
@@ -330,14 +413,14 @@ private suspend fun SessionNode.toEntry(
     updateArchived: suspend (Boolean) -> Unit,
 ): KodexSessionEntry {
     val latest = storage.latestIndex()
-    val threadName = if (latest >= 0) storage.getSettingsAtOrNull(latest)?.threadName else null
+    val sessionName = if (latest >= 0) storage.getSettingsAtOrNull(latest)?.name else null
     val createdAt = if (latest >= 0) storage.getCommitExact(0)?.createdAt?.takeIf { it != Instant.DISTANT_PAST } else null
     val lastActivityAt = if (latest >= 0) storage.getCommitAtOrBefore(latest)?.createdAt?.takeIf { it != Instant.DISTANT_PAST } else null
     val agentId = checkNotNull(storage.agentId)
     return object : KodexSessionEntry {
         override val entryIndex: Int = entryIndex
         override val rootAgentId: Int = agentId
-        override val threadName: String? = threadName
+        override val name: String? = sessionName
         override val createdAt: Instant? = createdAt
         override val lastActivityAt: Instant? = lastActivityAt
         override val archived: Boolean = this@toEntry.archived
@@ -345,35 +428,5 @@ private suspend fun SessionNode.toEntry(
         override val running: Boolean = owner?.runtime?.runningTurn?.value != null
         override suspend fun archive(): Unit = updateArchived(true)
         override suspend fun unarchive(): Unit = updateArchived(false)
-    }
-}
-
-private suspend fun cloneStorage(
-    source: KodexAgentStorage,
-    target: MutableKodexAgentStorage,
-) {
-    val latest = source.latestIndex()
-    if (latest < 0) return
-    val grouped = source.getCommitsIn(0..latest).groupBy({ it.index }, { it.commit })
-    for (index in 0..latest) {
-        val commits = grouped[index] ?: continue
-        val createdAt = source.getCommitExact(index)?.createdAt ?: Instant.DISTANT_PAST
-        val mapped = commits.map { commit ->
-            when (commit) {
-                is SteerSnapshot -> SteerSnapshot(emptyList())
-                is UnstableSnapshot -> UnstableSnapshot(
-                    commit.events.map { record ->
-                        if (record is PendingAwait && record.armedForAgentId != null) record.copy(armedForAgentId = null)
-                        else record
-                    },
-                )
-                else -> commit
-            }
-        }
-        if (createdAt != Instant.DISTANT_PAST) {
-            target.commit(mapped, createdAt)
-        } else {
-            target.commit(mapped)
-        }
     }
 }

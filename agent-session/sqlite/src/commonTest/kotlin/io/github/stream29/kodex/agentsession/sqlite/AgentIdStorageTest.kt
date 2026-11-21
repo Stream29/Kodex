@@ -3,32 +3,45 @@ package io.github.stream29.kodex.agentsession.sqlite
 import de.infix.testBalloon.framework.core.testSuite
 import de.infix.testBalloon.framework.core.TestCompartment
 import io.github.stream29.kodex.agentsession.contract.StoredAgent
+import io.github.stream29.kodex.agentsession.contract.AgentForkSourceChanged
 import io.github.stream29.kodex.agentsession.contract.RunningSubagentsPreventDeletion
 import io.github.stream29.kodex.agentruntime.contract.submitUserMessage
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
-import io.github.stream29.kodex.agentstorage.sqlite.initializeSqlitePhaseOneSchema
+import io.github.stream29.kodex.agentstorage.contract.getSteerAt
+import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
+import io.github.stream29.kodex.agentstorage.sqlite.initializeKodexHomeDatabase
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.utils.coroutines.use
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
+import io.github.stream29.kodex.utils.sqlite.SqliteFailure
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
@@ -40,6 +53,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 private val fs = SystemCoroutineFileSystem
 
@@ -84,9 +98,14 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
         test("root lookup, fork, archive and child relations are independent of same-numbered Sessions") { home ->
             val dbPath = Path(home, "kodex.db")
             openSqliteConnection(dbPath).use { db ->
-                initializeSqlitePhaseOneSchema(db)
+                initializeKodexHomeDatabase(db)
                 db.execute("INSERT INTO sessions(session_id) VALUES(12), (90)")
                 db.execute("INSERT INTO agents(agent_id, session_id) VALUES(90, 12), (12, 90)")
+                db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES(12), (90)")
+                for (includeArchived in listOf(false, true)) {
+                    val plan = db.query("EXPLAIN QUERY PLAN ${rootCatalogQuery(includeArchived)}").toString()
+                    assertTrue("agent_commits" !in plan && "commits_global_index" !in plan, plan)
+                }
             }
             testKodexAgentDependencies().use { dependencies ->
                 SqliteKodexSessionRepository(home, dependencies).use { repository ->
@@ -129,7 +148,7 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
                     val forkId = repository.createFork(12)
                     val fork = repository.open(forkId)
                     assertEquals(94, fork.runtime.agentId)
-                    assertEquals("real root", fork.storage.getSettingsAt(0).threadName)
+                    assertEquals("real root", fork.storage.getSettingsAt(0).name)
                     assertNull(fork.storage.getCommitExact(spawnAt, AgentCommitType.IndexTypes))
                     assertEquals(creation, root.storage.getCommitExact(spawnAt, AgentCommitType.IndexTypes)?.commit)
                     for (retained in listOf(before, packedAt, completedAt, after)) {
@@ -160,8 +179,8 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
                 assertFalse(fs.exists(Path(home, "sessions", "12", "agents", "93")))
                 SqliteKodexSessionRepository(home, dependencies).use { repository ->
                     assertEquals(90, repository.getEntry(12).rootAgentId)
-                    assertEquals("real root", repository.getEntry(12).threadName)
-                    assertEquals("unrelated root", repository.getEntry(90).threadName)
+                    assertEquals("real root", repository.getEntry(12).name)
+                    assertEquals("unrelated root", repository.getEntry(90).name)
                     repository.delete(12)
                     assertNull(repository.getAgentRecord(90))
                     assertNull(repository.getAgentRecord(91))
@@ -174,10 +193,146 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
                 assertFalse(fs.exists(Path(home, "sessions", "12")))
             }
         }
+
+        test("fork copy accepts a sparse exclusive boundary and rejects a replaced owner") { home ->
+            testKodexAgentDependencies().use { dependencies ->
+                SqliteKodexSessionRepository(home, dependencies).use { repository ->
+                    val sessionId = repository.create()
+                    val source = repository.open(sessionId)
+                    val agentId = repository.getRootAgentId(sessionId)
+                    source.runtime.modify {
+                        it.initialize(settings("initial settings"))
+                        it.commit(settings("beyond the boundary"))
+                    }
+                    repository.closeSession(sessionId)
+                    openSqliteConnection(Path(home, "kodex.db")).use { db ->
+                        db.execute(
+                            """UPDATE agent_commits SET "index" = 5 WHERE agent_id = ? AND "index" = 1""",
+                            listOf(agentId.toLong()),
+                        )
+                    }
+                    val reopened = repository.open(sessionId)
+                    assertFailsWith<AgentForkSourceChanged> { repository.createAgentFork(agentId, source, 4) }
+                    assertEquals(listOf(sessionId), repository.list())
+                    val fork = reopened.runtime.modify { checkNotNull(repository.createAgentFork(agentId, reopened, 4)) }
+                    assertEquals("initial settings", fork.boundarySettings.name)
+                    val target = repository.open(fork.sessionId).storage
+                    assertEquals(0, target.latestIndex())
+                    assertEquals("initial settings", target.getSettingsAt(0).name)
+                    assertEquals("beyond the boundary", reopened.storage.getSettingsAt(5).name)
+                }
+            }
+        }
+
+        test("fork recovery is private, transactional and cascades on revert or delete") { home ->
+            val mutex = Mutex()
+            openSqliteConnection(Path(home, "kodex.db")).use { db ->
+                initializeKodexHomeDatabase(db)
+                suspend fun recoveryRows() = mutex.withLock {
+                    db.query("SELECT agent_id, checkpoint_index, phase, starts_new_turn FROM fork_context_recovery ORDER BY agent_id")
+                }
+                testKodexAgentDependencies().use { dependencies ->
+                    SqliteKodexSessionRepository(home, db, mutex, dependencies).use { repository ->
+                        assertEquals(listOf(listOf(1L)), mutex.withLock { db.query("PRAGMA foreign_keys") })
+                        val sourceIndex = repository.create()
+                        val sourceId = repository.getRootAgentId(sourceIndex)
+                        val checkpoint = StableContextCompaction(encryptedContent = "private-baseline-fixture")
+                        val source = repository.open(sourceIndex)
+                        val oldWindowIndex = source.runtime.modify {
+                            it.initialize(settings("initial"))
+                            it.commit(StableUserMessage(listOf(ContentItem.InputText("only in the old window"))))
+                        }
+                        val pending = PendingAwait(
+                            callId = "old-wait",
+                            arguments = AwaitEventArguments(listOf(AwaitEventInput.Timeout(1000)), name = "Wait for the deadline"),
+                            timeoutAt = Instant.fromEpochMilliseconds(1000),
+                            armedForAgentId = sourceId,
+                        )
+                        val (pendingIndex, packedAt) = source.runtime.modify {
+                            val pendingIndex = it.commit(listOf(
+                                UnstableSnapshot(listOf(pending)),
+                                SteerSnapshot(listOf(StableUserMessage(listOf(ContentItem.InputText("queued"))))),
+                            ))
+                            pendingIndex to it.commit(checkpoint)
+                        }
+                        source.runtime.modify { it.commit(UnstableSnapshot(emptyList())) }
+                        assertEquals(KodexAgentStateValue.UserMessage, source.runtime.state.value)
+                        repository.closeSession(sourceIndex)
+                        val reopened = repository.open(sourceIndex)
+                        assertEquals(KodexAgentStateValue.UserMessage, reopened.runtime.state.value)
+                        assertEquals(emptyList(), recoveryRows(), "An unforked source must not have recovery rows.")
+
+                        val copy = reopened.runtime.modify {
+                            checkNotNull(repository.createAgentFork(sourceId, reopened, packedAt + 1))
+                        }
+                        val targetId = repository.getRootAgentId(copy.sessionId)
+                        val target = repository.open(copy.sessionId)
+                        assertNull(target.storage.getCommitExact(pendingIndex))
+                        assertEquals(checkpoint, target.storage.getCommitExact(packedAt, AgentCommitType.IndexTypes)?.commit)
+                        assertEquals(listOf(pending.copy(armedForAgentId = null)), target.storage.getUnstableAtOrNull(packedAt))
+                        assertEquals(emptyList(), target.storage.getSteerAt(packedAt))
+                        assertNull(repository.pendingAwaitDeadlines.value[targetId])
+                        assertEquals(listOf(pending), reopened.storage.getUnstableAtOrNull(pendingIndex))
+                        assertEquals(emptyList(), reopened.storage.getUnstableAtOrNull(reopened.storage.latestIndex()))
+                        val targetRecovery = listOf(targetId.toLong(), packedAt.toLong(), "UserMessage", 0L)
+                        assertEquals(listOf(targetRecovery), recoveryRows())
+                        val mirrorDirectory = Path(home, "sessions", copy.sessionId.toString(), "index")
+                        val publishedIndex = Path(mirrorDirectory, "latest.json")
+                        withTimeout(5.seconds) { while (!fs.exists(publishedIndex)) delay(10) }
+                        assertEquals(packedAt.toString(), fs.readString(publishedIndex))
+                        val mirrorPayload = fs.readString(Path(mirrorDirectory, "$packedAt.json"))
+                        val (sourcePayload, targetPayload) = mutex.withLock {
+                            listOf(sourceId, targetId).map { agentId ->
+                                db.query(
+                                    """SELECT payload_json FROM agent_commits WHERE agent_id = ? AND type = 'context_compaction' AND "index" = ?""",
+                                    listOf(agentId.toLong(), packedAt.toLong()),
+                                ).single().single()
+                            }
+                        }
+                        assertEquals(sourcePayload, targetPayload, "The public checkpoint payload must not carry recovery state.")
+                        assertEquals(targetPayload, mirrorPayload)
+                        assertTrue(mirrorPayload.contains("private-baseline-fixture"))
+                        assertFalse(mirrorPayload.contains("starts_new_turn"))
+                        assertFalse(mirrorPayload.contains("checkpoint_index"))
+                        assertFalse(mirrorPayload.contains("\"phase\""))
+
+                        mutex.withLock {
+                            db.execute("""CREATE TRIGGER reject_recovery BEFORE INSERT ON fork_context_recovery
+                                BEGIN SELECT RAISE(ABORT, 'injected fork recovery failure'); END""")
+                        }
+                        val failure = assertFailsWith<SqliteFailure> {
+                            reopened.runtime.modify { repository.createAgentFork(sourceId, reopened, packedAt + 1) }
+                        }
+                        assertEquals("injected fork recovery failure", failure.sqliteMessage)
+                        assertEquals(listOf(sourceIndex, copy.sessionId), repository.list())
+                        assertEquals(listOf(targetRecovery), recoveryRows(), "The aborted fork must leave existing recovery rows intact.")
+                        mutex.withLock {
+                            assertEquals(listOf(listOf(2L)), db.query("SELECT count(*) FROM agents"))
+                            db.execute("DROP TRIGGER reject_recovery")
+                        }
+
+                        val latestCopy = reopened.runtime.modify { checkNotNull(repository.createAgentFork(sourceId, reopened, null)) }
+                        val latest = repository.open(latestCopy.sessionId)
+                        val latestId = repository.getRootAgentId(latestCopy.sessionId)
+                        assertNull(latest.storage.getCommitExact(oldWindowIndex), "The recovered phase must not come from copied old history.")
+                        assertEquals(emptyList(), latest.storage.getUnstableAtOrNull(latest.storage.latestIndex()))
+                        assertEquals(KodexAgentStateValue.UserMessage, latest.runtime.state.value)
+                        assertEquals(listOf(targetRecovery, listOf(latestId.toLong(), packedAt.toLong(), "UserMessage", 0L)), recoveryRows())
+                        repository.delete(latestCopy.sessionId)
+                        assertEquals(listOf(targetRecovery), recoveryRows(), "Deleting one fork must remove only its recovery row.")
+                        target.runtime.modify { it.revert(packedAt) }
+                        assertEquals(KodexAgentStateValue.Empty, target.runtime.state.value)
+                        assertEquals(emptyList(), recoveryRows(), "Reverting the retained checkpoint must remove its recovery row.")
+                        repository.closeSession(copy.sessionId)
+                        assertEquals(KodexAgentStateValue.Empty, repository.open(copy.sessionId).runtime.state.value)
+                    }
+                }
+            }
+        }
     }
 }
 
-private fun settings(name: String) = KodexAgentSettings(model = OpenAiModelId("test"), threadName = name)
+private fun settings(name: String) = KodexAgentSettings(model = OpenAiModelId("test"), name = name)
 
 private suspend fun deleteTree(path: Path) {
     val metadata = fs.metadataOrNull(path) ?: return

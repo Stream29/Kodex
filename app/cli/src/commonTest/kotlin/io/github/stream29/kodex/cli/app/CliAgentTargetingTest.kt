@@ -73,8 +73,7 @@ val cliAgentTargetingTest by testSuite(compartment = { TestCompartment.RealTime 
                     suspend fun running(expected: Boolean) = withTimeout(10_000) {
                         backend.runtime.getRunningTurnFlow(child.agentId).first { it == expected }
                     }
-                    suspend fun childMessages(): List<String> {
-                        val id = child.agentId
+                    suspend fun userMessages(id: Int): List<String> {
                         val latest = backend.runtime.getLatestIndex(id)
                         return backend.runtime.getFirstCommitsIn(
                             id, backend.runtime.getCacheNonce(id), 0, latest, setOf(AgentCommitType.UserMessage), 5,
@@ -82,23 +81,36 @@ val cliAgentTargetingTest by testSuite(compartment = { TestCompartment.RealTime 
                     }
                     running(true)
                     withTimeout(10_000) {
-                        backend.runtime.getLatestIndexFlow(child.agentId).first { childMessages() == listOf("initial child task") }
+                        backend.runtime.getLatestIndexFlow(child.agentId).first { userMessages(child.agentId) == listOf("initial child task") }
                     }
                     val status = checkNotNull(issue("status", child.agentId).result).jsonObject
                     assertEquals(child.agentId, status.getValue("agent_id").jsonPrimitive.int)
                     assertTrue(status.getValue("running").jsonPrimitive.boolean)
                     assertTrue(issue("stop", child.agentId).ok)
                     running(false)
-                    val beforeResume = childMessages()
+                    val beforeResume = userMessages(child.agentId)
                     assertEquals(listOf("initial child task"), beforeResume)
+                    val forked = checkNotNull(issue("fork", child.agentId).result).jsonObject
+                    val forkSessionId = forked.getValue("session_id").jsonPrimitive.int
+                    val forkRootAgentId = forked.getValue("root_agent_id").jsonPrimitive.int
+                    assertFalse(forkSessionId in listOf(parent.sessionId, unrelated.sessionId))
+                    assertEquals(forkRootAgentId, backend.global.getRootAgentId(forkSessionId))
+                    assertNotEquals(child.agentId, forkRootAgentId)
+                    backend.runtime.keepAgentAlive(forkRootAgentId)
+                    assertEquals(beforeResume, userMessages(forkRootAgentId))
+                    val missing = checkNotNull(issue("fork", Int.MAX_VALUE, expectedExit = 1).error)
+                    assertEquals("target_not_found", missing.code)
+                    assertEquals("fork", missing.phase)
+                    assertEquals(Int.MAX_VALUE, missing.agentId)
+                    assertNull(missing.sessionId)
                     assertTrue(issue("resume", child.agentId).ok)
                     running(true)
-                    assertEquals(beforeResume, childMessages())
+                    assertEquals(beforeResume, userMessages(child.agentId))
                     issue("stop", child.agentId)
                     running(false)
                     assertTrue(issue("submit", child.agentId, "--message", "another child task").ok)
                     withTimeout(10_000) {
-                        backend.runtime.getLatestIndexFlow(child.agentId).first { "another child task" in childMessages() }
+                        backend.runtime.getLatestIndexFlow(child.agentId).first { "another child task" in userMessages(child.agentId) }
                     }
                     assertEquals(parentTail, backend.runtime.getLatestIndex(parent.rootAgentId))
                     assertEquals(0, backend.runtime.getLatestIndex(unrelated.rootAgentId))

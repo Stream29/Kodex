@@ -77,7 +77,7 @@ val agentEventBusTest by testSuite(
                                     callId = "await_1",
                                     arguments = OpenAiJsonCodec.encodeToString(
                                         AwaitEventArguments.serializer(),
-                                        AwaitEventArguments(listOf(AwaitEventInput.AskUserAnswered)),
+                                        AwaitEventArguments(listOf(AwaitEventInput.AskUserAnswered), name = "Wait for an answer"),
                                     ),
                                 ),
                             ),
@@ -91,7 +91,7 @@ val agentEventBusTest by testSuite(
                                     callId = "await_2",
                                     arguments = OpenAiJsonCodec.encodeToString(
                                         AwaitEventArguments.serializer(),
-                                        AwaitEventArguments(listOf(AwaitEventInput.UserMessage)),
+                                        AwaitEventArguments(listOf(AwaitEventInput.UserMessage), name = "Wait for a message"),
                                     ),
                                 ),
                             ),
@@ -212,7 +212,7 @@ val agentEventBusTest by testSuite(
                                     callId = "await_bad",
                                     arguments = OpenAiJsonCodec.encodeToString(
                                         AwaitEventArguments.serializer(),
-                                        AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(99999))),
+                                        AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(99999)), name = "Wait for missing terminal"),
                                     ),
                                 ),
                             ),
@@ -276,7 +276,9 @@ val agentEventBusRealTerminalTest by testSuite(
                 val client = mockOpenAiClient {
                     createResponse {
                         if (++requests == 1) {
-                            val input = AwaitEventArguments(List(2) { AwaitEventInput.TerminalExited(terminalId) })
+                            val input = AwaitEventArguments(
+                                List(2) { AwaitEventInput.TerminalExited(terminalId) }, name = "Wait for terminal exit",
+                            )
                             flowOf(
                                 ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
                                     name = AwaitEventTools.Name, callId = "terminal-only",
@@ -345,7 +347,7 @@ val agentEventBusRealTerminalTest by testSuite(
                                         AwaitEventArguments(listOf(
                                             AwaitEventInput.TerminalExited(requireNotNull(watchedSessionId)),
                                             AwaitEventInput.UserMessage,
-                                        )),
+                                        ), name = "Wait for the worker or a message"),
                                     ),
                                 ),
                             ),

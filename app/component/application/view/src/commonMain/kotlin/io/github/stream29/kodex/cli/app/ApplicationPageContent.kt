@@ -4,7 +4,7 @@ import androidx.compose.runtime.*
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -14,11 +14,11 @@ public actual fun ApplicationPageContent(
     navigation: ApplicationNavigationState,
     onOperationFailure: (Throwable) -> Unit,
     newSession: @Composable (NewSessionViewModel, onSubmit: (Long) -> Unit) -> Unit,
-    persistedSession: @Composable (PersistedSessionViewModel) -> Unit,
+    agentTab: @Composable (AgentTabViewModel) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val report by rememberUpdatedState(onOperationFailure)
-    val selected = navigation.selectedSession
+    val selected = navigation.selectedTab
     if (selected == null) {
         key(ApplicationChildKey(viewModel.newSession)) {
             newSession(viewModel.newSession) { revision ->
@@ -30,6 +30,6 @@ public actual fun ApplicationPageContent(
             }
         }
     } else {
-        key(ApplicationChildKey(selected)) { persistedSession(selected) }
+        key(ApplicationChildKey(selected)) { agentTab(selected) }
     }
 }

@@ -1,6 +1,10 @@
+@file:OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+
 package io.github.stream29.kodex.backend.host
 
 import io.github.stream29.kodex.app.migration.CurrentKodexApplicationVersion
+import io.github.stream29.kodex.app.migration.KodexHomeHandle
+import io.github.stream29.kodex.app.migration.preflightKodexHome
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.backend.*
 import io.github.stream29.kodex.cli.notification.collectNotificationHooks
@@ -23,6 +27,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import kotlinx.io.files.Path
+import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -30,6 +35,7 @@ import kotlinx.serialization.json.put
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.uuid.Uuid
 
 private val logger = KotlinLogging.logger {}
 
@@ -40,9 +46,9 @@ public actual suspend fun runBackendHost(
     createClient: (OpenAiAuthStore) -> OpenAiClient,
     createLoginClient: () -> OpenAiLoginClient,
 ): Unit = coroutineScope {
-    suspend fun resolveDirectory(requested: String?): String {
+    suspend fun resolveDirectory(defaultDirectory: Path, requested: String?): String {
         require(requested == null || '\u0000' !in requested) { "The browser working directory contains NUL." }
-        val candidate = requested?.let(::Path) ?: home
+        val candidate = requested?.let(::Path) ?: defaultDirectory
         require(candidate.isAbsolute) { "The browser working directory must be absolute on the backend." }
         val resolved = SystemCoroutineFileSystem.resolve(candidate)
         require(SystemCoroutineFileSystem.metadataOrNull(resolved)?.isDirectory == true) {
@@ -50,9 +56,10 @@ public actual suspend fun runBackendHost(
         }
         return resolved.toString()
     }
-    val browserAccess = LocalBrowserAccess(::resolveDirectory)
     val hostJob = currentCoroutineContext().job
-    val instance = BackendInstance.acquire(home)
+    val absoluteHome = if (home.isAbsolute) home else Path(SystemCoroutineFileSystem.resolve(Path(".")), home.toString())
+    preflightKodexHome(absoluteHome)
+    val instance = BackendInstance.acquire(absoluteHome)
     val lifecycle = createBackendLifecycle()
     val replyFinished = CompletableDeferred<Unit>()
     var services: BackendServices? = null
@@ -60,6 +67,7 @@ public actual suspend fun runBackendHost(
     var port = 0
     var published: BackendEndpoint? = null
     var logging: ApplicationLoggingSession? = null
+    var preparedHome: KodexHomeHandle? = null
     var primary: Throwable? = null
     fun reason(failure: Throwable): String {
         val diagnostic = if (failure is CancellationException) failure.cause ?: failure else failure
@@ -84,11 +92,16 @@ public actual suspend fun runBackendHost(
         }
     }
     try {
+        val resolvedHome = SystemCoroutineFileSystem.resolve(absoluteHome)
+        rejectLiveLegacyOwner(resolvedHome)
+        val handle = prepareKodexHome(resolvedHome)
+        preparedHome = handle
+        val browserAccess = LocalBrowserAccess { requested -> resolveDirectory(handle.home, requested) }
         val identity = randomBackendPassword()
         val password = randomBackendPassword()
         installBackendSignals()
-        setBackendWorkingDirectory(home)
-        logging = initializeProcessLogging(home, "Backend-${processId()}")
+        setBackendWorkingDirectory(handle.home)
+        logging = initializeProcessLogging(handle.home, "Backend-${processId()}")
         val control = object : BackendControl {
             override fun status() = buildJsonObject {
                 put("control_protocol", BackendControlProtocol)
@@ -120,15 +133,13 @@ public actual suspend fun runBackendHost(
             instance.publish(endpoint)
             published = endpoint
             val work = launch {
-                var handle: io.github.stream29.kodex.app.migration.KodexHomeHandle? = null
                 try {
-                    rejectLiveLegacyOwner(home)
-                    handle = prepareKodexHome(home)
                     if (!ensureBundledHomeGuide(handle.home)) {
                         logger.warn { "Preserved custom or non-regular skills/kodex-home/SKILL.md; review it before following its Home instructions." }
                     }
                     withBackendServices(
-                        home, codexHome, agentsHome,
+                        handle.home, codexHome, agentsHome,
+                        requiresPreparedHome = true,
                         createClient = createClient, createLoginClient = createLoginClient,
                         renewBackend = { lifecycle.renew() },
                         backendRenewalInterval = {
@@ -145,7 +156,7 @@ public actual suspend fun runBackendHost(
                             lifecycle.updateIdleTimeout(ttl(settings.current.backend.daemonTtlSeconds))
                             // One consumer is launched before the Ready business-admission publication.
                             launch(start = CoroutineStart.UNDISPATCHED) {
-                                collectNotificationHooks(backend.notifications, { settings.current.backend.hooks }, home)
+                                collectNotificationHooks(backend.notifications, { settings.current.backend.hooks }, handle.home)
                             }
                             launch {
                                 settings.backendSettings.collect { lifecycle.updateIdleTimeout(ttl(it.daemonTtlSeconds)) }
@@ -173,12 +184,6 @@ public actual suspend fun runBackendHost(
                 } finally {
                     withContext(NonCancellable) {
                         coreEnded()
-                        failed?.let { reportFailure(it) }
-                        try { handle?.closeAndJoin() }
-                        catch (cleanup: Throwable) {
-                            val failure = failed
-                            if (failure == null) failed = cleanup else if (failure !== cleanup) failure.addSuppressed(cleanup)
-                        }
                         failed?.let { reportFailure(it) }
                     }
                 }
@@ -219,12 +224,19 @@ public actual suspend fun runBackendHost(
         throw failure
     } finally {
         // Network and services have both closed before the stable lock inode is released.
-        try {
-            try { logging?.close() } finally { instance.close() }
-        }
-        catch (cleanup: Throwable) {
-            val failure = primary ?: failed
-            if (failure == null) throw cleanup else if (failure !== cleanup) failure.addSuppressed(cleanup)
+        withContext(NonCancellable) {
+            var cleanupPrimary = primary ?: failed
+            suspend fun release(block: suspend () -> Unit) {
+                try { block() }
+                catch (cleanup: Throwable) {
+                    val failure = cleanupPrimary
+                    if (failure == null) cleanupPrimary = cleanup else if (failure !== cleanup) failure.addSuppressed(cleanup)
+                }
+            }
+            release { logging?.close() }
+            release { preparedHome?.closeAndJoin() }
+            release { instance.close() }
+            if (primary == null && failed == null) cleanupPrimary?.let { throw it }
         }
     }
     failed?.let { failure ->
@@ -238,15 +250,31 @@ private suspend fun verifyReadyBackend(current: BackendEndpoint): BackendEndpoin
     current.failureReason?.let { error(it) }
     val status = backendControlRequest(current, "status")
     check(status["phase"]?.jsonPrimitive?.content == "ready") { "A locked backend cannot serve this frontend." }
-    check(status["instance"]?.jsonPrimitive?.content == current.instanceId &&
-        status["port"]?.jsonPrimitive?.intOrNull == current.port &&
-        status["business_protocol"]?.jsonPrimitive?.content == BackendBusinessProtocol
-    ) { "Backend status does not match the recorded instance." }
+    check(status.matches(current)) { "Backend status does not match the recorded instance." }
     return current
+}
+
+private fun kotlinx.serialization.json.JsonObject.matches(endpoint: BackendEndpoint): Boolean =
+    get("instance")?.jsonPrimitive?.content == endpoint.instanceId &&
+        get("port")?.jsonPrimitive?.intOrNull == endpoint.port &&
+        get("business_protocol")?.jsonPrimitive?.content == BackendBusinessProtocol
+
+private suspend fun <T> probe(block: suspend () -> T): T? = try {
+    block()
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (_: Exception) {
+    null
+}
+
+public actual suspend fun discoverReadyBackend(home: Path): BackendEndpoint? {
+    preflightKodexHome(home)
+    return BackendInstance.discover(home)?.let { verifyReadyBackend(it) }
 }
 
 public actual suspend fun connectBackend(home: Path, port: Int): BackendEndpoint {
     require(port in 1..65535) { "Invalid backend port: $port." }
+    preflightKodexHome(home)
     val current = checkNotNull(BackendInstance.discover(home)) {
         "No locked backend is running in the target Home."
     }
@@ -257,46 +285,55 @@ public actual suspend fun connectBackend(home: Path, port: Int): BackendEndpoint
 }
 
 public actual suspend fun ensureBackend(home: Path): BackendEndpoint {
+    preflightKodexHome(home)
     val current = BackendInstance.discover(home)
     if (current != null) return verifyReadyBackend(current)
     SystemCoroutineFileSystem.createDirectories(home)
-    SystemCoroutineFileSystem.createDirectories(Path(home, "log"))
-    val startupLog = Path(home, "log", "backend-startup.log")
-    suspend fun startupOutput(): String = try {
-        if (SystemCoroutineFileSystem.exists(startupLog)) SystemCoroutineFileSystem.readString(startupLog) else ""
-    } catch (cancelled: CancellationException) { throw cancelled }
-    catch (_: Exception) { "" }
-    val outputOffset = startupOutput().length
-    val previous = try { BackendInstance.readRecord(home)?.instanceId } catch (_: Exception) { null }
-    val launchedPid = launchIndependentBackend(home)
-    return BackendControlClient().use { controlClient ->
-        withTimeout(60.seconds) {
-            while (true) {
-                val endpoint = try { BackendInstance.discover(home) } catch (_: Exception) { null }
-                if (endpoint == null) {
-                    val ended = try { BackendInstance.readRecord(home) } catch (_: Exception) { null }
-                    if (ended?.pid == launchedPid && ended.instanceId != previous) {
-                        ended.failureReason?.let { error(it) }
+    val resolvedHome = SystemCoroutineFileSystem.resolve(home)
+    preflightKodexHome(resolvedHome)
+    // Bootstrap diagnostics are private and outside Home, including when full preparation fails.
+    val startupLog = Path(SystemTemporaryDirectory, "kodex-backend-startup-${Uuid.random()}.log")
+    SystemCoroutineFileSystem.writePrivateString(startupLog, "", mustCreate = true)
+    try {
+        val previous = probe { BackendInstance.readRecord(resolvedHome)?.instanceId }
+        val launchedPid = launchIndependentBackend(resolvedHome, startupLog)
+        return BackendControlClient().use { controlClient ->
+            withTimeout(60.seconds) {
+                while (true) {
+                    val endpoint = probe { BackendInstance.discover(resolvedHome) }
+                    if (endpoint == null) {
+                        val ended = probe { BackendInstance.readRecord(resolvedHome) }
+                        if (ended?.pid == launchedPid && ended.instanceId != previous) {
+                            ended.failureReason?.let { error(it) }
+                        }
+                        val output = probe { SystemCoroutineFileSystem.readString(startupLog) }.orEmpty()
+                        val reason = output.substringAfterLast("Unable to run Kodex [pid=$launchedPid]: ", "").trim()
+                        if (reason.isNotEmpty()) error(reason)
+                        if (!backendProcessAlive(launchedPid)) {
+                            error(output.trim().ifEmpty { "Backend failed to start (pid=$launchedPid)." })
+                        }
+                    } else {
+                        check(endpoint.businessProtocol == BackendBusinessProtocol) { "Backend protocol differs." }
+                        if (endpoint.pid == launchedPid) endpoint.failureReason?.let { error(it) }
+                        val status = probe { controlClient.request(endpoint, "status") }
+                        val phase = status?.get("phase")?.jsonPrimitive?.content
+                        if (status != null && phase == "ready" && status.matches(endpoint)) {
+                            preflightKodexHome(resolvedHome)
+                            return@withTimeout endpoint
+                        }
+                        if (endpoint.pid != launchedPid) {
+                            check(phase != "stopping") { "Backend startup is stopping." }
+                        }
                     }
-                    val output = startupOutput()
-                    val currentOutput = if (output.length >= outputOffset) output.substring(outputOffset) else output
-                    val reason = currentOutput.substringAfterLast("Unable to run Kodex [pid=$launchedPid]: ", "").trim()
-                    if (reason.isNotEmpty()) error(reason)
-                    if (!backendProcessAlive(launchedPid)) error("Backend failed to start; inspect log/backend-startup.log.")
+                    delay(100)
                 }
-                if (endpoint != null) {
-                    check(endpoint.businessProtocol == BackendBusinessProtocol) { "Backend protocol differs." }
-                    if (endpoint.pid == launchedPid) endpoint.failureReason?.let { error(it) }
-                    val status = try { controlClient.request(endpoint, "status") } catch (_: Exception) { null }
-                    if (status?.get("phase")?.jsonPrimitive?.content == "ready") return@withTimeout endpoint
-                    if (endpoint.pid != launchedPid) {
-                        check(status?.get("phase")?.jsonPrimitive?.content != "stopping") { "Backend startup is stopping." }
-                    }
-                }
-                delay(100)
+                @Suppress("UNREACHABLE_CODE")
+                error("Backend startup failed.")
             }
-            @Suppress("UNREACHABLE_CODE")
-            error("Backend startup failed.")
+        }
+    } finally {
+        withContext(NonCancellable) {
+            runCatching { SystemCoroutineFileSystem.delete(startupLog, mustExist = false) }
         }
     }
 }
@@ -315,7 +352,13 @@ private suspend fun rejectLiveLegacyOwner(home: Path) {
 }
 
 public actual suspend fun initializeProcessLogging(home: Path, processName: String): ApplicationLoggingSession {
-    val directory = Path(home, "log")
+    val directory = Path(SystemCoroutineFileSystem.resolve(home), "log")
+    val existing = SystemCoroutineFileSystem.metadataOrNull(directory)
+    check(if (existing == null) directory !in SystemCoroutineFileSystem.list(requireNotNull(directory.parent))
+        else existing.isDirectory && SystemCoroutineFileSystem.resolve(directory) == directory
+    ) {
+        "The Kodex log directory is not a direct directory: $directory"
+    }
     SystemCoroutineFileSystem.createDirectories(directory)
     // Kermit 2.1.0 rolls "<base>-1.log", not "<base>.1.log".
     val names = Regex("^(?:Backend|Tui|Cli)-([0-9]+)(?:-[0-9]+)?\\.log$")
@@ -329,12 +372,6 @@ public actual suspend fun initializeProcessLogging(home: Path, processName: Stri
     }.sortedByDescending { it.second }
     for ((entry, _) in dated.drop(8)) {
         entry.value.forEach { SystemCoroutineFileSystem.delete(it, mustExist = false) }
-    }
-    if (processName.startsWith("Backend-")) {
-        val startup = Path(directory, "backend-startup.log")
-        if ((SystemCoroutineFileSystem.fingerprintOrNull(startup)?.size ?: 0) > 10 * 1024 * 1024) {
-            SystemCoroutineFileSystem.writeString(startup, "")
-        }
     }
     return initializeLogging(home, processName)
 }

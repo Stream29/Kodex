@@ -21,6 +21,7 @@ kotlin {
             implementation(project(":agent-context"))
             implementation(project(":tool-apply-patch"))
             implementation(project(":tool-await-event"))
+            implementation(project(":tool-intent-name"))
             implementation(project(":tool-read-media"))
             implementation(project(":tool-plan"))
             implementation(project(":tool-unified-exec"))

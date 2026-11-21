@@ -42,7 +42,7 @@ internal fun rememberComposeSessionTabBarRenderer(): SessionTabBarRenderer =
 private class ComposeSessionTabBarRenderer : SessionTabBarRenderer {
     @Composable
     override fun Frame(
-        state: SessionTabBarState, sessions: @Composable () -> Unit,
+        state: SessionTabBarState, sessions: (@Composable () -> Unit)?,
         tab: @Composable (SessionTabPresentation, Int) -> Unit, newSession: @Composable () -> Unit,
     ) {
         val scroll = rememberLazyListState()
@@ -98,7 +98,7 @@ private class ComposeSessionTabBarRenderer : SessionTabBarRenderer {
                 }
                 true
             }, verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.widthIn(max = sessionsMaximum)) { sessions() }
+                if (sessions != null) Box(Modifier.widthIn(max = sessionsMaximum)) { sessions() }
                 LazyRow(
                     Modifier.weight(1f).pointerInput(scroll, wheelInput, density, layoutDirection) {
                         awaitPointerEventScope {

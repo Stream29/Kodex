@@ -2,17 +2,14 @@ package io.github.stream29.kodex.agentstorage.sqlite
 
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 
-/**
- * Authoritative SQLite DDL for Phase 1 (`PRAGMA user_version = 1`).
- */
-// language=SQL
-public const val SqlitePhaseOneSchema: String = """
-CREATE TABLE sessions (
-    session_id INTEGER PRIMARY KEY CHECK (session_id BETWEEN 0 AND 2147483647),
-    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1))
-) STRICT;
+/** Physical schema required by current repositories and the independent SQL reader. */
+public const val SqliteSchemaVersion: Int = 2
 
-CREATE INDEX idx_sessions_archived ON sessions(archived, session_id);
+/** SQLite header signature for databases prepared by the current Kodex Home format. */
+public const val KodexHomeDatabaseApplicationId: Int = 0x4B445830
+
+// language=SQL
+private const val AgentHistorySchema: String = """
 
 CREATE TABLE agents (
     agent_id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (agent_id BETWEEN 0 AND 2147483647),
@@ -72,34 +69,72 @@ CREATE INDEX commits_global_index ON agent_commits(agent_id, "index", type);
 CREATE INDEX commits_settings_cwd ON agent_commits(
     json_extract(payload_json, '$.cwd'), agent_id, "index" DESC
 ) WHERE type = 'settings';
+"""
 
-CREATE VIEW session_catalog (
-    session_id, archived, thread_name, cwd,
-    created_at, updated_at
-) AS
-SELECT s.session_id, s.archived,
-    CASE WHEN st.agent_id IS NULL THEN NULL
-        ELSE coalesce(json_extract(st.payload_json, '$.threadName'), '') END,
-    CASE WHEN st.agent_id IS NULL THEN NULL
-        ELSE coalesce(json_extract(st.payload_json, '$.cwd'), '.') END,
-    (SELECT c.created_at FROM agent_commits AS c INDEXED BY commits_global_index
-        WHERE c.agent_id = root.agent_id AND c."index" = 0 ORDER BY c.type LIMIT 1),
-    (SELECT c.created_at FROM agent_commits AS c WHERE c.agent_id = root.agent_id ORDER BY c."index" DESC LIMIT 1)
-FROM sessions AS s
-LEFT JOIN agents AS root ON root.session_id = s.session_id AND root.parent_agent_id IS NULL
-LEFT JOIN agent_commits AS st
-    ON st.agent_id = root.agent_id AND st.type = 'settings'
-    AND st."index" = (
-        SELECT max("index") FROM agent_commits
-        WHERE agent_id = root.agent_id AND type = 'settings'
-    );
+// language=SQL
+internal const val SqliteSchema: String = """
+CREATE TABLE sessions (
+    session_id INTEGER PRIMARY KEY CHECK (session_id BETWEEN 0 AND 2147483647)
+) STRICT;
+""" + AgentHistorySchema + """
+CREATE TABLE session_catalog_view (
+    root_agent_id INTEGER PRIMARY KEY REFERENCES agents(agent_id) ON DELETE CASCADE,
+    name TEXT,
+    cwd TEXT,
+    created_at TEXT,
+    updated_at TEXT
+) STRICT;
+
+CREATE TABLE schedules (
+    schedule_id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (schedule_id >= 1),
+    agent_id INTEGER NOT NULL CHECK (agent_id BETWEEN 0 AND 2147483647),
+    trigger_at_epoch_seconds INTEGER NOT NULL,
+    trigger_at_nanoseconds INTEGER NOT NULL CHECK (trigger_at_nanoseconds BETWEEN 0 AND 999999999),
+    cron TEXT,
+    description TEXT NOT NULL,
+    created_at TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX idx_schedules_trigger_at
+    ON schedules(trigger_at_epoch_seconds, trigger_at_nanoseconds, schedule_id);
+
+CREATE INDEX idx_schedules_agent_id
+    ON schedules(agent_id, trigger_at_epoch_seconds, trigger_at_nanoseconds, schedule_id);
+
+CREATE TABLE fork_context_recovery (
+    agent_id INTEGER NOT NULL,
+    checkpoint_index INTEGER NOT NULL,
+    commit_type TEXT NOT NULL DEFAULT 'context_compaction' CHECK (commit_type = 'context_compaction'),
+    phase TEXT NOT NULL CHECK (phase IN ('Empty', 'UserMessage', 'AssistantMessage', 'ToolCompleted')),
+    starts_new_turn INTEGER NOT NULL CHECK (starts_new_turn IN (0, 1)),
+    PRIMARY KEY (agent_id, checkpoint_index),
+    FOREIGN KEY (agent_id, commit_type, checkpoint_index)
+        REFERENCES agent_commits(agent_id, type, "index") ON DELETE CASCADE
+) STRICT, WITHOUT ROWID;
 """
 
 /**
- * Creates Phase 1 sessions, agents, agent_commits and the ordinary session_catalog view in an empty DB.
- * Global settings remain in settings.yml. Creation is one short transaction; user_version becomes 1.
- * @throws io.github.stream29.kodex.utils.sqlite.SqliteFailure on constraint or schema creation failure.
+ * Creates the entire current Kodex schema and stamps its signature in one transaction.
+ * The caller owns [connection] and any staging, journal mode and durable publication.
+ * @throws IllegalStateException if [connection] does not point to a fresh, unmarked main database.
+ * @throws io.github.stream29.kodex.utils.sqlite.SqliteFailure on SQLite I/O or execution failure.
  */
-public expect fun initializeSqlitePhaseOneSchema(connection: SqliteConnection)
+public expect fun initializeKodexHomeDatabase(connection: SqliteConnection)
 
-public expect fun ensureSqlitePhaseOneSchema(connection: SqliteConnection)
+/**
+ * Verifies the current signature, schema version and complete main schema without issuing writes.
+ * @throws IllegalStateException if any of them differ.
+ * @throws io.github.stream29.kodex.utils.sqlite.SqliteFailure if SQLite cannot read the database.
+ */
+public expect fun requireKodexHomeDatabase(connection: SqliteConnection)
+
+/**
+ * Verifies the current database and that no table, including ID sequences, contains any data.
+ * Use with exclusive Home ownership to check interrupted fresh initialization.
+ * @throws IllegalStateException if the database is incompatible or not empty.
+ * @throws io.github.stream29.kodex.utils.sqlite.SqliteFailure if SQLite cannot read the database.
+ */
+public expect fun requireEmptyKodexHomeDatabase(connection: SqliteConnection)
+
+/** Rebuilds one existing root's projection after history was copied or reverted in this transaction. */
+public expect fun SqliteConnection.recomputeSessionCatalog(rootAgentId: Int)

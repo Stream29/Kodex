@@ -9,9 +9,10 @@ import kotlinx.serialization.Serializable
  * latency, retry records, and request-level diagnostics.
  */
 @Serializable
-public sealed interface LlmRequestMeta : AgentCommit, TokenCountSnapshot {
-    override val totalTokens: Long
+public sealed interface LlmRequestMeta : AgentCommit {
+    public val totalTokens: Long
 
+    /** Usage-only fallback when a provider response has no complete measurement. */
     @Serializable
     @SerialName("llm_request_meta_legacy")
     public data class Legacy(
@@ -38,22 +39,21 @@ public sealed interface LlmRequestMeta : AgentCommit, TokenCountSnapshot {
     public data class Response(
         @SerialName("total_tokens")
         override val totalTokens: Long,
+        @SerialName("elapsed_ns")
+        public val elapsedNanoseconds: Long,
+        @SerialName("output_tokens")
+        public val outputTokens: Long,
         public val usage: TokenUsage? = null,
         public val diagnostics: TokenCountDiagnostics? = null,
         public val retries: Int = 0,
         @SerialName("latency_ms")
         public val latencyMs: Long? = null,
-    ) : LlmRequestMeta
-}
-
-/** Retained unannotated compatibility alias for frozen historical migration tests under `-Werror`. */
-public sealed interface TokenCountSnapshot : AgentCommit {
-    public val totalTokens: Long
-
-    public typealias Legacy = LlmRequestMeta.Legacy
-    public typealias Initialization = LlmRequestMeta.Initialization
-    public typealias Compaction = LlmRequestMeta.Compaction
-    public typealias Response = LlmRequestMeta.Response
+    ) : LlmRequestMeta {
+        init {
+            require(elapsedNanoseconds > 0) { "Response elapsed_ns must be positive." }
+            require(outputTokens >= 0) { "Response output_tokens must be nonnegative." }
+        }
+    }
 }
 
 @Serializable

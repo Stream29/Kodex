@@ -58,6 +58,14 @@ public expect fun openSqliteConnection(
 ): SqliteConnection
 
 /**
+ * Opens an existing SQLite file without creating it or selecting a journal mode.
+ * Uses normal SQLite locking and recovery, enables foreign keys, and waits up to 1000 ms on locks.
+ * Reads may touch WAL sidecars; this is not a filesystem-pure preflight.
+ * @throws SqliteFailure if the file cannot be opened.
+ */
+public expect fun openExistingSqliteConnection(path: Path): SqliteConnection
+
+/**
  * Opens an isolated in-memory SQLite connection with foreign keys enabled.
  * @throws SqliteFailure when bootstrap fails; underlying SQLiter exceptions are attached as [SqliteFailure.cause].
  */

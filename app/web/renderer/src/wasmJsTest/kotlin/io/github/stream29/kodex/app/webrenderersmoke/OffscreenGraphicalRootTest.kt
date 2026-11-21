@@ -181,9 +181,9 @@ val offscreenGraphicalRootTest by testSuite {
             }
         }
         try {
-            scene.settle { scene.hasText("Loading Session…") }
-            scene.clickDescription("Expand left sidebar")
-            scene.clickDescription("Expand right sidebar")
+            scene.settle { scene.hasText("Loading Agent…") }
+            scene.clickDescription("Sessions")
+            scene.clickDescription("History Index")
             scene.settle { scene.hasDescription("Resize left sidebar") && scene.hasDescription("Resize right sidebar") }
             fun resizeNode(side: String) = scene.nodes().single {
                 it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Resize $side sidebar") == true
@@ -223,23 +223,26 @@ val offscreenGraphicalRootTest by testSuite {
             val width = scene.descriptionBounds("Left sidebar").width
             viewport = 32
             scene.settle { !scene.hasDescription("Left sidebar") && !scene.hasDescription("Right sidebar") }
-            assertTrue(scene.hasDescription("Hide left sidebar") && scene.hasDescription("Hide right sidebar"))
+            assertTrue(scene.railSelected("Sessions") && scene.railSelected("History Index"))
             assertEquals(original, sidebars.state.value)
             viewport = 800
             scene.settle { scene.hasDescription("Left sidebar") && scene.descriptionBounds("Left sidebar").width == width }
             assertEquals(before, sidebars.resized)
-            for (side in listOf("left", "right")) {
+            for ((side, rail, collapseLabel) in listOf(
+                Triple("left", "Sessions", "Collapse Sessions"),
+                Triple("right", "History Index", "Collapse right sidebar"),
+            )) {
                 val collapse = scene.nodes().single {
-                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Collapse $side sidebar") == true
+                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(collapseLabel) == true
                 }
                 assertTrue(assertNotNull(collapse.config.getOrNull(SemanticsActions.RequestFocus)?.action).invoke())
                 scene.key(Key.Enter)
                 scene.settle { !scene.hasDescription("${side.replaceFirstChar { it.uppercase() }} sidebar") && scene.nodes().any {
-                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Expand $side sidebar") == true &&
+                    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(rail) == true &&
                         it.config.getOrNull(SemanticsProperties.Focused) == true
                 } }
                 scene.key(Key.Enter)
-                scene.settle { scene.hasDescription("Collapse $side sidebar") }
+                scene.settle { scene.hasDescription(collapseLabel) }
             }
             assertTrue(failures.isEmpty())
             scene.frame()
@@ -249,10 +252,10 @@ val offscreenGraphicalRootTest by testSuite {
     test("graphical root keeps captured tabs and converts physical sidebar drag into logical columns") { offscreenTest {
         val first = loadingSession(1, "first")
         val second = loadingSession(2, "second")
-        val closed = mutableListOf<PersistedSessionViewModel>()
+        val closed = mutableListOf<AgentTabViewModel>()
         val app = object : NavigationApplication(listOf(first, second)) {
             override val popup = MutableStateFlow<ApplicationPopupState>(ApplicationPopupState.Closed)
-            override suspend fun closeTab(target: PersistedSessionViewModel): Boolean {
+            override suspend fun closeTab(target: AgentTabViewModel): Boolean {
                 closed += target
                 val current = navigation.value
                 navigation.value = ApplicationNavigationState(
@@ -269,17 +272,18 @@ val offscreenGraphicalRootTest by testSuite {
             ComposeApplicationScreen(app, newLineKey, sidebars, failures::add, { false })
         }
         try {
-            scene.settle { scene.hasText("Loading Session…") && sidebars.initialViewport != null }
+            scene.settle { scene.hasText("Loading Agent…") && sidebars.initialViewport != null }
             assertTrue(assertNotNull(sidebars.initialViewport) in 20..400) // scene width is 800 physical pixels
             scene.click("second")
             scene.settle { app.selected.singleOrNull() === second }
             scene.contextTabText("second")
-            scene.settle { scene.hasText("Index: 2") && scene.hasText("Close") }
-            scene.click("Close")
-            scene.settle { closed.singleOrNull() === second && !scene.hasText("Index: 2") }
+            scene.settle { scene.hasText("Session #2") && scene.hasText("Close Agent tab") }
+            scene.click("Close Agent tab")
+            scene.settle { closed.singleOrNull() === second && !scene.hasText("Session #2") }
             assertSame(first, app.navigation.value.selectedSession)
-            scene.clickDescription("Expand left sidebar")
-            scene.clickDescription("Expand right sidebar")
+            assertFalse(scene.hasText("Sessions"))
+            scene.clickDescription("Sessions")
+            scene.clickDescription("History Index")
             scene.settle { scene.hasDescription("Left sidebar") && scene.hasDescription("Right sidebar") }
             val initial = scene.descriptionBounds("Left sidebar").width
             scene.dragRootSplitter(48f)
@@ -290,13 +294,17 @@ val offscreenGraphicalRootTest by testSuite {
             assertTrue(scene.descriptionBounds("Left sidebar").width > initial)
             sidebars.state.value = sidebars.state.value.copy(leftWidth = 20)
             scene.settle { scene.descriptionBounds("Left sidebar").width > initial * 1.4f }
-            scene.clickDescription("Sidebar content left")
-            scene.settle { scene.hasText("None") }
-            scene.click("None")
-            scene.settle { sidebars.state.value.left == SidebarContent.None }
-            assertEquals(listOf(SessionSidebarSide.Left to SidebarContent.None), sidebars.selected)
-            scene.clickDescription("Hide left sidebar")
+            assertFalse(scene.hasDescription("Sidebar content right"))
+            val rightWidth = scene.descriptionBounds("Right sidebar").width
+            scene.clickDescription("Terminal")
+            scene.settle { scene.railSelected("Terminal") && scene.hasText("Select an Agent to use this tool window.") }
+            assertFalse(scene.railSelected("History Index"))
+            assertTrue(scene.railSelected("Sessions"))
+            assertEquals(rightWidth, scene.descriptionBounds("Right sidebar").width)
+            scene.clickDescription("Sessions")
             scene.settle { !scene.hasDescription("Left sidebar") }
+            assertEquals(ToolWindowId.TerminalSessions, sidebars.state.value.activeRight)
+            assertTrue(scene.hasDescription("Right sidebar"))
             assertTrue(failures.isEmpty())
             scene.frame()
         } finally { scene.close() }
@@ -308,7 +316,9 @@ val offscreenGraphicalRootTest by testSuite {
             override val popup = MutableStateFlow<ApplicationPopupState>(ApplicationPopupState.Closed)
         }
         app.navigation.value = app.navigation.value.copy(selection = ApplicationTabSelection.SelectedTab(0))
-        val sidebars = RootSidebarPreferences()
+        val sidebars = RootSidebarPreferences(
+            SidebarSettings(leftWidth = 12, rightWidth = 12, activeLeft = ToolWindowId.Sessions, activeRight = ToolWindowId.HistoryIndex),
+        )
         val failures = mutableListOf<Throwable>()
         val newLineKey = MutableStateFlow(NewLineKey.Enter)
         val scene = OffscreenScene.create {
@@ -317,9 +327,7 @@ val offscreenGraphicalRootTest by testSuite {
             }
         }
         try {
-            scene.settle { scene.hasText("Loading Session…") }
-            scene.clickDescription("Expand left sidebar")
-            scene.clickDescription("Expand right sidebar")
+            scene.settle { scene.hasText("Loading Agent…") }
             scene.settle { scene.hasDescription("Left sidebar") && scene.hasDescription("Right sidebar") }
             val main = scene.descriptionBounds("Session surface")
             val left = scene.descriptionBounds("Left sidebar")
@@ -327,7 +335,9 @@ val offscreenGraphicalRootTest by testSuite {
             assertTrue(main.width >= 150f && main.height > 0f)
             assertTrue(left.width > 0 && right.width > 0)
             assertTrue(left.right <= main.left && main.right <= right.left)
-            assertTrue(right.right <= 320f)
+            assertTrue(scene.descriptionBounds("Sessions").right <= left.left)
+            assertTrue(right.right <= scene.descriptionBounds("History Index").left)
+            assertTrue(scene.descriptionBounds("History Index").right <= 320f)
             assertTrue(failures.isEmpty())
             scene.frame()
         } finally { scene.close() }
@@ -361,16 +371,31 @@ private fun loadingSession(index: Int, name: String): NavigationSession =
     }.also { it.rootAgent.value = null }
 
 /** UI preference port only; no second Application, backend or filesystem implementation. */
-private class RootSidebarPreferences : SidebarSettingsViewModel {
-    override val state = MutableStateFlow(SidebarSettings(leftWidth = 12, rightWidth = 12))
+private class RootSidebarPreferences(initial: SidebarSettings = SidebarSettings(leftWidth = 12, rightWidth = 12)) : SidebarSettingsViewModel {
+    override val state = MutableStateFlow(initial)
     var initialViewport: Int? = null
     val resized = mutableListOf<Pair<SessionSidebarSide, Int>>()
-    val selected = mutableListOf<Pair<SessionSidebarSide, SidebarContent>>()
     override fun initializeViewport(columns: Int) { if (initialViewport == null) initialViewport = columns }
-    override suspend fun selectLeft(content: SidebarContent) { selected += SessionSidebarSide.Left to content; state.value = state.value.copy(left = content) }
-    override suspend fun selectRight(content: SidebarContent) { selected += SessionSidebarSide.Right to content; state.value = state.value.copy(right = content) }
+    override suspend fun toggle(id: ToolWindowId) {
+        val current = state.value
+        state.value = when (id.side) {
+            ToolWindowSide.Left -> current.copy(activeLeft = id.takeUnless { it == current.activeLeft })
+            ToolWindowSide.Right -> current.copy(activeRight = id.takeUnless { it == current.activeRight })
+        }
+    }
+    override suspend fun collapse(side: ToolWindowSide) {
+        state.value = when (side) {
+            ToolWindowSide.Left -> state.value.copy(activeLeft = null)
+            ToolWindowSide.Right -> state.value.copy(activeRight = null)
+        }
+    }
     override suspend fun resizeLeft(columns: Int) { resized += SessionSidebarSide.Left to columns; state.value = state.value.copy(leftWidth = columns) }
     override suspend fun resizeRight(columns: Int) { resized += SessionSidebarSide.Right to columns; state.value = state.value.copy(rightWidth = columns) }
+}
+
+private fun OffscreenScene.railSelected(label: String): Boolean = nodes().any {
+    it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(label) == true &&
+        it.config.getOrNull(SemanticsProperties.Selected) == true
 }
 
 private fun OffscreenScene.descriptionBounds(description: String) = nodes().first {

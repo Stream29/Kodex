@@ -111,6 +111,18 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
             } finally { native.close() }
         }
     }
+    test("previous Native business checkpoint cannot renew or allocate an RPC connection") {
+        withServer(enabled = false) { harness ->
+            val response = harness.http.post(harness.httpUrl("/heartbeat")) { nativeCredentials(business = "0.7.6") }
+            assertEquals(HttpStatusCode.Conflict, response.status)
+            val native = harness.http.webSocketSession(harness.wsUrl("/rpc")) { nativeCredentials(business = "0.7.6") }
+            try {
+                assertTrue(withTimeout(5.seconds) { native.incoming.receiveCatching() }.isClosed)
+                assertEquals(0, harness.registered.value)
+                assertEquals(0, harness.control.renewals.value)
+            } finally { native.close() }
+        }
+    }
     test("authenticated browser receives validated backend directory before original RPC registration") {
         withServer { harness ->
             val socket = harness.browser()
@@ -130,7 +142,7 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
     for ((label, frame) in listOf(
         "password" to Frame.Text(encodeHello(password = Secret + "-wrong")),
         "instance" to Frame.Text(encodeHello(instance = "replacement-instance")),
-        "business version" to Frame.Text(encodeHello(business = "incompatible")),
+        "previous business version" to Frame.Text(encodeHello(business = "0.7.6", directory = "/canonical/project")),
         "browser version" to Frame.Text(encodeHello(protocol = LocalBrowserProtocol + 1)),
         "malformed" to Frame.Text("not JSON"),
         "missing fields" to Frame.Text("""{"password":"$Secret"}"""),
@@ -276,10 +288,10 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
     }
 }
 
-private fun HttpRequestBuilder.nativeCredentials() {
+private fun HttpRequestBuilder.nativeCredentials(business: String = BackendBusinessProtocol) {
     header(HttpHeaders.Authorization, "Bearer $Secret")
     header("X-Kodex-Instance", Instance)
-    header("X-Kodex-Protocol", BackendBusinessProtocol)
+    header("X-Kodex-Protocol", business)
 }
 
 private fun encodeHello(

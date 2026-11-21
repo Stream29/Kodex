@@ -314,44 +314,50 @@ val unifiedExecToolsTest by testSuite {
         }
     }
 
-    test("invalid typed names never allocate shell settings, process or registry entry") {
-        val shell = object : ShellClient, CoroutineScope by CoroutineScope(SupervisorJob()) {
-            override suspend fun start(command: ShellProcessCommand): ProcessSession = fail("Invalid name started a process")
-            override fun close() { cancel() }
-        }
-        val client = UnifiedExecToolClient(
-            workingDirectoryProvider = { fail("Invalid name looked up the execution directory") },
-            settingsProvider = { fail("Invalid name looked up shell settings") },
-            shellClient = shell,
-        )
-        try {
-            for (name in listOf(null, "", "  ", "first\nsecond", "a\u001bb", "a\u2029b")) {
-                val error = assertFailsWith<UnifiedExecToolException> {
-                    client.execCommand(ExecCommandArguments("private command", name = name, yieldTimeMillis = 10_000))
-                }
-                assertEquals("`name` must be nonblank, single-line text.", error.message)
-                assertTrue(client.activeSessions.value.isEmpty())
+    test("exec_command rejects blank and multiline or control-containing names when creating arguments") {
+        val invalidNames = listOf("", "  ", "first\nsecond", "a\u001bb", "a\u007fb", "a\u0085b", "a\u2028b", "a\u2029b")
+        for (name in invalidNames) {
+            val constructorError = assertFailsWith<IllegalArgumentException> {
+                ExecCommandArguments(command = "echo fixture", name = name, yieldTimeMillis = 10_000)
             }
-        } finally {
-            client.close()
+            val jsonName = Json.encodeToString(name)
+            val decoderError = assertFailsWith<IllegalArgumentException> {
+                Json.decodeFromString<ExecCommandArguments>(
+                    """{"cmd":"echo fixture","name":$jsonName,"yield_time_ms":10000}""",
+                )
+            }
+            assertEquals("`name` must be nonblank, single-line text.", constructorError.message)
+            assertEquals(constructorError.message, decoderError.message)
         }
     }
 
-    test("exec_command decodes shell and optional name and requires yield_time_ms while retaining legacy WriteStdinArguments DTO") {
+    test("exec_command JSON preserves the intent name and decodes the shell") {
         val arguments = Json.decodeFromString<ExecCommandArguments>(
-            """{"cmd":"echo test","name":"dev-server","shell":"/opt/codex/bash","yield_time_ms":10000}""",
+            """{"cmd":"echo test","name":" 启动开发服务 🧪 ","shell":"/opt/codex/bash","yield_time_ms":10000}""",
         )
 
-        assertEquals("dev-server", arguments.name)
+        assertEquals(" 启动开发服务 🧪 ", arguments.name)
         assertEquals(
             Shell(type = ShellType.Bash, path = Path("/opt/codex/bash")),
             arguments.shell,
         )
         assertEquals(10_000L, arguments.yieldTimeMillis)
+        assertEquals(arguments, Json.decodeFromString<ExecCommandArguments>(Json.encodeToString(arguments)))
+    }
 
+    test("exec_command JSON requires a non-null name and explicit yield_time_ms") {
         assertFailsWith<SerializationException> {
-            Json.decodeFromString<ExecCommandArguments>("""{"cmd":"echo test"}""")
+            Json.decodeFromString<ExecCommandArguments>("""{"cmd":"echo test","yield_time_ms":10000}""")
         }
+        assertFailsWith<SerializationException> {
+            Json.decodeFromString<ExecCommandArguments>("""{"cmd":"echo test","name":null,"yield_time_ms":10000}""")
+        }
+        assertFailsWith<SerializationException> {
+            Json.decodeFromString<ExecCommandArguments>("""{"cmd":"echo test","name":"Check output"}""")
+        }
+    }
+
+    test("historical write_stdin arguments still require explicit yield_time_ms") {
         assertFailsWith<SerializationException> {
             Json.decodeFromString<WriteStdinArguments>("""{"session_id":1,"chars":"hi"}""")
         }

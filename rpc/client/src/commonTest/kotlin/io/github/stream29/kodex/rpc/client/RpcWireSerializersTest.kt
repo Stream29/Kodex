@@ -3,12 +3,14 @@ package io.github.stream29.kodex.rpc.client
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.WorkCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRecord
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.rpc.models.AgentStateValue
@@ -26,11 +28,17 @@ import io.github.stream29.kodex.agentcontext.contract.ContextPathComparison
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluationFailure
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 import kotlin.reflect.typeOf
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 
 val rpcWireSerializersTest by testSuite {
     val originalJson = Json { encodeDefaults = true }
@@ -78,6 +86,20 @@ val rpcWireSerializersTest by testSuite {
         val encoded = json.encodeToString(runtime, value)
         assertEquals(json.encodeToString(value), encoded)
         assertEquals(value, json.decodeFromString(runtime, encoded))
+    }
+
+    test("runtime settings wire exposes name without historical storage aliases") {
+        val json = Json { serializersModule = RpcWireSerializers }
+        val runtime = RpcWireSerializers.serializer(typeOf<KodexAgentSettings>())
+        val settings = KodexAgentSettings(model = OpenAiModelId("fixture"), name = "Explicit name")
+        val encoded = json.encodeToJsonElement(runtime, settings).jsonObject
+        assertEquals(settings.name, encoded.getValue("name").jsonPrimitive.content)
+        assertEquals(settings, json.decodeFromJsonElement(runtime, encoded))
+        for (oldField in listOf("threadName", "thread_name")) {
+            assertFalse(oldField in encoded)
+            val obsolete = JsonObject(encoded.toMutableMap().apply { put(oldField, checkNotNull(remove("name"))) })
+            assertFailsWith<SerializationException> { json.decodeFromJsonElement(runtime, obsolete) }
+        }
     }
 
     test("backend path strings round trip without frontend path interpretation") {

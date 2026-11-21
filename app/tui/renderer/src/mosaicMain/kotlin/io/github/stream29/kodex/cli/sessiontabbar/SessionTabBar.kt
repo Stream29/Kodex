@@ -28,10 +28,12 @@ private class MosaicSessionTabBarRenderer(
 ) : SessionTabBarRenderer {
     @Composable
     override fun Frame(
-        state: SessionTabBarState, sessions: @Composable () -> Unit,
+        state: SessionTabBarState, sessions: (@Composable () -> Unit)?,
         tab: @Composable (SessionTabPresentation, Int) -> Unit, newSession: @Composable () -> Unit,
     ) {
-        val tabColumns = (columns - TabControlsColumns).coerceAtLeast(1)
+        val controlsColumns = if (sessions == null) 4 else TabControlsColumns
+        val minimumColumns = controlsColumns + 1
+        val tabColumns = (columns - controlsColumns).coerceAtLeast(1)
         val scrollState = rememberScrollState()
         val controlsScrollState = rememberScrollState()
         val labels = state.tabs.map { terminalTabLabel(it, runningIndicatorFrame.value) }
@@ -47,14 +49,16 @@ private class MosaicSessionTabBarRenderer(
         // Tiny surfaces retain a tab viewport and page the outer row to reach its controls.
         Box(
             Modifier.width(columns.coerceAtLeast(1)).horizontalScroll(controlsScrollState)
-                .focusCursor(0).focusable(enabled = columns < MinimumTabBarColumns),
+                .focusCursor(0).focusable(enabled = columns < minimumColumns),
         ) {
             Row(
-                Modifier.width(columns.coerceAtLeast(MinimumTabBarColumns)).background(SessionTopBarBackground)
+                Modifier.width(columns.coerceAtLeast(minimumColumns)).background(SessionTopBarBackground)
                     .scrollablePaging(scrollState, viewportSize = { scrollState.viewportSize }, orientation = ScrollOrientation.Horizontal),
             ) {
-                sessions()
-                Text(" ")
+                if (sessions != null) {
+                    sessions()
+                    Text(" ")
+                }
                 Row(Modifier.width(tabColumns).horizontalScroll(scrollState)) {
                     state.tabs.forEachIndexed { index, presentation -> tab(presentation, index) }
                 }
@@ -112,7 +116,6 @@ private const val MaximumTabLabelColumns: Int = 20
 private const val TabBracketsColumns: Int = 2
 private const val TabSpacingColumns: Int = 1
 private const val TabControlsColumns: Int = 15
-private const val MinimumTabBarColumns: Int = TabControlsColumns + 1
 
 private val SessionForeground
     @Composable get() = TuiTheme.colorScheme.onSurface

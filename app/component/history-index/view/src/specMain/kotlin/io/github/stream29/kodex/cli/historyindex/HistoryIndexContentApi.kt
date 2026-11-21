@@ -6,7 +6,6 @@ import androidx.compose.runtime.compositionLocalOf
 import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.cli.history.HistoryPlanModel
 import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRowModel
-import kotlin.time.Instant
 
 /** Placement only, not Agent identity. */
 public enum class HistoryIndexSide { Left, Right }
@@ -48,8 +47,12 @@ public interface HistoryIndexRowInteraction : HistoryIndexInteraction {
     public fun emitMenu()
 }
 
-/** Fresh object identity owns its timestamp and read-only detail leases. */
+/** Fresh object identity is used for target admission and dismissal. */
 public class HistoryIndexMenuOpening(public val interaction: HistoryIndexInteraction)
+
+public enum class HistoryIndexCommand { GoTo, Revert, Fork, RevertAndEdit }
+
+public data class HistoryIndexMenuAction(public val key: String, public val label: String, public val onClick: () -> Unit)
 
 /** Position within the current linear window, not an Agent relationship. */
 public enum class HistoryIndexRowPosition { Single, First, Middle, Last }
@@ -92,12 +95,13 @@ public interface HistoryIndexRenderer {
         onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit, onEnterChild: (() -> Unit)?,
     )
     @Composable public fun Hover(
-        interaction: HistoryIndexInteraction, presentation: HistoryIndexDetailPresentation, onHoverChanged: (Boolean) -> Unit,
+        interaction: HistoryIndexInteraction, presentation: HistoryIndexDetailPresentation, timestamp: String?,
+        onHoverChanged: (Boolean) -> Unit,
     )
-    /** Detail is already redacted; null means loading. A command dismisses before onCheckOut. */
+    /** Actions own admission and dismissal; the renderer must not dismiss before invoking one. */
     @Composable public fun Menu(
-        opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
-        onDismiss: () -> Unit, onCheckOut: () -> Unit,
+        opening: HistoryIndexMenuOpening, timestamp: String?, actions: List<HistoryIndexMenuAction>,
+        onDismiss: () -> Unit,
     )
 }
 
@@ -116,5 +120,9 @@ public expect fun HistoryIndexHoverContent(
 
 @Composable
 public expect fun HistoryIndexMenuContent(
-    opening: HistoryIndexMenuOpening?, renderer: HistoryIndexRenderer, onDismiss: () -> Unit,
+    opening: HistoryIndexMenuOpening?, renderer: HistoryIndexRenderer,
+    canEdit: Boolean = false,
+    admit: () -> Boolean = { true },
+    edit: (HistoryIndexCommand, HistoryIndexTarget, String?) -> Unit = { _, _, _ -> },
+    onDismiss: () -> Unit,
 )

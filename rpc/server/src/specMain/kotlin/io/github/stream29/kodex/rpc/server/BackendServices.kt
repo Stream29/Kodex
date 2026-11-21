@@ -22,7 +22,9 @@ import kotlin.time.Duration.Companion.seconds
 /**
  * Owns a complete backend graph without selecting a CLI or running Home migration.
  *
- * Callers must provide a prepared Home. The OpenAI login/client factories are injectable test
+ * The product host passes [requiresPreparedHome] and must provide a prepared Home. Isolated
+ * service fixtures may omit the flag to create a database lazily in an unused root.
+ * The OpenAI login/client factories are injectable test
  * seams, not frontend services; their returned clients are owned here and closed after their
  * consumers. Settings, authentication, model and global-service initialization does not create
  * `kodex.db` on an empty Home.
@@ -42,6 +44,7 @@ public expect suspend fun <R> withBackendServices(
     renewBackend: suspend () -> Unit = {},
     backendRenewalInterval: () -> Duration = { 20.seconds },
     checkAdmission: () -> Unit = {},
+    requiresPreparedHome: Boolean = false,
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R
 

@@ -62,7 +62,7 @@ internal class BackendSubagentSpawner(
             child = withContext(NonCancellable) { allocate(parentId, parent).also { allocated = it } }
             val instructions = subagentHierarchyInstructions(ancestry(child))
             childOwner = checkNotNull(repository.openAgent(child.agentId))
-            childOwner.runtime.modify { it.initialize(settings.copy(instructions = instructions, threadName = name)) }
+            childOwner.runtime.modify { it.initialize(settings.copy(instructions = instructions, name = name)) }
         } catch (_: AgentResumeNotAdmittedException) {
             check(allocated == null) { "Unexpected owner rejection after allocation." }
             return SubagentSpawnResult.Rejected(SubagentSpawnRejection.InvalidSource)

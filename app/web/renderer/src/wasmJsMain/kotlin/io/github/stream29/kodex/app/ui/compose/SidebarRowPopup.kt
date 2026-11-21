@@ -21,6 +21,8 @@ import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -35,7 +37,7 @@ import androidx.navigationevent.compose.rememberNavigationEventState
 import io.github.stream29.kodex.app.ui.compose.EditorPopup as Popup
 import kotlin.math.roundToInt
 
-internal interface ComposeSidebarPopupPlacement {
+internal interface ComposeSidebarMenuPlacement {
     val preferAfter: Boolean
     val bounds: Rect?
     val point: Offset?
@@ -44,13 +46,15 @@ internal interface ComposeSidebarPopupPlacement {
 }
 
 internal abstract class ComposeSidebarRowOrigin(
-    override val preferAfter: Boolean,
-    override val fallback: FocusRequester?,
-) : ComposeSidebarPopupPlacement {
-    override var bounds: Rect? by mutableStateOf(null)
-    override var point: Offset? by mutableStateOf(null)
+    final override val preferAfter: Boolean,
+    final override val fallback: FocusRequester?,
+) : ComposeSidebarMenuPlacement {
+    final override var bounds: Rect? by mutableStateOf(null)
+    var hoverBounds: Rect? by mutableStateOf(null)
     var openingPoint: Offset? = null
-    override val isPlaced: Boolean get() = bounds?.let { it.width > 0 && it.height > 0 } == true
+    // A row handle without an opening snapshot uses the row's keyboard anchor.
+    final override val point: Offset? get() = null
+    final override val isPlaced: Boolean get() = bounds?.let { it.width > 0 && it.height > 0 } == true
 }
 
 @Composable
@@ -68,7 +72,12 @@ internal fun SidebarPopupRow(
     val focus = remember(origin) { FocusRequester() }
     var focused by remember(origin) { mutableStateOf(false) }
     var hovered by remember(origin) { mutableStateOf(false) }
-    DisposableEffect(origin) { onDispose { origin.bounds = null } }
+    DisposableEffect(origin) {
+        onDispose {
+            origin.bounds = null
+            origin.hoverBounds = null
+        }
+    }
     Row(
         modifier = Modifier.fillMaxWidth().heightIn(min = 32.dp)
             .background(if (focused) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
@@ -79,10 +88,8 @@ internal fun SidebarPopupRow(
             }
             .onPointerEvent(PointerEventType.Enter) {
                 hovered = true
-                origin.point = it.changes.firstOrNull()?.position
                 onHoverChanged(true)
             }
-            .onPointerEvent(PointerEventType.Move) { origin.point = it.changes.firstOrNull()?.position }
             .onPointerEvent(PointerEventType.Exit) { hovered = false; onHoverChanged(false) }
             .onPointerEvent(PointerEventType.Press) {
                 if (it.buttons.isSecondaryPressed) {
@@ -131,20 +138,28 @@ internal fun SidebarPopupRow(
 
 @Composable
 internal fun SidebarHoverPopup(
-    origin: ComposeSidebarPopupPlacement,
+    origin: ComposeSidebarRowOrigin,
     title: String,
     onHoverChanged: (Boolean) -> Unit,
     singleLineTitle: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val bounds = origin.bounds ?: return
-    val placement = remember(bounds, origin.preferAfter, origin.point) {
-        PointerPopupPosition(bounds, origin.preferAfter, origin.point)
+    val bounds = origin.hoverBounds ?: origin.bounds ?: return
+    val density = LocalDensity.current
+    val gap = with(density) { 4.dp.roundToPx() }
+    val placement = remember(bounds, origin.preferAfter, gap) {
+        RowEdgePopupPosition(bounds, origin.preferAfter, gap)
     }
+    val windowWidth = LocalWindowInfo.current.containerSize.width
+    val maxWidth = if (windowWidth > 0) {
+        val available = placement.maximumWidth(windowWidth)
+        if (available == 0) return
+        with(density) { available.toDp() }.coerceAtMost(480.dp)
+    } else 480.dp
     Popup(popupPositionProvider = placement, properties = PopupProperties(focusable = false)) {
         Surface(
             shadowElevation = 8.dp,
-            modifier = Modifier.widthIn(max = 480.dp).heightIn(max = 360.dp)
+            modifier = Modifier.widthIn(max = maxWidth).heightIn(max = 360.dp)
                 .onPointerEvent(PointerEventType.Enter) { onHoverChanged(true) }
                 .onPointerEvent(PointerEventType.Exit) { onHoverChanged(false) },
         ) {
@@ -163,7 +178,7 @@ internal fun SidebarHoverPopup(
 @Composable
 internal fun SidebarMenuPopup(
     opening: Any,
-    origin: ComposeSidebarPopupPlacement,
+    origin: ComposeSidebarMenuPlacement,
     restoration: RowMenuFocusRestoration,
     isOriginValid: () -> Boolean,
     dismissWhenUnplaced: Boolean = false,
@@ -214,6 +229,32 @@ internal fun SidebarMenuPopup(
             withFrameNanos { }
             if (try { actionFocus.requestFocus() } catch (_: IllegalStateException) { false }) return@LaunchedEffect
         }
+    }
+}
+
+internal class RowEdgePopupPosition(
+    bounds: Rect, private val preferAfter: Boolean, gap: Int,
+) : PopupPositionProvider {
+    private val afterEdge = bounds.right.roundToInt() + gap
+    private val beforeEdge = bounds.left.roundToInt() - gap
+    private val top = bounds.top.roundToInt()
+
+    // Reflow an oversized preview into the larger side rather than covering the anchor row.
+    fun maximumWidth(windowWidth: Int): Int = maxOf(beforeEdge, windowWidth - afterEdge)
+        .coerceIn(0, windowWidth)
+
+    override fun calculatePosition(
+        anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize,
+    ): IntOffset {
+        val maxX = (windowSize.width - popupContentSize.width).coerceAtLeast(0)
+        val before = beforeEdge - popupContentSize.width
+        val x = if (preferAfter) {
+            if (afterEdge <= maxX) afterEdge else before
+        } else if (before >= 0) before else afterEdge
+        return IntOffset(
+            x.coerceIn(0, maxX),
+            top.coerceIn(0, (windowSize.height - popupContentSize.height).coerceAtLeast(0)),
+        )
     }
 }
 

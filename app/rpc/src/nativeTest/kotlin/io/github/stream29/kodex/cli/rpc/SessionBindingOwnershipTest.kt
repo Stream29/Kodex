@@ -73,8 +73,8 @@ val sessionBindingOwnershipTest by testSuite(compartment = { TestCompartment.Rea
                 session.lifecycle.first { it == PersistedSessionLifecycleState.Open }
                 assertNotSame(firstAgent, nextAgent)
                 assertSame(session.current().settings, nextAgent.settings)
-                assertFailsWith<IllegalArgumentException> {
-                    session.fork(firstAgent, 1, session.current().storage.cacheNonce.value)
+                assertFailsWith<kotlinx.coroutines.CancellationException> {
+                    firstAgent.forkHistory(1, session.current().storage.cacheNonce.value)
                 }
                 session.rename("current")
                 session.name.first { it == "current" }
@@ -225,7 +225,7 @@ private class SessionFrontendFixture(
         val session = views.open(services.global.createSession(home))
         session.rename(name)
         session.name.first { it == name }
-        session.settings.first { it.threadName == name }
+        session.settings.first { it.name == name }
         return session
     }
 }

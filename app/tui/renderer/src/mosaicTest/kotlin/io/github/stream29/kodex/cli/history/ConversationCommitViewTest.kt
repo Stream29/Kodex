@@ -415,7 +415,7 @@ val cleanEventViewTest by testSuite {
         val event = StableCommandExecution(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
-                ExecCommandArguments(command = "sleep 5", yieldTimeMillis = 10_000),
+                ExecCommandArguments(command = "sleep 5", name = "Check background exit", yieldTimeMillis = 10_000),
             ),
             result = StableCommandExecutionResult.Output(
                 UnifiedExecOutput(
@@ -430,7 +430,7 @@ val cleanEventViewTest by testSuite {
 
         runMosaicTest {
             assertEquals(
-                "> Run a command",
+                "> Check background exit",
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     Box(Modifier.width(60)) { event.render() }
@@ -443,7 +443,7 @@ val cleanEventViewTest by testSuite {
     test("writeStdinUsesOnlyItsOwnRecordedPoll") {
         val session = TestUnifiedExecProcessSession(
             sessionId = 7,
-            arguments = ExecCommandArguments(command = "tail -f build.log", yieldTimeMillis = 10_000),
+            arguments = ExecCommandArguments(command = "tail -f build.log", name = "Follow build log", yieldTimeMillis = 10_000),
         )
         val event = StableCommandExecution(
             callId = "write",

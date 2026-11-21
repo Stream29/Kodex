@@ -57,7 +57,6 @@ import io.github.stream29.kodex.tool.readmedia.MediaDetail
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
-import io.github.stream29.kodex.tool.unifiedexec.commandIntentDisplayName
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -100,7 +99,7 @@ public actual fun HistoryEventContent(
                 status = if (exitCode == 0) "completed" else "failed",
                 expansionKey = this,
             ) {
-                name.takeIf(String::isNotBlank)?.let { renderer.Text(it, TextStyle.Dim) }
+                renderer.Text(name, TextStyle.Dim)
                 renderer.Text(command, TextStyle.Normal)
             }
             is StableAskUserEvent -> renderer.RequestUserInput(this, elapsed)
@@ -124,7 +123,7 @@ public actual fun HistoryEventContent(
 }
 
 internal fun StableTerminalExitedEvent.terminalExitSummary(): String =
-    "${name.commandIntentDisplayName()} (exit $exitCode)".trimStart()
+    "$name (exit $exitCode)"
 
 internal val LocalHistoryRenderer = staticCompositionLocalOf<HistoryContentRenderer> {
     error("History content requires a renderer")
@@ -156,7 +155,7 @@ public actual fun HistoryEventContent(
         is PendingPatch -> renderer.PendingPatch(diff)
         is PendingPlanUpdate -> HistoryPlanContent(this, renderer)
         is PendingAwait -> ToolEvent(
-            summary = arguments.ongoingToolSummary(),
+            summary = arguments.name,
             rawName = "await_event",
             status = "running",
             expansionKey = callId,
@@ -369,7 +368,7 @@ private fun StableReadMedia.renderReadMedia() {
 @Composable
 private fun StableAwait.renderAwaitEvent() {
     BuiltInToolEvent(
-        summary = functionToolSummary("await_event", null, failed = result is StableAwaitEventResult.Failure),
+        summary = arguments.name,
         firstLine = "await_event",
         status = when (result) {
             is StableAwaitEventResult.Output -> "succeeded"
@@ -414,8 +413,11 @@ private fun PendingInvalidToolCall.renderInvalidToolCall() {
     }
 }
 
-private fun invalidToolTitle(displayName: String, function: Boolean): String =
-    if (function && displayName == "exec_command") UnnamedCommandHistoryTitle else "Model emitted an invalid tool call"
+private fun invalidToolTitle(displayName: String, function: Boolean): String = when {
+    function && (displayName == "exec_command" || displayName == "await_event") ->
+        functionToolSummary(displayName, null, failed = false)
+    else -> "Model emitted an invalid tool call"
+}
 
 @Composable
 internal fun ToolEvent(
@@ -696,7 +698,7 @@ internal fun customToolOngoingSummary(
 private fun PendingCommandExecutionAction.ongoingToolSummary(
     sourceArguments: ExecCommandArguments? = null,
 ): String = when (this) {
-    is PendingCommandExecutionAction.ExecCommand -> arguments.commandHistoryTitle()
+    is PendingCommandExecutionAction.ExecCommand -> arguments.name
     is PendingCommandExecutionAction.WriteStdin -> arguments.ongoingToolSummary(sourceArguments)
 }
 
@@ -720,13 +722,6 @@ private fun ReadMediaToolArguments.ongoingToolSummary(): String =
         .takeIf(String::isNotBlank)
         ?.let { path -> "Reading media: $path" }
         ?: "Reading media"
-
-private fun AwaitEventArguments.ongoingToolSummary(): String =
-    if (terminalIds.isEmpty()) {
-        "Waiting for events"
-    } else {
-        "Waiting for events (terminals: ${terminalIds.joinToString()})"
-    }
 
 internal fun JsonElement.ongoingServerToolSearchSummary(): String {
     val paths = ((this as? JsonObject)?.get("paths") as? JsonArray)

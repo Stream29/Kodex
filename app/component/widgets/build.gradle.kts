@@ -10,6 +10,7 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":app-rpc-protocol"))
+            api(libs.kotlinx.datetime)
             api(compose.runtime)
         }
 

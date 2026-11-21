@@ -72,7 +72,7 @@ val backendSubagentSpawnerTest by testSuite(compartment = { TestCompartment.Real
                 0..Int.MAX_VALUE, setOf(AgentCommitType.EventSubagentCreated), 1,
             ).single().commit
             assertEquals(StableSubagentCreatedEvent(child.agentId, "Review", "first-task"), rootEvent)
-            assertEquals("Review", childOwner.storage.getSettingsAt(Int.MAX_VALUE).threadName)
+            assertEquals("Review", childOwner.storage.getSettingsAt(Int.MAX_VALUE).name)
             val childEvent = childOwner.storage.getLastCommitsIn(
                 0..Int.MAX_VALUE, setOf(AgentCommitType.EventSubagentCreated), 1,
             ).single().commit

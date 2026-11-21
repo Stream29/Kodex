@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.LocalTerminalState
 import com.jakewharton.mosaic.ui.BoxScope
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
 import io.github.stream29.kodex.app.sessiondelete.contract.SessionDeleteViewModel
 import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameViewModel
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
@@ -12,7 +11,6 @@ import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
 import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryViewModel
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.tuiColorSchemeFor
-import io.github.stream29.kodex.cli.sessioncatalog.SessionCatalogPopup
 import io.github.stream29.kodex.cli.sessiondelete.SessionDeletePopup
 import io.github.stream29.kodex.cli.sessionrename.SessionRenamePopup
 import io.github.stream29.kodex.cli.settings.OpenAiLoginPopup
@@ -24,10 +22,6 @@ public actual fun BoxScope.rememberMosaicApplicationPopupRenderer(): Application
     remember(this) { MosaicApplicationPopups(this) }
 
 private class MosaicApplicationPopups(private val scope: BoxScope) : ApplicationPopupRenderer {
-    @Composable
-    override fun Catalog(viewModel: SessionCatalogViewModel, onFailure: (Throwable) -> Unit) {
-        with(scope) { SessionCatalogPopup(viewModel, onFailure) }
-    }
     @Composable
     override fun Settings(viewModel: SettingsViewModel, onClose: () -> Unit, onLogin: () -> Unit) {
         with(scope) {

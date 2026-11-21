@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.io.files.Path
+import kotlinx.io.files.SystemFileSystem
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
@@ -33,7 +34,7 @@ internal class TerminalInspectorFixture(private val directory: Path, private val
             return flowOf(
                 ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
                     name = "await_event", callId = AwaitCall,
-                    arguments = """{"events":[{"type":"terminal_exited","session_id":$terminalId},{"type":"timeout","duration_ms":35000}]}""",
+                    arguments = """{"name":"Wait for fixture exit","events":[{"type":"terminal_exited","session_id":$terminalId},{"type":"timeout","duration_ms":35000}]}""",
                 )),
                 ResponsesStreamEvent.Completed(Response(id = "terminal-intent-await", endTurn = false)),
             )
@@ -49,6 +50,15 @@ internal class TerminalInspectorFixture(private val directory: Path, private val
     }
 
     private fun initialResponse(): Flow<ResponsesStreamEvent> {
+        if (SystemFileSystem.exists(Path(directory, "terminal-sidebar-preview"))) {
+            return flowOf(
+                exec(
+                    0, ExecCall, "exec /bin/sh ./emit-terminal-inspector\n# PREVIEW_COMMAND_END",
+                    "Inspect fixture output", 10_000, workdir = directory.toString(), shell = "/bin/sh",
+                ),
+                ResponsesStreamEvent.Completed(Response(id = "terminal-sidebar-preview-exec", endTurn = false)),
+            )
+        }
         val launch = Path(directory, "emit-terminal-inspector").toString()
         // The owning offline driver creates this fixed executable in a brand-new temporary directory.
         return flowOf(
@@ -57,10 +67,15 @@ internal class TerminalInspectorFixture(private val directory: Path, private val
         )
     }
 
-    private fun exec(index: Long, callId: String, command: String, intent: String?, yieldMillis: Int): ResponsesStreamEvent.OutputItemDone {
+    private fun exec(
+        index: Long, callId: String, command: String, intent: String?, yieldMillis: Int,
+        workdir: String? = null, shell: String? = null,
+    ): ResponsesStreamEvent.OutputItemDone {
         val arguments = buildJsonObject {
             put("cmd", command)
             if (intent != null) put("name", intent)
+            if (workdir != null) put("workdir", workdir)
+            if (shell != null) put("shell", shell)
             put("yield_time_ms", yieldMillis)
             put("max_output_tokens", 100)
         }.toString()

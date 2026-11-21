@@ -5,7 +5,7 @@ import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabMenuPlacement
 import kotlin.time.Instant
 
@@ -14,7 +14,7 @@ public interface ApplicationHistoryMenuPlacement
 
 /** Each instance is a fresh opening bound to the actual rendered child and storage boundary. */
 public class ApplicationHistoryMenuOpening(
-    public val session: PersistedSessionViewModel,
+    public val tab: AgentTabViewModel,
     public val agent: AgentViewModel,
     public val generation: Long,
     public val storageIndex: Int,
@@ -28,7 +28,7 @@ public class ApplicationHistoryDisplayOption(public val label: String, public va
 
 /** Exact transient stream and placement; no stored-history edit target is implied. */
 public class ApplicationStreamingHistoryMenuOpening(
-    public val session: PersistedSessionViewModel,
+    public val tab: AgentTabViewModel,
     public val agent: AgentViewModel,
     public val generation: Long,
     public val item: HistoryStreamingItem.Output,
@@ -91,7 +91,7 @@ public expect fun ApplicationTabMenuContent(
 @Composable
 public expect fun ApplicationHistoryMenuContent(
     opening: ApplicationHistoryMenuOpening?,
-    selectedSession: PersistedSessionViewModel?,
+    selectedTab: AgentTabViewModel?,
     selectedAgent: AgentViewModel?,
     renderer: ApplicationMenuRenderer,
     onDismiss: (ApplicationHistoryMenuOpening) -> Unit,

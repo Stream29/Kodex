@@ -55,6 +55,41 @@ import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 
 val historyViewportAndScrollEffectTest by testSuite {
+    test("a published exact anchor becomes ineligible before its renderer consumes it") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                storage.commit(navigationMessage("anchor"))
+            }
+            val model = createAgentHistoryViewModel(
+                AgentHistorySource(runtime.storage, runtime.latestIndex, runtime.state),
+                supervisorChildScope(), MutableStateFlow(false),
+            )
+            try {
+                model.awaitNavigationReady()
+                val generation = model.historyItems.value.generation
+                val selected = MutableStateFlow(true)
+                model.requestScrollToAnchor(1, generation) { selected.value }
+                val effect = model.awaitEffect()
+                assertEquals(1, assertIs<MessageHistoryItemViewModel>(
+                    assertIs<HistoryScrollTarget.Item>(effect.target).item,
+                ).index)
+                assertTrue(effect.isCurrent())
+                selected.value = false
+                assertFalse(effect.isCurrent())
+                model.acknowledgeScrollEffect(effect)
+                assertNull(model.pendingScrollEffect.value)
+
+                model.requestScrollToStorageIndex(1)
+                assertTrue(model.awaitEffect().isCurrent(), "Ordinary Locate has no Agent-tab guard.")
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
     for (latest in listOf(false, true)) {
         test("blocked original structural read plus 256 navigations retains newest ${if (latest) "latest" else "exact item"}") {
             coroutineScope {
@@ -442,7 +477,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 for (index in 1..20) {
                     if (index in setOf(3, 9, 20)) storage.commit(navigationMessage("$index"))
-                    else storage.commit(LlmRequestMeta.Response(0L), Clock.System.now())
+                    else storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), Clock.System.now())
                 }
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
@@ -582,7 +617,7 @@ val historyViewportAndScrollEffectTest by testSuite {
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 for (i in 1..1_200) {
                     if (i % 3 == 0) storage.commit(navigationMessage("${i / 3}"))
-                    else storage.commit(LlmRequestMeta.Response(0L), Clock.System.now())
+                    else storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), Clock.System.now())
                 }
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())

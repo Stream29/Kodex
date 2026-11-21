@@ -82,10 +82,11 @@ public actual suspend fun <R> withSqliteReadQuery(
             try {
                 scope.check(code, SqliteReadFailureKind.Unavailable)
                 checkNotNull(db)
-                sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, policy.inputBytes)
-                scope.check(sqlite3_set_authorizer(db, queryAuthorizer, hooks.asCPointer()))
                 sqlite3_progress_handler(db, 100, queryProgress, hooks.asCPointer())
                 scope.check(sqlite3_busy_handler(db, queryBusy, hooks.asCPointer()))
+                requireUserVersion(db, scope)
+                sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, policy.inputBytes)
+                scope.check(sqlite3_set_authorizer(db, queryAuthorizer, hooks.asCPointer()))
                 val statement = alloc<CPointerVar<sqlite3_stmt>>()
                 statement.value = null
                 val tail = alloc<CPointerVar<ByteVar>>()
@@ -130,6 +131,23 @@ public actual suspend fun <R> withSqliteReadQuery(
         }
     } finally {
         hooks.dispose()
+    }
+}
+
+private fun requireUserVersion(db: CPointer<sqlite3>, scope: QueryScope) = memScoped {
+    val statement = alloc<CPointerVar<sqlite3_stmt>>()
+    statement.value = null
+    try {
+        scope.check(sqlite3_prepare_v2(db, "PRAGMA main.user_version".cstr.getPointer(this), -1, statement.ptr, null))
+        val version = checkNotNull(statement.value)
+        val stepped = sqlite3_step(version)
+        scope.checkBudget()
+        if (stepped != SQLITE_ROW) scope.check(stepped)
+        if (stepped != SQLITE_ROW || sqlite3_column_int(version, 0) != scope.policy.requiredUserVersion) {
+            throw SqliteReadFailure(SqliteReadFailureKind.IncompatibleSchema)
+        }
+    } finally {
+        statement.value?.let { sqlite3_finalize(it) }
     }
 }
 

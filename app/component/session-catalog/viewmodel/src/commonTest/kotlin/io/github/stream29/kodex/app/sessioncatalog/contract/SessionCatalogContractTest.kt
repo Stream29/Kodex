@@ -16,47 +16,53 @@ val sessionCatalogContractTest by testSuite {
     test("entryKeepsPersistedIdentityAndValidatesDisplayName") {
         val entry = SessionCatalogEntry(
             sessionIndex = 3,
-            threadName = "Thread",
+            name = "Thread",
+            rootAgentId = 103,
         )
 
         assertEquals(3, entry.sessionIndex)
-        assertEquals("Thread", entry.threadName)
+        assertEquals(103, entry.rootAgentId)
+        assertEquals("Thread", entry.name)
         assertFailsWith<IllegalArgumentException> {
             entry.copy(sessionIndex = -1)
         }
         assertFailsWith<IllegalArgumentException> {
-            entry.copy(threadName = " ")
+            entry.copy(rootAgentId = -1)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            entry.copy(name = " ")
         }
     }
 
     test("catalogDatesRoundTripWithoutADuplicateActivityField") {
         val entry = SessionCatalogEntry(
             sessionIndex = 3,
-            threadName = "Thread",
+            name = "Thread",
             createdAt = Instant.parse("2026-01-01T00:00:00.123456789Z"),
             updatedAt = Instant.parse("2026-01-02T03:04:05.987654321Z"),
             archived = true,
             running = true,
             isActive = true,
+            rootAgentId = 103,
         )
         val encoded = json.encodeToJsonElement(serializer, entry)
 
         assertEquals(
-            setOf("sessionIndex", "threadName", "createdAt", "updatedAt", "archived", "running", "isActive"),
+            setOf("sessionIndex", "name", "createdAt", "updatedAt", "archived", "running", "isActive", "rootAgentId"),
             encoded.jsonObject.keys,
         )
         assertEquals(entry, json.decodeFromJsonElement(serializer, encoded))
     }
 
     test("catalogDatesAreIndependentlyNullableAndDefaultToAbsent") {
-        val empty = SessionCatalogEntry(0)
+        val empty = SessionCatalogEntry(sessionIndex = 0, rootAgentId = 100)
         assertNull(empty.createdAt)
         assertNull(empty.updatedAt)
-        assertEquals(empty, json.decodeFromString(serializer, """{"sessionIndex":0}"""))
+        assertEquals(empty, json.decodeFromString(serializer, """{"sessionIndex":0,"rootAgentId":100}"""))
         val timestamp = Instant.parse("2026-01-02T03:04:05Z")
         for (created in listOf(null, timestamp)) {
             for (updated in listOf(null, timestamp)) {
-                val entry = SessionCatalogEntry(1, createdAt = created, updatedAt = updated)
+                val entry = SessionCatalogEntry(1, createdAt = created, updatedAt = updated, rootAgentId = 101)
                 assertEquals(
                     entry,
                     json.decodeFromString(serializer, json.encodeToString(serializer, entry)),
@@ -68,12 +74,14 @@ val sessionCatalogContractTest by testSuite {
     test("catalogActivityDefaultsToFalseWithoutInferringItFromMetadata") {
         val entry = SessionCatalogEntry(
             sessionIndex = 3,
-            threadName = "Persisted",
+            name = "Persisted",
             updatedAt = Instant.parse("2026-01-02T03:04:05Z"),
+            rootAgentId = 103,
         )
         assertEquals(false, entry.isActive)
         assertEquals(false, entry.running)
-        val decoded = json.decodeFromString(serializer, """{"sessionIndex":3}""")
+        val decoded = json.decodeFromString(serializer, """{"sessionIndex":3,"rootAgentId":103}""")
+        assertEquals(103, decoded.rootAgentId)
         assertEquals(false, decoded.isActive)
         assertEquals(false, decoded.running)
     }
@@ -81,7 +89,13 @@ val sessionCatalogContractTest by testSuite {
     test("catalogPreservesUnloadedIdleAndRunningSnapshotsRegardlessOfArchive") {
         for (archived in listOf(false, true)) {
             for ((active, running) in listOf(false to false, true to false, true to true)) {
-                val entry = SessionCatalogEntry(3, archived = archived, running = running, isActive = active)
+                val entry = SessionCatalogEntry(
+                    sessionIndex = 3,
+                    archived = archived,
+                    running = running,
+                    isActive = active,
+                    rootAgentId = 103,
+                )
                 assertEquals(
                     entry,
                     json.decodeFromString(serializer, json.encodeToString(serializer, entry)),
@@ -96,8 +110,9 @@ val sessionCatalogContractTest by testSuite {
                 sessionIndex = 8,
                 createdAt = Instant.parse("2026-01-02T00:00:00Z"),
                 updatedAt = Instant.parse("2026-01-01T00:00:00Z"),
+                rootAgentId = 108,
             ),
-            SessionCatalogEntry(0),
+            SessionCatalogEntry(sessionIndex = 0, rootAgentId = 100),
         )
         val listSerializer = ListSerializer(serializer)
         assertEquals(

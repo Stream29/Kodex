@@ -96,7 +96,7 @@ val agentStateHardCutoverTest by testSuite {
 
         test("compaction checkpoint preserves settings accepted during its wait") {
             val storage = InMemoryKodexAgentStorage(
-                KodexAgentSettings(OpenAiModelId("test"), threadName = "before"),
+                KodexAgentSettings(OpenAiModelId("test"), name = "before"),
             )
             val entered = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
@@ -119,13 +119,13 @@ val agentStateHardCutoverTest by testSuite {
             try {
                 entered.await()
                 val current = storage.getSettingsAt(agent.latestIndex.value)
-                assertTrue(agent.compareAndSetSettings(current, current.copy(threadName = "during")))
+                assertTrue(agent.compareAndSetSettings(current, current.copy(name = "during")))
                 val acceptedIndex = agent.latestIndex.value
-                assertEquals("during", storage.getSettingsAt(acceptedIndex).threadName)
+                assertEquals("during", storage.getSettingsAt(acceptedIndex).name)
                 release.complete(Unit)
                 val checkpointIndex = compaction.await()
                 assertTrue(checkpointIndex > acceptedIndex)
-                assertEquals("during", storage.getSettingsAt(checkpointIndex).threadName)
+                assertEquals("during", storage.getSettingsAt(checkpointIndex).name)
                 assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             } finally {
                 release.complete(Unit)

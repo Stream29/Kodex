@@ -27,6 +27,7 @@ kotlin {
         nativeTest.dependencies {
             implementation("io.ktor:ktor-network:${libs.versions.ktor.asProvider().get()}")
             implementation(project(":app-backend-host"))
+            implementation(project(":app-backend-migration"))
             implementation(project(":app-rpc"))
             implementation(project(":rpc-client"))
             implementation(project(":rpc-local"))

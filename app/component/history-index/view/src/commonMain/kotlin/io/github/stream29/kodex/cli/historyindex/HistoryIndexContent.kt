@@ -4,8 +4,12 @@ import androidx.compose.runtime.*
 import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.cli.history.HistoryPlanModel
 import io.github.stream29.kodex.cli.history.requestUserInputHistoryRows
+import io.github.stream29.kodex.cli.components.formatPopupTimestamp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.datetime.TimeZone
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Instant
 
 public actual fun HistoryIndexTarget.isCurrent(): Boolean =
     viewModel.window.value.revision == revision && viewModel.contains(generation, index)
@@ -20,7 +24,7 @@ public actual fun HistoryIndexContent(
     val currentNavigation = rememberUpdatedState(supplied)
     val owned = supplied?.takeIf { it.owner === viewModel }
     val hasParent = owned?.returnToParent != null
-    val hasCompletion = hasParent && owned.hasCompletionAnchor()
+    val hasCompletion = owned?.let { it.returnToParent != null && it.hasCompletionAnchor() } == true
     var mounted by remember(viewModel) { mutableStateOf(false) }
     DisposableEffect(viewModel) {
         mounted = true
@@ -97,12 +101,14 @@ public actual fun HistoryIndexHoverContent(
         delayed = true
     }
     if (!delayed) return
-    renderer.Hover(current, historyIndexDetailPresentation(entry.detail), onHoverChanged)
+    renderer.Hover(current, historyIndexDetailPresentation(entry.detail), popupTimestamp(entry.timestamp), onHoverChanged)
 }
 
 @Composable
 public actual fun HistoryIndexMenuContent(
-    opening: HistoryIndexMenuOpening?, renderer: HistoryIndexRenderer, onDismiss: () -> Unit,
+    opening: HistoryIndexMenuOpening?, renderer: HistoryIndexRenderer,
+    canEdit: Boolean, admit: () -> Boolean, edit: (HistoryIndexCommand, HistoryIndexTarget, String?) -> Unit,
+    onDismiss: () -> Unit,
 ) {
     val current = opening ?: return
     val origin = current.interaction
@@ -112,10 +118,45 @@ public actual fun HistoryIndexMenuContent(
     val valid = window.revision == target.revision && target.isCurrent() && origin.isPlaced && entry != null
     LaunchedEffect(current, valid) { if (!valid) onDismiss() }
     if (!valid) return
-    renderer.Menu(current, entry.messageTimestamp, historyIndexDetailPresentation(entry.detail), onDismiss) {
-        if (origin.isPlaced && target.isCurrent()) {
-            target.viewModel.checkOut(target.generation, target.index)
+    val currentAdmission by rememberUpdatedState(admit)
+    val currentEdit by rememberUpdatedState(edit)
+    val editable by rememberUpdatedState(canEdit)
+    var mounted by remember(current) { mutableStateOf(false) }
+    DisposableEffect(current) {
+        mounted = true
+        onDispose { mounted = false }
+    }
+    fun action(command: HistoryIndexCommand, label: String, text: String? = null) =
+        HistoryIndexMenuAction(command.name, label) callback@{
+            if (!mounted || !origin.isPlaced || !target.isCurrent() || !currentAdmission()) return@callback
+            if (command != HistoryIndexCommand.GoTo && !editable) return@callback
+            if (command == HistoryIndexCommand.RevertAndEdit &&
+                target.viewModel.window.value.entryAtOrNull(target.index)?.editableUserText != text
+            ) return@callback
+            if (command == HistoryIndexCommand.GoTo) {
+                onDismiss()
+                target.viewModel.checkOut(target.generation, target.index)
+            } else currentEdit(command, target, text)
         }
+    val actions = buildList {
+        add(action(HistoryIndexCommand.GoTo, "Go to"))
+        if (canEdit && target.index < Int.MAX_VALUE) {
+            add(action(HistoryIndexCommand.Revert, "Revert to here"))
+            add(action(HistoryIndexCommand.Fork, "Fork from here"))
+            entry.editableUserText?.takeIf { target.index > 0 }?.let {
+                add(action(HistoryIndexCommand.RevertAndEdit, "Revert and edit", it))
+            }
+        }
+    }
+    renderer.Menu(current, popupTimestamp(entry.timestamp), actions, onDismiss)
+}
+
+@Composable
+private fun popupTimestamp(value: Instant?): String? = remember(value) {
+    value?.let {
+        try { formatPopupTimestamp(it, TimeZone.currentSystemDefault()) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
     }
 }
 

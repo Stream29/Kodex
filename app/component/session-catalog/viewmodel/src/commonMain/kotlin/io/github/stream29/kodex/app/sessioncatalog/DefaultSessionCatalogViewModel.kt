@@ -60,7 +60,7 @@ public actual class DefaultSessionCatalogViewModel actual constructor(
         lateinit var handle: SessionCatalogDeleteHandle
         val child = createSessionDeleteViewModel(
             entry.sessionIndex,
-            entry.threadName,
+            entry.name,
             SessionDeleteDependencies { sessionIndex ->
                 operation {
                     check(mutableDeleteTarget.value === handle) { "Catalog Delete handle is stale." }
@@ -98,9 +98,6 @@ public actual class DefaultSessionCatalogViewModel actual constructor(
     actual override suspend fun unarchive(sessionIndex: Int): Unit = operation {
         dependencies.unarchive(sessionIndex)
         reload(state.value.showArchived)
-    }
-    actual override suspend fun fork(sessionIndex: Int): Int = operation {
-        dependencies.fork(sessionIndex).also { reload(state.value.showArchived) }
     }
 
     private suspend fun reload(archived: Boolean) {

@@ -174,6 +174,10 @@ private class ComposeHistoryListRenderer(
                     ?.plus(firstCommittedIndex) ?: return@LaunchedEffect
             }
             while (true) {
+                if (!expected.isCurrent() || model.pendingScrollEffect.value !== expected) {
+                    model.acknowledgeScrollEffect(expected)
+                    return@LaunchedEffect
+                }
                 val before = list.layoutInfo
                 list.requestScrollToItem(index)
                 val measured = snapshotFlow { list.layoutInfo }.first { it !== before }

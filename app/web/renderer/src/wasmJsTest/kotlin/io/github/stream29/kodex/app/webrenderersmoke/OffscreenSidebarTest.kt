@@ -8,6 +8,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -31,7 +32,10 @@ import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
+import io.github.stream29.kodex.utils.shellclient.Shell
+import io.github.stream29.kodex.utils.shellclient.ShellType
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -85,7 +89,8 @@ val offscreenSidebarTest by testSuite {
                 assertFalse(scene.hasText(shell.arguments.command))
                 assertEquals(0, shell.readCount)
                 scene.secondaryShell(32)
-                scene.settle { scene.hasText("View output") && scene.hasText("Close session") && scene.hasText(shell.arguments.command) }
+                scene.settle { scene.hasText("View output") && scene.hasText("Close session") && scene.hasText("Terminal #32") }
+                assertFalse(scene.hasText(shell.arguments.command))
                 assertEquals(0, shell.readCount)
                 scene.click("View output")
                 scene.settle { scene.hasTerminalOutput(title) && scene.hasText("record 100 终端") }
@@ -123,7 +128,7 @@ val offscreenSidebarTest by testSuite {
     }
 
     test("an inspector survives opposite hover but stops reading when its side or root opening is replaced") { offscreenTest {
-        val shell = SidebarTestShell(32, "old registration")
+        val shell = SidebarTestShell(32, "old registration", "Inspect original registration")
         val agent = SidebarTestAgent(MutableStateFlow(mapOf(32 to shell)))
         var visible by mutableStateOf(true)
         var overlays: ApplicationOverlayState? = null
@@ -150,14 +155,14 @@ val offscreenSidebarTest by testSuite {
             scene.secondaryShell(32)
             scene.settle { scene.hasText("View output") }
             scene.click("View output")
-            scene.settle { shell.readCount == 1 && scene.hasTerminalOutput("Terminal #32") }
+            scene.settle { shell.readCount == 1 && scene.hasTerminalOutput("Inspect original registration") }
             val opening = assertIs<ApplicationOverlayMenu.ShellOutput>(overlays?.menu)
             val state = assertNotNull(overlays)
             state.hoverChanged(ApplicationOverlayHover.Shell(SessionSidebarSide.Right, assertNotNull(row)), true)
             assertSame(opening, state.menu)
             assertNull(state.hover)
             visible = false
-            scene.settle { released == 1 && !scene.hasTerminalOutput("Terminal #32") && state.menu == null }
+            scene.settle { released == 1 && !scene.hasTerminalOutput("Inspect original registration") && state.menu == null }
             visible = true
             scene.settle { scene.hasDescription("Shell session 32") }
             scene.secondaryShell(32)
@@ -165,7 +170,7 @@ val offscreenSidebarTest by testSuite {
             scene.click("View output")
             scene.settle { shell.readCount == 2 }
             state.openMenu(ApplicationOverlayMenu.Shell(SessionSidebarSide.Right, SidebarShellMenuOpening(assertNotNull(row))))
-            scene.settle { released == 2 && !scene.hasTerminalOutput("Terminal #32") }
+            scene.settle { released == 2 && !scene.hasTerminalOutput("Inspect original registration") }
             assertEquals(0, shell.closeCount)
         } finally { scene.close() }
     } }
@@ -262,8 +267,8 @@ val offscreenSidebarTest by testSuite {
         } finally { scene.close() }
     } }
 
-    test("shell summary preserves a name's own status-like character and normalizes old multiline text") { offscreenTest {
-        val shell = SidebarTestShell(23, "private command", "● user intent\n  second line")
+    test("shell summary preserves a name's own status-like character") { offscreenTest {
+        val shell = SidebarTestShell(23, "private command", "● user intent")
         val agent = SidebarTestAgent(MutableStateFlow(mapOf(23 to shell)))
         val scene = OffscreenScene.create(width = 320, height = 160) {
             Box(Modifier.fillMaxWidth().height(120.dp)) {
@@ -271,15 +276,15 @@ val offscreenSidebarTest by testSuite {
             }
         }
         try {
-            scene.settle { scene.hasText("● user intent   second line") }
+            scene.settle { scene.hasText("● user intent") }
             assertEquals("Running", scene.shellNodes(23).single().config.getOrNull(SemanticsProperties.StateDescription))
-            assertFalse(scene.hasText("● ● user intent   second line"))
+            assertFalse(scene.hasText("● ● user intent"))
         } finally { scene.close() }
     } }
 
-    test("shell display has no fake click and keyboard and semantic menus expose the complete command") { offscreenTest {
+    test("shell row has no primary action and keyboard and semantic menus show only compact metadata and actions") { offscreenTest {
         val command = "echo first\n  echo second\n" + "complete-command ".repeat(30)
-        val shell = SidebarTestShell(19, command)
+        val shell = SidebarTestShell(19, command, "Named terminal")
         val agent = SidebarTestAgent(MutableStateFlow(mapOf(19 to shell)))
         var overlays: ApplicationOverlayState? = null
         val scene = OffscreenScene.create(width = 320, height = 240) {
@@ -300,7 +305,7 @@ val offscreenSidebarTest by testSuite {
             val row = scene.shellNodes(19).single()
             assertNull(row.config.getOrNull(SemanticsActions.OnClick))
             assertEquals("Running", row.config.getOrNull(SemanticsProperties.StateDescription))
-            val summary = "Terminal #19"
+            val summary = "Named terminal"
             assertTrue(scene.hasText(summary))
             assertFalse(scene.hasText("● $summary"), "The status indicator must not be part of the command text.")
             assertTrue(row.boundsInRoot.height <= 32f)
@@ -309,7 +314,8 @@ val offscreenSidebarTest by testSuite {
             scene.settle { scene.shellNodes(19).single().config.getOrNull(SemanticsProperties.Focused) == true }
             assertFalse(unfocused.contentEquals(scene.frame()), "Keyboard focus must be visible on the row.")
             scene.key(Key.Menu)
-            scene.settle { scene.hasText(command) && scene.hasText("Close session") }
+            scene.settle { scene.hasText("Terminal #19") && scene.hasText("View output") && scene.hasText("Close session") }
+            assertFalse(scene.hasText(command))
             assertTrue(scene.text("Close session").boundsInWindow.bottom <= 240)
             scene.escape()
             scene.settle { assertNotNull(overlays).menu == null && scene.nodes().any {
@@ -321,11 +327,13 @@ val offscreenSidebarTest by testSuite {
                 it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Open menu for shell session 19") == true
             }
             assertTrue(assertNotNull(action.config.getOrNull(SemanticsActions.OnClick)?.action).invoke())
-            scene.settle { assertNotNull(overlays).menu != null && scene.hasText(command) }
+            scene.settle { assertNotNull(overlays).menu != null && scene.hasText("Terminal #19") }
+            assertFalse(scene.hasText(command))
             scene.escape()
             scene.settle { assertNotNull(overlays).menu == null }
             scene.key(Key.F10, shift = true)
-            scene.settle { assertNotNull(overlays).menu != null && scene.hasText(command) }
+            scene.settle { assertNotNull(overlays).menu != null && scene.hasText("Terminal #19") }
+            assertEquals(0, shell.readCount)
             scene.key(Key.Tab)
             scene.key(Key.Enter)
             scene.settle { shell.closeCount == 1 && assertNotNull(overlays).menu == null }
@@ -413,7 +421,7 @@ val offscreenSidebarTest by testSuite {
             }
             assertTrue(assertNotNull(row.config.getOrNull(SemanticsActions.RequestFocus)?.action).invoke())
             scene.key(Key.Menu)
-            scene.settle { scene.hasText("Check out") }
+            scene.settle { scene.hasText("Go to") }
             index.window.value = index.window.value.copy(generation = 8, entries = emptyList())
             scene.settle { opening == null && !scene.hasDescription("History index 1") && scene.nodes().any {
                 it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Sidebar content left") == true &&
@@ -469,9 +477,22 @@ val offscreenSidebarTest by testSuite {
         } finally { scene.close(); index.close() }
     } }
 
-    test("Shell hover preserves complete multiline command and completion dismisses without Close") { offscreenTest {
+    test("terminal hover renders full command, metadata and live output; exit cancels the suspended read") { offscreenTest {
         val command = "echo first\n  echo second\n" + "x".repeat(300)
-        val shell = SidebarTestShell(42, command)
+        val shell = SidebarTestShell(42, command, "Live terminal", "/tmp/example", Shell(ShellType.Bash, Path("/bin/bash")))
+        var source = byteArrayOf()
+        var blocked = false
+        var cancelled = false
+        val newest = "new line\n".encodeToByteArray()
+        shell.read = { offset, limit ->
+            if (source.size == newest.size && offset == newest.size.toULong()) {
+                blocked = true
+                try { awaitCancellation() } finally { cancelled = true }
+            }
+            val start = offset.toInt()
+            val end = minOf(start + limit.toInt(), source.size)
+            StdoutSlice(source.copyOfRange(start, end), byteArrayOf(), 0u, offset, end.toULong(), source.size.toULong())
+        }
         val agent = SidebarTestAgent(MutableStateFlow(mapOf(42 to shell)))
         var overlays: ApplicationOverlayState? = null
         val scene = OffscreenScene.create {
@@ -488,12 +509,58 @@ val offscreenSidebarTest by testSuite {
         try {
             scene.settle { scene.hasDescription("Shell session 42") }
             scene.scene.sendPointerEvent(PointerEventType.Move, scene.shellNodes(42).single().boundsInWindow.center)
-            scene.settle { scene.hasText(command) && scene.hasText("Terminal #42") }
+            scene.advance()
+            assertEquals(0, shell.readCount)
+            assertFalse(scene.hasText(command))
+            scene.settle { scene.hasText(command) && scene.hasText("Terminal #42") && scene.hasText("Waiting for output…") }
+            assertTrue(scene.hasText("Workdir: /tmp/example"))
+            assertTrue(scene.hasText("Shell: /bin/bash"))
             assertSame(shell, assertIs<ApplicationOverlayHover.Shell>(assertNotNull(overlays).hover).interaction.session)
-            scene.frame()
+            source = newest
+            scene.settle { scene.hasText("new line") && scene.hasText("Reading output…") && blocked }
+            shell.exitCode.value = 0
             shell.completed.value = true
-            scene.settle { assertNotNull(overlays).hover == null && !scene.hasText(command) }
+            scene.settle { cancelled && assertNotNull(overlays).hover == null && !scene.hasText(command) }
             assertEquals(0, shell.closeCount)
+        } finally { scene.close() }
+    } }
+
+    test("terminal hover releases its reader on pointer exit and same-id replacement") { offscreenTest {
+        val shell = SidebarTestShell(42, "captured command", workdir = "")
+        val replacement = SidebarTestShell(42, "replacement command")
+        var cancelled = 0
+        shell.read = { _, _ ->
+            try { awaitCancellation() } finally { cancelled++ }
+        }
+        val registry = MutableStateFlow<Map<Int, AgentShellSession>>(mapOf(42 to shell))
+        val agent = SidebarTestAgent(registry)
+        var overlays: ApplicationOverlayState? = null
+        val scene = OffscreenScene.create {
+            val state = rememberApplicationOverlays(agent, SidebarContent.TerminalSessions, SidebarContent.None, ApplicationPopupState.Closed)
+            overlays = state
+            val renderer = rememberComposeSessionSidebarRenderer(
+                onShellHoverChanged = { origin, entered -> state.hoverChanged(ApplicationOverlayHover.Shell(SessionSidebarSide.Left, origin), entered) },
+            )
+            Box(Modifier.width(320.dp).height(120.dp)) {
+                SessionSidebarContent(SessionSidebarSide.Left, SidebarContent.TerminalSessions, agent, renderer, {})
+            }
+            ApplicationSidebarOverlaysContent(state, agent, renderer, rememberComposeHistoryIndexRenderer())
+        }
+        try {
+            scene.settle { scene.hasDescription("Shell session 42") }
+            fun enter() = scene.scene.sendPointerEvent(PointerEventType.Move, scene.shellNodes(42).single().boundsInWindow.center)
+            enter()
+            scene.settle { scene.hasText("captured command") && shell.readCount == 1 }
+            assertFalse(scene.hasText("Workdir: "))
+            assertFalse(scene.hasText("Shell: "))
+            scene.scene.sendPointerEvent(PointerEventType.Move, Offset(0f, 0f))
+            scene.settle { cancelled == 1 && overlays?.hover == null && !scene.hasText("captured command") }
+            enter()
+            scene.settle { scene.hasText("captured command") && shell.readCount == 2 }
+            registry.value = mapOf(42 to replacement)
+            scene.settle { cancelled == 2 && overlays?.hover == null && !scene.hasText("captured command") }
+            assertEquals(0, replacement.readCount)
+            assertEquals(0, shell.closeCount + replacement.closeCount)
         } finally { scene.close() }
     } }
 
@@ -512,9 +579,9 @@ val offscreenSidebarTest by testSuite {
             )
             val renderer = object : SessionSidebarRenderer by graphical {
                 @Composable override fun ShellMenu(
-                    opening: SidebarShellMenuOpening, label: String, onDismiss: () -> Unit, onClose: () -> Unit,
+                    opening: SidebarShellMenuOpening, sessionId: Int, label: String, onDismiss: () -> Unit, onClose: () -> Unit,
                     onViewOutput: (() -> Unit)?,
-                ) { close = onClose; graphical.ShellMenu(opening, label, onDismiss, onClose, onViewOutput) }
+                ) { close = onClose; graphical.ShellMenu(opening, sessionId, label, onDismiss, onClose, onViewOutput) }
             }
             Box(Modifier.width(320.dp).height(120.dp)) {
                 SessionSidebarContent(SessionSidebarSide.Left, SidebarContent.TerminalSessions, ownerAgent, renderer, {})
@@ -547,8 +614,10 @@ val offscreenSidebarTest by testSuite {
 private fun OffscreenScene.hasTerminalOutput(title: String): Boolean =
     nodes().any { it.config.getOrNull(SemanticsProperties.PaneTitle) == title }
 
-internal class SidebarTestShell(override val sessionId: Int, command: String, name: String? = null) : AgentShellSession {
-    override val arguments = ExecCommandArguments(command, name = name, yieldTimeMillis = 10_000)
+internal class SidebarTestShell(
+    override val sessionId: Int, command: String, name: String = "Run terminal fixture", workdir: String? = null, shell: Shell? = null,
+) : AgentShellSession {
+    override val arguments = ExecCommandArguments(command, name = name, workdir = workdir, shell = shell, yieldTimeMillis = 10_000)
     override val completed = MutableStateFlow(false)
     override val exitCode = MutableStateFlow<Int?>(null)
     var read: suspend (ULong, UInt) -> StdoutSlice = { _, _ -> error("Unexpected shell read") }
@@ -594,8 +663,9 @@ internal open class SidebarTestAgent(
     override fun cancel(): Unit = unused()
     override fun clearPending(): Unit = unused()
     override fun forceCompact(): Unit = unused()
-    override suspend fun renameThread(threadName: String): Unit = unused()
+    override suspend fun rename(name: String): Unit = unused()
     override fun requestHistoryRevert(untilExclusive: Int, expectedGeneration: Long): Long = unused()
+    override suspend fun forkHistory(untilExclusive: Int, expectedGeneration: Long): Int = unused()
     override suspend fun revertHistory(untilExclusive: Int, expectedGeneration: Long): Unit = unused()
     override fun dismissHistoryRevert(requestId: Long): Unit = unused()
     override fun confirmHistoryRevert(requestId: Long): Unit = unused()

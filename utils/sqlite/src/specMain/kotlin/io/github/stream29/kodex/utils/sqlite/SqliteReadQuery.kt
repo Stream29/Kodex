@@ -3,7 +3,7 @@ package io.github.stream29.kodex.utils.sqlite
 import kotlinx.io.files.Path
 import kotlin.time.TimeMark
 
-public enum class SqliteReadFailureKind { Unavailable, Denied, InvalidStatement, Timeout, ValueTooLarge, Failed }
+public enum class SqliteReadFailureKind { Unavailable, IncompatibleSchema, Denied, InvalidStatement, Timeout, ValueTooLarge, Failed }
 
 /** Safe classification for the caller, not raw SQLite or file-system diagnostics. */
 public class SqliteReadFailure(public val kind: SqliteReadFailureKind) : IllegalStateException(kind.name)
@@ -13,6 +13,7 @@ public data class SqliteReadPolicy(
     public val functions: Set<String>,
     public val inputBytes: Int,
     public val cellBytes: Int,
+    public val requiredUserVersion: Int,
 )
 
 /** One borrowed SQLite statement. Consume it only inside [withSqliteReadQuery]. */

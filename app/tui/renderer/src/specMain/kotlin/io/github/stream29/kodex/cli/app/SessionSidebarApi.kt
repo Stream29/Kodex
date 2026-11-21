@@ -4,6 +4,7 @@ package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
+import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
@@ -16,6 +17,7 @@ import io.github.stream29.kodex.cli.settings.SidebarContent
 
 public const val SessionSidebarCollapsedButtonColumns: Int = 3
 public const val SessionSidebarCollapsedButtonRows: Int = 1
+public const val SessionSidebarSplitterColumns: Int = 1
 
 /** Renderer request retains the exact process handle, not a process-id lookup on another Agent. */
 public data class ShellSessionMenuRequest(
@@ -33,7 +35,6 @@ public expect class ShellSessionInteractionRequest(
     public val side: SessionSidebarSide
     public val session: AgentShellSession
     public val anchor: TuiPopupAnchor
-    public var pointerPosition: IntOffset?
 }
 
 public data class SessionSidebarColumns(
@@ -48,10 +49,10 @@ public expect fun SessionSidebar(
     side: SessionSidebarSide,
     content: SidebarContent,
     selectedAgent: AgentViewModel?,
-    dropdownState: TuiDropdownState,
+    dropdownState: TuiDropdownState? = null,
     columns: Int,
     rows: Int,
-    onHoverChanged: (Boolean) -> Unit,
+    onHoverChanged: ((Boolean) -> Unit)? = null,
     onToggleExpanded: () -> Unit,
     onOpenShellSessionMenu: (ShellSessionMenuRequest) -> Unit,
     onShellSessionHoverChanged: (ShellSessionInteractionRequest, Boolean) -> Unit = { _, _ -> },
@@ -61,6 +62,20 @@ public expect fun SessionSidebar(
     onResizeStart: (Int) -> Unit = {},
     onResize: (Int) -> Unit = {},
     onResizeEnd: (Int) -> Unit = {},
+): Unit
+
+/** Hosts a sidebar body beside its existing resize splitter. [content] receives the body width. */
+@Composable
+public expect fun SessionSidebarFrame(
+    side: SessionSidebarSide,
+    columns: Int,
+    rows: Int,
+    modifier: Modifier = Modifier,
+    resizable: Boolean = true,
+    onResizeStart: (Int) -> Unit = {},
+    onResize: (Int) -> Unit = {},
+    onResizeEnd: (Int) -> Unit = {},
+    content: @Composable (Int) -> Unit,
 ): Unit
 
 @Composable

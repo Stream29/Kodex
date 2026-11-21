@@ -79,7 +79,7 @@ val sessionCatalogInteractionTest by testSuite {
                 catalog.refresh()
                 val oldRow = catalog.state.value.sessions.first()
                 val old = catalog.requestDelete(oldRow)!!
-                backend.entries = backend.entries.map { it.copy(threadName = "replacement row") }
+                backend.entries = backend.entries.map { it.copy(name = "replacement row") }
                 catalog.refresh()
                 catalog.requestOpen(oldRow)
                 assertNull(catalog.requestDelete(oldRow))
@@ -132,7 +132,7 @@ val sessionCatalogInteractionTest by testSuite {
                     val handle = catalog.requestDelete(target)!!
                     assertSame(target, handle.target)
                     assertEquals(7, handle.viewModel.sessionIndex)
-                    assertEquals("first", handle.viewModel.threadName)
+                    assertEquals("first", handle.viewModel.name)
                     assertEquals(listOf("load:false"), backend.calls)
                     assertEquals(deleted, handle.viewModel.delete())
                     assertEquals(listOf("load:false", "delete:7", "load:false"), backend.calls)
@@ -204,7 +204,7 @@ val sessionCatalogInteractionTest by testSuite {
         }
     }
 
-    for (command in listOf("archive", "unarchive", "fork")) {
+    for (command in listOf("archive", "unarchive")) {
         test("$command success followed by reload failure throws the original exception without replay") {
             runTest {
                 val backend = InteractionBackend().apply {
@@ -220,7 +220,6 @@ val sessionCatalogInteractionTest by testSuite {
                         when (command) {
                             "archive" -> catalog.archive(7)
                             "unarchive" -> catalog.unarchive(7)
-                            "fork" -> catalog.fork(7)
                             else -> error("Unknown test command: $command")
                         }
                     }.originalFailure())
@@ -355,7 +354,7 @@ val sessionCatalogInteractionTest by testSuite {
         }
     }
 
-    test("fork reloads current filter without navigation and ordering remains backend supplied") {
+    test("archive reloads current filter without navigation and keeps backend ordering") {
         runTest {
             val backend = InteractionBackend()
             val host = InteractionHost()
@@ -365,9 +364,11 @@ val sessionCatalogInteractionTest by testSuite {
                 assertEquals(listOf(7, 2), catalog.state.value.sessions.map { it.sessionIndex })
                 catalog.setShowArchived(true)
                 catalog.setShowArchived(true)
-                assertEquals(42, catalog.fork(7))
+                catalog.archive(7)
+                assertEquals(listOf(7, 2), catalog.state.value.sessions.map { it.sessionIndex })
+                assertTrue(catalog.state.value.sessions.first().archived)
                 assertEquals(emptyList(), host.calls)
-                assertEquals(listOf("load:false", "load:true", "fork:7", "load:true"), backend.calls)
+                assertEquals(listOf("load:false", "load:true", "archive:7", "load:true"), backend.calls)
                 catalog.dismiss()
                 assertEquals(listOf("catalog"), host.dismissed)
             } finally {
@@ -417,10 +418,6 @@ private class InteractionBackend : SessionCatalogDependencies {
     override suspend fun unarchive(sessionIndex: Int) {
         calls += "unarchive:$sessionIndex"
         entries = entries.map { if (it.sessionIndex == sessionIndex) it.copy(archived = false) else it }
-    }
-    override suspend fun fork(sessionIndex: Int): Int {
-        calls += "fork:$sessionIndex"
-        return 42
     }
     override suspend fun delete(sessionIndex: Int): Boolean {
         calls += "delete:$sessionIndex"

@@ -3,7 +3,8 @@ package io.github.stream29.kodex.cli.app
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupTarget
+import kotlinx.coroutines.flow.first
 import kotlin.test.*
 
 val sessionTreeCliSessionDeletionTest by testSuite {
@@ -11,14 +12,18 @@ val sessionTreeCliSessionDeletionTest by testSuite {
         applicationFixture { app, _ ->
             val vm = app.viewModel
             val session = vm.submitTestSession()
-            val popup = vm.openDeleteSessionPopup(session.sessionIndex)
-            assertTrue(popup.viewModel.delete())
+            vm.openDeleteSessionPopup(session.sessionIndex)
+            vm.withMountedCatalog { catalog ->
+                val cwd = session.settings.value.cwd.toString()
+                val row = catalog.state.first { it.pages[cwd]?.entries?.size == 1 }.pages.getValue(cwd).entries.single()
+                val delete = assertNotNull(catalog.requestDelete(SessionGroupTarget(cwd, row)))
+                assertTrue(delete.viewModel.delete())
+                assertNull(catalog.deleteTarget.value)
+                catalog.state.first { it.groups?.isEmpty() == true }
+            }
             assertEquals(ApplicationPopupState.Closed, vm.popup.value)
             assertTrue(vm.navigation.value.tabs.isEmpty())
             assertEquals(ApplicationTabSelection.NewSession, vm.navigation.value.selection)
-            val catalog = vm.openSessionCatalogPopup().viewModel
-            catalog.refresh()
-            assertTrue(assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.isEmpty())
             assertFalse(vm.openDeleteSessionPopup(session.sessionIndex).viewModel.delete())
         }
     }

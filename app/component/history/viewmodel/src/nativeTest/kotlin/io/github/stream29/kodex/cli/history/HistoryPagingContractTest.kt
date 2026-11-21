@@ -95,8 +95,8 @@ private suspend fun withPagingModel(block: suspend (AgentHistoryViewModel) -> Un
     runtime.modify { storage ->
         storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
         for (index in 1..1_000) {
-            storage.commit(LlmRequestMeta.Response(0L), Instant.DISTANT_PAST)
-            storage.commit(LlmRequestMeta.Response(0L), Instant.DISTANT_PAST)
+            storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), Instant.DISTANT_PAST)
+            storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), Instant.DISTANT_PAST)
             storage.commit(StableUserMessage(listOf(ContentItem.InputText("$index"))))
         }
     }

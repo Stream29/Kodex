@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 
 /**
  * Selects the exact child from one navigation snapshot and wires singleton submission.
@@ -17,5 +17,5 @@ public expect fun ApplicationPageContent(
     navigation: ApplicationNavigationState,
     onOperationFailure: (Throwable) -> Unit,
     newSession: @Composable (NewSessionViewModel, onSubmit: (Long) -> Unit) -> Unit,
-    persistedSession: @Composable (PersistedSessionViewModel) -> Unit,
+    agentTab: @Composable (AgentTabViewModel) -> Unit,
 )

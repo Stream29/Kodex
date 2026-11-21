@@ -68,7 +68,7 @@ val stateFileSystemPublicationTest by testSuite {
                 try {
                     networkEntered.await()
                     storage.postCommitGate = commitEntered to commitRelease
-                    val latest = before.copy(threadName = "title", model = OpenAiModelId("selected"))
+                    val latest = before.copy(name = "title", model = OpenAiModelId("selected"))
                     val cas = async(start = CoroutineStart.UNDISPATCHED) {
                         agent.compareAndSetSettings(before, latest)
                     }

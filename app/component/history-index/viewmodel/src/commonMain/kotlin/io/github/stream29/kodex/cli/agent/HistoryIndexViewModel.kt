@@ -20,6 +20,7 @@ import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryKind
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexWindow
+import io.github.stream29.kodex.app.agent.contract.editableHistoryText
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessagePhase
@@ -263,18 +264,14 @@ private fun IndexedAgentCommit.toHistoryIndexEntryOrNull(): HistoryIndexEntry? {
         requestUserInput = event as? StableAskUserEvent,
         plan = event as? StablePlanUpdate,
     )
-    val messageTimestamp = if (event is AgentCommit.Steerable) {
-        createdAt.takeIf { it != Instant.DISTANT_PAST }
-    } else {
-        null
-    }
     return HistoryIndexEntry(
         index = index,
         kind = kind,
         summary = summary,
         detail = detail,
-        messageTimestamp = messageTimestamp,
+        timestamp = createdAt.takeIf { it != Instant.DISTANT_PAST },
         createdChildAgentId = (event as? StableSubagentCreatedEvent)?.childAgentId,
+        editableUserText = (event as? StableUserMessage)?.editableHistoryText(),
     )
 }
 

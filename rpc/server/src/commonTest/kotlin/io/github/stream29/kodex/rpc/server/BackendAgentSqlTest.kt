@@ -2,7 +2,8 @@ package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.sqlite.initializeSqlitePhaseOneSchema
+import io.github.stream29.kodex.agentstorage.sqlite.initializeKodexHomeDatabase
+import io.github.stream29.kodex.agentstorage.sqlite.recomputeSessionCatalog
 import io.github.stream29.kodex.rpc.models.AgentSqlCellBytes
 import io.github.stream29.kodex.rpc.models.AgentSqlError
 import io.github.stream29.kodex.rpc.models.AgentSqlQueryResult
@@ -36,13 +37,19 @@ val backendAgentSqlTest by testSuite(compartment = { TestCompartment.RealTime })
         fs.createDirectories(root, mustCreate = true)
         Path(root, "kodex.db").also { path ->
             openSqliteConnection(path).use { db ->
-                initializeSqlitePhaseOneSchema(db)
+                initializeKodexHomeDatabase(db)
                 db.query("PRAGMA journal_mode=WAL")
-                db.execute("INSERT INTO sessions VALUES(12,1)")
-                db.execute("INSERT INTO agents(agent_id, session_id) VALUES(12,12)")
-                db.execute("""INSERT INTO agent_commits VALUES(12,'settings',0,'{"threadName":"fixture","cwd":"/fixture"}','t0')""")
-                db.execute("""INSERT INTO agent_commits VALUES(12,'event_terminal_exited',1,'{"session_id":37,"exit_code":18}','t1')""")
-                db.execute("""INSERT INTO agent_commits VALUES(12,'llm_request_meta_response',2,'{"total_tokens":1598,"latency_ms":25}','t2')""")
+                db.execute("INSERT INTO sessions VALUES(8)")
+                db.execute("INSERT INTO agents(agent_id, session_id, completed) VALUES(12,8,1)")
+                db.execute("""INSERT INTO agent_commits VALUES(
+                    12,'settings',0,'{"name":"fixture","cwd":"/fixture"}','2026-11-20T00:00:00Z')""")
+                db.execute("""INSERT INTO agent_commits VALUES(
+                    12,'event_terminal_exited',1,'{"session_id":37,"name":"Fixture command","exit_code":18}','2026-11-20T00:00:01Z')""")
+                db.execute("""INSERT INTO agent_commits VALUES(
+                    12,'llm_request_meta_response',2,'{"total_tokens":1598,"latency_ms":25,"elapsed_ns":20000000,"output_tokens":8}',
+                    '2026-11-20T00:00:02Z')""")
+                db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES(12)")
+                db.recomputeSessionCatalog(12)
                 db.execute("CREATE TABLE internal_test_only (private_value TEXT)")
             }
         }
@@ -54,12 +61,19 @@ val backendAgentSqlTest by testSuite(compartment = { TestCompartment.RealTime })
     } asParameterForEach {
         test("published query model and examples use only allowed relations and scalar functions") { path ->
             val service = BackendAgentSql(path)
-            assertEquals(listOf("sessions", "agents", "agent_commits", "session_catalog"), service.schema().relations.map { it.name })
+            val schema = service.schema()
+            assertEquals(2, schema.queryModelVersion)
+            assertEquals(listOf("sessions", "agents", "agent_commits", "session_catalog_view"), schema.relations.map { it.name })
+            val catalog = schema.relations.last()
+            assertFalse(catalog.derived)
+            assertEquals(listOf("root_agent_id", "name", "cwd", "created_at", "updated_at"), catalog.columns.map { it.name })
+            assertEquals(listOf("root_agent_id"), catalog.primaryKey)
             for (example in service.schema().examples) {
                 val result = service.query(example.sql)
                 assertNull(result.error, "${example.title}: ${result.error}")
                 assertEquals(1, result.rows?.size)
             }
+            assertEquals(AgentSqlError.DENIED, service.query("SELECT phase FROM fork_context_recovery").error?.code)
             val reply = service.query("SELECT count(*) AS same, NULL AS same FROM sessions; /* trailing */")
             assertNull(reply.error)
             assertEquals(listOf("same", "same"), reply.columns)
@@ -69,7 +83,8 @@ val backendAgentSqlTest by testSuite(compartment = { TestCompartment.RealTime })
             listOf(
                 "SELECT * FROM internal_test_only", "WITH private AS (SELECT * FROM internal_test_only) SELECT * FROM private",
                 "SELECT 1; SELECT 2", "SELECT * FROM sqlite_schema", "PRAGMA query_only=OFF",
-                "UPDATE sessions SET archived=0", "SELECT * FROM json_each('[]')", "EXPLAIN SELECT * FROM agents",
+                "UPDATE session_catalog_view SET name='changed'", "SELECT * FROM session_catalog",
+                "SELECT * FROM json_each('[]')", "EXPLAIN SELECT * FROM agents",
                 "SELECT random()", "SELECT 'a'\u0000",
             ).forEach { query -> assertNotNull(service.query(query).error, query) }
             val unparsed = service.query("SELECT 1 -- " + "α".repeat(33_000))
@@ -95,11 +110,24 @@ val backendAgentSqlTest by testSuite(compartment = { TestCompartment.RealTime })
             assertTrue(timeout.elapsedMillis >= 1000)
             openSqliteConnection(path).use { db ->
                 db.execute("BEGIN IMMEDIATE")
-                db.execute("INSERT INTO sessions VALUES(14,0)")
+                db.execute("INSERT INTO sessions VALUES(14)")
                 assertEquals(1, service.query("SELECT * FROM sessions").rows?.size)
                 db.execute("COMMIT")
             }
             assertEquals(2, service.query("SELECT * FROM sessions").rows?.size)
+        }
+        test("the SQL reader rejects legacy schema before preparing a public query") { path ->
+            val legacy = Path(checkNotNull(path.parent), "legacy.db")
+            openSqliteConnection(legacy).use { db ->
+                db.execute("CREATE TABLE agent_commits (payload_json TEXT)")
+                db.execute("PRAGMA user_version=1")
+            }
+            val result = BackendAgentSql(legacy).query("SELECT * FROM agent_commits")
+            assertEquals(AgentSqlError.UNAVAILABLE, result.error?.code)
+            assertNull(result.rows)
+            openSqliteConnection(legacy).use { db ->
+                assertEquals(1L, db.query("PRAGMA user_version").single().single())
+            }
         }
         test("whole-row limits distinguish exact EOF, truncation and oversized cell or row") { path ->
             val service = BackendAgentSql(path)

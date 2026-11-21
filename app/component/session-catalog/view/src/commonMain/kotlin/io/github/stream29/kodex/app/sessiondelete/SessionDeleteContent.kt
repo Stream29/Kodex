@@ -23,7 +23,7 @@ public actual fun SessionDeleteContent(
 ) {
     val scope = rememberCoroutineScope()
     val currentOnResult by rememberUpdatedState(onResult)
-    val title = viewModel.threadName ?: "Session ${viewModel.sessionIndex}"
+    val title = viewModel.name ?: "Session ${viewModel.sessionIndex}"
     DisposableEffect(viewModel) { onDispose(viewModel::close) }
     frame {
         UiColumn {

@@ -18,6 +18,8 @@ val tokenCountValuesTest by testSuite {
     test("timeline values retain snapshot kinds usage diagnostics and sparse indexes") {
         val response = LlmRequestMeta.Response(
             totalTokens = 9_007_199_254_740_993L,
+            elapsedNanoseconds = 200_000_000L,
+            outputTokens = 20,
             usage = TokenUsage(
                 inputTokens = 100,
                 outputTokens = 20,
@@ -53,14 +55,14 @@ val tokenCountValuesTest by testSuite {
     test("missing details remain distinct from reported zero and false") {
         val missing = assertIs<LlmRequestMeta.Response>(
             Json.decodeFromString<LlmRequestMeta>(
-                """{"type":"llm_request_meta_response","total_tokens":0}""",
+                """{"type":"llm_request_meta_response","total_tokens":0,"elapsed_ns":1000000,"output_tokens":0}""",
             ),
         )
         val reported = missing.copy(
             usage = TokenUsage(0, 0, 0, TokenUsageInputDetails(0), TokenUsageOutputDetails(0)),
             diagnostics = TokenCountDiagnostics(turnStateSent = false),
         )
-        assertEquals(LlmRequestMeta.Response(0), missing)
+        assertEquals(LlmRequestMeta.Response(0, elapsedNanoseconds = 1_000_000L, outputTokens = 0), missing)
         assertNotEquals<LlmRequestMeta>(missing, reported)
         assertEquals<LlmRequestMeta>(
             reported,

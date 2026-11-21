@@ -17,8 +17,8 @@ internal fun SessionCatalogEntry.sessionBrowserLabel(
     now: Instant = Clock.System.now(),
     runningFrame: String = RunningIndicatorFrames.first(),
 ): AnnotatedString {
-    val name = threadName ?: "Session $sessionIndex"
-    val title = if (running) runningFrame + name else name
+    val label = name ?: "Session $sessionIndex"
+    val title = if (running) runningFrame + label else label
     val lastActivity = updatedAt?.relativeTimeFrom(now)
         ?: return buildAnnotatedString { append(title.ellipsizeToTerminalWidth(maximumColumns)) }
     val suffix = " $lastActivity"

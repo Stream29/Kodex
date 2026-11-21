@@ -70,8 +70,8 @@ val offscreenHistoryItemsTest by testSuite {
         test("terminal exit stays a single row and reveals the full command, grouped=$grouped") { offscreenTest {
             val code = if (grouped) 23 else 0
             val command = "first\n" + "x".repeat(120) + "\nlast"
-            val name = if (grouped) "检查作业 🧪 " + "long name".repeat(20) else ""
-            val summary = if (grouped) "$name (exit 23)" else "(exit 0)"
+            val name = if (grouped) "检查作业 🧪 " + "long name".repeat(20) else "Inspect job"
+            val summary = "$name (exit $code)"
             val child = object : MessageHistoryItemViewModel {
                 override val index = 4
                 override val state = MutableStateFlow(
@@ -102,7 +102,7 @@ val offscreenHistoryItemsTest by testSuite {
                 assertFalse(scene.hasText(name))
                 assertFalse(scene.hasText(command))
                 scene.clickDescription(summary)
-                scene.settle { scene.hasText(command) && (!grouped || scene.hasText(name)) }
+                scene.settle { scene.hasText(command) && scene.hasText(name) }
                 assertFalse(scene.hasDescription("History tool: $summary"))
                 scene.clickDescription(summary)
                 scene.settle { !scene.hasText(command) && !scene.hasText(name) }

@@ -15,7 +15,7 @@ public class SessionTabMenuRequest(
 public interface SessionTabBarRenderer {
     @Composable public fun Frame(
         state: SessionTabBarState,
-        sessions: @Composable () -> Unit,
+        sessions: (@Composable () -> Unit)?,
         tab: @Composable (SessionTabPresentation, index: Int) -> Unit,
         newSession: @Composable () -> Unit,
     )
@@ -37,4 +37,5 @@ public expect fun SessionTabBarContent(
     callbacks: SessionTabBarCallbacks,
     renderer: SessionTabBarRenderer,
     onOpenTabMenu: (SessionTabMenuRequest) -> Unit = {},
+    showSessions: Boolean = true,
 ): Unit

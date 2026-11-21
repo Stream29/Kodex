@@ -12,6 +12,7 @@ import io.github.stream29.kodex.cli.app.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.io.files.Path
 import kotlin.test.*
 import kotlin.time.Instant
 
@@ -20,7 +21,7 @@ val offscreenApplicationTabsTest by testSuite {
         val firstAgent = NavigationAgent()
         val secondAgent = NavigationAgent()
         val first = NavigationSession(1, "Same", firstAgent)
-        val second = NavigationSession(2, "Same", secondAgent)
+        val second = NavigationAgentTab(2, "Same", secondAgent)
         val replacement = NavigationSession(1, "Replacement", NavigationAgent())
         val app = NavigationApplication(listOf(first, second))
         val probe = NavigationProbe()
@@ -31,7 +32,7 @@ val offscreenApplicationTabsTest by testSuite {
             val firstIdentity = original.state.tabs.first().identity
             val secondIdentity = original.state.tabs.last().identity
             scene.clickDescription("Session tab: ${secondIdentity.value}")
-            scene.settle { app.selected.singleOrNull() === second && app.navigation.value.selectedSession === second }
+            scene.settle { app.selected.singleOrNull() === second && app.navigation.value.selectedTab === second }
             first.name.value = "Renamed"
             firstAgent.running.value = true
             scene.settle { scene.hasText("Renamed") && scene.hasDescription("Running") }
@@ -70,7 +71,7 @@ val offscreenApplicationTabsTest by testSuite {
             scene.settle { app.selected.lastOrNull() === replacement }
             scene.frame()
         } finally { scene.close() }
-        assertEquals(0, app.closeCount + first.closeCount + second.closeCount + replacement.closeCount)
+        assertEquals(0, app.closeCount + first.closeCount + replacement.closeCount)
         assertEquals(0, firstAgent.closeCount + secondAgent.closeCount)
     } }
     test("navigation intents report an ordinary failure once and do not report or replay cancellation") { offscreenTest {
@@ -94,13 +95,11 @@ val offscreenApplicationTabsTest by testSuite {
             assertEquals(1, probe.failures.size)
             scene.clickDescription("New Session")
             scene.settle { app.newSessionIntents == 1 }
-            scene.click("Sessions")
-            scene.settle { app.catalogIntents == 1 && probe.failures.size == 2 }
-            assertSame(app.catalogFailure, probe.failures.last())
-            assertEquals(2, probe.beforeIntents)
+            assertFalse(scene.hasText("Sessions"))
+            assertEquals(1, probe.beforeIntents)
             scene.advance()
             assertEquals(2, app.selected.size)
-            assertEquals(1, app.catalogIntents)
+            assertEquals(1, probe.failures.size)
             scene.frame()
         } finally { scene.close() }
         assertEquals(0, app.closeCount + session.closeCount)
@@ -138,14 +137,24 @@ private class NavigationProbe {
     var beforeIntents = 0
 }
 
-private class NavigationAgent : SidebarTestAgent() {
+internal class NavigationAgent : SidebarTestAgent() {
     override val running = MutableStateFlow(false)
+}
+
+internal class NavigationAgentTab(
+    override val agentId: Int, name: String, agent: AgentViewModel,
+) : AgentTabViewModel {
+    override val name = MutableStateFlow(name)
+    override val agent = MutableStateFlow<AgentViewModel?>(agent)
+    override val lifecycle = MutableStateFlow<PersistedSessionLifecycleState>(PersistedSessionLifecycleState.Open)
+    override fun close() { error("The renderer must not close a borrowed tab.") }
 }
 
 /** Only observations used by tab projection are supplied; unexpected Session work fails. */
 internal open class NavigationSession(
     override val sessionIndex: Int, name: String, agent: AgentViewModel,
 ) : PersistedSessionViewModel, AgentSettingsViewModel by agent {
+    override val agentId: Int = sessionIndex
     override val name = MutableStateFlow(name)
     override val rootAgent = MutableStateFlow<AgentViewModel?>(agent)
     override val lifecycle: StateFlow<PersistedSessionLifecycleState> get() = unused()
@@ -154,23 +163,20 @@ internal open class NavigationSession(
     override suspend fun rename(name: String): Unit = unused()
     override suspend fun readCreatedAt(): Instant? = unused()
     override suspend fun readUpdatedAt(): Instant? = unused()
-    override suspend fun fork(source: AgentViewModel, untilExclusive: Int, expectedGeneration: Long): Int = unused()
     override suspend fun shutdown(): Unit = unused()
     private fun unused(): Nothing = error("Unexpected Session API in navigation wiring fixture")
 }
 
 /** Command/observation probe, not an alternate Application implementation or backend fixture. */
-internal open class NavigationApplication(tabs: List<PersistedSessionViewModel>) : ApplicationViewModel {
+internal open class NavigationApplication(tabs: List<AgentTabViewModel>) : ApplicationViewModel {
     override val navigation = MutableStateFlow(ApplicationNavigationState(tabs, ApplicationTabSelection.NewSession))
     override val newSession: NewSessionViewModel get() = unused()
     override val popup: StateFlow<ApplicationPopupState> get() = unused()
-    val selected = mutableListOf<PersistedSessionViewModel>()
+    val selected = mutableListOf<AgentTabViewModel>()
     var selectFailure: Throwable? = null
     var newSessionIntents = 0
-    var catalogIntents = 0
-    val catalogFailure = IllegalStateException("Catalog fixture port failed")
     var closeCount = 0
-    override suspend fun selectTab(target: PersistedSessionViewModel): Boolean {
+    override suspend fun selectTab(target: AgentTabViewModel): Boolean {
         selected += target
         selectFailure?.let { throw it }
         val current = navigation.value
@@ -183,18 +189,21 @@ internal open class NavigationApplication(tabs: List<PersistedSessionViewModel>)
         newSessionIntents++
         navigation.value = navigation.value.copy(selection = ApplicationTabSelection.NewSession)
     }
-    override suspend fun openSessionCatalogPopup(): ApplicationPopupState.SessionCatalog {
-        catalogIntents++
-        throw catalogFailure
-    }
+    override suspend fun selectNewSessionInDirectory(cwd: Path): Unit = unused()
     override fun close() { closeCount++ }
     override suspend fun openSession(sessionIndex: Int): PersistedSessionViewModel = unused()
-    override suspend fun closeTab(target: PersistedSessionViewModel): Boolean = unused()
+    override suspend fun openAgent(agentId: Int): AgentTabViewModel = unused()
+    override suspend fun enterChild(
+        source: AgentPageActionTarget, index: Int, generation: Long, revision: Long, childAgentId: Int,
+    ): Unit = unused()
+    override suspend fun returnToParent(source: AgentPageActionTarget, anchor: AgentParentAnchor): Unit = unused()
+    override suspend fun closeTab(target: AgentTabViewModel): Boolean = unused()
     override suspend fun closeAndArchiveSession(target: PersistedSessionViewModel): Boolean = unused()
     override suspend fun submitNewSession(expectedRevision: Long): PersistedSessionViewModel? = unused()
     override suspend fun openSettingsPopup(target: PersistedSessionViewModel?, initialPage: SettingsPage): ApplicationPopupState.Settings = unused()
     override suspend fun openRenameSessionPopup(target: PersistedSessionViewModel): ApplicationPopupState.RenameSession = unused()
     override suspend fun openDeleteSessionPopup(sessionIndex: Int): ApplicationPopupState.DeleteSession = unused()
+    override suspend fun openDeleteSessionPopup(target: PersistedSessionViewModel): ApplicationPopupState.DeleteSession? = unused()
     override suspend fun openLoginPopup(returnTo: ApplicationPopupState.Settings): ApplicationPopupState.Login = unused()
     override suspend fun openWorkingDirectoryPopup(target: AgentSettingsViewModel): ApplicationPopupState.WorkingDirectory = unused()
     override fun dismissPopup(expected: ApplicationPopupState.Open): Boolean = unused()

@@ -7,27 +7,8 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-
-private val OldTimelineNames = setOf(
-    "compaction",
-    "settings",
-    "timestamp",
-    "token-count",
-    "stable",
-    "unstable",
-)
-
-private val CurrentTimelineNames = setOf(
-    "index",
-    "work",
-    "settings",
-    "timestamp",
-    "token-count",
-    "unstable",
-)
 
 private suspend fun temporaryDirectory(): Path =
     Path(SystemTemporaryDirectory, "kodex-storage-layout-${Random.nextLong()}").also {
@@ -38,19 +19,9 @@ public val fileSystemLayoutTest by testSuite {
     testFixture { temporaryDirectory() } closeWith {
         deleteRecursively(this)
     } asParameterForEach {
-        test("opens different historical timeline sets") { root ->
-            val oldDirectory = Path(root, "old")
-            createStorageDirectory(oldDirectory, OldTimelineNames)
-            val currentDirectory = Path(root, "current")
-            createStorageDirectory(currentDirectory, CurrentTimelineNames)
-
-            requireStorageLayout(oldDirectory, OldTimelineNames)
-            requireStorageLayout(currentDirectory, CurrentTimelineNames)
-        }
-
         test("lists only canonical numeric records") { root ->
-            createStorageDirectory(root, CurrentTimelineNames)
             val timeline = timelineDirectory(root, "index")
+            SystemCoroutineFileSystem.createDirectories(timeline)
             SystemCoroutineFileSystem.writeString(recordPath(timeline, 12), "twelve")
             SystemCoroutineFileSystem.writeString(recordPath(timeline, 2), "two")
             SystemCoroutineFileSystem.writeString(Path(timeline, "02.json"), "unknown")
@@ -62,37 +33,18 @@ public val fileSystemLayoutTest by testSuite {
             assertTrue(SystemCoroutineFileSystem.exists(Path(timeline, "note.txt")))
         }
 
-        test("performs raw record and latest operations") { root ->
-            createStorageDirectory(root, CurrentTimelineNames)
+        test("deletes only the requested record and keeps the latest pointer") { root ->
             val timeline = timelineDirectory(root, "work")
-            val payload = byteArrayOf(1, 2, 3, 4)
-
-            SystemCoroutineFileSystem.writeBytes(recordPath(timeline, 3), payload)
-            assertContentEquals(payload, readRecord(timeline, 3))
-            assertContentEquals(byteArrayOf(1, 2), readRecordPrefix(timeline, 3, 2))
-            assertContentEquals(payload, readRecordPrefix(timeline, 3, 20))
-
+            SystemCoroutineFileSystem.createDirectories(timeline)
+            SystemCoroutineFileSystem.writeString(recordPath(timeline, 3), "three")
+            SystemCoroutineFileSystem.writeString(recordPath(timeline, 2), "two")
             SystemCoroutineFileSystem.writeString(latestIndexPath(timeline), "3")
-            assertEquals(3, readLatestIndex(timeline))
 
             deleteRecord(timeline, 3)
             assertFalse(SystemCoroutineFileSystem.exists(recordPath(timeline, 3)))
+            assertEquals("two", SystemCoroutineFileSystem.readString(recordPath(timeline, 2)))
+            assertEquals("3", SystemCoroutineFileSystem.readString(latestIndexPath(timeline)))
         }
-
-        test("rejects missing declared timeline") { root ->
-            SystemCoroutineFileSystem.createDirectories(Path(root, "index"))
-
-            assertFailsWith<Exception> {
-                requireStorageLayout(root, CurrentTimelineNames)
-            }
-        }
-    }
-}
-
-private suspend fun createStorageDirectory(directory: Path, timelines: Set<String>) {
-    SystemCoroutineFileSystem.createDirectories(directory)
-    timelines.forEach { name ->
-        SystemCoroutineFileSystem.createDirectories(Path(directory, name))
     }
 }
 

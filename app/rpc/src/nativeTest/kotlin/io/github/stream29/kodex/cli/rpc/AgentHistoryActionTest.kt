@@ -8,14 +8,16 @@ import kotlinx.coroutines.flow.first
 import kotlin.test.*
 
 val agentHistoryActionTest by testSuite {
-    test("history fork rejects a foreign frontend owner") {
+    test("history fork is bound to the source Agent and rejects another Agent's nonce") {
         frontend {
             val first = create("first")
             val second = create("second")
             val agent = requireNotNull(first.rootAgent.value)
-            assertFailsWith<IllegalArgumentException> {
-                second.fork(agent, 1, first.current().storage.cacheNonce.value)
+            assertFailsWith<CacheNonceMismatch> {
+                agent.forkHistory(1, second.current().storage.cacheNonce.value)
             }
+            val fork = agent.forkHistory(first.current().latestIndex.value + 1, first.current().storage.cacheNonce.value)
+            assertEquals("[fork] first", views.open(fork).settings.value.name)
         }
     }
     test("revert changes cache identity and a stale fork is not retried") {
@@ -30,7 +32,8 @@ val agentHistoryActionTest by testSuite {
             // Keep initialization, discard all later events.
             agent.revertHistory(1, nonce)
             binding.storage.cacheNonce.first { it != nonce }
-            assertFailsWith<CacheNonceMismatch> { session.fork(agent, 1, nonce) }
+            binding.state.first { it != AgentStateValue.ExternalWrite }
+            assertFailsWith<CacheNonceMismatch> { agent.forkHistory(1, nonce) }
             assertEquals(1, services.global.getSessionCatalog(true).size)
         }
     }

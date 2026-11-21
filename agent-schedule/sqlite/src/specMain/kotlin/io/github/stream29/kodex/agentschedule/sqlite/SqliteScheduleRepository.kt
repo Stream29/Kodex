@@ -38,7 +38,8 @@ public expect class SqliteScheduleRepository : ScheduleRepository {
 
 /**
  * Opens a [SqliteScheduleRepository] sharing [connection] and [mutex] on `kodex.db`,
- * installing the `schedules` schema idempotently and initializing [ScheduleRepository.nextTriggerAt].
+ * reading its already-installed `schedules` schema to initialize [ScheduleRepository.nextTriggerAt].
+ * @throws io.github.stream29.kodex.utils.sqlite.SqliteFailure if the schema cannot be read.
  */
 public expect suspend fun SqliteScheduleRepository(
     connection: SqliteConnection,

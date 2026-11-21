@@ -7,7 +7,7 @@ import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
-import io.github.stream29.kodex.cli.settings.SidebarContent
+import io.github.stream29.kodex.cli.settings.ToolWindowId
 import io.github.stream29.kodex.mcp.contract.McpOAuthClient
 import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
 import io.github.stream29.kodex.mcp.contract.McpSecret
@@ -83,21 +83,21 @@ val settingsModelsTest by testSuite {
         val settings = CliFrontendSettings(
             newLineKey = NewLineKey.Enter,
             sidebars = CliSidebarSettings(
-                left = SidebarContent.None,
-                right = SidebarContent.HistoryIndex,
+                activeLeft = ToolWindowId.Sessions,
+                activeRight = ToolWindowId.HistoryIndex,
             ),
         )
         val encoded = json.encodeToJsonElement(CliFrontendSettings.serializer(), settings).jsonObject
         assertEquals(setOf("newLineKey", "sidebars", "hooks"), encoded.keys)
-        assertEquals(setOf("left", "right"), encoded.getValue("sidebars").jsonObject.keys)
+        assertEquals(setOf("activeLeft", "activeRight"), encoded.getValue("sidebars").jsonObject.keys)
         assertEquals(settings, json.decodeFromJsonElement(CliFrontendSettings.serializer(), encoded))
     }
 
-    test("CLI defaults preserve existing key and sidebar content choices") {
+    test("CLI defaults preserve the existing key and start with tool windows collapsed") {
         val settings = json.decodeFromString(CliFrontendSettings.serializer(), "{}")
         assertEquals(NewLineKey.ShiftEnter, settings.newLineKey)
-        assertEquals(SidebarContent.HistoryIndex, settings.sidebars.left)
-        assertEquals(SidebarContent.TerminalSessions, settings.sidebars.right)
+        assertEquals(null, settings.sidebars.activeLeft)
+        assertEquals(null, settings.sidebars.activeRight)
         assertTrue(settings.hooks.isEmpty())
     }
 }

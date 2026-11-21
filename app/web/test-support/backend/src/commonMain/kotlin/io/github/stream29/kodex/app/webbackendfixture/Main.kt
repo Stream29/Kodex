@@ -76,6 +76,7 @@ public actual fun main(): Unit = runBlocking {
                     }
                 },
                 createLoginClient = { NoFixtureCredentials },
+                requiresPreparedHome = true,
             ) { backend ->
                 val engine = embeddedServer(CIO, host = "127.0.0.1", port = 18796) {
                     install(WebSockets) { maxFrameSize = 4 * 1024 * 1024L }

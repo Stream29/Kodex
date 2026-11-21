@@ -722,7 +722,9 @@ private suspend fun KodexAgentStateContract.appendUserMessage(
     require(message.role == MessageRole.User)
     return appendUserMessage(message.content).also {
         if (tokenCount != null) {
-            (storage as MutableKodexAgentStorage).commit(LlmRequestMeta.Response(tokenCount))
+            (storage as MutableKodexAgentStorage).commit(
+                LlmRequestMeta.Response(tokenCount, elapsedNanoseconds = 1_000_000L, outputTokens = 0),
+            )
         }
     }
 }

@@ -46,7 +46,7 @@ val contextWindowTokenBudgetTest by testSuite {
                     autoCompactionTokenLimit = 800L,
                 ),
             )
-            storage.commit(LlmRequestMeta.Response(760L))
+            storage.commit(LlmRequestMeta.Response(760L, elapsedNanoseconds = 1_000_000L, outputTokens = 0))
 
             assertEquals(40L, testState(storage).tokensUntilCompaction(testCatalog()))
         }

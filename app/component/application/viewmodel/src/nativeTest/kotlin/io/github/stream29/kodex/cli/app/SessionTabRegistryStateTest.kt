@@ -16,16 +16,19 @@ val sessionTabRegistryStateTest by testSuite {
             }
         }
     }
-    test("navigation validates referential duplicates rather than structural equality") {
+    test("navigation admits one handle per Agent ID, not per Session or value equality") {
         applicationFixture { app, _ ->
             val real = app.viewModel.submitTestSession()
-            val first = EqualityEqualSession(real)
-            val second = EqualityEqualSession(real)
+            val first = EqualityEqualSession(real, real.agentId)
+            val second = EqualityEqualSession(real, real.agentId + 1)
             assertEquals(first, second)
             val state = ApplicationNavigationState(listOf(first, second), ApplicationTabSelection.SelectedTab(1))
             assertSame(second, state.selectedSession)
             assertFailsWith<IllegalArgumentException> {
                 ApplicationNavigationState(listOf(first, first), ApplicationTabSelection.NewSession)
+            }
+            assertFailsWith<IllegalArgumentException> {
+                ApplicationNavigationState(listOf(first, real), ApplicationTabSelection.NewSession)
             }
             for (index in listOf(-1, 2)) {
                 assertFailsWith<IllegalArgumentException> {
@@ -72,6 +75,7 @@ val sessionTabRegistryStateTest by testSuite {
 
 private class EqualityEqualSession(
     delegate: PersistedSessionViewModel,
+    override val agentId: Int,
 ) : PersistedSessionViewModel by delegate {
     override fun equals(other: Any?): Boolean = other is EqualityEqualSession
     override fun hashCode(): Int = 0

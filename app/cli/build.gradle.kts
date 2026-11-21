@@ -93,6 +93,7 @@ kotlin {
             implementation(project(":utils-kauri"))
             implementation(project(":utils-shell-client"))
             implementation(project(":app-backend-host"))
+            implementation(project(":app-backend-migration"))
             implementation(project(":rpc-local"))
             implementation(project(":rpc-backend-control-client"))
             implementation(project(":rpc-client"))

@@ -16,13 +16,9 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableScheduleEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCompletedEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTerminalExitedEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
@@ -44,6 +40,7 @@ import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
 import io.github.stream29.kodex.agentstorage.contract.ext.answerAskUser
 import io.github.stream29.kodex.agentstorage.contract.ext.buildCompactionRetainedItems
 import io.github.stream29.kodex.agentstorage.contract.ext.createAskUser
+import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
@@ -56,7 +53,6 @@ import io.github.stream29.kodex.openai.CompactionStrategy
 import io.github.stream29.kodex.openai.CompactionTurnMetadata
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
-import io.github.stream29.kodex.openai.MessagePhase
 import io.github.stream29.kodex.openai.OpenAiResponseStreamIncompleteException
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
@@ -71,11 +67,15 @@ import io.github.stream29.kodex.openai.OpenAiFailureDiagnostic
 import io.github.stream29.kodex.openai.OpenAiFailureTermination
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
+import io.github.stream29.kodex.openai.client.contract.ObservedResponseCompletion
+import io.github.stream29.kodex.openai.client.contract.withReadObservations
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -112,6 +112,7 @@ public actual suspend fun CoroutineScope.KodexAgentState(
     storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
     clock: Clock,
+    readForkContextRecovery: suspend (upToIndex: Int) -> ForkContextRecovery?,
 ): KodexAgentState {
     val stateScope = supervisorChildScope()
     try {
@@ -123,7 +124,8 @@ public actual suspend fun CoroutineScope.KodexAgentState(
             contextSettings = contextSettings,
             clock = clock,
             loadedLatestIndex = loadedLatestIndex,
-            initialState = storage.stateAt(loadedLatestIndex),
+            initialState = storage.stateAt(loadedLatestIndex, readForkContextRecovery),
+            readForkContextRecovery = readForkContextRecovery,
         )
     } catch (failure: Throwable) {
         stateScope.cancel()
@@ -147,6 +149,7 @@ private class KodexAgentStateImpl(
     private val clock: Clock,
     loadedLatestIndex: Int,
     initialState: KodexAgentStateValue,
+    private val readForkContextRecovery: suspend (Int) -> ForkContextRecovery?,
 ) : KodexAgentState, CoroutineScope by scope {
     private val contextPrefixResolver = AgentContextPrefixResolver(contextSettings)
     private val writeMutex = Mutex()
@@ -180,6 +183,8 @@ private class KodexAgentStateImpl(
         lastResponseFailure = null
         try {
             var streamingOutput: StreamingOutput? = null
+            var completed: PendingResponseMetadata? = null
+            val outputEstimate = ResponseOutputEstimate()
 
             suspend fun acceptResponseEvent(event: ResponsesStreamEvent) {
                 when (event) {
@@ -249,7 +254,8 @@ private class KodexAgentStateImpl(
                         )
                     }
                 },
-            ).collect { event ->
+            ).withReadObservations().collect { observed ->
+                val event = observed.event
                 if (event is ResponsesStreamEvent.Created || event is ResponsesStreamEvent.InProgress) {
                     lastResponseFailure = event.toFailureDiagnostic()?.copy(
                         httpStatus = responseHeaders?.httpStatus,
@@ -290,6 +296,7 @@ private class KodexAgentStateImpl(
                 if (event !is ResponsesStreamEvent.OutputItemDone) {
                     acceptResponseEvent(event)
                 }
+                outputEstimate.observe(event)
                 when (event) {
                     is ResponsesStreamEvent.OutputItemDone -> {
                         val historyItem = event.item as? ResponseItem.HistoryItem
@@ -301,20 +308,15 @@ private class KodexAgentStateImpl(
                     }
 
                     is ResponsesStreamEvent.Completed -> {
+                        if (terminalReason != null) return@collect
                         lastResponseFailure = null
-                        writeResponseResult {
-                            storage.requireNoPendingServerToolSearch()
-                            event.response.usage?.let { usage ->
-                                appendTimestampAndTokenCount(
-                                    usage = usage,
-                                    response = event.response,
-                                    responseHeaders = responseHeaders,
-                                    turnStateSent = settings.turnState != null,
-                                    settings = settings,
-                                    requestWindowId = windowId,
-                                )
-                            }
-                        }
+                        writeResponseResult { storage.requireNoPendingServerToolSearch() }
+                        val reportedOutputTokens = event.response.usage?.outputTokens ?: observed.completion?.reportedOutputTokens
+                        completed = PendingResponseMetadata(
+                            event.response,
+                            observed.completion,
+                            reportedOutputTokens ?: outputEstimate.estimatedTokens(event.response),
+                        )
                         terminalReason = if (event.response.endTurn == false) {
                             RequestFinish.Continue
                         } else {
@@ -345,6 +347,14 @@ private class KodexAgentStateImpl(
                 if (event is ResponsesStreamEvent.OutputItemDone) {
                     acceptResponseEvent(event)
                     completeResponseOutput(event.outputIndex)
+                }
+            }
+            if (lastResponseFailure == null && (terminalReason == RequestFinish.Finish || terminalReason == RequestFinish.Continue)) {
+                completed?.let { result ->
+                    writeResponseResult {
+                        currentCoroutineContext().ensureActive()
+                        appendResponseMetadata(result, responseHeaders, settings, windowId)
+                    }
                 }
             }
         } catch (failure: OpenAiRetryableStreamException) {
@@ -439,7 +449,7 @@ private class KodexAgentStateImpl(
                 val consumed = storage.consumeSteer()
                 val index = storage.latestIndex()
                 latestIndex.value = index
-                state.value = storage.stateAt(index)
+                state.value = storage.stateAt(index, readForkContextRecovery)
                 succeeded = true
                 return consumed
             } finally {
@@ -447,7 +457,7 @@ private class KodexAgentStateImpl(
                     withContext(NonCancellable) {
                         val index = storage.latestIndex()
                         latestIndex.value = index
-                        state.value = storage.stateAt(index)
+                        state.value = storage.stateAt(index, readForkContextRecovery)
                     }
                 }
             }
@@ -466,7 +476,7 @@ private class KodexAgentStateImpl(
             val timestamp = now()
             val stableEvent = StableUserMessage(content)
             val settings = storage.getSettingsAt(previousLatest)
-            val settingsForNewTurn = storage.startsNewTurnBefore(previousLatest + 1)
+            val settingsForNewTurn = storage.startsNewTurnAfter(previousLatest, readForkContextRecovery)
                 .takeIf { it }
                 ?.let { settings.copy(turnId = Uuid.generateV7().toString()) }
             val index = storage.commit(
@@ -653,19 +663,32 @@ private class KodexAgentStateImpl(
         }
     }
 
-    private suspend fun appendTimestampAndTokenCount(
-        usage: io.github.stream29.kodex.openai.TokenUsage,
-        response: io.github.stream29.kodex.openai.Response,
+    private suspend fun appendResponseMetadata(
+        result: PendingResponseMetadata,
         responseHeaders: OpenAiResponseHeaders?,
-        turnStateSent: Boolean,
         settings: KodexAgentSettings,
         requestWindowId: String,
     ) {
+        val response = result.response
+        val reportedTotalTokens = response.usage?.totalTokens ?: result.observation?.reportedTotalTokens
+        val elapsedNanoseconds = result.observation?.elapsed?.inWholeNanoseconds?.takeIf { it in 1L until Long.MAX_VALUE }
+        val outputTokens = result.outputTokens?.takeIf { it >= 0 }
+        if (elapsedNanoseconds == null || outputTokens == null) {
+            // Keep an independently reported context count without fabricating a response measurement.
+            if (reportedTotalTokens != null) {
+                latestIndex.value = storage.commit(listOf(LlmRequestMeta.Legacy(reportedTotalTokens)), now())
+            }
+            return
+        }
+        // If the provider reported no total, preserve the last visible context budget unchanged.
+        val contextTokens = reportedTotalTokens ?: storage.getLlmRequestMetaAtOrNull(storage.latestIndex())?.totalTokens ?: 0L
         val index = storage.commit(
             listOf(
                 LlmRequestMeta.Response(
-                    totalTokens = usage.totalTokens,
-                    usage = usage,
+                    totalTokens = contextTokens,
+                    elapsedNanoseconds = elapsedNanoseconds,
+                    outputTokens = outputTokens,
+                    usage = response.usage,
                     diagnostics = TokenCountDiagnostics(
                         turnId = settings.turnId,
                         windowId = requestWindowId,
@@ -676,7 +699,7 @@ private class KodexAgentStateImpl(
                         requestId = responseHeaders?.requestId,
                         model = response.model,
                         serviceTier = response.serviceTier,
-                        turnStateSent = turnStateSent,
+                        turnStateSent = settings.turnState != null,
                         turnStateReceived = responseHeaders?.turnState != null,
                         turnStateAdopted = responseHeaders?.turnState != null && settings.turnState == null,
                     ),
@@ -686,6 +709,12 @@ private class KodexAgentStateImpl(
         )
         latestIndex.value = index
     }
+
+    private data class PendingResponseMetadata(
+        val response: io.github.stream29.kodex.openai.Response,
+        val observation: ObservedResponseCompletion?,
+        val outputTokens: Long?,
+    )
 
     private class StreamingOutput(
         val outputIndex: Long,
@@ -756,7 +785,7 @@ private class KodexAgentStateImpl(
             writeMutex.withLock {
                 val index = storage.latestIndex()
                 latestIndex.value = index
-                state.value = storage.stateAt(index)
+                state.value = storage.stateAt(index, readForkContextRecovery)
             }
         }
     }
@@ -788,7 +817,7 @@ private class KodexAgentStateImpl(
             writeMutex.withLock {
                 val index = storage.latestIndex()
                 latestIndex.value = index
-                state.value = storage.stateAt(index)
+                state.value = storage.stateAt(index, readForkContextRecovery)
             }
         }
     }
@@ -815,7 +844,7 @@ private class KodexAgentStateImpl(
                     withContext(NonCancellable) {
                         val index = storage.latestIndex()
                         latestIndex.value = index
-                        state.value = storage.stateAt(index)
+                        state.value = storage.stateAt(index, readForkContextRecovery)
                     }
                 }
             }
@@ -862,34 +891,14 @@ private fun KodexAgentStateValue.requireToolPending(): KodexAgentStateValue.Tool
     this as? KodexAgentStateValue.ToolPending
         ?: throw KodexAgentStateInvalidTransitionException("complete tool calls", this)
 
-private val StateTransitionCommitTypes: Set<AgentCommitType> = setOf(
-    AgentCommitType.UserMessage,
-    AgentCommitType.AgentMessage,
-    AgentCommitType.EventAskUser,
-    AgentCommitType.EventSchedule,
-    AgentCommitType.EventSubagentCompleted,
-    AgentCommitType.EventTerminalExited,
-    AgentCommitType.AssistantMessage,
-    AgentCommitType.AssistantMessageCommentary,
-    AgentCommitType.AssistantMessageFinal,
-    AgentCommitType.AwaitEventToolEvent,
-    AgentCommitType.PlanUpdate,
-    AgentCommitType.CommandExecutionToolEvent,
-    AgentCommitType.PatchToolEvent,
-    AgentCommitType.ReadMediaToolEvent,
-    AgentCommitType.InvalidToolCall,
-    AgentCommitType.ServerToolSearch,
-    AgentCommitType.HostedWebSearch,
-    AgentCommitType.HostedImageGeneration,
-    AgentCommitType.JsonToolEvent,
-    AgentCommitType.TextToolEvent,
-    AgentCommitType.CustomToolEvent,
-)
-
 /**
- * Derives the state from the committed clean events and unstable pending tail.
+ * Pending work takes precedence. A fork checkpoint supplies only the phase whose
+ * original transition is outside the retained context window.
  */
-private suspend fun KodexAgentStorage.stateAt(index: Int): KodexAgentStateValue {
+private suspend fun KodexAgentStorage.stateAt(
+    index: Int,
+    readRecovery: suspend (Int) -> ForkContextRecovery?,
+): KodexAgentStateValue {
     if (index < 0) {
         return KodexAgentStateValue.Empty
     }
@@ -899,30 +908,11 @@ private suspend fun KodexAgentStorage.stateAt(index: Int): KodexAgentStateValue 
         return KodexAgentStateValue.ToolPending(pending)
     }
 
-    val lastTransition = getLastCommitsIn(0..index, StateTransitionCommitTypes, limit = 1)
+    val lastTransition = getLastCommitsIn(0..index, StablePhaseTransitionTypes, limit = 1)
         .lastOrNull()
-        ?.commit
-    return lastTransition?.toAgentStateValueOrNull() ?: KodexAgentStateValue.Empty
+        ?.let { it.index to it.commit.commitType }
+    return stablePhaseAt(lastTransition, readRecovery(index)).state
 }
-
-private fun AgentCommit.toAgentStateValueOrNull(): KodexAgentStateValue? =
-    when (this) {
-        is StableUserMessage,
-        is StableAgentMessage,
-        is StableAskUserEvent,
-        is StableScheduleEvent,
-        is StableSubagentCompletedEvent,
-        is StableTerminalExitedEvent,
-        -> KodexAgentStateValue.UserMessage
-
-        is StableAssistantMessage ->
-            KodexAgentStateValue.AssistantMessage
-
-        is AgentCommit.CompletedTool ->
-            KodexAgentStateValue.ToolCompleted
-
-        else -> null
-    }
 
 private fun List<PendingToolCall>.requireEvent(callId: String): PendingToolCall =
     firstOrNull { event -> event.callId == callId }
@@ -945,18 +935,16 @@ private suspend fun KodexAgentStorage.unstableEventsAt(index: Int): List<Pending
 private suspend fun KodexAgentStorage.pendingToolEventsAt(index: Int): List<PendingToolCall> =
     unstableEventsAt(index).filterIsInstance<PendingToolCall>()
 
-private suspend fun KodexAgentStorage.startsNewTurnBefore(
+private suspend fun KodexAgentStorage.startsNewTurnAfter(
     index: Int,
+    readRecovery: suspend (Int) -> ForkContextRecovery?,
 ): Boolean {
-    if (index <= 0) return false
-    val last = getLastCommitsIn(0 until index, AgentCommitType.TurnStartBoundaryTypes, limit = 1)
+    if (index < 0) return false
+    val last = getLastCommitsIn(0..index, AgentCommitType.TurnStartBoundaryTypes, limit = 1)
         .lastOrNull()
-        ?.commit
-    return (last as? StableAssistantMessage)?.startsNewTurn() ?: false
+        ?.let { it.index to it.commit.commitType }
+    return startsNewTurnAt(last, readRecovery(index))
 }
-
-private fun StableAssistantMessage.startsNewTurn(): Boolean =
-    phase != MessagePhase.Commentary
 
 private suspend fun KodexAgentStorage.requireNoPendingServerToolSearch() {
     check(unstableEventsAt(latestIndex()).none { event -> event is PendingServerToolSearch }) {

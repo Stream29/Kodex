@@ -1,7 +1,8 @@
 package io.github.stream29.kodex.app.application.contract
 
-import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.cli.settings.SidebarSettings
+import io.github.stream29.kodex.cli.settings.ToolWindowId
+import io.github.stream29.kodex.cli.settings.ToolWindowSide
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -34,17 +35,11 @@ public interface SidebarSettingsViewModel {
      */
     public fun initializeViewport(columns: Int): Unit
 
-    /**
-     * Selects the content shown in the left sidebar.
-     * @throws Exception when persistence fails; caller cancellation stops its wait.
-     */
-    public suspend fun selectLeft(content: SidebarContent)
+    /** Opens or closes this tool window on its own side; widths remain unchanged. */
+    public suspend fun toggle(id: ToolWindowId)
 
-    /**
-     * Selects the content shown in the right sidebar.
-     * @throws Exception when persistence fails; caller cancellation stops its wait.
-     */
-    public suspend fun selectRight(content: SidebarContent)
+    /** Closes the tool window on this side only. */
+    public suspend fun collapse(side: ToolWindowSide)
 
     /** Changes the left width for this frontend invocation only, clamped to the preferences minimum. */
     public suspend fun resizeLeft(columns: Int)

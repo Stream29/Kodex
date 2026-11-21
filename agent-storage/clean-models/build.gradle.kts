@@ -16,6 +16,7 @@ kotlin {
                 api(project(":openai-models"))
                 api(project(":utils-kotlinx-io-serialization"))
                 api(project(":tool-await-event"))
+                implementation(project(":tool-intent-name"))
                 api(project(":tool-read-media-contract"))
                 api(project(":tool-request-user-input"))
                 api(project(":tool-unified-exec-contract"))

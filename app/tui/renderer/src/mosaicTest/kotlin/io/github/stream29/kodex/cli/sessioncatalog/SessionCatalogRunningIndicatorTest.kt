@@ -22,12 +22,12 @@ val sessionCatalogRunningIndicatorTest by testSuite {
         val updatedAt = Instant.parse("2026-09-28T10:25:00Z")
         val activeIdle = SessionCatalogEntry(
             sessionIndex = 1,
-            threadName = "Idle",
+            name = "Idle",
             isActive = true,
         )
         val running = SessionCatalogEntry(
             sessionIndex = 2,
-            threadName = "abcdefghijklmnop",
+            name = "abcdefghijklmnop",
             updatedAt = updatedAt,
             running = true,
         )
@@ -46,7 +46,7 @@ val sessionCatalogRunningIndicatorTest by testSuite {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 TuiPopupHost(modifier = Modifier.width(40).height(4)) {
                     SessionCatalogRow(
-                        entry = SessionCatalogEntry(2, threadName = "Running", running = true),
+                        entry = SessionCatalogEntry(2, name = "Running", running = true),
                         maximumLabelColumns = 38,
                         runningIndicatorFrame = frame,
                         onClick = {},

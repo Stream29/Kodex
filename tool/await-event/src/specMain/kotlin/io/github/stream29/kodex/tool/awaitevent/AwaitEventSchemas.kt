@@ -8,6 +8,13 @@ import kotlinx.schema.json.obj
 public val AwaitEventParametersSchema: ObjectPropertyDefinition =
     PropertyBuilder().obj {
         additionalProperties = false
+        property("name") {
+            required = true
+            string {
+                description = "Short, specific, single-line waiting intent in the conversation's language. " +
+                    "Do not copy arguments, include sensitive literals, or predict the result."
+            }
+        }
         property("events") {
             required = true
             array {

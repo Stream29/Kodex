@@ -88,9 +88,9 @@ val cliCommandsTest by testSuite {
             listOf("ask"), listOf("ask", "create"), listOf("ask", "answer"),
             listOf("schedule"), listOf("schedule", "create"),
             listOf("session"), listOf("session", "list"), listOf("session", "spawn"),
-            listOf("session", "rename"), listOf("session", "archive"), listOf("session", "unarchive"), listOf("session", "delete"), listOf("session", "fork"),
+            listOf("session", "rename"), listOf("session", "archive"), listOf("session", "unarchive"), listOf("session", "delete"),
             listOf("agent"), listOf("agent", "status"), listOf("agent", "submit"), listOf("agent", "resume"), listOf("agent", "stop"),
-            listOf("agent", "compact"), listOf("agent", "clear-pending"),
+            listOf("agent", "fork"), listOf("agent", "compact"), listOf("agent", "clear-pending"),
             listOf("agent", "sql"),
             listOf("search"), listOf("image"),
             listOf("mcp"), listOf("mcp", "status"),
@@ -123,6 +123,25 @@ val cliCommandsTest by testSuite {
             assertContains(messages.single(), "--help")
             assertContains(messages.single(), "-h")
         }
+    }
+
+    test("Session fork is not exposed; Agent fork requires an explicit Agent ID") {
+        suspend fun help(vararg arguments: String): String {
+            val messages = mutableListOf<String>()
+            assertEquals(0, dispatchCli(arguments.toList(), { message, error ->
+                assertFalse(error)
+                messages += message
+            }) { fail("Help must not enter runtime") })
+            return messages.single()
+        }
+        val sessionHelp = help("session", "fork", "--help")
+        assertTrue(sessionHelp.startsWith("Usage: kodex session ["))
+        assertFalse(sessionHelp.lineSequence().any { it.trimStart().startsWith("fork ") })
+        assertContains(help("agent", "fork", "--help"), "--agent")
+        assertEquals(0, dispatchCli(listOf("agent", "fork", "--agent", "42"), { message, _ -> fail(message) }) {
+            assertEquals(42, assertIs<AgentForkCommand>(it).agentId)
+            0
+        })
     }
 
     test("invalid arguments use stderr and nonzero status without entering runtime") {
@@ -183,7 +202,10 @@ val cliCommandsTest by testSuite {
             listOf("session", "rename", "--session", "0", "--name", "  "),
             listOf("session", "delete", "--session", "0", "--yes"),
             listOf("session", "archive"), listOf("session", "delete"), listOf("session", "unarchive"),
-            listOf("session", "fork", "--session", "0", "--until", "5"),
+            listOf("session", "fork"), listOf("session", "fork", "--session", "0"),
+            listOf("agent", "fork"), listOf("agent", "fork", "0"),
+            listOf("agent", "fork", "--session", "0"), listOf("agent", "fork", "--agent", "-1"),
+            listOf("agent", "fork", "--agent", "0", "--until", "5"),
             listOf("agent", "revert", "--agent", "0"), listOf("agent", "settings"), listOf("agent", "compact"),
             listOf("agent", "sql"), listOf("agent", "sql", "--stdin", "--schema"),
             listOf("agent", "sql", "--schema", "--agent", "0"),
@@ -202,7 +224,7 @@ val cliCommandsTest by testSuite {
         for (arguments in cases) {
             val messages = mutableListOf<String>()
             val code = dispatchCli(arguments, { message, error ->
-                assertTrue(error)
+                assertTrue(error, arguments.toString())
                 messages += message
             }) { fail("Invalid input must not enter runtime: $arguments") }
             assertNotEquals(0, code, arguments.toString())

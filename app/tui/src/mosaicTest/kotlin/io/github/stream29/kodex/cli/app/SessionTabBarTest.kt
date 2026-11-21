@@ -16,7 +16,7 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -69,11 +69,12 @@ val sessionTabBarTest by testSuite {
         }
     }
 
-    test("selectedSessionTabUsesReverseVideo") {
+    test("selectedAgentTabUsesReverseVideo") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val selected = fixture.persistedSession("First")
-            val inactive = fixture.persistedSession("Second")
+            val second = fixture.persistedSession("Second")
+            val inactive = object : AgentTabViewModel by second {}
 
             runMosaicTest(snapshotStrategy = ansi16Snapshots) {
                 val snapshot = setContentAndSnapshot {
@@ -298,8 +299,8 @@ val sessionTabBarTest by testSuite {
         try {
             val activeTarget = fixture.persistedSession("First")
             val inactiveTarget = fixture.persistedSession("Second")
-            var selectedTarget by mutableStateOf<PersistedSessionViewModel?>(null)
-            var menuTarget by mutableStateOf<PersistedSessionViewModel?>(null)
+            var selectedTarget by mutableStateOf<AgentTabViewModel?>(null)
+            var menuTarget by mutableStateOf<AgentTabViewModel?>(null)
             var menuInitialName by mutableStateOf<String?>(null)
             var menuClickPosition by mutableStateOf<IntOffset?>(null)
 
@@ -354,8 +355,8 @@ val sessionTabBarTest by testSuite {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val target = fixture.persistedSession("First")
-            var selectedTarget by mutableStateOf<PersistedSessionViewModel?>(null)
-            var menuTarget by mutableStateOf<PersistedSessionViewModel?>(null)
+            var selectedTarget by mutableStateOf<AgentTabViewModel?>(null)
+            var menuTarget by mutableStateOf<AgentTabViewModel?>(null)
 
             runMosaicTest {
                 setContentAndSnapshot {

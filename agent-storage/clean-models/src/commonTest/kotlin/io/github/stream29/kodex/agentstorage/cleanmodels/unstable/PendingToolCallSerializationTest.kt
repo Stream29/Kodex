@@ -162,12 +162,12 @@ val pendingToolEventSerializationTest by testSuite {
             ) to ("read_media" to null),
             PendingAwait(
                 callId = "call_await",
-                arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(7))),
+                arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(7)), name = "Wait for terminal exit"),
             ) to ("await_event" to null),
             PendingCommandExecution(
                 callId = "call_exec",
                 action = PendingCommandExecutionAction.ExecCommand(
-                    ExecCommandArguments("pwd", yieldTimeMillis = 10_000),
+                    ExecCommandArguments("pwd", name = "Inspect working directory", yieldTimeMillis = 10_000),
                 ),
             ) to ("exec_command" to null),
             PendingCommandExecution(
@@ -206,7 +206,7 @@ val pendingToolEventSerializationTest by testSuite {
 
         assertFailsWith<SerializationException> {
             pendingEventJson.decodeFromString<PendingToolCall>(
-                """{"type":"command_execution","call_id":"call_exec","action":{"type":"exec_command","arguments":{"cmd":"pwd"}}}""",
+                """{"type":"command_execution","call_id":"call_exec","action":{"type":"exec_command","arguments":{"cmd":"pwd","name":"Inspect working directory"}}}""",
             )
         }
         assertFailsWith<SerializationException> {

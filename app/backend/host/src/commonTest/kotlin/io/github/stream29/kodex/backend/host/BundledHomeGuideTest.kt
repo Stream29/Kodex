@@ -34,12 +34,8 @@ val bundledHomeGuideTest by testSuite(compartment = { TestCompartment.RealTime }
         }
     }
 
-    test("Backend readiness follows the replacement of the guide installed by historical migration") {
-        withHost(
-            prepareHome = { home ->
-                fs.writeString(Path(home, "version.json"), "\"0.4.2\"")
-            },
-        ) { home, _, _ ->
+    test("Backend installs the current guide before Ready on a fresh Home") {
+        withHost(useCurrentCatalogFixture = false) { home, _, _ ->
             assertCurrentGuide(Path(home, "skills", "kodex-home", "SKILL.md"))
         }
     }

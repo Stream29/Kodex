@@ -36,8 +36,8 @@ val offscreenSessionLayoutTest by testSuite {
         val preferences = object : SidebarSettingsViewModel {
             override val state = MutableStateFlow(SidebarSettings())
             override fun initializeViewport(columns: Int) = Unit
-            override suspend fun selectLeft(content: SidebarContent) = Unit
-            override suspend fun selectRight(content: SidebarContent) = Unit
+            override suspend fun toggle(id: ToolWindowId) = Unit
+            override suspend fun collapse(side: ToolWindowSide) = Unit
             override suspend fun resizeLeft(columns: Int) = Unit
             override suspend fun resizeRight(columns: Int) = Unit
         }

@@ -66,5 +66,5 @@ public interface SessionTabBarCallbacks {
     public fun selectNewSession(): Unit
 
     /** Opens the Application-owned session catalog popup. */
-    public fun openSessions(): Unit
+    public val sessionsAction: (() -> Unit)? get() = null
 }

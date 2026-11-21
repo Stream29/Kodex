@@ -273,14 +273,14 @@ internal class AgentHistoryViewModelImpl(
     }
 
     private fun isCurrent(intent: HistoryNavigationIntent): Boolean =
-        !closed && navigationIntent === intent &&
+        !closed && navigationIntent === intent && intent.isTargetCurrent() &&
             activeGeneration == intent.generation &&
             intent.generation == (agentState.cacheNonce?.value ?: activeGeneration)
 
     private fun publishScrollEffect(intent: HistoryNavigationIntent, target: HistoryScrollTarget) {
         val window = mutableHistoryItems.value
         if (isCurrent(intent) && intent.generation == window.generation && isCurrent(window)) {
-            mutablePendingScrollEffect.value = HistoryScrollEffect(window.generation, target)
+            mutablePendingScrollEffect.value = HistoryScrollEffect(window.generation, target, intent.isTargetCurrent)
         }
     }
 
@@ -294,9 +294,16 @@ internal class AgentHistoryViewModelImpl(
         commands.trySend(HistoryCommand.Navigate)
     }
 
-    override fun requestScrollToStorageIndex(storageIndex: Int) {
-        if (closed) return
-        val intent = HistoryNavigationIntent(agentState.cacheNonce?.value ?: activeGeneration)
+    override fun requestScrollToStorageIndex(storageIndex: Int) =
+        seek(storageIndex, HistoryNavigationIntent(agentState.cacheNonce?.value ?: activeGeneration))
+
+    override fun requestScrollToAnchor(storageIndex: Int, generation: Long, isCurrent: () -> Boolean) {
+        if ((agentState.cacheNonce?.value ?: activeGeneration) != generation) return
+        seek(storageIndex, HistoryNavigationIntent(generation, exactAnchor = true, isTargetCurrent = isCurrent))
+    }
+
+    private fun seek(storageIndex: Int, intent: HistoryNavigationIntent) {
+        if (closed || !intent.isTargetCurrent()) return
         navigationIntent = intent
         mutablePendingScrollEffect.value = null
         pendingNavigation.value = PendingNavigation.SeekToStorageIndex(storageIndex, intent)
@@ -768,18 +775,21 @@ internal class AgentHistoryViewModelImpl(
                 agentState.storage.getCommitExact(storageIndex, AgentCommitType.IndexTypes)?.commit as? IndexCommit
             }
             if (!isCurrent(intent)) return
+            if (intent.exactAnchor && indexEntry == null) return
             checkNotNull(indexEntry) { "The selected History entry is no longer available." }
             val displayIndex = storageIndex
+            if (intent.exactAnchor && displayIndex > snapshotIndex) return
             check(displayIndex <= snapshotIndex) {
                 "The selected History entry is no longer available."
             }
-            mutableLoadState.value = AgentHistoryLoadState.Initializing
+            if (!intent.exactAnchor) mutableLoadState.value = AgentHistoryLoadState.Initializing
             val batch = withContext(Dispatchers.Default) {
                 agentState.storage.readHistoryPage(
                     fromInclusive = displayIndex,
                     snapshotIndex = snapshotIndex,
                 )
             }
+            if (!isCurrent(intent) || (intent.exactAnchor && batch.items.isEmpty())) return
             check(batch.items.isNotEmpty()) {
                 "The selected History entry has no visible History item."
             }
@@ -790,9 +800,11 @@ internal class AgentHistoryViewModelImpl(
                 )
             } != null
             if (!isCurrent(intent)) return
+            val loaded = materializePages(displayIndex, batch, activeGeneration)
+            val exact = loaded.flatMap { it.items }.firstOrNull { it.storageIndex == displayIndex }
+            if (intent.exactAnchor && exact == null) return
             accessedItem.value = null
             visibleItems = emptyList()
-            val loaded = materializePages(displayIndex, batch, activeGeneration)
             observedLatestIndex = snapshotIndex
             nextOlderIndex = batch.nextOlderIndex
             hasNewer = newer
@@ -805,8 +817,7 @@ internal class AgentHistoryViewModelImpl(
                 hasOlder = nextOlderIndex != null,
                 hasNewer = newer,
             )
-            val target = loaded.flatMap { it.items }.firstOrNull { it.storageIndex == displayIndex }
-                ?: loaded.first().items.first()
+            val target = exact ?: loaded.first().items.first()
             publishScrollEffect(intent, HistoryScrollTarget.Item(target))
             mutableLoadState.value = AgentHistoryLoadState.Ready
             refreshActiveTurnStart()
@@ -903,7 +914,9 @@ internal class AgentHistoryViewModelImpl(
                 } catch (failure: CancellationException) {
                     throw failure
                 } catch (failure: Throwable) {
-                    mutableLoadState.value = AgentHistoryLoadState.Failed(failure.message ?: failure.toString())
+                    if (!navigation.intent.exactAnchor || (failure is Error && isCurrent(navigation.intent))) {
+                        mutableLoadState.value = AgentHistoryLoadState.Failed(failure.message ?: failure.toString())
+                    }
                 }
             }
             // Accesses made while a read was suspended are retained, not lost at Ready.
@@ -1029,11 +1042,16 @@ private sealed interface HistoryCommand {
 }
 
 private sealed interface PendingNavigation {
-    data class JumpToLatest(val intent: HistoryNavigationIntent) : PendingNavigation
-    data class SeekToStorageIndex(val storageIndex: Int, val intent: HistoryNavigationIntent) : PendingNavigation
+    val intent: HistoryNavigationIntent
+    data class JumpToLatest(override val intent: HistoryNavigationIntent) : PendingNavigation
+    data class SeekToStorageIndex(val storageIndex: Int, override val intent: HistoryNavigationIntent) : PendingNavigation
 }
 
-private class HistoryNavigationIntent(val generation: Long)
+private class HistoryNavigationIntent(
+    val generation: Long,
+    val exactAnchor: Boolean = false,
+    val isTargetCurrent: () -> Boolean = { true },
+)
 
 private class HistoryItemWindowImpl(
     override val generation: Long,

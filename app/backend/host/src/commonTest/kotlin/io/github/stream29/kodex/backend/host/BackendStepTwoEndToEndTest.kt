@@ -5,6 +5,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.backend.BackendInstance
+import io.github.stream29.kodex.backend.setBackendWorkingDirectory
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.FreeformTool
@@ -112,7 +113,7 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                                     0,
                                     ResponseItem.FunctionCall(
                                         name = "await_event",
-                                        arguments = """{"events":[{"type":"terminal_exited","session_id":$shellId},{"type":"user_message"}]}""",
+                                        arguments = """{"name":"Wait for the worker","events":[{"type":"terminal_exited","session_id":$shellId},{"type":"user_message"}]}""",
                                         callId = "await_1",
                                     ),
                                 ),
@@ -140,7 +141,7 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                                 0,
                                 ResponseItem.FunctionCall(
                                     name = "await_event",
-                                    arguments = """{"events":[{"type":"user_message"}]}""",
+                                    arguments = """{"name":"Wait for a user message","events":[{"type":"user_message"}]}""",
                                     callId = "await_2",
                                 ),
                             ),
@@ -197,7 +198,7 @@ val backendStepTwoEndToEndTest by testSuite(compartment = { TestCompartment.Real
                 )
 
                 step("awaiting auto-generated session title") {
-                    while (rpc.global.getSessionCatalog(false).single().threadName != "Run interactive shell and await exit") {
+                    while (rpc.global.getSessionCatalog(false).single().name != "Run interactive shell and await exit") {
                         delay(50)
                     }
                 }
@@ -291,9 +292,10 @@ private suspend fun withStepTwoHost(
     block: suspend kotlinx.coroutines.CoroutineScope.(Path, BackendEndpoint) -> Unit,
 ) = withTimeout(45.seconds) {
     coroutineScope {
+        val originalCwd = SystemCoroutineFileSystem.resolve(Path("."))
         val home = Path(SystemTemporaryDirectory, "kodex-step2-e2e-${Random.nextLong()}")
         SystemCoroutineFileSystem.createDirectories(home, mustCreate = true)
-        SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"0.4.15\"")
+        prepareCatalogHomeFixture(home)
         SystemCoroutineFileSystem.writeString(
             Path(home, "settings.yml"),
             """
@@ -375,6 +377,8 @@ private suspend fun withStepTwoHost(
                 }
                 withTimeoutOrNull(10.seconds) { backend.join() } ?: backend.cancel()
                 backend.join()
+                // The in-process backend changes cwd; restore it before deleting this Home.
+                setBackendWorkingDirectory(originalCwd)
                 deleteStepTwoPath(home)
             }
         }

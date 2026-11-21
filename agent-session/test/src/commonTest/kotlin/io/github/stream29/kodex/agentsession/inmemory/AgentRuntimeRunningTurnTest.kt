@@ -69,7 +69,7 @@ val agentRuntimeRunningTurnTest by testSuite {
         cancelAndJoin()
     } asContextForEach {
         test("root resume preserves cancellation when durable pending completion fails") {
-            val arguments = AwaitEventArguments(listOf(AwaitEventInput.UserMessage))
+            val arguments = AwaitEventArguments(listOf(AwaitEventInput.UserMessage), name = "Wait for user input")
             val client = mockOpenAiClient {
                 createResponse {
                     flowOf(
@@ -149,7 +149,7 @@ val agentRuntimeRunningTurnTest by testSuite {
         }
 
         test("composed await_event interactions remain parked while unsupported calls auto-fail and continue") {
-            val awaitArgs = AwaitEventArguments(listOf(AwaitEventInput.AskUserAnswered))
+            val awaitArgs = AwaitEventArguments(listOf(AwaitEventInput.AskUserAnswered), name = "Wait for an answer")
             var requests = 0
             val root = openTurnTestSession(mockOpenAiClient {
                 createResponse {
@@ -437,6 +437,8 @@ val agentRuntimeRunningTurnTest by testSuite {
                     it.commit(
                         LlmRequestMeta.Response(
                             totalTokens = if (preTurn) 90L else 1L,
+                            elapsedNanoseconds = 1_000_000L,
+                            outputTokens = 0,
                         ),
                     )
                 }

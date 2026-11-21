@@ -10,7 +10,7 @@ import kotlinx.serialization.json.JsonElement
 @OptIn(ExperimentalSerializationApi::class)
 public val AgentSqlResultJson: Json = Json { encodeDefaults = true; explicitNulls = false }
 
-public const val AgentSqlQueryModelVersion: Int = 1
+public const val AgentSqlQueryModelVersion: Int = 2
 public const val AgentSqlInputBytes: Int = 64 * 1024
 public const val AgentSqlCellBytes: Int = 256 * 1024
 public const val AgentSqlResultBytes: Int = 1024 * 1024

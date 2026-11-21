@@ -20,7 +20,21 @@ public actual fun HttpClient.postSseEventsWithHeaders(
     onResponseHeaders: suspend (Headers) -> Unit,
     onResponseStatus: suspend (HttpStatusCode) -> Unit,
     configureRequest: HttpRequestBuilder.() -> Unit,
-): Flow<ServerSentEvent> =
+): Flow<ServerSentEvent> = postSseEventsWithHeaders(
+    socketTimeoutMillis = socketTimeoutMillis,
+    onResponseHeaders = onResponseHeaders,
+    onResponseStatus = onResponseStatus,
+    transformOnRead = { it },
+    configureRequest = configureRequest,
+)
+
+public actual fun <T> HttpClient.postSseEventsWithHeaders(
+    socketTimeoutMillis: Long,
+    onResponseHeaders: suspend (Headers) -> Unit,
+    onResponseStatus: suspend (HttpStatusCode) -> Unit,
+    transformOnRead: (ServerSentEvent) -> T,
+    configureRequest: HttpRequestBuilder.() -> Unit,
+): Flow<T> =
     channelFlow {
         check(pluginOrNull(SSE) != null) {
             "HttpClient must install SSE before calling postSseEventsWithHeaders."
@@ -42,6 +56,6 @@ public actual fun HttpClient.postSseEventsWithHeaders(
         ) {
             onResponseStatus(call.response.status)
             onResponseHeaders(call.response.headers)
-            incoming.collect(::send)
+            incoming.collect { event -> send(transformOnRead(event)) }
         }
     }

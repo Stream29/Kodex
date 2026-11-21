@@ -52,7 +52,10 @@ val pendingToolEventProjectionTest by testSuite {
             explanation = "Cut over model surface.",
             plan = listOf(PlanItemArg("Verify tools.", StepStatus.InProgress)),
         )
-        val awaitEvent = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(3), AwaitEventInput.Timeout(3000)))
+        val awaitEvent = AwaitEventArguments(
+            listOf(AwaitEventInput.TerminalExited(3), AwaitEventInput.Timeout(3000)),
+            name = "Wait for terminal results",
+        )
         val cases: List<Pair<ResponseItem.FunctionCall, PendingToolCall>> = listOf(
             functionCall(
                 UnifiedExecTools.ExecCommandName,
@@ -177,7 +180,7 @@ val pendingToolEventProjectionTest by testSuite {
                 id = ItemId,
                 callId = "call_await_bad_terminals",
                 name = AwaitEventTools.Name,
-                arguments = """{"terminals":"not-an-array"}""",
+                arguments = """{"name":"Wait for work","terminals":"not-an-array"}""",
             ),
         )
 
@@ -196,6 +199,16 @@ val pendingToolEventProjectionTest by testSuite {
                 event.invocation,
             )
             assertEquals(listOf(call), event.toResponseHistoryItems())
+        }
+    }
+
+    test("rejects unnamed or malformed await calls as invalid instead of arming a deadline") {
+        val events = """"events":[{"type":"timeout","duration_ms":1000}]"""
+        for (name in listOf("", ""","name":null""", ""","name":123""", ""","name":"line\u2029break"""")) {
+            val call = ResponseItem.FunctionCall(name = AwaitEventTools.Name, callId = "invalid-await", arguments = "{$events$name}")
+            val rejected = assertIs<PendingInvalidToolCall>(call.toPendingToolEvent(CallTimestamp))
+            assertEquals("`name` must be nonblank, single-line text.", rejected.message)
+            assertEquals(listOf(call), rejected.toResponseHistoryItems())
         }
     }
 

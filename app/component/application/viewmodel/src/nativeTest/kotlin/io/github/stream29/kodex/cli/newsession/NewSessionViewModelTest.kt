@@ -126,7 +126,7 @@ val newSessionViewModelTest by testSuite {
                 val revision = draft.composer.update("first message")
                 val first = assertNotNull(draft.submit(revision))
                 assertSame(first, sessions.open(first.sessionIndex))
-                assertEquals("Session ${first.sessionIndex}", first.settings.value.threadName)
+                assertEquals("Session ${first.sessionIndex}", first.settings.value.name)
                 assertEquals(OpenAiModelId("shared-model"), first.settings.value.model)
                 assertEquals(SystemTemporaryDirectory, first.settings.value.cwd)
                 assertEquals("", draft.composer.state.value.text)

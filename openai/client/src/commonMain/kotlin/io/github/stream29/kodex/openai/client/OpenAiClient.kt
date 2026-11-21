@@ -37,9 +37,11 @@ import io.github.stream29.kodex.openai.TextControls
 import io.github.stream29.kodex.openai.ToolChoice
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.openai.unavailableMessage
+import io.github.stream29.kodex.openai.client.contract.ObservedResponseEvent
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient as OpenAiClientContract
 import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
+import io.github.stream29.kodex.openai.client.contract.OpenAiResponseObservationSource
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.ktorclientext.ChatGptAccountId
 import io.github.stream29.kodex.utils.ktorclientext.CodexOriginator
@@ -85,6 +87,7 @@ import io.ktor.utils.io.core.remaining
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -478,16 +481,33 @@ private const val HeaderCodexTurnMetadata: String = "x-codex-turn-metadata"
 private const val HeaderCodexWindowId: String = "x-codex-window-id"
 private const val HeaderCodexTurnState: String = "x-codex-turn-state"
 
+@OptIn(ExperimentalCoroutinesApi::class)
 internal fun HttpClient.streamResponseEvents(
     socketTimeoutMillis: Long,
     retry: OpenAiClientRetryConfig,
     onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit = {},
     configureRequest: HttpRequestBuilder.() -> Unit,
-): Flow<ResponsesStreamEvent> =
+): Flow<ResponsesStreamEvent> {
+    val observed = streamObservedResponseEvents(socketTimeoutMillis, retry, onResponseHeaders, configureRequest = configureRequest)
+    val wire = observed.map { it.event }
+    return object : Flow<ResponsesStreamEvent> by wire, OpenAiResponseObservationSource {
+        override val eventsWithObservations = observed
+    }
+}
+
+/** Ordinary Responses events plus client read observations, before storage-level estimation. */
+internal fun HttpClient.streamObservedResponseEvents(
+    socketTimeoutMillis: Long,
+    retry: OpenAiClientRetryConfig,
+    onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit = {},
+    clock: TimeSource.WithComparableMarks = TimeSource.Monotonic,
+    configureRequest: HttpRequestBuilder.() -> Unit,
+): Flow<ObservedResponseEvent> =
     flow {
         var acceptedStatus: Int? = null
         var providerRequestId: String? = null
         var observedResponseId: String? = null
+        val observation = ResponseAttemptObservation()
         emitAll(
             postSseEventsWithHeaders(
                 socketTimeoutMillis = socketTimeoutMillis,
@@ -503,14 +523,20 @@ internal fun HttpClient.streamResponseEvents(
                         ),
                     )
                 },
+                transformOnRead = { frame -> ReceivedResponseFrame(clock.markNow(), frame.data) },
                 configureRequest = {
                     configureRequest()
                     attributes.put(OpenAiStreamingRequestKey, Unit)
                 },
             )
-                .mapNotNull { event -> event.data?.takeIf { it != "[DONE]" } }
-                .map { data -> OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(data) }
-                .onEach { event ->
+                .mapNotNull { frame ->
+                    val data = frame.data ?: return@mapNotNull null
+                    if (data == "[DONE]") {
+                        observation.endAttempt()
+                        return@mapNotNull null
+                    }
+                    val decoded = decodeObservedResponseEvent(data)
+                    val event = decoded.event
                     val responseId = event.responseIdentifier()
                     if (!responseId.isNullOrEmpty() && responseId != observedResponseId) {
                         observedResponseId = responseId
@@ -520,6 +546,7 @@ internal fun HttpClient.streamResponseEvents(
                         requestId = providerRequestId,
                         responseId = observedResponseId?.takeIf { it.isNotEmpty() },
                     )?.let { throw it }
+                    observation.observe(decoded, frame.receivedAt)
                 }
                 .catch { cause ->
                     currentCoroutineContext().ensureActive()

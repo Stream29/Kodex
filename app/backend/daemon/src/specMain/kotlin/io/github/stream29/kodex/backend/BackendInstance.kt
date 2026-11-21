@@ -25,7 +25,8 @@ public expect class BackendInstance : AutoCloseable {
 }
 
 public expect fun randomBackendPassword(): String
-public expect fun launchIndependentBackend(home: Path): Long
+/** Starts the internal detached CLI entry in [home], streaming to a caller-owned private file. */
+public expect fun launchIndependentBackend(home: Path, startupOutput: Path): Long
 public expect fun setBackendWorkingDirectory(home: Path)
 public expect fun installBackendSignals()
 public expect fun backendStopSignalReceived(): Boolean

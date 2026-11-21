@@ -22,7 +22,7 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
             val second = views.open(index)
             assertNotSame(session, second)
             assertNotSame(first, second.rootAgent.value)
-            assertEquals("retained", second.settings.value.threadName)
+            assertEquals("retained", second.settings.value.name)
         }
     }
     test("closing a running tab does not stop accepted backend work") {
@@ -46,8 +46,8 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
             assertTrue(services.global.getSessionCatalog(true).single().archived)
             assertSame(session, views.open(session.sessionIndex))
             assertFalse(services.global.getSessionCatalog(true).single().archived)
-            val fork = views.fork(session.sessionIndex)
-            assertEquals("[fork] source", views.open(fork).settings.value.threadName)
+            val fork = services.global.forkAgent(session.agentId)
+            assertEquals("[fork] source", views.open(fork).settings.value.name)
             assertTrue(views.delete(session.sessionIndex))
             assertEquals(PersistedSessionLifecycleState.Closed, session.lifecycle.value)
             assertFalse(views.delete(session.sessionIndex))
@@ -61,7 +61,7 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
             session.name.first { it == "renamed" }
             session.updateReasoningEffort(ReasoningEffort.High)
             session.settings.first { it.reasoning.effort == ReasoningEffort.High }
-            assertEquals("renamed", session.settings.value.threadName)
+            assertEquals("renamed", session.settings.value.name)
             assertNotNull(session.readCreatedAt())
             assertNotNull(session.readUpdatedAt())
         }

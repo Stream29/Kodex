@@ -14,6 +14,8 @@ import kotlin.time.Instant
 /**
  * [onHistoryChanged] runs after commit under the database mutex. It receives changed types
  * or `null` for a revert. The callback must not suspend, reacquire the mutex, or throw.
+ * [onSessionGroupsChanged] has the same after-commit boundary and is called only for roots
+ * with a catalog change; the map reports affected cwd keys and whether each still exists.
  */
 public expect class SqliteAgentStorage(
     connection: SqliteConnection,
@@ -22,6 +24,7 @@ public expect class SqliteAgentStorage(
     mutex: Mutex = Mutex(),
     requireAccess: () -> Unit = {},
     onHistoryChanged: ((Set<AgentCommitType>?) -> Unit)? = null,
+    onSessionGroupsChanged: ((Map<String?, Boolean>) -> Unit)? = null,
 ) : MutableKodexAgentStorage {
     override val agentId: Int
     override val uri: String

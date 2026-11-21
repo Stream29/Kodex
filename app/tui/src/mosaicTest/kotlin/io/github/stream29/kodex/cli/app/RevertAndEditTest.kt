@@ -78,7 +78,7 @@ val revertAndEditTest by testSuite {
             val session = fixture.rpc.sessions.open(seededSessionIndex)
             val other = fixture.persistedSession("other")
             val binding = fixture.rpc.views.open(session.sessionIndex).current()
-            val userIndex = fixture.rpc.services.runtime.getLatestIndex(session.sessionIndex)
+            val userIndex = fixture.rpc.services.runtime.getLatestIndex(session.agentId)
             assertEquals(1, userIndex)
             binding.latestIndex.first { it >= userIndex }
             val agent = requireNotNull(session.rootAgent.value)

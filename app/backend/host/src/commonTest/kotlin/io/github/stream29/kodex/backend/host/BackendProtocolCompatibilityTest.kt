@@ -20,29 +20,30 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 val backendProtocolCompatibilityTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("old business checkpoint is refused without stopping or replacing the locked backend") {
+    test("old business checkpoints are refused without stopping or replacing the locked backend") {
         withHost { home, endpoint, backend ->
-            assertEquals("0.7.5", endpoint.businessProtocol)
+            assertEquals("0.7.8", endpoint.businessProtocol)
             assertEquals(1, endpoint.controlProtocol)
-            val obsolete = BackendEndpoint(
-                endpoint.instanceId, endpoint.pid, endpoint.port, endpoint.password,
-                endpoint.applicationVersion, businessProtocol = "0.7.4",
-            )
             val record = Path(home, ".locks", "backend", "connection.json")
             val originalRecord = SystemCoroutineFileSystem.readString(record)
             try {
-                // Simulate discovery of a live old backend, while retaining the same
-                // authenticated offline fixture process and its actual kernel guard.
-                SystemCoroutineFileSystem.writeString(record, Json.encodeToString(BackendEndpoint.serializer(), obsolete))
-                assertEquals("ready", backendControlRequest(obsolete, "status")["phase"]?.jsonPrimitive?.content)
-                assertFailsWith<IllegalStateException> { ensureBackend(home) }
-                assertFailsWith<IllegalArgumentException> { withLocalRpcClient(home, obsolete) {} }
-                val stillLocked = assertNotNull(BackendInstance.discover(home))
-                assertEquals(endpoint.instanceId, stillLocked.instanceId)
-                assertEquals(endpoint.pid, stillLocked.pid)
-                assertEquals("0.7.4", stillLocked.businessProtocol)
-                assertTrue(backend.isActive)
-                assertEquals("ready", backendControlRequest(obsolete, "status")["phase"]?.jsonPrimitive?.content)
+                for (oldProtocol in listOf("0.7.4", "0.7.5", "0.7.7")) {
+                    val obsolete = BackendEndpoint(
+                        endpoint.instanceId, endpoint.pid, endpoint.port, endpoint.password,
+                        endpoint.applicationVersion, businessProtocol = oldProtocol,
+                    )
+                    // Advertise an old checkpoint without changing the fixture process or its lock.
+                    SystemCoroutineFileSystem.writeString(record, Json.encodeToString(BackendEndpoint.serializer(), obsolete))
+                    assertEquals("ready", backendControlRequest(obsolete, "status")["phase"]?.jsonPrimitive?.content)
+                    assertFailsWith<IllegalStateException> { ensureBackend(home) }
+                    assertFailsWith<IllegalArgumentException> { withLocalRpcClient(home, obsolete) {} }
+                    val stillLocked = assertNotNull(BackendInstance.discover(home))
+                    assertEquals(endpoint.instanceId, stillLocked.instanceId)
+                    assertEquals(endpoint.pid, stillLocked.pid)
+                    assertEquals(oldProtocol, stillLocked.businessProtocol)
+                    assertTrue(backend.isActive)
+                    assertEquals("ready", backendControlRequest(obsolete, "status")["phase"]?.jsonPrimitive?.content)
+                }
             } finally {
                 SystemCoroutineFileSystem.writeString(record, originalRecord)
             }

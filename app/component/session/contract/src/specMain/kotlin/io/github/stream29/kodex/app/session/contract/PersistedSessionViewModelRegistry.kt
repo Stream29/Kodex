@@ -22,6 +22,12 @@ public interface PersistedSessionViewModelRegistry : PersistedSessionViewModelFa
      */
     override suspend fun open(sessionIndex: Int): PersistedSessionViewModel
 
+    /** Opens one exact Agent without changing persisted Session state. */
+    public suspend fun openAgent(agentId: Int): AgentTabViewModel
+
+    /** Releases only the captured local Agent page. */
+    public suspend fun releaseAgent(target: AgentTabViewModel): Unit
+
     /**
      * Releases the current opened child without deleting data or stopping backend work.
      * A late release must not close a different view opened after that child was removed.
@@ -48,7 +54,6 @@ public interface PersistedSessionViewModelRegistry : PersistedSessionViewModelFa
      * @throws Exception if source/running admission/storage/transport fails.
      * @throws kotlinx.coroutines.CancellationException if caller waiting is cancelled.
      */
-    public suspend fun fork(sessionIndex: Int): Int
 
     /**
      * Deletes persisted data and releases a matching local child on true.

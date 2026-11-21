@@ -30,7 +30,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 public class SessionCommand : KodexGroupCommand(
     "session", "List and manage independent Sessions.",
     SessionListCommand(), SessionSpawnCommand(),
-    SessionRenameCommand(), SessionForkCommand(), SessionArchiveCommand(), SessionUnarchiveCommand(), SessionDeleteCommand(),
+    SessionRenameCommand(), SessionArchiveCommand(), SessionUnarchiveCommand(), SessionDeleteCommand(),
     isToolGroup = true,
 )
 
@@ -38,7 +38,7 @@ public class AgentCommand : KodexGroupCommand(
     "agent", "Inspect and control a specific Agent.",
     AgentSpawnCommand(),
     AgentStatusCommand(), AgentSubmitCommand(), AgentResumeCommand(), AgentStopCommand(), AgentCompleteCommand(),
-    AgentCompactCommand(), AgentClearPendingCommand(),
+    AgentForkCommand(), AgentCompactCommand(), AgentClearPendingCommand(),
     AgentSqlCommand(),
     isToolGroup = true,
 )
@@ -111,6 +111,8 @@ public class AgentResumeCommand : ExplicitAgentOperation("resume", "Continue wit
 
 public class AgentStopCommand : ExplicitAgentOperation("stop", "Request cancellation of only the currently running turn.")
 
+public class AgentForkCommand : ExplicitAgentOperation("fork", "Copy the Agent's current effective history into a new independent Session.")
+
 public class AgentCompleteCommand : SessionAgentOperation("complete", "Complete a child or archive a root Session without stopping it.") {
     public val agentId: Int? by option("--agent", metavar = "ID", help = "Target Agent ID; omit to complete the calling Agent.")
         .int().check("Agent ID must be non-negative.") { it >= 0 }
@@ -131,8 +133,6 @@ public class SessionRenameCommand : ExplicitSessionOperation("rename", "Update o
     public val name: String by option("--name", metavar = "TEXT", help = "New Session title.")
         .convert { it.trim().also { name -> require(name.isNotEmpty()) { "Session title must not be blank." } } }.required()
 }
-
-public class SessionForkCommand : ExplicitSessionOperation("fork", "Fork the complete Session as a new independent Session.")
 
 public class SessionArchiveCommand : ExplicitSessionOperation("archive", "Archive the Session without stopping it.")
 
@@ -162,7 +162,7 @@ public data class CliSessionCatalogOutput(public val sessions: List<CliSessionCa
 public data class CliSessionCatalogRow(
     @SerialName("session_id") public val sessionId: Int,
     @SerialName("root_agent_id") public val rootAgentId: Int,
-    @SerialName("thread_name") public val threadName: String?,
+    public val name: String?,
     public val archived: Boolean,
     public val running: Boolean,
     @SerialName("is_active") public val isActive: Boolean,

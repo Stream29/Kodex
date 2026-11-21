@@ -13,12 +13,12 @@ kotlin {
             api(project(":app-component-agent-view"))
             api(project(":app-component-composer-view"))
             api(project(":app-component-history-index-view"))
+            api(project(":app-component-widgets"))
             api(libs.kotlinx.datetime)
             api(compose.runtime)
         }
         commonMain.dependencies {
             implementation(project(":app-component-settings-view"))
-            implementation(project(":app-component-widgets"))
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

@@ -32,7 +32,6 @@ kotlin {
         implementation(project(":rpc-websocket"))
         implementation(project(":openai-client-test"))
         implementation(project(":utils-os-environment"))
-        implementation(project(":utils-sqlite"))
         implementation(libs.ktor.server.cio)
         implementation(libs.ktor.server.websockets)
         implementation(libs.ktor.client.core)

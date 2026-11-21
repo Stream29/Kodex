@@ -8,14 +8,11 @@ import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.session.contract.*
-import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModelFactory
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModelFactory
 import io.github.stream29.kodex.app.test.RpcFrontendFixture
 import io.github.stream29.kodex.app.test.withRpcFrontend
 import io.github.stream29.kodex.cli.newsession.DefaultNewSessionViewModelFactory
-import io.github.stream29.kodex.cli.rpc.RpcSessionCatalogDependencies
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import kotlinx.coroutines.*
@@ -89,7 +86,7 @@ val exactTargetCommandTest by testSuite(compartment = { TestCompartment.RealTime
         test("Application submits nonzero $label text unchanged through real RPC") {
             withCommandApplication {
                 val persisted = assertNotNull(application.submitNewSession(input(text)))
-                val message = readFirstUserMessage(persisted.sessionIndex)
+                val message = readFirstUserMessage(persisted.agentId)
                 assertEquals(listOf(ContentItem.InputText(text)), message.content)
                 assertEquals("", first.composer.state.value.text)
                 assertSame(persisted, application.navigation.value.selectedSession)
@@ -110,12 +107,12 @@ val exactTargetCommandTest by testSuite(compartment = { TestCompartment.RealTime
             assertNull(application.submitNewSession(later))
             renderer.cancelAndJoin()
             gate.proceed.complete(Unit)
-            val persisted = application.navigation.first { it.tabs.size == 1 }.tabs.single()
+            val persisted = assertNotNull(application.navigation.first { it.tabs.size == 1 }.selectedSession)
             assertEquals(SystemTemporaryDirectory, persisted.settings.value.cwd)
             assertEquals("later text", first.composer.state.value.text)
             assertEquals(later, first.composer.state.value.revision)
             first.settings.first { it.cwd == SystemTemporaryDirectory }
-            val message = readFirstUserMessage(persisted.sessionIndex)
+            val message = readFirstUserMessage(persisted.agentId)
             assertEquals(listOf(ContentItem.InputText("captured text")), message.content)
             assertNull(application.submitNewSession(original))
             assertNotNull(application.submitNewSession(later))
@@ -140,7 +137,7 @@ val exactTargetCommandTest by testSuite(compartment = { TestCompartment.RealTime
             assertTrue(application.navigation.value.tabs.isEmpty())
             gate.proceed.complete(Unit)
             val navigation = application.navigation.first { it.tabs.size == 1 }
-            assertSame(navigation.tabs.single(), navigation.selectedSession)
+            assertSame(navigation.tabs.single(), navigation.selectedTab)
             assertEquals("", first.composer.state.value.text)
             first.settings.first { it.cwd == backend.root }
             assertEquals(1, backend.services.global.getSessionCatalog(true).size)
@@ -174,7 +171,7 @@ val exactTargetCommandTest by testSuite(compartment = { TestCompartment.RealTime
     }
     test("opening failure after allocation propagates unchanged without retry reset or navigation") {
         withCommandApplication {
-            val popup = application.openSessionCatalogPopup()
+            val popup = application.openDeleteSessionPopup(999)
             val snapshot = application.navigation.value
             val failure = ChildOpeningFailure()
             failOpening = failure
@@ -406,16 +403,16 @@ private class CommandApplicationFixture(
     var failOpening: Throwable? = null
     var beforeOpen: suspend () -> Unit = {}
     var afterOpen: suspend (PersistedSessionViewModel) -> Unit = {}
-    private var forkGate: CommandGate? = null
+    private var openingGate: CommandGate? = null
     private val registry = object : PersistedSessionViewModelRegistry by backend.sessions {
         override suspend fun open(sessionIndex: Int): PersistedSessionViewModel {
+            if (sessionIndex == Int.MAX_VALUE) {
+                checkNotNull(openingGate).wait()
+                throw ChildOpeningFailure()
+            }
             beforeOpen()
             failOpening?.let { throw it }
             return backend.sessions.open(sessionIndex).also { afterOpen(it) }
-        }
-        override suspend fun fork(sessionIndex: Int): Int {
-            forkGate?.wait()
-            return backend.sessions.fork(sessionIndex)
         }
     }
     private val actualDrafts = DefaultNewSessionViewModelFactory(
@@ -426,10 +423,6 @@ private class CommandApplicationFixture(
         newSessionFactory = NewSessionViewModelFactory { arguments ->
             ObservedDraft(actualDrafts.create(arguments)).also { drafts += it }
         },
-        catalogFactory = SessionCatalogViewModelFactory { dependencies, interactions ->
-            DefaultSessionCatalogViewModel(frontendScope, dependencies, interactions)
-        },
-        catalogDependencies = RpcSessionCatalogDependencies(backend.services.global),
         settingsFactory = SettingsViewModelFactory { error("These command gates do not open Settings.") },
         loginFactory = OpenAiLoginViewModelFactory { error("These command gates do not open Login.") },
         createDirectoryPicker = { error("These command gates do not open a directory picker.") },
@@ -444,13 +437,13 @@ private class CommandApplicationFixture(
     suspend fun openPersisted(): PersistedSessionViewModel =
         application.openSession(backend.services.global.createSession(backend.root))
 
-    suspend fun readFirstUserMessage(sessionIndex: Int): StableUserMessage = withTimeout(5.seconds) {
+    suspend fun readFirstUserMessage(agentId: Int): StableUserMessage = withTimeout(5.seconds) {
         while (true) {
             try {
-                val nonce = backend.services.runtime.getCacheNonce(sessionIndex)
-                val latest = backend.services.runtime.getLatestIndex(sessionIndex)
+                val nonce = backend.services.runtime.getCacheNonce(agentId)
+                val latest = backend.services.runtime.getLatestIndex(agentId)
                 val entry = backend.services.runtime.getFirstCommitsIn(
-                    sessionIndex,
+                    agentId,
                     nonce,
                     0,
                     latest,
@@ -469,17 +462,18 @@ private class CommandApplicationFixture(
     }
 
     suspend fun blockCommands(): CommandBlocker {
-        val index = backend.services.global.createSession(backend.root)
-        val gate = commandGate().also { forkGate = it }
-        val operation = async(start = CoroutineStart.UNDISPATCHED) { application.forkSession(index) }
+        val gate = commandGate().also { openingGate = it }
+        val operation = async(start = CoroutineStart.UNDISPATCHED) {
+            assertFailsWith<ChildOpeningFailure> { application.openSession(Int.MAX_VALUE) }
+        }
         gate.entered.await()
-        return CommandBlocker(gate, operation) { forkGate = null }
+        return CommandBlocker(gate, operation) { openingGate = null }
     }
 }
 
 private class CommandBlocker(
     private val gate: CommandGate,
-    private val operation: Deferred<Int>,
+    private val operation: Deferred<*>,
     private val finished: () -> Unit,
 ) {
     suspend fun proceed() { gate.proceed.complete(Unit); operation.await(); finished() }

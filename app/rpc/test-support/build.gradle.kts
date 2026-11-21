@@ -27,7 +27,6 @@ kotlin {
         implementation(project(":utils-kotlinx-io-coroutines"))
         implementation(project(":utils-coroutines"))
         implementation(project(":agent-session-sqlite"))
-        implementation(project(":utils-sqlite"))
         implementation(project(":agent-session-test"))
         implementation(project(":agent-storage-core"))
     }

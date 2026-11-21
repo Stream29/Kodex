@@ -2,6 +2,7 @@ package io.github.stream29.kodex.app.ui.compose
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -13,6 +14,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -20,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
+import io.github.stream29.kodex.app.application.contract.TerminalOutputItem
 import io.github.stream29.kodex.app.application.contract.TerminalOutputState
 import io.github.stream29.kodex.app.ui.compose.EditorDropdownMenu as DropdownMenu
 import io.github.stream29.kodex.cli.app.*
@@ -34,6 +39,7 @@ internal fun rememberComposeSessionSidebarRenderer(
     onOpenShellMenu: (SidebarShellMenuOpening) -> Unit = {},
     onIndexHoverChanged: (HistoryIndexInteraction, Boolean) -> Unit = { _, _ -> },
     onOpenIndexMenu: (HistoryIndexMenuOpening) -> Unit = {},
+    showContentMenu: Boolean = true, // Standalone sidebar callers can still exercise the legacy header.
 ): SessionSidebarRenderer {
     val select = rememberUpdatedState(onSelectContent)
     val shellHover = rememberUpdatedState(onShellHoverChanged)
@@ -41,10 +47,10 @@ internal fun rememberComposeSessionSidebarRenderer(
     val indexHover = rememberUpdatedState(onIndexHoverChanged)
     val indexMenu = rememberUpdatedState(onOpenIndexMenu)
     val scope = rememberCoroutineScope()
-    return remember(scope) { ComposeSessionSidebarRenderer(select, shellHover, shellMenu, indexHover, indexMenu, RowMenuFocusRestoration(scope)) }
+    return remember(scope, showContentMenu) {
+        ComposeSessionSidebarRenderer(select, shellHover, shellMenu, indexHover, indexMenu, RowMenuFocusRestoration(scope), showContentMenu)
+    }
 }
-
-private interface ComposeShellPlacement : SidebarShellInteraction, ComposeSidebarPopupPlacement
 
 private class ComposeShellRowOrigin(
     side: SessionSidebarSide,
@@ -52,7 +58,7 @@ private class ComposeShellRowOrigin(
     fallback: FocusRequester?,
     private val hover: State<(SidebarShellInteraction, Boolean) -> Unit>,
     private val menu: State<(SidebarShellMenuOpening) -> Unit>,
-) : ComposeSidebarRowOrigin(side == SessionSidebarSide.Left, fallback), ComposeShellPlacement, SidebarShellRowInteraction {
+) : ComposeSidebarRowOrigin(side == SessionSidebarSide.Left, fallback), SidebarShellRowInteraction {
     override fun emitHover(hovered: Boolean) { hover.value(this, hovered) }
     override fun emitMenu() {
         if (isPlaced && !session.completed.value) menu.value(SidebarShellMenuOpening(ComposeShellMenuOrigin(this, openingPoint)))
@@ -61,7 +67,7 @@ private class ComposeShellRowOrigin(
 
 private class ComposeShellMenuOrigin(
     private val row: ComposeShellRowOrigin, override val point: Offset?,
-) : ComposeShellPlacement {
+) : SidebarShellInteraction, ComposeSidebarMenuPlacement {
     override val preferAfter: Boolean get() = row.preferAfter
     override val session: AgentShellSession get() = row.session
     override val bounds: Rect? get() = row.bounds
@@ -76,6 +82,7 @@ private class ComposeSessionSidebarRenderer(
     private val indexHover: State<(HistoryIndexInteraction, Boolean) -> Unit>,
     private val indexMenu: State<(HistoryIndexMenuOpening) -> Unit>,
     private val restoration: RowMenuFocusRestoration,
+    private val showContentMenu: Boolean,
 ) : SessionSidebarRenderer {
     override val canShowHover: Boolean get() = true
 
@@ -92,8 +99,25 @@ private class ComposeSessionSidebarRenderer(
     }
 
     @Composable override fun Header(side: SessionSidebarSide, content: SidebarContent, label: String, onToggleExpanded: () -> Unit) {
-        var expanded by remember(side) { mutableStateOf(false) }
         val fallback = LocalRowMenuFallback.current
+        if (!showContentMenu) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    label, Modifier.weight(1f).padding(start = 4.dp), style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                ToolWindowIconButton(
+                    "Collapse ${side.name.lowercase()} sidebar", ToolWindowIcon.Collapse, onToggleExpanded,
+                    modifier = if (fallback == null) Modifier else Modifier.focusRequester(fallback),
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            return
+        }
+        var expanded by remember(side) { mutableStateOf(false) }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             @Composable fun Collapse() {
                 CompactTextButton(
@@ -163,27 +187,69 @@ private class ComposeSessionSidebarRenderer(
     }
 
     @Composable override fun ShellHover(
-        interaction: SidebarShellInteraction, title: String, command: String, onHoverChanged: (Boolean) -> Unit,
+        interaction: SidebarShellInteraction, preview: SidebarShellPreview,
+        output: StateFlow<TerminalOutputState>, onHoverChanged: (Boolean) -> Unit,
     ) {
-        SidebarHoverPopup(interaction as ComposeShellPlacement, title, onHoverChanged, singleLineTitle = true) {
-            SelectionContainer {
-                Text(
-                    command, Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
-                    style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace,
-                )
+        SidebarHoverPopup(interaction as ComposeShellRowOrigin, preview.title, onHoverChanged, singleLineTitle = true) {
+            val state by output.collectAsState()
+            SelectionContainer(Modifier.width(440.dp).weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    preview.metadataLines.forEach { line ->
+                        Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(preview.command, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                }
+            }
+            Text(terminalOutputStatus(state.phase, state.items.isNotEmpty()), style = MaterialTheme.typography.labelMedium)
+            val list = rememberLazyListState()
+            var follows by remember { mutableStateOf(true) }
+            val gestures = remember(list) {
+                object : NestedScrollConnection {
+                    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                        if (source == NestedScrollSource.UserInput) {
+                            // In a reversed list, positive consumed Y moves away from the latest line.
+                            if (consumed.y > 0f) follows = false
+                            else if (!list.canScrollBackward) follows = true
+                        }
+                        return Offset.Zero
+                    }
+                }
+            }
+            LaunchedEffect(state.items.lastOrNull()?.id, follows) {
+                if (follows && state.items.isNotEmpty()) list.requestScrollToItem(0)
+            }
+            // Allocate the viewport even before the first line so live output does not move the popup.
+            SelectionContainer(Modifier.weight(1f, fill = false)) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().height(112.dp).nestedScroll(gestures),
+                    state = list,
+                    reverseLayout = true,
+                ) {
+                    items(state.items.size, key = { state.items[state.items.lastIndex - it].id }) { index ->
+                        val item = state.items[state.items.lastIndex - index]
+                        Text(
+                            terminalOutputItemLabel(item).ifEmpty { " " },
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (item is TerminalOutputItem.Text) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
     }
 
     @Composable override fun ShellMenu(
-        opening: SidebarShellMenuOpening, label: String, onDismiss: () -> Unit, onClose: () -> Unit, onViewOutput: (() -> Unit)?,
+        opening: SidebarShellMenuOpening, sessionId: Int, label: String, onDismiss: () -> Unit,
+        onClose: () -> Unit, onViewOutput: (() -> Unit)?,
     ) {
-        val origin = opening.interaction as ComposeShellPlacement
+        val origin = opening.interaction as ComposeSidebarMenuPlacement
         SidebarMenuPopup(
             opening = opening,
             origin = origin,
             restoration = restoration,
-            isOriginValid = { origin.isPlaced && !origin.session.completed.value },
+            isOriginValid = { origin.isPlaced && !opening.interaction.session.completed.value },
             dismissWhenUnplaced = true,
             actionLabel = if (onViewOutput != null) "View output" else label,
             actionColors = if (onViewOutput != null) ButtonDefaults.textButtonColors()
@@ -200,19 +266,15 @@ private class ComposeSessionSidebarRenderer(
                 }
             },
         ) {
-            Text(origin.session.terminalIntentTitle(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            SelectionContainer(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                Text(
-                    origin.session.arguments.command,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
+            Text(
+                "Terminal #$sessionId", Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 
     override fun captureShellOutputPlacement(opening: SidebarShellMenuOpening): SidebarShellOutputPlacement? {
-        val origin = opening.interaction as ComposeShellPlacement
+        val origin = opening.interaction as ComposeSidebarMenuPlacement
         val bounds = origin.bounds?.takeIf { origin.isPlaced } ?: return null
         return ComposeTerminalOutputPlacement(bounds, origin.point, origin.preferAfter, origin.fallback)
     }

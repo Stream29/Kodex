@@ -28,7 +28,6 @@ import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
 import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.WebSearchAction
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
-import io.github.stream29.kodex.tool.unifiedexec.commandIntentDisplayName
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration
 
@@ -51,7 +50,7 @@ internal fun AgentCommit.CompletedTool.toHistoryHeader(
     is StableCommandExecution -> ToolHistoryItemHeader.CommandExecution(
         action = when (val action = action) {
             is StableCommandExecutionAction.ExecCommand ->
-                CommandExecutionHistoryAction.Run(action.arguments.name.commandIntentDisplayName())
+                CommandExecutionHistoryAction.Run(action.arguments.name)
 
             is StableCommandExecutionAction.WriteStdin ->
                 if (action.arguments.chars.isEmpty()) {
@@ -92,11 +91,12 @@ internal fun AgentCommit.CompletedTool.toHistoryHeader(
 }
 
 private fun AgentCommit.CompletedTool.historyToolSummary(failed: Boolean): String = when (this) {
-    is StableAwait -> functionToolSummary("await_event", null, failed)
+    is StableAwait -> arguments.name
     is StableInvalidToolCall -> when (val call = invocation) {
-        is InvalidToolInvocation.Function -> if (call.name == "exec_command" && call.namespace == null) {
-            functionToolSummary(call.name, call.namespace, failed = false)
-        } else "Model emitted an invalid tool call"
+        is InvalidToolInvocation.Function -> when (val tool = qualifiedToolName(call.name, call.namespace)) {
+            "exec_command", "await_event" -> functionToolSummary(tool, null, failed = false)
+            else -> "Model emitted an invalid tool call"
+        }
         is InvalidToolInvocation.Custom -> "Model emitted an invalid tool call"
     }
     is StableServerToolSearch -> functionToolSummary("server_tool_search", null, failed)

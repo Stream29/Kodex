@@ -5,6 +5,7 @@ package io.github.stream29.kodex.cli.app
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
+import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.backend.*
 import io.github.stream29.kodex.backend.host.runBackendHost
@@ -748,7 +749,7 @@ private suspend fun withRoundTrip(
                     }
                     SystemFileSystem.createDirectories(Path(f.launch, "Alpha", "nested"), mustCreate = true)
                     SystemCoroutineFileSystem.writeString(Path(f.launch, "plain-file"), "harmless")
-                    SystemCoroutineFileSystem.writeString(Path(f.home, "version.json"), "\"0.4.15\"")
+                    prepareKodexHome(f.home).closeAndJoin()
                     SystemCoroutineFileSystem.writeString(Path(f.home, "settings.yml"), """
                         backend:
                           daemon_ttl_seconds: $ttlSeconds

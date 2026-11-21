@@ -24,6 +24,9 @@ public expect suspend fun runBackendHost(
 /** Bootstrapping has lifecycle rights; established frontends never call this to replace an instance. */
 public expect suspend fun ensureBackend(home: Path): BackendEndpoint
 
+/** Discovers a compatible ready backend after a read-only Home preflight, without starting it. */
+public expect suspend fun discoverReadyBackend(home: Path): BackendEndpoint?
+
 /**
  * Connects to an already-locked local backend in [home] at the exact [port] without starting,
  * replacing or stopping any backend instance.

@@ -574,7 +574,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 assertTrue(view.current().settings.compareAndSet(old, old.copy(instructions = "external")))
                 view.current().settings.first { it.instructions == "external" }
                 assertTrue(source.tryRenameSession(before.revision, "edited"))
-                view.current().settings.first { it.threadName == "edited" }
+                view.current().settings.first { it.name == "edited" }
                 assertEquals("external", view.current().settings.value.instructions)
             } finally { source.close() }
         }
@@ -587,7 +587,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 global.settings.first { it.newSession.model == OpenAiModelId("shared") }
                 assertTrue(services.global.getSessionCatalog(true).isEmpty())
                 val view = assertNotNull(draft.submit(draft.composer.update("first"), views::open))
-                assertEquals("Session ${view.sessionIndex}", view.current().settings.value.threadName)
+                assertEquals("Session ${view.sessionIndex}", view.current().settings.value.name)
                 assertEquals(OpenAiModelId("shared"), view.current().settings.value.model)
                 val source = RpcSessionSettingsSource(view, this)
                 try {

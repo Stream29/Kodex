@@ -4,7 +4,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.session.contract.*
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupTarget
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -31,14 +31,19 @@ val sessionTreeCliViewModelTest by testSuite {
         applicationFixture { app, _ ->
             val vm = app.viewModel
             val session = vm.submitTestSession()
-            val catalog = vm.openSessionCatalogPopup().viewModel
-            catalog.archive(session.sessionIndex)
-            catalog.setShowArchived(true)
-            assertTrue(assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.single().archived)
-            vm.selectNewSession()
-            assertSame(session, vm.openSession(session.sessionIndex))
-            catalog.refresh()
-            assertFalse(assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.single().archived)
+            vm.withMountedCatalog { catalog ->
+                val cwd = session.settings.value.cwd.toString()
+                val row = catalog.state.first { it.pages[cwd]?.entries?.size == 1 }.pages.getValue(cwd).entries.single()
+                catalog.toggleArchived(cwd)
+                catalog.requestArchive(SessionGroupTarget(cwd, row))
+                val archived = catalog.state.first { it.pages[cwd]?.entries?.singleOrNull()?.archived == true }
+                    .pages.getValue(cwd).entries.single()
+                vm.selectNewSession()
+                catalog.requestOpen(SessionGroupTarget(cwd, archived))
+                assertSame(session, vm.navigation.value.selectedSession)
+                catalog.state.first { it.pages[cwd]?.entries?.singleOrNull()?.archived == false }
+                assertSame(catalog, vm.sessionCatalog)
+            }
         }
     }
     test("close and archive disposes the exact tab but retains backend state") {
@@ -47,38 +52,41 @@ val sessionTreeCliViewModelTest by testSuite {
             val session = vm.submitTestSession()
             assertTrue(vm.closeAndArchiveSession(session))
             assertEquals(PersistedSessionLifecycleState.Closed, session.lifecycle.value)
-            val catalog = vm.openSessionCatalogPopup().viewModel
-            catalog.setShowArchived(true)
-            val row = assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.single()
-            assertTrue(row.archived)
-            assertTrue(row.isActive)
+            vm.withMountedCatalog { catalog ->
+                val cwd = catalog.state.value.groups!!.single().cwd
+                catalog.toggleArchived(cwd)
+                val row = catalog.state.first { it.pages[cwd]?.entries?.size == 1 }.pages.getValue(cwd).entries.single()
+                assertTrue(row.archived)
+                assertTrue(row.isActive)
+            }
             assertFalse(vm.closeAndArchiveSession(session))
         }
     }
     test("popup dismissal compares the exact handle") {
         applicationFixture { app, _ ->
-            val first = app.viewModel.openSessionCatalogPopup()
-            val next = app.viewModel.openSessionCatalogPopup()
+            val first = app.viewModel.openDeleteSessionPopup(91)
+            val next = app.viewModel.openDeleteSessionPopup(92)
             assertFalse(app.viewModel.dismissPopup(first))
             assertSame(next, app.viewModel.popup.value)
             assertTrue(app.viewModel.dismissPopup(next))
             assertEquals(ApplicationPopupState.Closed, app.viewModel.popup.value)
         }
     }
-    test("catalog navigation dismisses its exact opening and stale callbacks cannot dismiss its replacement") {
+    test("catalog navigation retains its stable child and never dismisses an unrelated popup") {
         applicationFixture { app, _ ->
             val vm = app.viewModel
             val session = vm.submitTestSession()
-            val first = vm.openSessionCatalogPopup()
-            first.viewModel.refresh()
-            val row = assertIs<SessionCatalogState.Loaded>(first.viewModel.state.value).sessions.single()
-            first.viewModel.requestOpen(row)
-            assertSame(session, vm.navigation.value.selectedSession)
-            assertEquals(ApplicationPopupState.Closed, vm.popup.value)
-            val replacement = vm.openSessionCatalogPopup()
-            assertFailsWith<CancellationException> { first.viewModel.dismiss() }
-            assertSame(replacement, vm.popup.value)
-            assertFalse(vm.dismissPopup(first))
+            vm.selectNewSession()
+            val popup = vm.openDeleteSessionPopup(92)
+            vm.withMountedCatalog { catalog ->
+                val cwd = session.settings.value.cwd.toString()
+                val row = catalog.state.first { it.pages[cwd]?.entries?.size == 1 }.pages.getValue(cwd).entries.single()
+                catalog.requestOpen(SessionGroupTarget(cwd, row))
+                assertSame(session, vm.navigation.value.selectedSession)
+                assertSame(catalog, vm.sessionCatalog)
+                assertSame(popup, vm.popup.value)
+            }
+            assertNull(vm.sessionCatalog?.state?.value?.groups)
         }
     }
     test("login dismissal restores its settings parent and target closure disposes both") {

@@ -195,7 +195,7 @@ val terminalOutputReaderTest by testSuite {
 
 private class TestTerminal(private val read: suspend (ULong) -> StdoutSlice) : AgentShellSession {
     override val sessionId = 1
-    override val arguments = ExecCommandArguments("fixture", yieldTimeMillis = 10_000)
+    override val arguments = ExecCommandArguments("fixture", name = "Inspect fixture output", yieldTimeMillis = 10_000)
     override val exitCode = MutableStateFlow<Int?>(null)
     override val completed = MutableStateFlow(false)
     var reads = 0

@@ -13,3 +13,12 @@ public expect fun HttpClient.postSseEventsWithHeaders(
     onResponseStatus: suspend (HttpStatusCode) -> Unit = {},
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<ServerSentEvent>
+
+/** Transforms each frame in the SSE reader, before it can wait in the downstream channel. */
+public expect fun <T> HttpClient.postSseEventsWithHeaders(
+    socketTimeoutMillis: Long,
+    onResponseHeaders: suspend (Headers) -> Unit,
+    onResponseStatus: suspend (HttpStatusCode) -> Unit = {},
+    transformOnRead: (ServerSentEvent) -> T,
+    configureRequest: HttpRequestBuilder.() -> Unit,
+): Flow<T>

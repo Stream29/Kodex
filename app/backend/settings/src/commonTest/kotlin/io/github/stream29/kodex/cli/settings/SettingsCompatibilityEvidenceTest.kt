@@ -15,6 +15,7 @@ import io.github.stream29.kodex.rpc.models.CliFrontendSettings
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -39,20 +40,16 @@ val settingsCompatibilityEvidenceTest by testSuite(compartment = { TestCompartme
         }
     }
 
-    test("legacy ultra reasoning normalizes to max in the actual backend file codec") {
+    test("retired settings values are rejected without rewriting the actual Home file") {
         withSettingsDirectory { directory ->
             val path = Path(directory, "settings.yml")
-            writeFixture(
-                path,
-                "backend:\n  new_session: {reasoning_effort: ultra}\n  session_title: {reasoning_effort: ultra}\n",
-            )
-            val unified = UnifiedSettingsStore.open(directory, backendDefaults())
-            assertEquals(ReasoningEffort.Max, unified.backendSettings.value.newSession.reasoningEffort)
-            assertEquals(ReasoningEffort.Max, unified.backendSettings.value.sessionTitle.reasoningEffort)
-            unified.backendStore.update { it }
-            val text = SystemCoroutineFileSystem.readString(path)
-            assertFalse("reasoning_effort: ultra" in text)
-            assertEquals(2, text.lineSequence().count { it.trim() == "reasoning_effort: max" })
+            for (field in listOf("new_session: {reasoning_effort: ultra}", "session_title: {reasoning_effort: ultra}",
+                "new_session: {service_tier: fast}")) {
+                val fixture = "backend:\n  $field\n"
+                writeFixture(path, fixture)
+                assertFailsWith<IllegalArgumentException> { UnifiedSettingsStore.open(directory, backendDefaults()) }
+                assertEquals(fixture, SystemCoroutineFileSystem.readString(path))
+            }
         }
     }
 
@@ -130,14 +127,17 @@ val settingsCompatibilityEvidenceTest by testSuite(compartment = { TestCompartme
         assertTrue("request_user_input_mode: no_question" in encoded)
         assertTrue("model: null" in encoded)
         assertEquals(expected, decodeBackendSettingsFile(yamlMap(encoded), defaults))
-        val frontendGolden = "new_line_key: enter\nsidebars: {left: none, right: history_index}\nhooks: []"
+        val frontendGolden = "new_line_key: enter\nsidebars: {active_left: null, active_right: history_index}\nhooks: []"
         val frontend = decodeCliFrontendSettingsFile(yamlMap(frontendGolden), CliFrontendSettings())
         assertEquals(NewLineKey.Enter, frontend.newLineKey)
-        assertEquals(SidebarContent.None, frontend.sidebars.left)
-        assertEquals(SidebarContent.HistoryIndex, frontend.sidebars.right)
+        assertEquals(null, frontend.sidebars.activeLeft)
+        assertEquals(ToolWindowId.HistoryIndex, frontend.sidebars.activeRight)
         assertEquals(emptyList(), frontend.hooks)
         assertEquals(frontend, decodeCliFrontendSettingsFile(
             yamlMap(encodeCliFrontendSettingsFile(frontend)), CliFrontendSettings(),
+        ))
+        assertEquals(CliFrontendSettings(), decodeCliFrontendSettingsFile(
+            yamlMap("sidebars: {left: history_index, right: terminal_sessions}"), CliFrontendSettings(),
         ))
     }
 }

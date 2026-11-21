@@ -3,6 +3,7 @@
 package io.github.stream29.kodex.agentschedule.sqlite
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.sqlite.initializeKodexHomeDatabase
 import io.github.stream29.kodex.utils.sqlite.openInMemorySqliteConnection
 import kotlinx.coroutines.sync.Mutex
 import kotlin.test.assertEquals
@@ -15,6 +16,7 @@ import kotlin.time.Instant
 val sqliteScheduleRepositoryTest by testSuite {
     test("persists schedules in SQLite, preserves sub-second ordering, and reloads earliest trigger on reopen") {
         openInMemorySqliteConnection().use { connection ->
+            initializeKodexHomeDatabase(connection)
             val mutex = Mutex()
             val repo = SqliteScheduleRepository(connection, mutex)
             assertNull(repo.nextTriggerAt.value)
@@ -60,10 +62,10 @@ val sqliteScheduleRepositoryTest by testSuite {
 
     test("deleteForSessionInTransaction removes root and child agent schedules and refreshes nextTriggerAt") {
         openInMemorySqliteConnection().use { connection ->
-            connection.execute("CREATE TABLE sessions (session_id INTEGER PRIMARY KEY)")
-            connection.execute("CREATE TABLE agents (agent_id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL)")
+            initializeKodexHomeDatabase(connection)
             connection.execute("INSERT INTO sessions (session_id) VALUES (10), (20)")
-            connection.execute("INSERT INTO agents (agent_id, session_id) VALUES (20, 10), (11, 10), (10, 20)")
+            connection.execute("INSERT INTO agents (agent_id, session_id) VALUES (20, 10), (10, 20)")
+            connection.execute("INSERT INTO agents (agent_id, session_id, parent_agent_id) VALUES (11, 10, 20)")
 
             val mutex = Mutex()
             val repo = SqliteScheduleRepository(connection, mutex)

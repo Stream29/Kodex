@@ -33,7 +33,6 @@ public interface SessionCatalogRenderer {
         entry: SessionCatalogEntry,
         origin: SessionCatalogMenuOrigin,
         onDismiss: () -> Unit,
-        onFork: () -> Unit,
         onArchive: () -> Unit,
         onUnarchive: () -> Unit,
         onDelete: () -> Unit,

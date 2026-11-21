@@ -101,9 +101,11 @@ val tokenCountTimelineRpcTest by testSuite(testConfig = TestConfig.testScope(isE
 private class TokenCountTestService(
     val entries: Map<Int, LlmRequestMeta> = mapOf(
         0 to LlmRequestMeta.Legacy(0),
-        2 to LlmRequestMeta.Response(0, usage = TokenUsage(0, 0, 0)),
+        2 to LlmRequestMeta.Response(0, elapsedNanoseconds = 1_000_000L, outputTokens = 0, usage = TokenUsage(0, 0, 0)),
         5 to LlmRequestMeta.Response(
             totalTokens = 120,
+            elapsedNanoseconds = 200_000_000L,
+            outputTokens = 20,
             usage = TokenUsage(100, 20, 120),
             diagnostics = TokenCountDiagnostics(requestId = "request", turnStateReceived = true),
         ),

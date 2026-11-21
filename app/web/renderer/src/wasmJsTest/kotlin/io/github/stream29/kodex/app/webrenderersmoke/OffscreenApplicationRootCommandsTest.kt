@@ -8,6 +8,7 @@ import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.sessionrename.createSessionRenameViewModel
 import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameViewModel
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabMenuPlacement
@@ -25,7 +26,7 @@ val offscreenApplicationRootCommandsTest by testSuite {
         val calls = mutableListOf<Pair<String, Any>>()
         var closeFailure: Throwable? = null
         val app = object : NavigationApplication(listOf(session)) {
-            override suspend fun closeTab(target: PersistedSessionViewModel): Boolean {
+            override suspend fun closeTab(target: AgentTabViewModel): Boolean {
                 calls += "close" to target
                 closeFailure?.let { throw it }
                 return true
@@ -38,8 +39,8 @@ val offscreenApplicationRootCommandsTest by testSuite {
                 calls += "rename" to target
                 throw CancellationException("command observation only")
             }
-            override suspend fun openDeleteSessionPopup(sessionIndex: Int): ApplicationPopupState.DeleteSession {
-                calls += "delete" to sessionIndex
+            override suspend fun openDeleteSessionPopup(target: PersistedSessionViewModel): ApplicationPopupState.DeleteSession {
+                calls += "delete" to target
                 throw CancellationException("command observation only")
             }
         }
@@ -84,11 +85,39 @@ val offscreenApplicationRootCommandsTest by testSuite {
             scene.advance()
             assertEquals<List<Throwable>>(listOf(failure), failures)
             assertEquals(listOf("rename", "archive", "delete", "close", "close"), calls.map { it.first })
-            calls.filter { it.first != "delete" }.forEach { assertSame(session, it.second) }
-            assertEquals(19, calls.single { it.first == "delete" }.second)
+            calls.forEach { assertSame(session, it.second) }
             scene.frame()
         } finally { scene.close() }
         assertEquals(0, session.closeCount + app.closeCount)
+    } }
+
+    test("an Agent without a Session management handle can close only its own local tab") { offscreenTest {
+        val root = NavigationSession(4, "root", NavigationAgent())
+        val child = NavigationAgentTab(41, "child", NavigationAgent())
+        val calls = mutableListOf<AgentTabViewModel>()
+        val app = object : NavigationApplication(listOf(root, child)) {
+            override suspend fun closeTab(target: AgentTabViewModel): Boolean {
+                calls += target
+                return true
+            }
+        }
+        var opening by mutableStateOf<ApplicationTabMenuTarget?>(
+            ApplicationTabMenuTarget(child, "child", object : SessionTabMenuPlacement {}),
+        )
+        val renderer = RootCommandSlots()
+        val scene = OffscreenScene.create {
+            ApplicationMenusContent(
+                app, app.navigation.collectAsState().value, null, opening, null, renderer,
+                admitTab = { if (opening === it) { opening = null; true } else false },
+                admitHistory = { false }, focusEditedComposer = {}, onOperationFailure = { throw it },
+            )
+        }
+        try {
+            scene.settle { renderer.tab.isNotEmpty() }
+            assertEquals(listOf("close"), renderer.tab.filterIsInstance<ApplicationMenuEntry.Action>().map { it.key })
+            renderer.tab.action("close").onClick()
+            scene.settle { calls.singleOrNull() === child }
+        } finally { scene.close() }
     } }
     test("history commands preserve boundary and owner while navigation cannot redirect draft or focus") { runtimeScene { _, runtime, owner ->
         val actual = pageAgent("root command", runtime, owner)
@@ -96,6 +125,7 @@ val offscreenApplicationRootCommandsTest by testSuite {
         val confirms = mutableListOf<Pair<Int, Long>>()
         var gate = CompletableDeferred<Unit>()
         var failure: Throwable? = null
+        val forks = mutableListOf<Triple<AgentViewModel, Int, Long>>()
         val agent = object : AgentViewModel by actual {
             override val historyAction = MutableStateFlow<AgentHistoryActionState>(AgentHistoryActionState.None)
             override suspend fun revertHistory(untilExclusive: Int, expectedGeneration: Long) {
@@ -107,14 +137,12 @@ val offscreenApplicationRootCommandsTest by testSuite {
                 confirms += untilExclusive to expectedGeneration
                 return 1
             }
-        }
-        val forks = mutableListOf<Triple<AgentViewModel, Int, Long>>()
-        val session = object : NavigationSession(23, "captured", agent) {
-            override suspend fun fork(source: AgentViewModel, untilExclusive: Int, expectedGeneration: Long): Int {
-                forks += Triple(source, untilExclusive, expectedGeneration)
+            override suspend fun forkHistory(untilExclusive: Int, expectedGeneration: Long): Int {
+                forks += Triple(this, untilExclusive, expectedGeneration)
                 return 99
             }
         }
+        val session = NavigationSession(23, "captured", agent)
         val opened = mutableListOf<Int>()
         val rename = createSessionRenameViewModel("captured") { error("No rename command in focus fixture") }
         val popup = ApplicationPopupState.RenameSession(object : RenameSessionPopupViewModel, SessionRenameViewModel by rename {

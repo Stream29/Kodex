@@ -63,8 +63,9 @@ val backendStartupTest by testSuite(compartment = { TestCompartment.RealTime }) 
                                 }
                             },
                         ) { services ->
-                            services.runtime.keepAgentAlive(services.global.getRootAgentId(0))
-                            assertEquals(0, services.runtime.getLatestIndex(0))
+                            val agentId = services.global.getRootAgentId(0)
+                            services.runtime.keepAgentAlive(agentId)
+                            assertEquals(0, services.runtime.getLatestIndex(agentId))
                             assertTrue(services.global.getSessionCatalog(false).single().isActive)
                         }
                     }

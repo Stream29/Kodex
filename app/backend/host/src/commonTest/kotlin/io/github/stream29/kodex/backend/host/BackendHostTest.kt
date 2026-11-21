@@ -2,8 +2,10 @@ package io.github.stream29.kodex.backend.host
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.backend.BackendInstance
+import io.github.stream29.kodex.backend.setBackendWorkingDirectory
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.ContentItem
@@ -36,10 +38,10 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
     for (cancelled in listOf(false, true)) {
         test("startup failure cancelled=$cancelled ends the host preserves the cause and releases its guard") {
             val home = Path(SystemTemporaryDirectory, "kodex-startup-failure-${Random.nextLong()}")
+            val cwd = SystemCoroutineFileSystem.resolve(Path("."))
             val marker = "original startup reason cancelled=$cancelled"
             val original = if (cancelled) CancellationException(marker) else IllegalStateException(marker)
             SystemCoroutineFileSystem.createDirectories(home)
-            SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"0.4.15\"")
             try {
                 supervisorScope {
                     val backend = async {
@@ -52,7 +54,10 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                     assertNull(BackendInstance.discover(home))
                     assertEquals(marker, BackendInstance.readRecord(home)?.failureReason)
                 }
-            } finally { removeHost(home) }
+            } finally {
+                setBackendWorkingDirectory(cwd)
+                removeHost(home)
+            }
         }
     }
     test("parent cancellation does not manufacture a backend failure") {
@@ -282,13 +287,12 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
             try {
                 assertEquals(endpoint.instanceId, connectBackend(backendHome, endpoint.port).instanceId)
                 val target = connectBackend(backendHome, endpoint.port)
-                initializeProcessLogging(frontendHome, "Tui-${processId()}")
                 withLocalRpcClient(backendHome, target) { connection ->
                     val rpc = RpcServices(RestoringRpcClient(connection))
                     val old = rpc.global.getFrontendSettings()
                     assertTrue(rpc.global.compareAndSetFrontendSettings(old, old.copy(newLineKey = NewLineKey.Enter)))
                 }
-                assertTrue(SystemCoroutineFileSystem.exists(Path(frontendHome, "log")))
+                assertTrue(!SystemCoroutineFileSystem.exists(Path(frontendHome, "log")))
                 assertNull(BackendInstance.discover(frontendHome))
                 assertTrue(!SystemCoroutineFileSystem.exists(Path(frontendHome, ".locks", "backend")))
             } finally {
@@ -308,6 +312,7 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 assertFailsWith<IllegalStateException> { connectBackend(lockedNoRecordHome, 18080) }
             }
 
+            prepareCatalogHomeFixture(unreachableHome)
             BackendInstance.acquire(unreachableHome).use { instance ->
                 instance.publish(BackendEndpoint("unreachable-id", processId(), 1, "a".repeat(64), "0.6.0"))
                 assertFailsWith<Exception> { connectBackend(unreachableHome, 1) }
@@ -375,18 +380,22 @@ internal suspend fun withHost(
     ttl: Long = -1,
     hooks: String = "",
     stream: (suspend () -> kotlinx.coroutines.flow.Flow<io.github.stream29.kodex.openai.ResponsesStreamEvent>)? = null,
+    useCurrentCatalogFixture: Boolean = true,
     prepareHome: suspend CoroutineScope.(Path) -> Unit = {},
     observeRequest: (io.github.stream29.kodex.openai.ResponsesApiRequest) -> Unit = {},
     block: suspend CoroutineScope.(Path, BackendEndpoint, Job) -> Unit,
 ) = withTimeout(45.seconds) {
     coroutineScope {
+        val cwd = SystemCoroutineFileSystem.resolve(Path("."))
         val home = Path(SystemTemporaryDirectory, "kodex-daemon-host-${Random.nextLong()}")
         SystemCoroutineFileSystem.createDirectories(home, mustCreate = true)
-        SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"0.4.15\"")
-        SystemCoroutineFileSystem.writeString(Path(home, "settings.yml"),
-            "backend:\n  daemon_ttl_seconds: $ttl\n  new_session:\n    model: fixture\n  session_title:\n    enabled: false\n" +
-                (if (hooks.isEmpty()) "" else hooks.prependIndent("  ") + "\n") + "frontend: {}\n")
         try {
+            if (useCurrentCatalogFixture) {
+                prepareCatalogHomeFixture(home)
+                SystemCoroutineFileSystem.writeString(Path(home, "settings.yml"),
+                    "backend:\n  daemon_ttl_seconds: $ttl\n  new_session:\n    model: fixture\n  session_title:\n    enabled: false\n" +
+                        (if (hooks.isEmpty()) "" else hooks.prependIndent("  ") + "\n") + "frontend: {}\n")
+            }
             prepareHome(home)
         } catch (failure: Throwable) {
             withContext(NonCancellable) { removeHost(home) }
@@ -421,12 +430,18 @@ internal suspend fun withHost(
             withContext(NonCancellable) {
                 if (backend.isActive && endpoint != null) runCatching { backendControlRequest(requireNotNull(endpoint), "stop") }
                 withTimeoutOrNull(10.seconds) { backend.join() } ?: backend.cancelAndJoin()
+                setBackendWorkingDirectory(cwd)
                 removeHost(home)
             }
         }
     }
 }
-private suspend fun removeHost(path: Path) {
+
+internal suspend fun prepareCatalogHomeFixture(home: Path) = coroutineScope {
+    prepareKodexHome(home).closeAndJoin()
+}
+
+internal suspend fun removeHost(path: Path) {
     val attributes = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
     if (attributes.isDirectory) SystemCoroutineFileSystem.list(path).forEach { removeHost(it) }
     SystemCoroutineFileSystem.delete(path, mustExist = false)

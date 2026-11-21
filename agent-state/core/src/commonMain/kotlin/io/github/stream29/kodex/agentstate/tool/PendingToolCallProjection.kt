@@ -17,11 +17,11 @@ import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventTools
 import io.github.stream29.kodex.tool.awaitevent.decodeAwaitEventArguments
+import io.github.stream29.kodex.tool.intentname.isValidIntentName
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.readmedia.ReadMediaTools
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
-import io.github.stream29.kodex.tool.unifiedexec.isValidCommandIntentName
 import io.github.stream29.kodex.utils.applypatch.parsePatch
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
@@ -95,7 +95,7 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(timestamp: Instant): Pe
 private fun ResponseItem.FunctionCall.toPendingExecCommand(): PendingToolCall {
     val input = parsedJson() as? JsonObject ?: return invalid("Invalid JSON arguments for exec_command.")
     val rawName = input["name"] as? JsonPrimitive
-    if (rawName?.isString != true || !rawName.content.isValidCommandIntentName()) {
+    if (rawName?.isString != true || !rawName.content.isValidIntentName()) {
         return invalid("`name` must be nonblank, single-line text.")
     }
     val command = try {

@@ -2,10 +2,14 @@ package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.*
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
+import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.cli.agent.canEditHistory
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexCommand
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -32,10 +36,8 @@ public actual fun ApplicationMenusContent(
         renderer.isTabPlaced(request.placement) &&
             viewModel.navigation.value.tabs.any { it === request.target } && acceptTab(request)
     fun isCurrentHistory(request: ApplicationHistoryMenuOpening): Boolean {
-        val selected = viewModel.navigation.value.selectedSession
         val agent = request.agent
-        return selected === request.session && currentAgent === agent &&
-            agent.state.value.canEditHistory(agent.running.value) &&
+        return currentAgent === agent && viewModel.isSelectedHistoryAgent(request.tab, agent) && agent.canEditBoundHistory() &&
             agent.history.historyItems.value.generation == request.generation &&
             agent.history.contains(request.generation, request.storageIndex)
     }
@@ -52,36 +54,65 @@ public actual fun ApplicationMenusContent(
         tabOpening, navigation.tabs.any { it === tabOpening?.target }, renderer,
         onDismiss = { acceptTab(it) },
         onClose = { request -> if (consumeTab(request)) command { viewModel.closeTab(request.target) } },
-        onCloseAndArchive = { request -> if (consumeTab(request)) command { viewModel.closeAndArchiveSession(request.target) } },
-        onRename = { request -> if (consumeTab(request)) command { viewModel.openRenameSessionPopup(request.target) } },
-        onDelete = { request -> if (consumeTab(request)) command { viewModel.openDeleteSessionPopup(request.target.sessionIndex) } },
+        onCloseAndArchive = { request ->
+            val root = request.target as? PersistedSessionViewModel
+            if (root != null && consumeTab(request)) command { viewModel.closeAndArchiveSession(root) }
+        },
+        onRename = { request ->
+            val root = request.target as? PersistedSessionViewModel
+            if (root != null && consumeTab(request)) command { viewModel.openRenameSessionPopup(root) }
+        },
+        onDelete = { request ->
+            val root = request.target as? PersistedSessionViewModel
+            if (root != null && consumeTab(request)) command { viewModel.openDeleteSessionPopup(root) }
+        },
     )
     ApplicationHistoryMenuContent(
-        historyOpening, navigation.selectedSession, selectedAgent, renderer,
+        historyOpening, navigation.selectedTab, selectedAgent, renderer,
         onDismiss = { acceptHistory(it) },
         onRevert = { request ->
             if (consumeHistory(request)) command {
                 if (!isCurrentHistory(request)) return@command
-                request.agent.requestHistoryRevert(request.storageIndex + 1, request.generation)
+                viewModel.editHistory(request.tab, request.agent, request.storageIndex, request.generation,
+                    HistoryIndexCommand.Revert, null, focus)
             }
         },
         onRevertAndEdit = { request, text ->
             if (consumeHistory(request)) command {
                 if (!isCurrentHistory(request)) return@command
-                revertAndEdit(request.agent, request.storageIndex, request.generation, text)
-                withFrameNanos { }
-                if (viewModel.navigation.value.selectedSession === request.session && currentAgent === request.agent &&
-                    viewModel.popup.value == ApplicationPopupState.Closed
-                ) focus(request.agent)
+                viewModel.editHistory(request.tab, request.agent, request.storageIndex, request.generation,
+                    HistoryIndexCommand.RevertAndEdit, text, focus)
             }
         },
         onFork = { request ->
-            if (request.session.rootAgent.value === request.agent && consumeHistory(request)) command {
-                if (!isCurrentHistory(request) || request.session.rootAgent.value !== request.agent) return@command
-                val index = request.session.fork(request.agent, request.storageIndex + 1, request.generation)
-                viewModel.openSession(index)
+            if (consumeHistory(request)) command {
+                if (!isCurrentHistory(request)) return@command
+                viewModel.editHistory(request.tab, request.agent, request.storageIndex, request.generation,
+                    HistoryIndexCommand.Fork, null, focus)
             }
         },
     )
     AgentHistoryRevertContent(selectedAgent, renderer)
+}
+
+internal fun ApplicationViewModel.isSelectedHistoryAgent(tab: AgentTabViewModel, agent: AgentViewModel): Boolean =
+    navigation.value.selectedTab === tab && tab.agent.value === agent &&
+        agent.lifecycle.value == AgentLifecycleState.Open && popup.value == ApplicationPopupState.Closed
+
+internal fun AgentViewModel.canEditBoundHistory(): Boolean = state.value.canEditHistory(running.value)
+
+internal suspend fun ApplicationViewModel.editHistory(
+    tab: AgentTabViewModel, agent: AgentViewModel, index: Int, generation: Long,
+    command: HistoryIndexCommand, text: String?, focus: (AgentViewModel) -> Unit,
+) {
+    when (command) {
+        HistoryIndexCommand.GoTo -> error("Go to does not edit history.")
+        HistoryIndexCommand.Revert -> agent.requestHistoryRevert(index + 1, generation)
+        HistoryIndexCommand.Fork -> openSession(agent.forkHistory(index + 1, generation))
+        HistoryIndexCommand.RevertAndEdit -> {
+            revertAndEdit(agent, index, generation, requireNotNull(text))
+            withFrameNanos { }
+            if (isSelectedHistoryAgent(tab, agent)) focus(agent)
+        }
+    }
 }

@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.unstable
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.StoredAwaitEventArgumentsSerializer
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
@@ -16,7 +15,6 @@ public data class PendingAwait(
     override val callId: String,
     @SerialName("item_id")
     override val itemId: ResponseItemId? = null,
-    @Serializable(with = StoredAwaitEventArgumentsSerializer::class)
     public val arguments: AwaitEventArguments,
     @SerialName("timeout_at")
     public val timeoutAt: Instant? = null,

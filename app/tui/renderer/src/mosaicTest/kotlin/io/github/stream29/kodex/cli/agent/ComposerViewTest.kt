@@ -77,7 +77,7 @@ val composerViewTest by testSuite {
         }
     }
 
-    test("error and request-input branches retain presentation without inline failure banner") {
+    test("failed submission retains the draft without an inline failure banner") {
         val error = RenderComposerModel(
             ComposerState(
                 ownerId = ComposerOwnerId("agent-a"),
@@ -88,18 +88,6 @@ val composerViewTest by testSuite {
                 ),
             ),
         )
-        val request = RenderComposerModel(
-            ComposerState(
-                ownerId = ComposerOwnerId("agent-a"),
-                text = "not sent",
-                revision = 9,
-                requestInput = ComposerRequestInputPresentation.Pending(
-                    title = "Answer required",
-                    questionCount = 3,
-                ),
-            ),
-        )
-
         runMosaicTest {
             val errorSnapshot = setContentAndSnapshot {
                 WithMosaicComponentRenderers {
@@ -110,14 +98,34 @@ val composerViewTest by testSuite {
             assertFalse("append failed" in errorSnapshot, errorSnapshot)
             assertTrue("retry explicitly" in errorSnapshot, errorSnapshot)
             assertEquals(ComposerMode.Error, error.state.value.mode)
+        }
+    }
 
+    test("composer can be focused, edited, and submitted while a question is pending") {
+        val pending = ComposerRequestInputPresentation.Pending(title = "Answer required", questionCount = 3)
+        val model = RenderComposerModel(
+            ComposerState(ownerId = ComposerOwnerId("agent-a"), text = "Follow-u", revision = 9, requestInput = pending),
+        )
+        runMosaicTest {
+            val focusRequester = FocusRequester()
             val requestSnapshot = setContentAndSnapshot {
                 WithMosaicComponentRenderers {
-                    ComposerView(request, 48, 4, NewLineKey.ShiftEnter)
+                    ComposerView(model, 48, 4, NewLineKey.ShiftEnter, autoFocus = false, focusRequester = focusRequester)
                 }
             }
             assertTrue("Input requested: Answer required (3)" in requestSnapshot, requestSnapshot)
-            assertEquals(ComposerMode.RequestInput, request.state.value.mode)
+            assertTrue(focusRequester.requestFocus())
+
+            sendKeyEvent(KeyboardEvent('p'.code))
+            awaitSnapshot()
+            assertEquals(listOf("Follow-up"), model.updatedTexts)
+
+            sendKeyEvent(KeyboardEvent(13))
+            awaitSnapshot()
+            repeat(4) { if (model.submittedRevisions.isEmpty()) awaitSnapshot() }
+            assertEquals(listOf(10L), model.submittedRevisions)
+            assertEquals("", model.state.value.text)
+            assertEquals(pending, model.state.value.requestInput)
         }
     }
 

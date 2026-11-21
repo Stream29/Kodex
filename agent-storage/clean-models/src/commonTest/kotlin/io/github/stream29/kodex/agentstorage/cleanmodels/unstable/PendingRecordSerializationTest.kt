@@ -114,7 +114,7 @@ val pendingToolEventHierarchySerializationTest by testSuite {
             PendingAwait(
                 callId = "call_await_event",
                 itemId = ResponseItemId("item_await_event"),
-                arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(2))),
+                arguments = AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(2)), name = "Wait for terminal exit"),
             ) to "await_event",
             PendingCommandExecution(
                 callId = "call_command_execution",
@@ -122,6 +122,7 @@ val pendingToolEventHierarchySerializationTest by testSuite {
                 action = PendingCommandExecutionAction.ExecCommand(
                     ExecCommandArguments(
                         command = "./gradlew check",
+                        name = "Verify project checks",
                         workdir = "Kodex",
                         yieldTimeMillis = 10_000,
                         maxOutputTokens = 20_000,

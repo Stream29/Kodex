@@ -2,26 +2,25 @@ package io.github.stream29.kodex.agentstorage.sqlite
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.sqlite.*
 import kotlinx.io.files.Path
 import kotlin.test.*
 import kotlin.time.Instant
-import kotlin.time.TimeSource
 
 private fun withSchema(block: (SqliteConnection) -> Unit) {
     openInMemorySqliteConnection().use { db ->
-        initializeSqlitePhaseOneSchema(db)
+        initializeKodexHomeDatabase(db)
+        requireEmptyKodexHomeDatabase(db)
         block(db)
     }
 }
 
-private fun SqliteConnection.session(id: Int, archived: Boolean = false) {
-    execute("INSERT INTO sessions(session_id, archived) VALUES(?, ?)", listOf(id.toLong(), if (archived) 1L else 0L))
+private fun SqliteConnection.session(id: Int) {
+    execute("INSERT INTO sessions(session_id) VALUES(?)", listOf(id.toLong()))
     execute("INSERT INTO agents(agent_id, session_id, parent_agent_id) VALUES(?, ?, NULL)", listOf(id.toLong(), id.toLong()))
+    execute("INSERT INTO session_catalog_view(root_agent_id) VALUES(?)", listOf(id.toLong()))
 }
 
 private fun SqliteConnection.put(agent: Int, type: String, index: Int, payload: String, createdAt: Instant = Instant.DISTANT_PAST) {
@@ -30,20 +29,20 @@ private fun SqliteConnection.put(agent: Int, type: String, index: Int, payload: 
 
 private fun settingsPayload(name: String, cwd: String): String = OpenAiJsonCodec.encodeToString(
     KodexAgentSettings.serializer(),
-    KodexAgentSettings(model = OpenAiModelId("synthetic"), threadName = name, cwd = Path(cwd)),
+    KodexAgentSettings(model = OpenAiModelId("synthetic"), name = name, cwd = Path(cwd)),
 )
 
-private val scaleWorkPayload: String = OpenAiJsonCodec.encodeToString(
-    StableWebSearchCall.serializer(),
-    StableWebSearchCall(ResponseItem.WebSearchCall(status = "completed")),
-)
-
-private fun SqliteConnection.catalog(id: Int): List<Any?> = query("SELECT * FROM session_catalog WHERE session_id=?", listOf(id.toLong())).single()
+private fun SqliteConnection.catalog(id: Int): List<Any?> =
+    query("SELECT * FROM session_catalog_view WHERE root_agent_id = ?", listOf(id.toLong())).single()
 
 val sqliteSchemaTest by testSuite {
-    test("phase one DDL and constraints exclude global settings and retired commit types") { withSchema { db ->
-        assertEquals(1L, db.query("PRAGMA user_version").single().single())
-        assertEquals(setOf("sessions", "agents", "agent_commits", "session_catalog", "sqlite_sequence"), db.query("SELECT name FROM sqlite_master WHERE type IN ('table','view')").map { it[0] }.toSet())
+    test("live DDL and constraints exclude global settings and retired commit types") { withSchema { db ->
+        assertEquals(2L, db.query("PRAGMA user_version").single().single())
+        assertEquals(KodexHomeDatabaseApplicationId.toLong(), db.query("PRAGMA application_id").single().single())
+        assertEquals(setOf("sessions", "agents", "agent_commits", "session_catalog_view", "session_groups",
+            "sqlite_sequence", "schedules", "fork_context_recovery"),
+            db.query("SELECT name FROM sqlite_master WHERE type = 'table'").map { it[0] }.toSet())
+        assertTrue(db.query("SELECT name FROM sqlite_master WHERE type = 'view'").isEmpty())
         db.session(0)
         assertFailsWith<SqliteFailure> { db.session(-1) }
         assertFailsWith<SqliteFailure> { db.put(999, "user_message", 0, "{}") }
@@ -57,31 +56,59 @@ val sqliteSchemaTest by testSuite {
         assertFailsWith<SqliteFailure> { db.execute("INSERT INTO agents(agent_id, session_id, parent_agent_id) VALUES(99, 0, 888)") }
         assertFailsWith<SqliteFailure> { db.execute("INSERT INTO agents(session_id) VALUES(0)") }
     } }
+    test("ordinary open rejects a directory-only v2 and never backfills it") { withSchema { db ->
+        db.execute("DROP INDEX idx_session_catalog_view_cwd_updated")
+        db.execute("DROP TABLE session_groups")
+        assertFailsWith<IllegalStateException> { requireKodexHomeDatabase(db) }
+        assertTrue(db.query("SELECT name FROM sqlite_schema WHERE name = 'session_groups'").isEmpty())
+    } }
+    test("rechecking signed schema never stamps an old database or reruns initialization") {
+        openInMemorySqliteConnection().use { db ->
+            db.execute("CREATE TABLE sessions (session_id INTEGER PRIMARY KEY)")
+            db.execute("PRAGMA user_version=2")
+            assertFailsWith<IllegalStateException> { requireKodexHomeDatabase(db) }
+            assertFailsWith<IllegalStateException> { initializeKodexHomeDatabase(db) }
+            assertEquals(listOf(listOf(0L)), db.query("PRAGMA application_id"))
+            assertEquals(listOf(listOf("sessions")), db.query("SELECT name FROM sqlite_schema"))
+        }
+        withSchema { db ->
+            assertFailsWith<IllegalStateException> { initializeKodexHomeDatabase(db) }
+            db.session(0)
+            db.execute("DELETE FROM sessions")
+            requireKodexHomeDatabase(db)
+            assertFailsWith<IllegalStateException> { requireEmptyKodexHomeDatabase(db) }
+        }
+    }
     test("catalog exact zero, latest settings, archive and revert semantics") { withSchema { db ->
         db.session(0)
-        assertEquals(listOf(0L, 0L, null, null, null, null), db.catalog(0))
+        assertEquals(listOf(0L, null, null, null, null), db.catalog(0))
         val defaultPayload = """{"model":"synthetic"}"""
         OpenAiJsonCodec.decodeFromString(KodexAgentSettings.serializer(), defaultPayload)
         val t2 = Instant.fromEpochSeconds(-1, 999_999_998)
         db.put(0, "settings", 2, defaultPayload, createdAt = t2)
-        assertEquals(listOf("", "."), db.catalog(0).subList(2, 4))
-        assertNull(db.catalog(0)[4]) // created_at requires exact index 0, never the first later timestamp.
-        assertEquals(t2.toString(), db.catalog(0)[5])
+        db.recomputeSessionCatalog(0)
+        assertEquals(listOf("", "."), db.catalog(0).subList(1, 3))
+        assertNull(db.catalog(0)[3]) // created_at requires exact index 0, never the first later timestamp.
+        assertEquals(t2.toString(), db.catalog(0)[4])
         val t0 = Instant.fromEpochSeconds(-2, 999_999_999)
         val t15 = Instant.fromEpochSeconds(0, 1)
         db.put(0, "user_message", 0, "{}", createdAt = t0)
         db.put(0, "settings", 12, settingsPayload("new", "/new"), createdAt = t2)
         db.put(0, "user_message", 15, "{}", createdAt = t15)
-        db.execute("UPDATE sessions SET archived=1 WHERE session_id=0")
-        assertEquals(listOf(0L, 1L, "new", "/new", t0.toString(), t15.toString()), db.catalog(0))
-        assertTrue(db.query("SELECT * FROM session_catalog WHERE cwd='/old'").isEmpty())
+        db.recomputeSessionCatalog(0)
+        assertEquals(listOf(0L, "new", "/new", t0.toString(), t15.toString()), db.catalog(0))
+        assertTrue(db.query("SELECT * FROM session_catalog_view WHERE cwd='/old'").isEmpty())
         db.execute("""DELETE FROM agent_commits WHERE agent_id=0 AND "index">=12""")
-        assertEquals(listOf(0L, 1L, "", ".", t0.toString(), t2.toString()), db.catalog(0))
+        db.recomputeSessionCatalog(0)
+        assertEquals(listOf(0L, "", ".", t0.toString(), t2.toString()), db.catalog(0))
         db.put(0, "assistant_message", 0, "{}", createdAt = t15)
         db.execute("INSERT INTO agents(agent_id, session_id, parent_agent_id) VALUES(100, 0, 0)")
         db.put(100, "assistant_message", 0, "{}")
         db.put(100, "settings", 20, settingsPayload("child", "/child"), createdAt = Instant.fromEpochSeconds(1000))
-        assertEquals(listOf(0L, 1L, "", ".", t15.toString(), t2.toString()), db.catalog(0))
+        db.recomputeSessionCatalog(100)
+        db.recomputeSessionCatalog(0)
+        assertEquals(listOf(0L, "", ".", t15.toString(), t2.toString()), db.catalog(0))
+        assertTrue(db.query("SELECT * FROM session_catalog_view WHERE root_agent_id=100").isEmpty())
     } }
     test("fork strict until, sparse boundaries and deleted Session index reuse") { withSchema { db ->
         db.session(0)
@@ -97,47 +124,20 @@ val sqliteSchemaTest by testSuite {
         db.transaction {
             db.session(1)
             db.execute("""INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at) SELECT 1,type,"index",payload_json,created_at FROM agent_commits WHERE agent_id=0 AND "index"<9""")
+            db.recomputeSessionCatalog(1)
         }
-        assertEquals(listOf("forkable", "/kept", t0.toString(), t0.toString()), db.catalog(1).subList(2, 6))
+        assertEquals(listOf("forkable", "/kept", t0.toString(), t0.toString()), db.catalog(1).subList(1, 5))
         db.execute("DELETE FROM sessions WHERE session_id=0")
         assertTrue(db.query("SELECT * FROM agent_commits WHERE agent_id=0").isEmpty())
+        assertTrue(db.query("SELECT * FROM session_catalog_view WHERE root_agent_id=0").isEmpty())
         db.execute("INSERT INTO sessions(session_id) VALUES(0)")
         val replacement = db.query("INSERT INTO agents(session_id) VALUES(0) RETURNING agent_id").single().single()
         assertEquals(2L, replacement)
-        assertEquals(listOf(0L, 0L, null, null, null, null), db.catalog(0))
+        db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES(2)")
+        assertEquals(listOf(2L, null, null, null, null), db.catalog(2))
     } }
-    test("full catalog uses exact root index zero and keeps the settings lookup") { withSchema { db ->
-        for (sessionCount in listOf(100, 1000)) {
-            db.transaction {
-                val first = if (sessionCount == 100) 0 else 100
-                for (session in first until sessionCount) {
-                    db.session(session, archived = session % 7 == 0)
-                    if (session % 10 == 0) continue
-                    for (history in 0 until (8 + (session % 3) * 8)) {
-                        val index = history * 7
-                        val created = Instant.fromEpochSeconds((session * 1000 + history).toLong(), history * 999)
-                        db.put(session, "settings", index, settingsPayload("s$session", "/cwd/${history % 4}"), createdAt = created)
-                        db.put(session, "hosted_web_search", index, scaleWorkPayload, createdAt = created)
-                    }
-                }
-            }
-            val mark = TimeSource.Monotonic.markNow()
-            repeat(5) {
-                val rows = db.query("SELECT session_id FROM session_catalog WHERE archived=0 AND cwd='/cwd/3' ORDER BY session_id DESC")
-                val expected = (0 until sessionCount).filter { it % 7 != 0 && it % 10 != 0 }.reversed().map(Int::toLong)
-                assertEquals(expected, rows.map { it[0] })
-            }
-            val elapsed = mark.elapsedNow()
-            for (filter in listOf("", "WHERE archived=0 AND cwd='/cwd/3' ")) {
-                val plan = db.query("EXPLAIN QUERY PLAN SELECT * FROM session_catalog ${filter}ORDER BY session_id")
-                    .map { it.last().toString() }
-                assertTrue(plan.any { "SEARCH st USING PRIMARY KEY" in it }, plan.toString())
-                assertTrue(plan.any { "commits_global_index (agent_id=? AND index=?)" in it }, plan.toString())
-                assertTrue(plan.none { "SCAN agent_commits" in it }, plan.toString())
-            }
-            val historyPlan = db.query("EXPLAIN QUERY PLAN SELECT agent_id FROM agent_commits WHERE type='settings' AND json_extract(payload_json,'$.cwd')='/cwd/1'").joinToString()
-            assertTrue("commits_settings_cwd" in historyPlan, historyPlan)
-            assertTrue(elapsed.inWholeMilliseconds < 5000, "Five warm catalog queries exceeded 5s: $elapsed")
-        }
+    test("history settings lookup retains the cwd expression index") { withSchema { db ->
+        val plan = db.query("EXPLAIN QUERY PLAN SELECT agent_id FROM agent_commits WHERE type='settings' AND json_extract(payload_json,'$.cwd')='/cwd/1'")
+        assertTrue("commits_settings_cwd" in plan.toString(), plan.toString())
     } }
 }

@@ -23,7 +23,6 @@ public actual fun AgentPageContent(
         val composer = viewModel.composer.state.collectAsState().value
         val duration = viewModel.history.activeTurnDuration.collectAsState().value
         val followsLatest = viewModel.history.followsLatest.collectAsState().value
-        val hostInteractionPending = pendingRequest != null
         val inputs = AgentPageMeasureInputs(
             composer = composer,
             pendingSteer = pendingSteer,
@@ -31,14 +30,14 @@ public actual fun AgentPageContent(
             running = running,
             settings = settings,
             tokenCount = tokenCount,
-            pendingToolPanelCount = if (hostInteractionPending) 1 else 0,
+            pendingToolPanelCount = if (pendingRequest != null) 1 else 0,
         )
         renderer.Frame(inputs) { slots ->
             slots.History(viewModel.history, viewModel.shellSessions, state.canEditHistory(running))
             pendingRequest?.let { slots.UserInput(viewModel.requestUserInput, it) }
             if (pendingSteer.isNotEmpty()) slots.PendingSteer()
             AgentHistorySeparatorContent(duration, !followsLatest, viewModel.history::requestScrollToLatest, renderer.separator)
-            slots.Composer(viewModel.composer, newLineKey, enabled = !hostInteractionPending)
+            slots.Composer(viewModel.composer, newLineKey, autoFocus = pendingRequest == null)
             AgentRuntimeStatusContent(
                 viewModel, state, running, settings, tokenCount, renderer.status,
                 onBrowseWorkingDirectory, onOpenSettings,

@@ -5,19 +5,19 @@ import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.sessiontabbar.contract.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun collectSessionTabRenderStates(
-    tabs: List<PersistedSessionViewModel>, selectedIndex: Int?,
+    tabs: List<AgentTabViewModel>, selectedIndex: Int?,
 ): List<SessionTabRenderState> = buildList(tabs.size) {
     tabs.forEachIndexed { index, target ->
         key(ApplicationChildKey(target)) {
             val name = target.name.collectAsState().value
-            val agent = target.rootAgent.collectAsState().value
+            val agent = target.agent.collectAsState().value
             val running = agent?.running?.collectAsState()?.value ?: false
             add(SessionTabRenderState(target, index == selectedIndex, name, running, agent))
         }
@@ -40,7 +40,7 @@ public actual fun <T : Any> applicationHistoryWidgetStateFor(
 public actual fun collectApplicationTabBar(navigation: ApplicationNavigationState): ApplicationTabBarProjection {
     val selectedIndex = (navigation.selection as? ApplicationTabSelection.SelectedTab)?.index
     val tabs = collectSessionTabRenderStates(navigation.tabs, selectedIndex)
-    val identities = remember { SessionTabKeys<PersistedSessionViewModel>() }.identify(navigation.tabs)
+    val identities = remember { SessionTabKeys<AgentTabViewModel>() }.identify(navigation.tabs)
     val presentations = tabs.mapIndexed { index, tab ->
         SessionTabPresentation(identities[index].second, tab.sessionName, tab.running)
     }
@@ -51,9 +51,9 @@ public actual fun collectApplicationTabBar(navigation: ApplicationNavigationStat
 private class ApplicationTabProjection(
     override val tabs: List<SessionTabRenderState>,
     override val state: SessionTabBarState,
-    private val identities: List<Pair<PersistedSessionViewModel, SessionTabIdentity>>,
+    private val identities: List<Pair<AgentTabViewModel, SessionTabIdentity>>,
 ) : ApplicationTabBarProjection {
-    override fun targetFor(identity: SessionTabIdentity): PersistedSessionViewModel? =
+    override fun targetFor(identity: SessionTabIdentity): AgentTabViewModel? =
         identities.firstOrNull { it.second == identity }?.first
 }
 
@@ -80,6 +80,7 @@ public actual fun ApplicationTabBarContent(
     onOperationFailure: (Throwable) -> Unit,
     onOpenTabMenu: (ApplicationTabMenuTarget) -> Unit,
     onBeforeNewOrCatalog: () -> Unit,
+    showSessions: Boolean,
 ) {
     val scope = rememberCoroutineScope()
     val currentNavigation by rememberUpdatedState(navigation)
@@ -87,7 +88,7 @@ public actual fun ApplicationTabBarContent(
     val report by rememberUpdatedState(onOperationFailure)
     val before by rememberUpdatedState(onBeforeNewOrCatalog)
     val openMenu by rememberUpdatedState(onOpenTabMenu)
-    fun targetFor(identity: SessionTabIdentity): PersistedSessionViewModel? =
+    fun targetFor(identity: SessionTabIdentity): AgentTabViewModel? =
         currentProjection.targetFor(identity)?.takeIf { target -> currentNavigation.tabs.any { it === target } }
     fun command(block: suspend () -> Unit) {
         scope.launch {
@@ -104,12 +105,12 @@ public actual fun ApplicationTabBarContent(
                 command { viewModel.selectTab(target) }
             }
             override fun selectNewSession() { before(); command { viewModel.selectNewSession() } }
-            override fun openSessions() { before(); command { viewModel.openSessionCatalogPopup() } }
         },
         renderer,
         onOpenTabMenu = { request ->
             val target = targetFor(request.identity)
             if (target != null) openMenu(ApplicationTabMenuTarget(target, request.label, request.placement))
         },
+        showSessions = showSessions,
     )
 }

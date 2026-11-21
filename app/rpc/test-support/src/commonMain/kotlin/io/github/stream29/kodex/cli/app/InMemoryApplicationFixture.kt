@@ -43,6 +43,7 @@ public actual suspend fun <R> withKodexApplication(
         return withBackendServices(
             homeHandle.home, resolveAllowingMissing(codexDirectory), resolveAllowingMissing(agentsDirectory),
             createClient = createClient, createLoginClient = createLoginClient,
+            requiresPreparedHome = true,
         ) { backend ->
             onPhase(ApplicationStartupPhase.BackendReady)
             val hooksOwner = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[Job]))

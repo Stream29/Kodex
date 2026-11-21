@@ -4,6 +4,8 @@ import dev.kauri.framework.openEmbeddedResource
 import io.github.oshai.kotlinlogging.DirectLoggerFactory
 import io.github.oshai.kotlinlogging.KotlinLoggingConfiguration
 import io.github.oshai.kotlinlogging.Level
+import io.github.stream29.kodex.app.migration.KodexHomeVersionException
+import io.github.stream29.kodex.app.migration.preflightKodexHome
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.backend.BackendInstance
 import io.github.stream29.kodex.backend.backendProcessAlive
@@ -22,13 +24,16 @@ import io.github.stream29.kodex.utils.osenvironment.processId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.io.files.Path
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 public actual fun main(args: Array<String>) {
     initializeCliLogging()
-    val home = KodexHome
     val result = runBlocking(CliCoroutineExceptionLogger) {
+        val detached = args.contentEquals(arrayOf("backend", "start", "--detached-cwd"))
+        val home = if (detached) SystemCoroutineFileSystem.resolve(Path(".")) else KodexHome
         dispatchCliWithToolRpc(
-            arguments = args.asList(),
+            arguments = if (detached) listOf("backend", "start") else args.asList(),
             defaultHome = home,
             output = ::printCliMessage,
         ) { command, invokeTool ->
@@ -59,7 +64,9 @@ private suspend fun runLeafCommand(
     return runCliSafely(
         backendStart = command is BackendStartCommand,
         processId = ::processId,
-        reportFailure = { logCliFailure(it, home) },
+        reportFailure = {
+            if (command !is BackendStartCommand && command !is BackendControlCliCommand) logCliFailure(it, home)
+        },
         output = outputHandler,
     ) {
         when (command) {
@@ -97,26 +104,11 @@ private suspend fun runLeafCommand(
                 }
             }
             is BackendStartCommand -> runBackendHost(home)
-            is BackendControlCliCommand -> {
-                try {
-                    val endpoint = BackendInstance.discover(home)
-                    if (endpoint == null) {
-                        println("""{"phase":"not_running"}""")
-                        if (command.control != BackendControlCommand.Status) result = 1
-                    } else {
-                        println(backendControlRequest(endpoint, command.control.commandName))
-                    }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    println("""{"phase":"unavailable","error":"backend_cannot_serve_command"}""")
-                    result = 1
-                }
-            }
+            is BackendControlCliCommand -> result = runBackendControlCli(command.control, home)
             is TuiCommand -> {
                 val cwd = SystemCoroutineFileSystem.resolve(Path("."))
                 val (backendHome, endpoint) = resolveFrontendBackend(home, command.backend.resolve())
-                initializeTuiLogging(home, ::backendProcessAlive)
+                initializeTuiLoggingForBackendHome(home, backendHome)
                 withLocalRpcClient(backendHome, endpoint) { connection ->
                     withFrontendApplication(connection, cwd) { application ->
                         runTuiApplication(application)
@@ -129,6 +121,44 @@ private suspend fun runLeafCommand(
         }
         result
     }
+}
+
+internal suspend fun runBackendControlCli(
+    command: BackendControlCommand,
+    home: Path,
+    output: (String) -> Unit = ::println,
+): Int = try {
+    preflightKodexHome(home)
+    val endpoint = BackendInstance.discover(home)
+    if (endpoint == null) {
+        output("""{"phase":"not_running"}""")
+        if (command == BackendControlCommand.Status) 0 else 1
+    } else {
+        val target = if (command == BackendControlCommand.Reload) connectBackend(home, endpoint.port) else endpoint
+        output(backendControlRequest(target, command.commandName).toString())
+        0
+    }
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (incompatible: KodexHomeVersionException) {
+    output(buildJsonObject {
+        put("phase", "unavailable")
+        put("error", "incompatible_kodex_home")
+        put("message", incompatible.message ?: "Use a different, empty Kodex Home.")
+    }.toString())
+    1
+} catch (_: Exception) {
+    output("""{"phase":"unavailable","error":"backend_cannot_serve_command"}""")
+    1
+}
+
+// The caller has resolved a ready backend. A separate default Home was not prepared by it.
+internal suspend fun initializeTuiLoggingForBackendHome(home: Path, backendHome: Path) {
+    if (!SystemCoroutineFileSystem.exists(home) ||
+        SystemCoroutineFileSystem.resolve(backendHome) != SystemCoroutineFileSystem.resolve(home)
+    ) return
+    preflightKodexHome(home)
+    initializeTuiLogging(resolveCliLoggingHome(home), ::backendProcessAlive)
 }
 
 internal suspend fun resolveFrontendBackend(

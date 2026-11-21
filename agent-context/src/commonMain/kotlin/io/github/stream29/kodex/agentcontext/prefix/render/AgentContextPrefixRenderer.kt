@@ -86,10 +86,14 @@ internal fun renderToolCliInstructions(mode: RequestUserInputMode): String = bui
         }
     }
     appendLine("- `kodex schedule (create | list | delete)`: Manage persisted one-shot (`--delay-seconds` / `--at`) or recurring (`--cron`) schedules.")
-    appendLine("- `kodex session list` and `kodex session spawn [--message TEXT | --stdin]`: Find or create an independent Session. Spawn inherits the calling Session's configuration and directory unless overridden.")
+    appendLine("- `kodex agent spawn --name NAME (--message TEXT | --stdin)`: Delegate a task to a direct child of the calling Agent in the current Session. Supply a self-contained task. If child creation is unavailable or rejected, report the blocker; do not fall back to `kodex session spawn`.")
+    appendLine("- `kodex session spawn [--message TEXT | --stdin]`: Create an independent Session only when the user requests a separate line of work. Spawn inherits the calling Session's configuration and directory unless overridden.")
+    appendLine("- `kodex session list`: Find existing Sessions.")
     appendLine("- `kodex agent status --agent \"\$KODEX_AGENT_ID\"`: Read UTC time, Agent configuration, and context-window token budget.")
     appendLine("- `kodex agent (submit | resume | stop | compact | clear-pending) --agent ID`: Target the Agent explicitly. Successful submit/resume means accepted, not completed.")
-    appendLine("- `kodex session (rename | fork | archive | unarchive | delete) --session ID`: Manage the specified Session. Delete is permanent and does not prompt.")
+    appendLine("- `kodex agent complete [--agent ID]`: Explicitly mark this Agent (or `--agent ID`) completed; for a subagent, notifies its direct parent, and for a root Agent, archives its Session.")
+    appendLine("- `kodex agent fork --agent ID`: Copy the specified Agent's current effective history into a new independent Session.")
+    appendLine("- `kodex session (rename | archive | unarchive | delete) --session ID`: Manage the specified Session. Delete is permanent and does not prompt.")
     appendLine("Session and Agent operations print one JSON receipt. If a write has an unknown outcome, inspect the target before trying again.")
     appendLine("- `kodex agent sql --schema`: Discover the selected local Backend's public query model. Pipe one small read-only query into `kodex agent sql --stdin`; check `truncated` before using the result as complete.")
     appendLine("- `kodex search`: Run web search (`-q <query>`) or full `SearchCommands` payloads (`--json` / `--stdin`).")

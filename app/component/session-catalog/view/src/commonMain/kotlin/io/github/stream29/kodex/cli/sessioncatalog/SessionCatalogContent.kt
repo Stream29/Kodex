@@ -58,7 +58,6 @@ public actual fun SessionCatalogContent(
                 renderer.ContextMenu(
                     request.entry, request.origin,
                     onDismiss = { if (menu === request) menu = null },
-                    onFork = { consume { launchReported { viewModel.fork(request.entry.sessionIndex) } } },
                     onArchive = { consume { scope.launch { viewModel.archive(request.entry.sessionIndex) } } },
                     onUnarchive = { consume { scope.launch { viewModel.unarchive(request.entry.sessionIndex) } } },
                     onDelete = { consume { viewModel.requestDelete(request.entry) } },

@@ -5,10 +5,12 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.oshai.kotlinlogging.DirectLoggerFactory
 import io.github.oshai.kotlinlogging.KotlinLoggingConfiguration
 import io.github.oshai.kotlinlogging.Level
+import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.backend.BackendInstance
 import io.github.stream29.kodex.backend.host.runBackendHost
 import io.github.stream29.kodex.backend.randomBackendPassword
+import io.github.stream29.kodex.backend.setBackendWorkingDirectory
 import io.github.stream29.kodex.rpc.control.backendControlRequest
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.processId
@@ -51,61 +53,64 @@ val cliFailureLoggingTest by testSuite(compartment = { TestCompartment.RealTime 
         }
     }
 
-    test("initialized TUI and early failure both write the throwable to their process log") {
-        // The isolated test process retains its rolling writers until exit.
+    test("early errors and detached coroutine failures do not create logs in fresh or old Homes") {
         val home = Path(SystemTemporaryDirectory, "cli-failure-logging-${Random.nextLong()}")
         val failure = IllegalStateException("outer failure marker", IllegalArgumentException("cause marker"))
-        initializeTuiLogging(home) { false }
-        val messages = mutableListOf<String>()
-        val result = runCliSafely(false, ::processId, { logCliFailure(it, home) }, { messages += it }) {
-            throw failure
-        }
-        assertEquals(1, result)
-        assertEquals(listOf("Unable to run Kodex: outer failure marker"), messages)
-
-        suspend fun readFailureLog(base: Path): String {
-            val files = SystemCoroutineFileSystem.list(Path(base, "log"))
-                .filter { it.name.matches(Regex("Cli-${processId()}-[0-9]+\\.log")) }
-            assertEquals(1, files.size)
-            return SystemCoroutineFileSystem.readString(files.single())
-        }
-        val tuiLog = readFailureLog(home)
-        assertContains(tuiLog, "CLI invocation failed")
-        assertContains(tuiLog, "IllegalStateException")
-        assertContains(tuiLog, "outer failure marker")
-        assertContains(tuiLog, "IllegalArgumentException")
-        assertContains(tuiLog, "cause marker")
-
-        val earlyHome = Path(home, "early")
-        logCliFailure(failure, earlyHome)
-        val cliLog = readFailureLog(earlyHome)
-        assertContains(cliLog, "IllegalStateException")
-        assertContains(cliLog, "IllegalArgumentException")
-
-        val unavailableHome = Path(home, "not-a-directory")
-        SystemCoroutineFileSystem.writeString(unavailableHome, "test fixture")
-        val fallback = mutableListOf<String>()
-        val fallbackCode = runCliSafely(false, ::processId, { logCliFailure(it, unavailableHome) }, { fallback += it }) {
-            throw failure
-        }
-        assertEquals(1, fallbackCode)
-        assertEquals(listOf("Unable to run Kodex: outer failure marker"), fallback)
-
+        val fs = SystemCoroutineFileSystem
         val previousLevel = KotlinLoggingConfiguration.direct.logLevel
         try {
             KotlinLoggingConfiguration.direct.logLevel = Level.OFF
-            val nonTuiHome = Path(home, "non-tui-coroutine")
-            val stderrMessages = mutableListOf<String>()
-            val handler = createCliCoroutineExceptionHandler(
-                home = { nonTuiHome },
-                stderrOutput = stderrMessages::add,
-            )
-            handler.handleException(kotlin.coroutines.EmptyCoroutineContext, failure)
-            val coroutineLog = readFailureLog(nonTuiHome)
-            assertContains(coroutineLog, "outer failure marker")
-            assertEquals(listOf("Unhandled CLI coroutine failure: outer failure marker"), stderrMessages)
+            for (old in listOf(false, true)) {
+                val version = Path(home, "version.json")
+                if (old) {
+                    fs.createDirectories(home, mustCreate = true)
+                    fs.writeString(version, "\"0.7.5\"")
+                }
+                val messages = mutableListOf<String>()
+                val result = runCliSafely(false, ::processId, { logCliFailure(it, home) }, messages::add) { throw failure }
+                assertEquals(1, result)
+                assertEquals(listOf("Unable to run Kodex: outer failure marker"), messages)
+                val stderr = mutableListOf<String>()
+                createCliCoroutineExceptionHandler(home = { home }, stderrOutput = stderr::add)
+                    .handleException(kotlin.coroutines.EmptyCoroutineContext, failure)
+                assertEquals(listOf("Unhandled CLI coroutine failure: outer failure marker"), stderr)
+                assertFalse(fs.exists(Path(home, "log")))
+                if (old) {
+                    assertEquals("\"0.7.5\"", fs.readString(version))
+                    assertEquals(listOf("version.json"), fs.list(home).map { it.name })
+                } else {
+                    assertFalse(fs.exists(home))
+                }
+            }
         } finally {
             KotlinLoggingConfiguration.direct.logLevel = previousLevel
+            fs.delete(Path(home, "version.json"), mustExist = false)
+            fs.delete(home, mustExist = false)
+        }
+    }
+
+    test("backend management reports a fresh Home as not running and refuses all old Home commands") {
+        val fs = SystemCoroutineFileSystem
+        val home = Path(SystemTemporaryDirectory, "cli-control-home-${Random.nextLong()}")
+        val version = Path(home, "version.json")
+        try {
+            val output = mutableListOf<String>()
+            assertEquals(0, runBackendControlCli(BackendControlCommand.Status, home, output::add))
+            assertEquals(listOf("""{"phase":"not_running"}"""), output)
+            assertFalse(fs.exists(home))
+            fs.createDirectories(home, mustCreate = true)
+            fs.writeString(version, "\"0.7.5\"")
+            for (command in BackendControlCommand.entries) {
+                output.clear()
+                assertEquals(1, runBackendControlCli(command, home, output::add))
+                assertContains(output.single(), "incompatible_kodex_home")
+                assertContains(output.single(), "different, empty Kodex Home")
+                assertEquals(listOf("version.json"), fs.list(home).map { it.name })
+                assertEquals("\"0.7.5\"", fs.readString(version))
+            }
+        } finally {
+            fs.delete(version, mustExist = false)
+            fs.delete(home, mustExist = false)
         }
     }
 
@@ -165,6 +170,7 @@ val cliFailureLoggingTest by testSuite(compartment = { TestCompartment.RealTime 
     }
 
     test("web connects to the target backend Home without a frontend record and leaves backend running") {
+        val originalCwd = SystemCoroutineFileSystem.resolve(Path("."))
         val root = Path(SystemTemporaryDirectory, "kodex-cli-web-target-${Random.nextLong()}")
         val frontendHome = Path(root, "frontend-home")
         val backendHome = Path(root, "backend-home")
@@ -172,7 +178,8 @@ val cliFailureLoggingTest by testSuite(compartment = { TestCompartment.RealTime 
         SystemCoroutineFileSystem.createDirectories(frontendHome)
         SystemCoroutineFileSystem.createDirectories(backendHome)
         SystemCoroutineFileSystem.createDirectories(launchDir)
-        SystemCoroutineFileSystem.writeString(Path(backendHome, "version.json"), "\"0.4.15\"")
+        SystemCoroutineFileSystem.writeString(Path(frontendHome, "version.json"), "\"0.7.5\"")
+        kotlinx.coroutines.coroutineScope { prepareKodexHome(backendHome).closeAndJoin() }
         SystemCoroutineFileSystem.writeString(
             Path(backendHome, "settings.yml"),
             "backend:\n  daemon_ttl_seconds: -1\n  new_session:\n    model: fixture\n  session_title:\n    enabled: false\nfrontend: {}\n",
@@ -209,6 +216,16 @@ val cliFailureLoggingTest by testSuite(compartment = { TestCompartment.RealTime 
                     )
                     assertEquals(SystemCoroutineFileSystem.resolve(backendHome), resolvedHome)
                     assertEquals(targetEndpoint.instanceId, connectedEndpoint.instanceId)
+                    initializeTuiLoggingForBackendHome(frontendHome, resolvedHome)
+                    assertFalse(SystemCoroutineFileSystem.exists(Path(frontendHome, "log")))
+                    assertEquals("\"0.7.5\"", SystemCoroutineFileSystem.readString(Path(frontendHome, "version.json")))
+
+                    logCliFailure(IllegalStateException("outer failure marker", IllegalArgumentException("cause marker")), backendHome)
+                    val failureLog = SystemCoroutineFileSystem.list(Path(backendHome, "log"))
+                        .single { it.name.matches(Regex("Cli-${processId()}-[0-9]+\\.log")) }
+                    val diagnostic = SystemCoroutineFileSystem.readString(failureLog)
+                    assertContains(diagnostic, "outer failure marker")
+                    assertContains(diagnostic, "cause marker")
 
                     withLocalFrontendHost(
                         connectedEndpoint,
@@ -234,6 +251,8 @@ val cliFailureLoggingTest by testSuite(compartment = { TestCompartment.RealTime 
                 }
             }
         } finally {
+            // The in-process backend changes the process cwd. Restore it before removing that directory.
+            setBackendWorkingDirectory(originalCwd)
             suspend fun removeTree(path: Path) {
                 val meta = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
                 if (meta.isDirectory) SystemCoroutineFileSystem.list(path).forEach { removeTree(it) }

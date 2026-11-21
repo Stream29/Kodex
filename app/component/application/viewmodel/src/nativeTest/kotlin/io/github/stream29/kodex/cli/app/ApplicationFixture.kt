@@ -3,6 +3,8 @@ package io.github.stream29.kodex.cli.app
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupFocus
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupsViewModel
 import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.app.test.testAnswer
 import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
@@ -40,6 +42,19 @@ internal suspend fun applicationFixture(
         } finally { withContext(NonCancellable) { handle.closeAndJoin() } }
     } finally { withContext(NonCancellable) { deleteTestDirectory(home) } }
 } }
+
+internal suspend fun <T> ApplicationViewModel.withMountedCatalog(
+    block: suspend (SessionGroupsViewModel) -> T,
+): T = coroutineScope {
+    val catalog = checkNotNull(sessionCatalog)
+    val observe = launch { catalog.observeGroups(flowOf<SessionGroupFocus?>(null)) { throw it } }
+    try {
+        catalog.state.first { it.groups != null }
+        block(catalog)
+    } finally {
+        observe.cancelAndJoin()
+    }
+}
 
 /** Real singleton submission; ordinary ownership tests start from an idle persisted Session. */
 internal suspend fun ApplicationViewModel.submitTestSession(text: String = "fixture first message"): PersistedSessionViewModel {

@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
 import kotlin.time.Instant
 
 public actual class RpcSessionBinding private constructor(
-    public actual val sessionIndex: Int,
+    public actual val sessionIndex: Int?,
     internal val agentId: Int,
     public actual val storage: ObservableKodexAgentStorage,
     public actual val latestIndex: StateFlow<Int>,
@@ -79,7 +79,7 @@ public actual class RpcSessionBinding private constructor(
     public actual suspend fun revertHistory(untilExclusive: Int, selectedCacheNonce: Long): Unit =
         command { services.runtime.revertHistory(agentId, untilExclusive, selectedCacheNonce) }
     public actual suspend fun forkHistory(untilExclusive: Int, selectedCacheNonce: Long): Int =
-        command { services.global.forkSessionHistory(sessionIndex, untilExclusive, selectedCacheNonce) }
+        command { services.global.forkAgentHistory(agentId, untilExclusive, selectedCacheNonce) }
     public actual suspend fun readCreatedAt(): Instant? =
         storage.getCommitAtOrBefore(0)?.createdAt?.takeIf { it != Instant.DISTANT_PAST }
     public actual suspend fun readUpdatedAt(): Instant? =
@@ -89,7 +89,7 @@ public actual class RpcSessionBinding private constructor(
 
     internal companion object {
         suspend fun create(
-            index: Int,
+            index: Int?,
             services: RpcServices,
             scope: CoroutineScope,
             agentId: Int,

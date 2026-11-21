@@ -15,8 +15,9 @@ import kotlinx.io.files.Path
  * @property toVersion Target application version; registry targets must be unique
  * and strictly increasing. Entries above the running version are not executed.
  * @property action Receives the Home and its filesystem after prior applicable
- * entries have completed. Each historical action owns its compatibility and
- * reentry behavior; the entry itself supplies no transaction or recovery.
+ * entries have completed. Each action owns same-generation input validation,
+ * its transaction boundaries, and reentry behavior. The entry itself supplies
+ * no transaction or recovery.
  */
 public class Migration(
     public val toVersion: MigrationVersion,

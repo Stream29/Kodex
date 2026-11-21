@@ -56,7 +56,7 @@ val sessionSettingsCasTest by testSuite {
             val old = storage.getSettingsAt(0)
             val expect = old.copy()
             assertNotSame(old, expect)
-            val update = old.copy(threadName = "renamed")
+            val update = old.copy(name = "renamed")
             val oldTimestamp = storage.getTimestampAt(0)
 
             assertTrue(agent.compareAndSetSettings(expect, update))
@@ -75,7 +75,7 @@ val sessionSettingsCasTest by testSuite {
             val current = storage.getSettingsAt(0)
 
             assertFalse(agent.compareAndSetSettings(current.copy(turnState = "stale"), current))
-            assertFalse(agent.compareAndSetSettings(current.copy(threadName = "stale"), current))
+            assertFalse(agent.compareAndSetSettings(current.copy(name = "stale"), current))
 
             assertEquals(
                 listOf(IndexedAgentCommit(0, current)),
@@ -107,7 +107,7 @@ val sessionSettingsCasTest by testSuite {
             val current = backing.getSettingsAt(0)
             val calls = (1..8).map { n ->
                 async(start = CoroutineStart.UNDISPATCHED) {
-                    agent.compareAndSetSettings(current, current.copy(threadName = "name-$n"))
+                    agent.compareAndSetSettings(current, current.copy(name = "name-$n"))
                 }
             }
             entered.await()
@@ -115,7 +115,7 @@ val sessionSettingsCasTest by testSuite {
             release.complete(Unit)
 
             assertEquals(listOf(true) + List(7) { false }, calls.awaitAll())
-            assertEquals("name-1", backing.getSettingsAt(1).threadName)
+            assertEquals("name-1", backing.getSettingsAt(1).name)
         }
 
         test("unconditional update holds the same lock and invalidates queued expect") {
@@ -128,11 +128,11 @@ val sessionSettingsCasTest by testSuite {
             }
             val agent = KodexAgentState(mockOpenAiClient(), storage)
             val current = backing.getSettingsAt(0)
-            val update = current.copy(threadName = "unconditional")
+            val update = current.copy(name = "unconditional")
             val writer = async(start = CoroutineStart.UNDISPATCHED) { agent.updateSettings(update) }
             entered.await()
             val cas = async(start = CoroutineStart.UNDISPATCHED) {
-                agent.compareAndSetSettings(current, current.copy(threadName = "obsolete"))
+                agent.compareAndSetSettings(current, current.copy(name = "obsolete"))
             }
             assertFalse(cas.isCompleted)
             release.complete(Unit)
@@ -154,13 +154,13 @@ val sessionSettingsCasTest by testSuite {
             }
             val agent = KodexAgentState(mockOpenAiClient(), storage)
             val current = backing.getSettingsAt(0)
-            val update = current.copy(threadName = "cas")
+            val update = current.copy(name = "cas")
             val cas = async(start = CoroutineStart.UNDISPATCHED) {
                 agent.compareAndSetSettings(current, update)
             }
             entered.await()
             val writer = async(start = CoroutineStart.UNDISPATCHED) {
-                agent.updateSettings(update.copy(threadName = "next"))
+                agent.updateSettings(update.copy(name = "next"))
             }
             assertFalse(writer.isCompleted)
             assertEquals(0, agent.latestIndex.value)
@@ -169,7 +169,7 @@ val sessionSettingsCasTest by testSuite {
             assertTrue(cas.await())
             assertEquals(2, writer.await())
             assertEquals(update, backing.getSettingsExact(1))
-            assertEquals("next", backing.getSettingsAt(2).threadName)
+            assertEquals("next", backing.getSettingsAt(2).name)
         }
 
         test("cancelled lock waiter never compares or writes") {
@@ -181,7 +181,7 @@ val sessionSettingsCasTest by testSuite {
                 agent.modify { release.await() }
             }
             val waiter = async(start = CoroutineStart.UNDISPATCHED) {
-                agent.compareAndSetSettings(current, current.copy(threadName = "cancelled"))
+                agent.compareAndSetSettings(current, current.copy(name = "cancelled"))
             }
             assertFalse(waiter.isCompleted)
             waiter.cancel()
@@ -191,7 +191,7 @@ val sessionSettingsCasTest by testSuite {
 
             assertEquals(0, storage.latestIndex())
             assertEquals(current, storage.getSettingsAt(0))
-            assertTrue(agent.compareAndSetSettings(current, current.copy(threadName = "next")))
+            assertTrue(agent.compareAndSetSettings(current, current.copy(name = "next")))
         }
 
         test("write failure propagates and releases the comparison lock") {
@@ -203,7 +203,7 @@ val sessionSettingsCasTest by testSuite {
             }
             val agent = KodexAgentState(mockOpenAiClient(), storage)
             val current = backing.getSettingsAt(0)
-            val update = current.copy(threadName = "new")
+            val update = current.copy(name = "new")
 
             assertSame(failure, assertFailsWith<IllegalStateException> {
                 agent.compareAndSetSettings(current, update)
@@ -228,7 +228,7 @@ val sessionSettingsCasTest by testSuite {
             val agent = KodexAgentState(mockOpenAiClient(), storage)
             val current = backing.getSettingsAt(0)
             val call = async(start = CoroutineStart.UNDISPATCHED) {
-                agent.compareAndSetSettings(current, current.copy(threadName = "cancelled"))
+                agent.compareAndSetSettings(current, current.copy(name = "cancelled"))
             }
             entered.await()
             call.cancel()
@@ -236,7 +236,7 @@ val sessionSettingsCasTest by testSuite {
             assertEquals(0, agent.latestIndex.value)
             assertEquals(current, backing.getSettingsAt(0))
             suspendWrite = false
-            assertTrue(agent.compareAndSetSettings(current, current.copy(threadName = "next")))
+            assertTrue(agent.compareAndSetSettings(current, current.copy(name = "next")))
         }
 
         test("comparison read errors propagate rather than reporting mismatch") {

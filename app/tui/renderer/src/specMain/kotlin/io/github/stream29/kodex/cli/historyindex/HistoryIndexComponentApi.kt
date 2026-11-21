@@ -23,7 +23,6 @@ public expect class HistoryIndexInteractionRequest(
     public val index: Int
     public val anchor: TuiPopupAnchor
     public val revision: Long
-    public var pointerPosition: IntOffset?
 
     /** No latest selected-Agent lookup. Host separately checks its selected stable child identity. */
     public fun isCurrent(): Boolean

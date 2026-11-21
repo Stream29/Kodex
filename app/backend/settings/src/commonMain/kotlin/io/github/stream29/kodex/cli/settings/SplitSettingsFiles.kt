@@ -46,7 +46,7 @@ internal fun decodeBackendSettingsFile(root: YamlMap, defaults: BackendSettings)
             val base = defaults.newSession
             KodexNewSessionSettings(
                 model = OpenAiModelId(session.value("model", base.model.value)),
-                reasoningEffort = session.value("reasoning_effort", base.reasoningEffort),
+                reasoningEffort = session.reasoningEffort(base.reasoningEffort),
                 serviceTier = decodeServiceTier(session.value("service_tier", base.serviceTier.requestValue)),
                 requestUserInputMode = session.value("request_user_input_mode", base.requestUserInputMode),
             )
@@ -56,7 +56,7 @@ internal fun decodeBackendSettingsFile(root: YamlMap, defaults: BackendSettings)
             SessionTitleSettings(
                 enabled = title.value("enabled", base.enabled),
                 model = title.value("model", base.model?.value)?.let(::OpenAiModelId),
-                reasoningEffort = title.value("reasoning_effort", base.reasoningEffort),
+                reasoningEffort = title.reasoningEffort(base.reasoningEffort),
             )
         } ?: defaults.sessionTitle,
         mcpServers = root.value("mcp_servers", defaults.mcpServers),
@@ -70,8 +70,8 @@ internal fun decodeCliFrontendSettingsFile(root: YamlMap, defaults: CliFrontendS
         newLineKey = root.value("new_line_key", defaults.newLineKey),
         sidebars = root.get<YamlMap>("sidebars")?.let { sidebars ->
             CliSidebarSettings(
-                left = sidebars.value("left", defaults.sidebars.left),
-                right = sidebars.value("right", defaults.sidebars.right),
+                activeLeft = sidebars.value("active_left", defaults.sidebars.activeLeft),
+                activeRight = sidebars.value("active_right", defaults.sidebars.activeRight),
             )
         } ?: defaults.sidebars,
         hooks = root.value("hooks", defaults.hooks),
@@ -112,8 +112,17 @@ internal fun encodeBackendSettingsFile(value: BackendSettings): String =
 internal fun encodeCliFrontendSettingsFile(value: CliFrontendSettings): String =
     SplitSettingsYaml.encodeToString(
         FrontendFile.serializer(),
-        FrontendFile(value.newLineKey, value.sidebars, value.hooks),
+        FrontendFile(value.newLineKey, SidebarFile(value.sidebars.activeLeft, value.sidebars.activeRight), value.hooks),
     )
+
+private fun YamlMap.reasoningEffort(default: ReasoningEffort): ReasoningEffort {
+    val node = get<YamlNode>("reasoning_effort") ?: return default
+    // The provider serializer still recognizes its historical wire values; Home YAML does not.
+    require(SplitSettingsYaml.decodeFromYamlNode<String>(node) != "ultra") {
+        "Use max for reasoning_effort."
+    }
+    return SplitSettingsYaml.decodeFromYamlNode<ReasoningEffort>(node)
+}
 
 private inline fun <reified T> YamlMap.value(name: String, default: T): T {
     val node = get<YamlNode>(name) ?: return default
@@ -122,7 +131,7 @@ private inline fun <reified T> YamlMap.value(name: String, default: T): T {
 
 private fun decodeServiceTier(value: String): ServiceTier = when (value) {
     "default" -> ServiceTier.Default
-    "fast", "priority" -> ServiceTier.Fast
+    "priority" -> ServiceTier.Fast
     "flex" -> ServiceTier.Flex
     "ultrafast" -> ServiceTier.Ultrafast
     else -> throw IllegalArgumentException("Unsupported service tier '$value'.")
@@ -169,8 +178,14 @@ private data class TitleDefaultsFile(
 @Serializable
 private data class FrontendFile(
     @SerialName("new_line_key") val newLineKey: NewLineKey,
-    val sidebars: CliSidebarSettings,
+    val sidebars: SidebarFile,
     val hooks: List<NotificationHook>,
+)
+
+@Serializable
+private data class SidebarFile(
+    @SerialName("active_left") val activeLeft: ToolWindowId?,
+    @SerialName("active_right") val activeRight: ToolWindowId?,
 )
 
 private val SplitSettingsYaml = Yaml(

@@ -6,15 +6,17 @@ import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import kotlin.test.assertEquals
 
 val terminalTitleTest by testSuite {
-    test("summaryCountsOnlyOpenedPersistedSessionTabs") {
+    test("summary counts open Agent tabs and their running states") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val first = fixture.persistedSession("First")
             val second = fixture.persistedSession("Overflow")
-            val summary = summarizeOpenSessions(
+            val standalone = object : AgentTabViewModel by second {}
+            val summary = summarizeOpenAgents(
                 listOf(
                     SessionTabRenderState(
                         target = first,
@@ -23,7 +25,7 @@ val terminalTitleTest by testSuite {
                         running = true,
                     ),
                     SessionTabRenderState(
-                        target = second,
+                        target = standalone,
                         selected = false,
                         sessionName = "Overflow",
                     ),
@@ -31,27 +33,27 @@ val terminalTitleTest by testSuite {
             )
 
             assertEquals(
-                OpenSessionSummary(sessionCount = 2, runningSessionCount = 1),
+                OpenAgentSummary(agentCount = 2, runningAgentCount = 1),
                 summary,
             )
-            assertEquals(OpenSessionSummary(0, 0), summarizeOpenSessions(emptyList()))
+            assertEquals(OpenAgentSummary(0, 0), summarizeOpenAgents(emptyList()))
         } finally {
             fixture.close()
         }
     }
 
     test("titleUsesTheFixedCountFormatAndOscZero") {
-        assertEquals("1 sessions (1 running)", terminalTitleText(sessionCount = 1, runningCount = 1))
+        assertEquals("1 agent (1 running)", terminalTitleText(agentCount = 1, runningCount = 1))
         assertEquals(
-            "\u001B]0;2 sessions (1 running)\u0007",
-            terminalTitleControlSequence("2 sessions (1 running)"),
+            "\u001B]0;2 agents (1 running)\u0007",
+            terminalTitleControlSequence("2 agents (1 running)"),
         )
         assertEquals("\u001B]0;\u0007", terminalTitleControlSequence(""))
     }
 
     test("effectWritesOnlyChangedCountsAndExplicitCleanupClears") {
         val writes = mutableListOf<String>()
-        var sessionCount by mutableStateOf(2)
+        var agentCount by mutableStateOf(2)
         var runningCount by mutableStateOf(1)
         var revision by mutableStateOf(0)
 
@@ -59,7 +61,7 @@ val terminalTitleTest by testSuite {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 TerminalTitleEffect(
-                    sessionCount = sessionCount,
+                    agentCount = agentCount,
                     runningCount = runningCount,
                     write = { sequence -> writes += sequence },
                 )
@@ -67,7 +69,7 @@ val terminalTitleTest by testSuite {
             }
             }
             assertEquals(
-                listOf("\u001B]0;2 sessions (1 running)\u0007"),
+                listOf("\u001B]0;2 agents (1 running)\u0007"),
                 writes,
             )
 
@@ -79,8 +81,8 @@ val terminalTitleTest by testSuite {
             awaitSnapshot()
             assertEquals(
                 listOf(
-                    "\u001B]0;2 sessions (1 running)\u0007",
-                    "\u001B]0;2 sessions (2 running)\u0007",
+                    "\u001B]0;2 agents (1 running)\u0007",
+                    "\u001B]0;2 agents (2 running)\u0007",
                 ),
                 writes,
             )

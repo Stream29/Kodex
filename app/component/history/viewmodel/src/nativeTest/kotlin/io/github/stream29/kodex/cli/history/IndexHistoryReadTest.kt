@@ -33,7 +33,7 @@ val indexHistoryReadTest by testSuite {
                 if (position == 1 || position % 7 == 0) storage.commit(historyUser("$position"))
                 else storage.commit(historyWork(index))
             } else {
-                storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(0))
+                storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), Instant.fromEpochSeconds(0))
             }
         }
         val expected = storage.readAllHistory(2_100).items

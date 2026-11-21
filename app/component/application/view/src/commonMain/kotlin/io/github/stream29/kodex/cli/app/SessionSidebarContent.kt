@@ -4,10 +4,14 @@ import androidx.compose.runtime.*
 import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.app.application.contract.TerminalOutputItem
 import io.github.stream29.kodex.app.application.contract.TerminalOutputPhase
+import io.github.stream29.kodex.app.application.contract.TerminalOutputReader
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.cli.historyindex.HistoryIndexSide
-import io.github.stream29.kodex.tool.unifiedexec.commandIntentDisplayName
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
 
 internal fun sidebarContentLabel(content: SidebarContent): String = when (content) {
@@ -73,20 +77,41 @@ private fun ongoingShellSessions(agent: AgentViewModel?): List<AgentShellSession
     }
 }
 
-/** Host filters selected-child matching requests and owns shared Shell/Index popup priority/grace. */
 @Composable
 public actual fun SidebarShellHoverContent(
-    interaction: SidebarShellInteraction?, renderer: SidebarShellRenderer,
+    interaction: SidebarShellInteraction?, registry: AgentShellSessionRegistry, renderer: SidebarShellRenderer,
     onHoverChanged: (Boolean) -> Unit, onDismiss: () -> Unit,
 ) {
     val current = interaction ?: return
     if (!current.isPlaced || !renderer.canShowHover) return
-    val completed = current.session.completed.collectAsState().value
+    val session = current.session
+    val completed = session.completed.collectAsState().value
     LaunchedEffect(current, completed) { if (completed) onDismiss() }
     if (completed) return
-    var visible by remember(current) { mutableStateOf(false) }
-    LaunchedEffect(current) { delay(300.milliseconds); visible = true }
-    if (visible) renderer.ShellHover(current, current.session.terminalIntentTitle(), current.session.arguments.command, onHoverChanged)
+    var visible by remember(current, registry) { mutableStateOf(false) }
+    LaunchedEffect(current, registry) { delay(300.milliseconds); visible = true }
+    if (!visible) return
+
+    val reader = remember(current, registry) { TerminalOutputReader(session, registry) }
+    LaunchedEffect(reader) {
+        // The inspector drains after exit; a hover instead cancels even a suspended read.
+        coroutineScope {
+            val read = launch { if (!session.completed.value) reader.observe() }
+            val stopOnExit = launch(start = CoroutineStart.UNDISPATCHED) {
+                session.completed.first { it }
+                read.cancel()
+            }
+            try { read.join() } finally { stopOnExit.cancel() }
+        }
+    }
+    val preview = remember(current) {
+        val arguments = session.arguments
+        SidebarShellPreview(
+            session.terminalIntentTitle(), session.sessionId, arguments.workdir,
+            arguments.shell?.path?.toString(), arguments.command,
+        )
+    }
+    renderer.ShellHover(current, preview, reader.state, onHoverChanged)
 }
 
 @Composable
@@ -101,14 +126,13 @@ public actual fun SidebarShellMenuContent(
     if (completed) return
     fun canUseMenu(): Boolean = canAct() && current.interaction.isPlaced && !session.completed.value
     renderer.ShellMenu(
-        current, "Close session", onDismiss,
+        current, session.sessionId, "Close session", onDismiss,
         onClose = { if (canUseMenu()) { onDismiss(); session.close() } },
         onViewOutput = onViewOutput?.let { open -> { if (canUseMenu()) open() } },
     )
 }
 
-public actual fun AgentShellSession.terminalIntentTitle(): String =
-    arguments.name.commandIntentDisplayName().ifEmpty { "Terminal #$sessionId" }
+public actual fun AgentShellSession.terminalIntentTitle(): String = arguments.name
 
 public actual fun terminalOutputItemLabel(item: TerminalOutputItem): String = when (item) {
     is TerminalOutputItem.Text -> item.text

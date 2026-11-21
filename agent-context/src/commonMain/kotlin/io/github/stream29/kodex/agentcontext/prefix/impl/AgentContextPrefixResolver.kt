@@ -32,7 +32,7 @@ public actual class AgentContextPrefixResolver actual constructor(
             shell = context.shell,
             agentMd = agentsMd.instructions,
             availableSkills = skills.skills,
-            sessionMeta = AgentSessionMeta(uri = uri, name = settings.threadName),
+            sessionMeta = AgentSessionMeta(uri = uri, name = settings.name),
             requestUserInputMode = settings.requestUserInputMode,
         )
     }

@@ -45,7 +45,7 @@ public actual class RpcFrontendFixture internal constructor(
     public actual suspend fun create(name: String): PersistedSessionViewModel {
         val session = sessions.open(services.global.createSession(root))
         session.rename(name)
-        session.settings.first { it.threadName == name }
+        session.settings.first { it.name == name }
         return session
     }
 
@@ -59,7 +59,7 @@ public actual class RpcFrontendFixture internal constructor(
 }
 
 public actual fun testSettings(name: String, cwd: Path): KodexAgentSettings =
-    KodexAgentSettings(model = OpenAiModelId("test-model"), cwd = cwd, threadName = name)
+    KodexAgentSettings(model = OpenAiModelId("test-model"), cwd = cwd, name = name)
 
 public actual suspend fun startRpcFrontendFixture(
     scope: CoroutineScope,
@@ -90,6 +90,7 @@ public actual suspend fun startRpcFrontendFixture(
                         )
                     },
                     createClient = { client }, createLoginClient = { TestLoginClient },
+                    requiresPreparedHome = true,
                 ) { backend ->
                     withInMemoryRpc(backend::register) { raw ->
                         val services = RpcServices(RestoringRpcClient(raw))

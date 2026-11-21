@@ -164,7 +164,7 @@ val inMemoryKodexAgentStorageTest by testSuite {
         storage.commit(settings("mid"), timestamp(1)) // 1
         storage.commit(listOf(userMessage("first"), workEvent("work"))) // 2
         storage.commit(UnstableSnapshot(listOf(pendingTool("call")))) // 3
-        storage.commit(LlmRequestMeta.Response(40L), timestamp(3)) // 4
+        storage.commit(LlmRequestMeta.Response(40L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), timestamp(3)) // 4
         storage.commit(settings("later")) // 5
 
         storage.revert(3)
@@ -182,7 +182,7 @@ val inMemoryKodexAgentStorageTest by testSuite {
         val storage = storage()
         val previousSettings = storage.getSettingsAt(0)
         val output = StableContextCompaction(encryptedContent = "encrypted")
-        storage.commit(LlmRequestMeta.Response(99L)) // 1
+        storage.commit(LlmRequestMeta.Response(99L, elapsedNanoseconds = 1_000_000L, outputTokens = 0)) // 1
 
         val compactionIndex = storage.appendCompaction(
             output = output,

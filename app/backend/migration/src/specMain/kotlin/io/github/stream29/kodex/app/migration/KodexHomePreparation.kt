@@ -15,22 +15,42 @@ import kotlinx.io.files.Path
 public expect val CurrentKodexApplicationVersion: MigrationVersion
 
 /**
+ * Checks whether [home] is eligible for preparation without creating files,
+ * acquiring leases, or opening SQLite. Accepts a fresh Home, a recognizable
+ * interrupted initialization from this build version, or a supported ready
+ * marker. A published database must carry the current Home generation signature
+ * in its SQLite header. Use [prepareKodexHome] to validate the current schema
+ * under a lease; this probe alone does not authorize opening Home data.
+ *
+ * @throws KodexHomeVersionException If the Home is incompatible or cannot be
+ * validated by this probe. The error explains how to keep the existing Home
+ * intact and select a different empty Home.
+ */
+public expect suspend fun preflightKodexHome(
+    home: Path,
+    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+): Unit
+
+/**
  * Prepares [home] for this application and returns a [KodexHomeHandle] owned by
  * this scope.
  *
- * Preparation validates the persisted version and, for an unversioned Home,
- * validates its existing Session layout before registering the supported
- * baseline. It applies only migrations in the existing registry whose targets
- * are newer than the stored version and no newer than
- * [CurrentKodexApplicationVersion]. A stored version newer than this
- * application, an invalid version, or an invalid unversioned layout is
- * rejected. The generated application version is not written as a checkpoint
- * unless it is itself a migration target; an already-versioned Home with no
- * applicable migrations retains its version without a rewrite or Session
- * layout scan.
+ * Preparation first performs [preflightKodexHome], then rechecks under
+ * each acquired lease. An absent marker is eligible for initialization only
+ * when the Home contains no data and at most recognized startup infrastructure.
+ * A fresh Home publishes an initializing marker, creates and atomically
+ * publishes the current SQLite database, then publishes its ready marker at
+ * [CurrentKodexApplicationVersion]. If interrupted after SQLite publication,
+ * recovery validates that database and its emptiness without recreating it.
+ * Already-ready Homes apply only same-generation migration targets newer than
+ * their checkpoint and no newer than the running application. With no
+ * applicable migrations they retain their checkpoint without rewriting it.
+ * The ready schema must be valid before a handle is returned. If there are
+ * applicable migrations, their actions own validation of their compatible
+ * inputs; the latest schema is required once the last action completes.
  *
- * Preparation first obtains a shared read lease. If initialization or a
- * migration is needed, it releases that lease, obtains an exclusive write
+ * After preflight, preparation obtains a shared read lease. If initialization
+ * or migration is needed, it releases that lease, obtains an exclusive write
  * lease, and reacquires a shared read lease before returning. The returned
  * handle retains that shared lease. Its lifetime is bound to this scope's
  * owner [kotlinx.coroutines.Job]: owner cancellation releases the lease, and
@@ -46,23 +66,21 @@ public expect val CurrentKodexApplicationVersion: MigrationVersion
  * suppressed on the primary failure. A failure cleaning up a temporary lease
  * after otherwise successful preparation is reported.
  *
- * A validated unversioned baseline and each completed migration target are
- * recorded as checkpoints. A failed migration does not advance its checkpoint,
- * so preparation can resume from the last completed target.
+ * Each completed migration target is recorded in an atomic checkpoint. A
+ * failed migration does not advance its checkpoint, so preparation can resume
+ * from the last completed target.
  *
  * @param home Home directory to validate and prepare; it need not be the
  * default user Home.
- * @param fileSystem Filesystem used for Home reads, writes and leases.
+ * @param fileSystem Filesystem used for Home reads, writes and leases. The
+ * SQLite database path must also be accessible to the local SQLite driver.
  * @param onMigrationStarted Callback invoked before each applicable migration
  * action, with its source and target versions.
  * @return A handle retaining a shared read lease for the prepared Home.
- * @throws KodexHomeVersionException If `version.json` is non-regular,
- * unreadable, malformed or non-canonical; if the stored version is newer than
- * this application's version; or if the final prepared version is missing or
- * still requires migration.
- * @throws KodexHomeLayoutException If baseline validation rejects the Session
- * root, visible Session entries, required timelines or latest pointers of an
- * unversioned Home.
+ * @throws KodexHomeVersionException If the persisted generation, version,
+ * database, or initialization state is incompatible or corrupt.
+ * @throws KodexHomeLayoutException If an unprepared Home contains entries
+ * disallowed during initialization.
  * @throws KodexHomeInUseException If initialization or a migration cannot
  * acquire exclusive access because another instance holds a conflicting Home
  * lease.

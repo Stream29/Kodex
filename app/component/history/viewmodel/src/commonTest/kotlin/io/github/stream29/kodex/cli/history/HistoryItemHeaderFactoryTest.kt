@@ -3,10 +3,14 @@ package io.github.stream29.kodex.cli.history
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwait
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAwaitEventResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecution
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomTool
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatch
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
@@ -22,6 +26,9 @@ import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.ResponseItem
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventOutput
 import io.github.stream29.kodex.tool.readmedia.MediaDetail
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolArguments
 import io.github.stream29.kodex.tool.readmedia.ReadMediaToolOutput
@@ -39,6 +46,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Instant
 
 val historyItemHeaderFactoryTest by testSuite {
     test("readMediaHeaderUsesBoundedPathAndMapsFailureStatus") {
@@ -90,7 +98,7 @@ val historyItemHeaderFactoryTest by testSuite {
             action = StableCommandExecutionAction.ExecCommand(
                 ExecCommandArguments(
                     command = "printf first\n" + "x".repeat(300),
-                    name = "  读取\n测试日志 🧪  ",
+                    name = "读取 测试日志 🧪",
                     yieldTimeMillis = 10_000,
                 ),
             ),
@@ -113,15 +121,31 @@ val historyItemHeaderFactoryTest by testSuite {
         assertEquals("读取 测试日志 🧪", action.intentName)
         assertFalse("printf" in header.toString())
         assertFalse("large output" in header.toString())
-        val unnamed = event.copy(action = StableCommandExecutionAction.ExecCommand(
-            ExecCommandArguments(command = "do not use this as the title", yieldTimeMillis = 100),
-        )).toHistoryHeader(12.milliseconds)
-        assertEquals(CommandExecutionHistoryAction.Run(""), assertIs<ToolHistoryItemHeader.CommandExecution>(unnamed).action)
         assertEquals(
             CommandExecutionHistoryResult.Output(exitCode = 0, sessionId = 7),
             header.result,
         )
         assertEquals(12.milliseconds, header.elapsed)
+    }
+
+    test("await headers keep the recorded name for both outcomes and a generic title for invalid calls") {
+        val elapsed = 12.milliseconds
+        val arguments = AwaitEventArguments(events = listOf(AwaitEventInput.UserMessage), name = "等待用户回复 🧪")
+        for ((result, status) in listOf(
+            StableAwaitEventResult.Output(AwaitEventOutput(Instant.fromEpochMilliseconds(0))) to "completed",
+            StableAwaitEventResult.Failure("fixture failure") to "failed",
+        )) {
+            val event = StableAwait("await", arguments = arguments, result = result)
+            assertEquals(ToolHistoryItemHeader.Summary(arguments.name, status, elapsed), event.toHistoryHeader(elapsed))
+        }
+        for ((tool, title) in listOf("await_event" to "Wait for events", "exec_command" to "Run a command")) {
+            val event = StableInvalidToolCall(
+                "invalid",
+                invocation = InvalidToolInvocation.Function(tool, arguments = "{BROKEN"),
+                message = "fixture validation error",
+            )
+            assertEquals(ToolHistoryItemHeader.Summary(title, "failed", elapsed), event.toHistoryHeader(elapsed))
+        }
     }
 
     test("materialized command disclosure does not read storage when projected or toggled") {
@@ -144,7 +168,7 @@ val historyItemHeaderFactoryTest by testSuite {
                 AgentHistorySource(storage, MutableStateFlow(6), MutableStateFlow(KodexAgentStateValue.ToolCompleted)),
                 this,
             ) { true }
-            for (name in listOf(null, "Inspect fixture output")) {
+            for (name in listOf("Run a command", "Inspect fixture output")) {
                 val event = StableCommandExecution(
                     callId = "command",
                     action = StableCommandExecutionAction.ExecCommand(
@@ -159,7 +183,7 @@ val historyItemHeaderFactoryTest by testSuite {
                 )
                 val collapsed = assertIs<ToolHistoryItemState.Collapsed>(item.state.value)
                 assertEquals(
-                    CommandExecutionHistoryAction.Run(name.orEmpty()),
+                    CommandExecutionHistoryAction.Run(name),
                     assertIs<ToolHistoryItemHeader.CommandExecution>(collapsed.header).action,
                 )
                 item.expand()

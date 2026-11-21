@@ -25,7 +25,7 @@ import kotlin.test.assertTrue
 val sessionCatalogContextMenuTest by testSuite {
     test("secondaryClickOpensArchiveMenuAndRoutesArchive") {
         val result = selectSessionCatalogMenu(
-            entry = SessionCatalogEntry(sessionIndex = 4, threadName = "Active"),
+            entry = SessionCatalogEntry(sessionIndex = 4, name = "Active"),
             moveDown = false,
         ) {
             sendMouseEvent(MouseEvent(4, 0, MouseEvent.Type.Press, MouseEvent.Button.Right))
@@ -42,7 +42,7 @@ val sessionCatalogContextMenuTest by testSuite {
         val result = selectSessionCatalogMenu(
             entry = SessionCatalogEntry(
                 sessionIndex = 5,
-                threadName = "Archived",
+                name = "Archived",
                 archived = true,
             ),
             moveDown = false,
@@ -63,7 +63,7 @@ val sessionCatalogContextMenuTest by testSuite {
 
     test("menuKeyRoutesDeleteThroughContextMenu") {
         val result = selectSessionCatalogMenu(
-            entry = SessionCatalogEntry(sessionIndex = 6, threadName = "Delete target"),
+            entry = SessionCatalogEntry(sessionIndex = 6, name = "Delete target"),
             moveDown = true,
         ) {
             sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Menu))
@@ -110,10 +110,6 @@ private suspend fun selectSessionCatalogMenu(
                         updatedAt = "2026-09-08 10:02:03 UTC+08:00",
                         clickPosition = menuClickPosition,
                         onDismissRequest = { menuAnchor = null },
-                        onFork = {
-                            menuAnchor = null
-                            selection = "fork"
-                        },
                         onArchive = {
                             menuAnchor = null
                             selection = "archive"

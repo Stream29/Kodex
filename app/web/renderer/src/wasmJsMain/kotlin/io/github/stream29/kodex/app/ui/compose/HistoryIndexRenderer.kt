@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.app.ui.compose
 
-import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -9,26 +8,21 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.nestedscroll.*
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexWindow
 import io.github.stream29.kodex.cli.historyindex.*
 import kotlinx.coroutines.launch
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
-import kotlin.coroutines.cancellation.CancellationException
-import kotlin.time.Instant
 
 @Composable
 internal fun rememberComposeHistoryIndexRenderer(
@@ -41,15 +35,13 @@ internal fun rememberComposeHistoryIndexRenderer(
     return remember(scope) { ComposeHistoryIndexRenderer(hover, menu, RowMenuFocusRestoration(scope)) }
 }
 
-private interface ComposeIndexPlacement : HistoryIndexInteraction, ComposeSidebarPopupPlacement
-
 private class ComposeIndexRowOrigin(
     override val target: HistoryIndexTarget,
     side: HistoryIndexSide,
     fallback: FocusRequester?,
     private val hover: State<(HistoryIndexInteraction, Boolean) -> Unit>,
     private val menu: State<(HistoryIndexMenuOpening) -> Unit>,
-) : ComposeSidebarRowOrigin(side == HistoryIndexSide.Left, fallback), ComposeIndexPlacement, HistoryIndexRowInteraction {
+) : ComposeSidebarRowOrigin(side == HistoryIndexSide.Left, fallback), HistoryIndexRowInteraction {
     override fun emitHover(hovered: Boolean) { hover.value(this, hovered) }
     override fun emitMenu() {
         if (isPlaced && target.isCurrent()) menu.value(HistoryIndexMenuOpening(ComposeIndexMenuOrigin(this, openingPoint)))
@@ -58,7 +50,7 @@ private class ComposeIndexRowOrigin(
 
 private class ComposeIndexMenuOrigin(
     private val row: ComposeIndexRowOrigin, override val point: Offset?,
-) : ComposeIndexPlacement {
+) : HistoryIndexInteraction, ComposeSidebarMenuPlacement {
     override val target: HistoryIndexTarget get() = row.target
     override val preferAfter: Boolean get() = row.preferAfter
     override val bounds: Rect? get() = row.bounds
@@ -125,7 +117,10 @@ private class ComposeHistoryIndexRenderer(
         onHoverChanged: (Boolean) -> Unit, onOpenMenu: () -> Unit, onEnterChild: (() -> Unit)?,
     ) {
         val origin = interaction as ComposeIndexRowOrigin
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().onGloballyPositioned { origin.hoverBounds = it.boundsInWindow() },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Box(Modifier.weight(1f)) {
                 SidebarPopupRow(
                     origin = origin,
@@ -149,68 +144,61 @@ private class ComposeHistoryIndexRenderer(
     }
 
     @Composable override fun Hover(
-        interaction: HistoryIndexInteraction, presentation: HistoryIndexDetailPresentation, onHoverChanged: (Boolean) -> Unit,
+        interaction: HistoryIndexInteraction, presentation: HistoryIndexDetailPresentation, timestamp: String?,
+        onHoverChanged: (Boolean) -> Unit,
     ) {
-        SidebarHoverPopup(interaction as ComposeIndexPlacement, presentation.title, onHoverChanged) {
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                HistoryIndexDetailBody(presentation, LocalTextStyle.current)
+        val scroll = key(interaction) { rememberScrollState() }
+        SidebarHoverPopup(interaction as ComposeIndexRowOrigin, presentation.title, onHoverChanged) {
+            HistoryIndexMetadata(interaction.target.index, timestamp)
+            Column(Modifier.weight(1f, fill = false).verticalScroll(scroll)) {
+                HistoryIndexDetailBody(presentation)
             }
         }
     }
 
     @Composable override fun Menu(
-        opening: HistoryIndexMenuOpening, timestamp: Instant?, detail: HistoryIndexDetailPresentation?,
-        onDismiss: () -> Unit, onCheckOut: () -> Unit,
+        opening: HistoryIndexMenuOpening, timestamp: String?, actions: List<HistoryIndexMenuAction>, onDismiss: () -> Unit,
     ) {
-        val origin = opening.interaction as ComposeIndexPlacement
-        val scroll = remember(opening) { ScrollState(0) }
-        var viewport by remember(opening) { mutableIntStateOf(1) }
-        val formatted = timestamp?.let {
-            try {
-                it.toLocalDateTime(TimeZone.currentSystemDefault()).toString()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Throwable) {
-                null
-            }
-        }
+        val origin = opening.interaction as ComposeSidebarMenuPlacement
+        val target = opening.interaction.target
+        val goTo = actions.first()
         SidebarMenuPopup(
             opening = opening,
             origin = origin,
             restoration = restoration,
             isOriginValid = {
-                origin.isPlaced && origin.target.isCurrent() && origin.target.viewModel.window.value.revision == origin.target.revision
+                origin.isPlaced && target.isCurrent() && target.viewModel.window.value.revision == target.revision
             },
-            columnModifier = Modifier.onPreviewKeyEvent {
-                if (it.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                val direction = when (it.key) {
-                    Key.PageUp -> -1
-                    Key.PageDown -> 1
-                    else -> return@onPreviewKeyEvent false
-                }
-                scroll.dispatchRawDelta((direction * viewport).toFloat())
-                true
-            },
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            actionLabel = "Check out",
+            actionLabel = goTo.label,
             onDismiss = onDismiss,
-            onAction = { onDismiss(); onCheckOut() },
-        ) {
-            Text("Index: ${origin.target.index}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-            formatted?.let { Text("Timestamp: $it", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
-            Column(Modifier.weight(1f, fill = false).onSizeChanged { viewport = it.height.coerceAtLeast(1) }.verticalScroll(scroll)) {
-                if (detail == null) Text("Loading history entry…", style = MaterialTheme.typography.bodySmall)
-                else {
-                    Text(detail.title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
-                    HistoryIndexDetailBody(detail, MaterialTheme.typography.bodyLarge)
+            onAction = goTo.onClick,
+            afterAction = {
+                actions.drop(1).forEach { action ->
+                    key(action.key) {
+                        CompactTextButton(onClick = action.onClick, modifier = Modifier.fillMaxWidth()) {
+                            Text(action.label, Modifier.weight(1f))
+                        }
+                    }
                 }
-            }
+            },
+        ) {
+            HistoryIndexMetadata(target.index, timestamp)
         }
     }
 }
 
 @Composable
-private fun HistoryIndexDetailBody(detail: HistoryIndexDetailPresentation, contentStyle: TextStyle) {
+private fun HistoryIndexMetadata(index: Int, timestamp: String?) {
+    val style = MaterialTheme.typography.bodySmall
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Column {
+        Text("Index: $index", style = style, color = color)
+        if (timestamp != null) Text("Timestamp: $timestamp", style = style, color = color)
+    }
+}
+
+@Composable
+private fun HistoryIndexDetailBody(detail: HistoryIndexDetailPresentation) {
     val questions = detail.questionRows
     val plan = detail.plan
     when {
@@ -219,7 +207,7 @@ private fun HistoryIndexDetailBody(detail: HistoryIndexDetailPresentation, conte
             questions.forEach { renderer.Row(it) }
         }
         plan != null -> ComposeHistoryPlanBody(plan)
-        else -> SelectionContainer { Text(detail.content, style = contentStyle) }
+        else -> SelectionContainer { Text(detail.content) }
     }
 }
 

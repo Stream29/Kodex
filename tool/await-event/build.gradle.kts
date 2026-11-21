@@ -12,6 +12,7 @@ kotlin {
             dependencies {
                 api(libs.kotlinx.serialization.core)
                 implementation(libs.kotlinx.serialization.json)
+                implementation(project(":tool-intent-name"))
                 api(project(":openai-models"))
                 api(libs.kotlinx.schema.json)
             }

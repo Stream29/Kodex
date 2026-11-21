@@ -57,7 +57,7 @@ val historyIndexViewModelTest by testSuite {
     test("completion is independently locatable in the parent index without making other Work a boundary") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("fixture")))
         val entered = storage.commit(StableSubagentCreatedEvent(90, "Reviewer", "inspect the output"))
-        storage.commit(StableTerminalExitedEvent(18, "Run fixture", command = "./fixture", exitCode = 0))
+        storage.commit(StableTerminalExitedEvent(18, name = "Run index fixture", command = "./fixture", exitCode = 0))
         val completed = storage.commit(StableSubagentCompletedEvent(90))
         val scrolled = mutableListOf<Int>()
         val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
@@ -83,7 +83,7 @@ val historyIndexViewModelTest by testSuite {
         }
     }
 
-    test("only exact Message timestamps are exposed and replacement invalidates requests") {
+    test("exact entry timestamps replace missing values after invalidation") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test")))
         val time = kotlin.time.Instant.parse("2026-09-08T01:02:03Z")
         storage.commit(StableUserMessage(listOf(ContentItem.InputText("message"))), kotlin.time.Instant.DISTANT_PAST)
@@ -94,7 +94,8 @@ val historyIndexViewModelTest by testSuite {
         val model = storageIndex(storage, latest, state, scope)
         try {
             val initialWindow = model.awaitIndexes(listOf(1, 2))
-            assertNull(assertNotNull(initialWindow.entryAtOrNull(1)).messageTimestamp)
+            assertNull(assertNotNull(initialWindow.entryAtOrNull(1)).timestamp)
+            assertNull(assertNotNull(initialWindow.entryAtOrNull(2)).timestamp)
             state.value = KodexAgentStateValue.ExternalWrite
             storage.revert(1)
             storage.commit(
@@ -111,12 +112,31 @@ val historyIndexViewModelTest by testSuite {
                     model.window.first { it.revision > initialWindow.revision }
                 }
             }
-            assertEquals(time + 1.seconds, assertNotNull(refreshed.entryAtOrNull(1)).messageTimestamp)
-            assertNull(assertNotNull(refreshed.entryAtOrNull(2)).messageTimestamp)
+            assertEquals(time + 1.seconds, assertNotNull(refreshed.entryAtOrNull(1)).timestamp)
+            assertEquals(time + 2.seconds, assertNotNull(refreshed.entryAtOrNull(2)).timestamp)
             storage.revert(1)
             latest.value = 0
             model.awaitIndexes(emptyList())
             assertFalse(model.contains(refreshed.generation, 1))
+        } finally {
+            scope.cancelAndJoin()
+        }
+    }
+
+    test("an Index user message with an image does not offer editable text") {
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test")))
+        storage.commit(StableUserMessage(listOf(ContentItem.InputText("  line\n"), ContentItem.OutputText(" next "))))
+        storage.commit(StableUserMessage(listOf(ContentItem.InputText("caption"), ContentItem.InputImage("https://example.invalid/image"))))
+        val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        try {
+            val model = storageIndex(
+                storage, MutableStateFlow(2), MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty), scope,
+            )
+            val window = model.awaitIndexes(listOf(1, 2))
+            assertEquals("  line\n next ", window.entryAtOrNull(1)?.editableUserText)
+            val image = assertNotNull(window.entryAtOrNull(2))
+            assertEquals("caption[image]", image.summary)
+            assertNull(image.editableUserText)
         } finally {
             scope.cancelAndJoin()
         }
@@ -141,13 +161,13 @@ val historyIndexViewModelTest by testSuite {
             try {
                 assertEquals(emptyList(), viewModel.awaitIndexes(emptyList()).indexes)
 
-                storage.commit(LlmRequestMeta.Response(0L), kotlin.time.Instant.DISTANT_PAST)
+                storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), kotlin.time.Instant.DISTANT_PAST)
                 storage.commit(
                     StableUserMessage(
                         content = listOf(ContentItem.InputText("question\nwith   spaces")),
                     ),
                 )
-                storage.commit(StableTerminalExitedEvent(37, "Run fixture", command = "./fixture", exitCode = 0))
+                storage.commit(StableTerminalExitedEvent(37, name = "Run pagination fixture", command = "./fixture", exitCode = 0))
                 latestIndex.value = 3
                 val firstWindow = viewModel.awaitIndexes(listOf(2))
                 assertNull(firstWindow.entryAtOrNull(3))
@@ -155,8 +175,9 @@ val historyIndexViewModelTest by testSuite {
                     "question with spaces",
                     assertNotNull(firstWindow.entryAtOrNull(2)).summary,
                 )
+                assertEquals("question\nwith   spaces", firstWindow.entryAtOrNull(2)?.editableUserText)
 
-                storage.commit(LlmRequestMeta.Response(0L), kotlin.time.Instant.DISTANT_PAST)
+                storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), kotlin.time.Instant.DISTANT_PAST)
                 storage.commit(
                     StableAssistantMessage(
                         content = listOf(ContentItem.OutputText("answer")),
@@ -173,6 +194,7 @@ val historyIndexViewModelTest by testSuite {
                     HistoryIndexEntryKind.AssistantFinal,
                     assertNotNull(appended.entryAtOrNull(5)).kind,
                 )
+                assertNull(appended.entryAtOrNull(5)?.editableUserText)
 
                 storage.revert(4)
                 latestIndex.value = 3
@@ -187,7 +209,7 @@ val historyIndexViewModelTest by testSuite {
                         content = listOf(ContentItem.InputText("rewritten")),
                     ),
                 )
-                storage.commit(LlmRequestMeta.Response(0L), kotlin.time.Instant.DISTANT_PAST)
+                storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), kotlin.time.Instant.DISTANT_PAST)
                 cacheNonce.value = 13L
                 val refreshed = viewModel.awaitGenerationAtLeast(13)
                 assertEquals(

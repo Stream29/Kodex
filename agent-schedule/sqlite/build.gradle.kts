@@ -15,6 +15,7 @@ kotlin {
             }
         }
         commonTest.dependencies {
+            implementation(project(":agent-storage-sqlite"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

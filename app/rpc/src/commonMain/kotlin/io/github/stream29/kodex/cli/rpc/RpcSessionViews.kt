@@ -6,6 +6,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettin
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.session.contract.AgentParentAnchor
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
@@ -59,24 +60,26 @@ public actual class RpcSessionViews actual constructor(
     private val localScope = CoroutineScope(scope.coroutineContext + owner)
     private val mutex = Mutex()
     private val views = mutableMapOf<Int, RpcSessionView>()
+    private val standalone = mutableMapOf<Int, RpcAgentTab>()
     private var closed = false
 
-    actual override suspend fun open(sessionIndex: Int): RpcSessionView {
+    actual override suspend fun open(sessionIndex: Int): RpcSessionView =
+        openRoot(sessionIndex, expectedAgentId = null, unarchive = true)
+
+    internal suspend fun openCatalogEntry(sessionIndex: Int, rootAgentId: Int): RpcSessionView =
+        openRoot(sessionIndex, expectedAgentId = rootAgentId, unarchive = true)
+
+    private suspend fun openRoot(sessionIndex: Int, expectedAgentId: Int?, unarchive: Boolean): RpcSessionView {
         val (view, alreadyReady) = mutex.withLock {
             check(!closed)
             owner.ensureActive()
             val current = views.getOrPut(sessionIndex) {
-                RpcSessionView(sessionIndex, services, localScope, models, reportUnhandledError, connectionAvailable)
+                RpcSessionView(sessionIndex, models, newTab(sessionIndex, expectedAgentId, unarchive))
             }
             current to current.isInitiallyReady
         }
-        if (alreadyReady) {
-            services.global.unarchiveSession(sessionIndex)
-            return view
-        }
         try {
             view.awaitReady()
-            return view
         } catch (error: Throwable) {
             // A terminal failure before the first Ready result must not poison future opens.
             // A cancelled caller alone is not grounds to discard a still-initializing shared view.
@@ -94,6 +97,53 @@ public actual class RpcSessionViews actual constructor(
                 }
             }
             throw error
+        }
+        if (expectedAgentId != null) check(view.agentId == expectedAgentId) { "The original Session no longer exists." }
+        // A direct Agent open may have created a root handle without unarchiving it.
+        if (unarchive && (alreadyReady || !view.tab.unarchivesOnFirstOpen)) services.global.unarchiveSession(sessionIndex)
+        return view
+    }
+
+    override suspend fun openAgent(agentId: Int): AgentTabViewModel {
+        mutex.withLock {
+            check(!closed)
+            owner.ensureActive()
+            views.values.firstOrNull { it.tab.resolvedAgentId == agentId }
+        }?.let { it.awaitReady(); return it }
+        // Existing read-only catalog supplies root capability. Child ids are never
+        // inferred from a Session number, and no extra delegation lookup is needed.
+        val root = services.global.getSessionCatalog(includeArchived = true).firstOrNull { it.rootAgentId == agentId }
+        if (root != null) return openRoot(root.sessionIndex, expectedAgentId = agentId, unarchive = false)
+        val tab = mutex.withLock {
+            check(!closed)
+            owner.ensureActive()
+            standalone.getOrPut(agentId) { newTab(null, agentId, false) }
+        }
+        try {
+            tab.awaitReady()
+            return tab
+        } catch (error: Throwable) {
+            if (tab.status.value is SessionViewStatus.Missing || tab.status.value is SessionViewStatus.Failed) {
+                withContext(NonCancellable) { releaseAgent(tab) }
+            }
+            throw error
+        }
+    }
+
+    private fun newTab(sessionIndex: Int?, agentId: Int?, unarchive: Boolean) =
+        RpcAgentTab(sessionIndex, agentId, unarchive, services, localScope, models, reportUnhandledError, connectionAvailable)
+
+    override suspend fun releaseAgent(target: AgentTabViewModel) {
+        when (target) {
+            is RpcSessionView -> release(target)
+            is RpcAgentTab -> {
+                mutex.withLock {
+                    if (standalone[target.agentId] === target) standalone.remove(target.agentId)
+                    target.close()
+                }
+                target.join()
+            }
+            else -> error("Unknown Agent page.")
         }
     }
 
@@ -113,7 +163,6 @@ public actual class RpcSessionViews actual constructor(
 
     actual override suspend fun archive(sessionIndex: Int): Unit = services.global.archiveSession(sessionIndex)
     actual override suspend fun unarchive(sessionIndex: Int): Unit = services.global.unarchiveSession(sessionIndex)
-    actual override suspend fun fork(sessionIndex: Int): Int = services.global.forkSession(sessionIndex)
     actual override suspend fun delete(sessionIndex: Int): Boolean =
         services.global.deleteSession(sessionIndex).also { if (it) release(sessionIndex) }
 
@@ -121,9 +170,10 @@ public actual class RpcSessionViews actual constructor(
         currentCoroutineContext().ensureActive()
         val snapshot = mutex.withLock {
             closed = true
-            views.values.toList().also {
+            (views.values.map { it.tab } + standalone.values).also {
                 views.clear()
-                it.forEach(RpcSessionView::close)
+                standalone.clear()
+                it.forEach(RpcAgentTab::close)
             }
         }
         close()
@@ -137,19 +187,18 @@ public actual class RpcSessionViews actual constructor(
     public actual suspend fun reactivate(replacement: RpcServices, isConnected: () -> Boolean): Unit {
         val targets = mutex.withLock {
             owner.ensureActive()
-            views.values.filter { it.status.value != SessionViewStatus.Closed }
-                .toList()
+            (views.values.map { it.tab } + standalone.values).mapNotNull { tab ->
+                tab.binding.value?.takeIf { tab.isInitiallyReady }?.let { tab to it }
+            }
         }
-        targets.forEach { view ->
-            view.recoveryBindings().forEach nextBinding@{ binding ->
-                if (!view.isOpenBinding(binding)) return@nextBinding
-                try { replacement.runtime.keepAgentAlive(binding.agentId) }
-                catch (failure: Throwable) {
-                    currentCoroutineContext().ensureActive()
-                    if (!isConnected()) throw failure
-                    // A business failure belongs to that exact binding, not another tab or Agent.
-                    binding.failRecovery(failure)
-                }
+        targets.forEach { (view, binding) ->
+            if (!view.isOpenBinding(binding)) return@forEach
+            try { replacement.runtime.keepAgentAlive(binding.agentId) }
+            catch (failure: Throwable) {
+                currentCoroutineContext().ensureActive()
+                if (!isConnected()) throw failure
+                // A business failure belongs to that exact binding, not another tab or Agent.
+                binding.failRecovery(failure)
             }
         }
     }
@@ -158,44 +207,44 @@ public actual class RpcSessionViews actual constructor(
     public actual suspend fun join(): Unit = owner.join()
 }
 
-public actual class RpcSessionView internal actual constructor(
-    actual override val sessionIndex: Int,
+/** Exactly one Agent binding lifecycle. Only a root tab has Session management capability. */
+internal class RpcAgentTab(
+    private val sessionIndex: Int?,
+    expectedAgentId: Int?,
+    val unarchivesOnFirstOpen: Boolean,
     private val services: RpcServices,
     scope: CoroutineScope,
-    actual override val models: StateFlow<List<ModelInfo>>,
+    private val models: StateFlow<List<ModelInfo>>,
     private val reportUnhandledError: (Throwable) -> Unit,
     private val connectionAvailable: () -> Boolean,
-) : PersistedSessionViewModel {
+) : AgentTabViewModel {
     private val owner = SupervisorJob(scope.coroutineContext[Job])
     private val localScope = CoroutineScope(scope.coroutineContext + owner)
     private val initial = CompletableDeferred<Unit>()
     private val mutableBinding = MutableStateFlow<RpcSessionBinding?>(null)
     private val mutableStatus = MutableStateFlow<SessionViewStatus>(SessionViewStatus.Loading)
-    public actual val binding: StateFlow<RpcSessionBinding?> = mutableBinding.asStateFlow()
-    public actual val status: StateFlow<SessionViewStatus> = mutableStatus.asStateFlow()
+    val binding: StateFlow<RpcSessionBinding?> = mutableBinding.asStateFlow()
+    val status: StateFlow<SessionViewStatus> = mutableStatus.asStateFlow()
     private val mutableAgent = MutableStateFlow<AgentViewModel?>(null)
-    /** Sole binding-owned Agent; recovery replaces it rather than wrapping the previous owner. */
-    actual override val rootAgent: StateFlow<AgentViewModel?> = mutableAgent.asStateFlow()
-    private val mutableSelected = MutableStateFlow<AgentViewModel?>(null)
-    override val selectedAgent: StateFlow<AgentViewModel?> = mutableSelected.asStateFlow()
-    private val path = MutableStateFlow<List<OpenedChild>>(emptyList())
-    private val pathMutex = Mutex()
-    private val enterMutex = Mutex()
-    private var pathRevision = 0L
+    override val agent: StateFlow<AgentViewModel?> = mutableAgent.asStateFlow()
+    private val identity = MutableStateFlow(expectedAgentId)
+    val resolvedAgentId: Int? get() = identity.value
+    override val agentId: Int get() = checkNotNull(resolvedAgentId)
     // Last-known read cache: recovery can withdraw the Agent/binding before publishing
     // the replacement. It must not blank the tab name or become a writable second truth.
     private val mutableSettings = MutableStateFlow(KodexAgentSettings(model = OpenAiModelId("placeholder")))
-    actual override val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()
-    actual override val name: StateFlow<String> = settings.projectState { it.threadName }
-    actual override val lifecycle: StateFlow<PersistedSessionLifecycleState> = status.projectState(::lifecycleStatus)
+    val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()
+    override val name: StateFlow<String> = settings.projectState {
+        it.name.ifBlank { resolvedAgentId?.let { id -> "Agent #$id" } ?: "Session #$sessionIndex" }
+    }
+    override val lifecycle: StateFlow<PersistedSessionLifecycleState> =
+        status.projectState { lifecycleStatus(it, isRoot = sessionIndex != null) }
 
     init {
         owner.invokeOnCompletion {
             mutableBinding.value = null
             mutableAgent.value?.close()
             mutableAgent.value = null
-            mutableSelected.value = null
-            path.value = emptyList()
             mutableStatus.value = SessionViewStatus.Closed
             initial.cancel()
         }
@@ -206,19 +255,17 @@ public actual class RpcSessionView internal actual constructor(
                 mutableBinding.value = null
                 mutableAgent.value?.close()
                 mutableAgent.value = null
-                mutableSelected.value = null
                 if (!owner.isActive) mutableStatus.value = SessionViewStatus.Closed
                 initial.cancel()
             }
         }
     }
 
-    internal val isInitiallyReady: Boolean get() = initial.isCompleted && owner.isActive
+    val isInitiallyReady: Boolean get() = initial.isCompleted && !initial.isCancelled && owner.isActive
 
-    internal suspend fun awaitReady() { initial.await(); owner.ensureActive() }
+    suspend fun awaitReady() { initial.await(); owner.ensureActive() }
 
     private suspend fun coordinate() {
-        var boundAgentId: Int? = null
         while (true) {
             currentCoroutineContext().ensureActive()
             mutableStatus.value = SessionViewStatus.Loading
@@ -232,13 +279,16 @@ public actual class RpcSessionView internal actual constructor(
             var failure: Throwable? = null
             try {
                 val next = withContext(bindingScope.coroutineContext) {
-                    val agentId = services.global.getRootAgentId(sessionIndex)
-                    if (boundAgentId != null && boundAgentId != agentId) {
-                        throw IllegalStateException("The original Session no longer exists.")
-                    }
-                    boundAgentId = agentId
+                    val agentId = if (sessionIndex != null) {
+                        services.global.getRootAgentId(sessionIndex).also { root ->
+                            check(resolvedAgentId == null || resolvedAgentId == root) { "The original Session no longer exists." }
+                            identity.value = root
+                        }
+                    } else this@RpcAgentTab.agentId
                     openBinding(agentId, bindingScope, failed) {
-                        if (!initial.isCompleted) services.global.unarchiveSession(sessionIndex)
+                        if (sessionIndex != null && unarchivesOnFirstOpen && !initial.isCompleted) {
+                            services.global.unarchiveSession(sessionIndex)
+                        }
                     }
                 }
                 owner.ensureActive()
@@ -254,12 +304,9 @@ public actual class RpcSessionView internal actual constructor(
                     models,
                     reportUnhandledError,
                 )
-                pathMutex.withLock {
-                    owner.ensureActive()
-                    mutableAgent.value = nextAgent
-                    mutableStatus.value = SessionViewStatus.Ready
-                    publishSelection()
-                }
+                owner.ensureActive()
+                mutableAgent.value = nextAgent
+                mutableStatus.value = SessionViewStatus.Ready
                 initial.complete(Unit)
                 failure = failed.await()
             } catch (error: Throwable) {
@@ -267,12 +314,9 @@ public actual class RpcSessionView internal actual constructor(
                 failure = if (failed.isCompleted) failed.await() else error
             } finally {
                 withContext(NonCancellable) {
-                    pathMutex.withLock {
-                        mutableBinding.value = null
-                        mutableAgent.value?.close()
-                        mutableAgent.value = null
-                        publishSelection()
-                    }
+                    mutableBinding.value = null
+                    mutableAgent.value?.close()
+                    mutableAgent.value = null
                     bindingJob.cancelAndJoin()
                 }
             }
@@ -283,13 +327,11 @@ public actual class RpcSessionView internal actual constructor(
                     do { delay(50) } while (!connectionAvailable())
                 }
                 is AgentNotFound, is SessionNotFound -> {
-                    closeChildren()
                     mutableStatus.value = SessionViewStatus.Missing
                     initial.completeExceptionally(reason)
                     awaitCancellation()
                 }
                 else -> {
-                    closeChildren()
                     mutableStatus.value = SessionViewStatus.Failed(reason)
                     initial.completeExceptionally(reason)
                     awaitCancellation()
@@ -320,197 +362,79 @@ public actual class RpcSessionView internal actual constructor(
         return RpcSessionBinding.create(sessionIndex, services, scope, agentId = agentId) { failed.complete(it) }
     }
 
-    private fun publishSelection() {
-        val root = mutableAgent.value
-        val last = path.value.lastOrNull()
-        mutableSelected.value = if (root == null || last == null) root else last.agent.value
-    }
-
-    private suspend fun closeChildren() {
-        pathMutex.withLock {
-            val children = path.value
-            path.value = emptyList()
-            pathRevision++
-            children.forEach { it.owner.cancel() }
-            publishSelection()
-        }
-    }
-
-    internal fun recoveryBindings(): List<RpcSessionBinding> =
-        listOfNotNull(binding.value) + path.value.mapNotNull { it.agent.value?.binding }
-
-    internal fun isOpenBinding(target: RpcSessionBinding): Boolean =
-        owner.isActive && (binding.value === target || path.value.any { it.agent.value?.binding === target })
-
-    override suspend fun enterChild(
-        source: AgentViewModel, index: Int, generation: Long, revision: Long, childAgentId: Int,
-        isTabSelected: () -> Boolean,
-    ): Unit = enterMutex.withLock enter@{
-        // Capture the projected event and recheck after both remote activation and binding reads.
-        fun sourceIsCurrent(): Boolean {
-            if (!owner.isActive || !isTabSelected() || selectedAgent.value !== source) return false
-            val indexView = source.historyIndex
-            val window = indexView.window.value
-            return window.revision == revision && indexView.contains(generation, index) &&
-                window.entryAtOrNull(index)?.createdChildAgentId == childAgentId
-        }
-        val root = pathMutex.withLock checkPath@{
-            if (!sourceIsCurrent()) return@checkPath null
-            val active = current()
-            check(active.agentId != childAgentId && path.value.none { it.id == childAgentId })
-            active
-        } ?: return@enter
-        suspend fun checkRoot() {
-            check(services.global.getRootAgentId(sessionIndex) == root.agentId) { "The original Session no longer exists." }
-        }
-        checkRoot()
-        if (!sourceIsCurrent() || binding.value !== root) return@enter
-        val child = OpenedChild(childAgentId)
-        var attached = false
-        try {
-            child.ready.await()
-            checkRoot()
-            pathMutex.withLock attach@{
-                currentCoroutineContext().ensureActive()
-                if (!sourceIsCurrent() || binding.value !== root || child.agent.value == null) return@attach
-                child.owner.ensureActive()
-                path.value += child
-                pathRevision++
-                attached = true
-                publishSelection()
-            }
-        } finally {
-            if (!attached) child.owner.cancel()
-        }
-    }
+    fun isOpenBinding(target: RpcSessionBinding): Boolean = owner.isActive && binding.value === target
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    override fun hasCompletionAnchor(source: AgentViewModel): Flow<Boolean> = flow {
-        val opened = path.value
-        val child = opened.lastOrNull()
-        if (child == null || child.agent.value !== source) {
+    override fun observeCompletionAnchor(childAgentId: Int): Flow<Boolean> =
+        binding.flatMapLatest { captured -> flow {
             emit(false)
-            return@flow
-        }
-        val parent = if (opened.size == 1) rootAgent else opened[opened.lastIndex - 1].agent
-        emitAll(parent.flatMapLatest { agent ->
-            flow bindingFlow@{
-                emit(false)
-                val binding = (agent as? RpcAgentViewModel)?.binding ?: return@bindingFlow
-                emitAll(binding.storage.observeSubagentCompletionAnchor(child.id) {
-                    child.agent.value === source && parent.value === agent && isOpenBinding(binding)
-                })
+            if (captured != null) {
+                emitAll(captured.storage.observeSubagentCompletionAnchor(childAgentId) { isOpenBinding(captured) })
             }
-        })
-    }
+        } }
 
-    override suspend fun returnToParent(
-        source: AgentViewModel, anchor: AgentParentAnchor, isTabSelected: () -> Boolean,
+    override suspend fun locateChildEvent(
+        source: AgentViewModel, childAgentId: Int, anchor: AgentParentAnchor, isCurrent: () -> Boolean,
     ) {
-        val (child, parent, revision) = pathMutex.withLock {
-            if (!owner.isActive || !isTabSelected() || selectedAgent.value !== source) return
-            val child = path.value.lastOrNull() ?: return
-            val parent = (if (path.value.size == 1) mutableAgent.value else path.value[path.value.lastIndex - 1].agent.value)
-                as? RpcAgentViewModel
-            path.value = path.value.dropLast(1)
-            pathRevision++
-            child.owner.cancel() // Local observers only; no Stop or archive.
-            publishSelection()
-            Triple(child, parent, pathRevision)
-        }
-        if (parent == null) return
-        val parentBinding = parent.binding
+        val captured = (source as? RpcAgentViewModel)?.binding ?: return
+        fun stillCurrent() = isCurrent() && isOpenBinding(captured) && agent.value === source
+        if (!stillCurrent()) return
         val type = when (anchor) {
             AgentParentAnchor.Creation -> AgentCommitType.EventSubagentCreated
             AgentParentAnchor.Completion -> AgentCommitType.EventSubagentCompleted
         }
-        val found = parentBinding.findSubagentReturnAnchor(child.id, type) as? SubagentReturnAnchorResult.Found ?: return
-        pathMutex.withLock {
-            currentCoroutineContext().ensureActive()
-            if (owner.isActive && isTabSelected() && selectedAgent.value === parent && pathRevision == revision &&
-                parentBinding.storage.cacheNonce.value == found.cacheNonce
-            ) {
-                parentBinding.ensureActive()
-                parent.history.requestScrollToStorageIndex(found.index)
-            }
+        val found = findSubagentReturnAnchor(captured.storage, childAgentId, type, isBound = ::stillCurrent)
+            as? SubagentReturnAnchorResult.Found ?: return
+        currentCoroutineContext().ensureActive()
+        if (stillCurrent() && captured.storage.cacheNonce.value == found.cacheNonce) {
+            source.history.requestScrollToAnchor(found.index, found.cacheNonce, ::stillCurrent)
         }
     }
 
-    private inner class OpenedChild(val id: Int) {
-        val owner = SupervisorJob(this@RpcSessionView.owner)
-        val ready = CompletableDeferred<Unit>(owner)
-        val agent = MutableStateFlow<RpcAgentViewModel?>(null)
-
-        init {
-            CoroutineScope(localScope.coroutineContext + owner).launch {
-                var initialized = false
-                while (true) {
-                    val failed = CompletableDeferred<Throwable>()
-                    val job = Job(owner)
-                    val handler = CoroutineExceptionHandler { _, error -> failed.complete(error) }
-                    val scope = CoroutineScope(localScope.coroutineContext + job + handler)
-                    job.invokeOnCompletion { cause -> if (cause != null) failed.complete(cause) }
-                    val reason = try {
-                        val binding = withContext(scope.coroutineContext) { openBinding(id, scope, failed) }
-                        val next = createRpcAgentViewModel(binding, scope, models, reportUnhandledError)
-                        pathMutex.withLock {
-                            owner.ensureActive()
-                            job.ensureActive()
-                            agent.value = next
-                            publishSelection()
-                            initialized = true
-                            ready.complete(Unit)
-                        }
-                        failed.await().remoteReason()
-                    } catch (failure: Throwable) {
-                        currentCoroutineContext().ensureActive()
-                        (if (failed.isCompleted) failed.await() else failure).remoteReason()
-                    } finally {
-                        withContext(NonCancellable) {
-                            pathMutex.withLock {
-                                agent.value?.close()
-                                agent.value = null
-                                publishSelection()
-                            }
-                            job.cancelAndJoin()
-                        }
-                    }
-                    if (initialized) when (reason) {
-                        is AgentNotActive, is SessionNotActive -> { delay(50); continue }
-                        is BackendConnectionLost -> {
-                            do { delay(50) } while (!connectionAvailable())
-                            continue
-                        }
-                    }
-                    if (!initialized) ready.completeExceptionally(reason)
-                    else {
-                        pathMutex.withLock {
-                            val at = path.value.indexOfFirst { it === this@OpenedChild }
-                            if (at >= 0) {
-                                val removed = path.value.drop(at)
-                                path.value = path.value.take(at)
-                                pathRevision++
-                                publishSelection()
-                                removed.forEach { it.owner.cancel() }
-                            }
-                        }
-                        reportUnhandledError(reason)
-                    }
-                    owner.cancel()
-                    return@launch
-                }
-            }
-        }
-    }
-
-    public actual fun current(): RpcSessionBinding {
+    fun current(): RpcSessionBinding {
         owner.ensureActive()
-        check(status.value == SessionViewStatus.Ready) { "Session view is not ready: ${status.value}" }
+        check(status.value == SessionViewStatus.Ready) { "Agent view is not ready: ${status.value}" }
         return requireNotNull(binding.value).also { it.ensureActive() }
     }
 
+    suspend fun requireOriginalRoot() {
+        if (sessionIndex == null) return
+        val captured = current()
+        check(services.global.getRootAgentId(sessionIndex) == captured.agentId) { "The original Session no longer exists." }
+        captured.ensureActive()
+    }
+
+    override fun close() {
+        owner.cancel()
+        mutableStatus.value = SessionViewStatus.Closed
+        mutableBinding.value = null
+        mutableAgent.value?.close()
+        mutableAgent.value = null
+    }
+
+    suspend fun join(): Unit = owner.join()
+}
+
+public actual class RpcSessionView internal constructor(
+    actual override val sessionIndex: Int,
+    actual override val models: StateFlow<List<ModelInfo>>,
+    internal val tab: RpcAgentTab,
+) : PersistedSessionViewModel, AgentTabViewModel by tab {
+    public actual val binding: StateFlow<RpcSessionBinding?> = tab.binding
+    public actual val status: StateFlow<SessionViewStatus> = tab.status
+    actual override val rootAgent: StateFlow<AgentViewModel?> = tab.agent
+    actual override val settings: StateFlow<KodexAgentSettings> = tab.settings
+    actual override val name: StateFlow<String> = tab.name
+    actual override val lifecycle: StateFlow<PersistedSessionLifecycleState> = tab.lifecycle
+    override val agent: StateFlow<AgentViewModel?> get() = rootAgent
+    override val agentId: Int get() = tab.agentId
+    override suspend fun requireOriginalRoot(): Unit = tab.requireOriginalRoot()
+
+    internal val isInitiallyReady: Boolean get() = tab.isInitiallyReady
+    internal suspend fun awaitReady(): Unit = tab.awaitReady()
+    public actual fun current(): RpcSessionBinding = tab.current()
+
     private fun currentAgent(): AgentViewModel {
-        owner.ensureActive()
         val activeBinding = current()
         return requireNotNull(rootAgent.value).also { check(it.settings === activeBinding.settings) }
     }
@@ -518,19 +442,7 @@ public actual class RpcSessionView internal actual constructor(
     actual override suspend fun readCreatedAt(): Instant? = current().readCreatedAt()
     actual override suspend fun readUpdatedAt(): Instant? = current().readUpdatedAt()
 
-    actual override suspend fun fork(
-        source: AgentViewModel,
-        untilExclusive: Int,
-        expectedGeneration: Long,
-    ): Int {
-        owner.ensureActive()
-        val activeBinding = current()
-        val capturedAgent = requireNotNull(rootAgent.value).also { check(it.settings === activeBinding.settings) }
-        require(source === capturedAgent) { "The history target expired." }
-        return activeBinding.forkHistory(untilExclusive, expectedGeneration)
-    }
-
-    actual override suspend fun rename(name: String): Unit = currentAgent().renameThread(name.trim())
+    actual override suspend fun rename(name: String): Unit = currentAgent().rename(name.trim())
     actual override suspend fun updateModel(model: OpenAiModelId): Unit = currentAgent().updateModel(model)
     actual override suspend fun updateWorkingDirectory(workingDirectory: Path): Unit =
         currentAgent().updateWorkingDirectory(workingDirectory)
@@ -551,24 +463,17 @@ public actual class RpcSessionView internal actual constructor(
         join()
     }
 
-    actual override fun close() {
-        mutableStatus.value = SessionViewStatus.Closed
-        mutableBinding.value = null
-        mutableAgent.value?.close()
-        mutableAgent.value = null
-        mutableSelected.value = null
-        owner.cancel()
-    }
+    actual override fun close(): Unit = tab.close()
 
-    public actual suspend fun join(): Unit = owner.join()
+    public actual suspend fun join(): Unit = tab.join()
 }
 
-private fun lifecycleStatus(status: SessionViewStatus): PersistedSessionLifecycleState =
+private fun lifecycleStatus(status: SessionViewStatus, isRoot: Boolean): PersistedSessionLifecycleState =
     when (status) {
         SessionViewStatus.Loading -> PersistedSessionLifecycleState.Loading
         SessionViewStatus.Ready -> PersistedSessionLifecycleState.Open
-        SessionViewStatus.Missing -> PersistedSessionLifecycleState.Failed("Session no longer exists.")
-        is SessionViewStatus.Failed -> PersistedSessionLifecycleState.Failed(status.cause.message ?: "Session view failed.")
+        SessionViewStatus.Missing -> PersistedSessionLifecycleState.Failed(if (isRoot) "Session no longer exists." else "Agent no longer exists.")
+        is SessionViewStatus.Failed -> PersistedSessionLifecycleState.Failed(status.cause.message ?: "Agent view failed.")
         SessionViewStatus.Closed -> PersistedSessionLifecycleState.Closed
     }
 

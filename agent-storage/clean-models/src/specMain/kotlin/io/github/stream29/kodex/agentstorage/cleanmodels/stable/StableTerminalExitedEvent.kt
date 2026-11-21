@@ -3,6 +3,7 @@ package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.ResponseItem
+import io.github.stream29.kodex.tool.intentname.isValidIntentName
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -18,19 +19,22 @@ import kotlinx.serialization.Serializable
 public data class StableTerminalExitedEvent(
     @SerialName("session_id")
     public val sessionId: Int,
-    /** The registered intent name; empty only if the stored event never had a name. */
+    /** The registered intent name, preserved as nonblank, single-line text. */
     public val name: String,
     public val command: String,
     @SerialName("exit_code")
     public val exitCode: Int,
 ) : WorkCommit, AgentCommit.Steerable {
+    init {
+        require(name.isValidIntentName()) { "`name` must be nonblank, single-line text." }
+    }
+
     public fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> {
-        val label = if (name.isNotBlank()) "terminal #$sessionId ($name)" else "terminal #$sessionId"
         return listOf(
             ResponseItem.Message(
                 role = MessageRole.User,
                 content = listOf(
-                    ContentItem.InputText("$label exited with code $exitCode: $command"),
+                    ContentItem.InputText("terminal #$sessionId ($name) exited with code $exitCode: $command"),
                 ),
             ),
         )

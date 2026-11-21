@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.app.webbackendfixture
 
+import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.backend.BackendInstance
 import io.github.stream29.kodex.backend.randomBackendPassword
@@ -46,29 +47,39 @@ public actual fun productMain(): Unit = runBlocking {
     }
     val terminalCheck = environmentVariable("KODEX_CHECK_TERMINAL_INSPECTOR") == "1"
     val navigationCheck = environmentVariable("KODEX_CHECK_SUBAGENT_NAVIGATION") == "1"
+    val sidebarHistoryCheck = environmentVariable("KODEX_CHECK_SIDEBAR_HISTORY_INDEX") == "1"
+    val historyCheck = environmentVariable("KODEX_CHECK_HISTORY") == "1"
+    val capabilityCheck = environmentVariable("KODEX_CHECK_CAPABILITIES") == "1"
+    require(!sidebarHistoryCheck || !terminalCheck && !navigationCheck && !historyCheck && !capabilityCheck &&
+        environmentVariable("KODEX_BROWSER_FIXTURE_CLI_HOME") != "1")
     val navigation = if (navigationCheck) SubagentNavigationFixture(temporaryDirectory) else null
     val intentScenario = environmentVariable("KODEX_CHECK_COMMAND_INTENT")
-    require(intentScenario == null || terminalCheck && intentScenario in setOf("watch", "no-watch", "legacy"))
+    require(intentScenario == null || terminalCheck && intentScenario in setOf("watch", "no-watch", "reopen"))
     SystemCoroutineFileSystem.createDirectories(home, mustCreate = true)
-    SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"0.4.15\"")
+    try {
+        prepareKodexHome(home).closeAndJoin()
+    } catch (failure: Throwable) {
+        withContext(NonCancellable) { deleteTestDirectory(home) }
+        throw failure
+    }
     val frontendSettings = if (terminalCheck) {
-        "frontend:\n  new_line_key: shift_enter\n  sidebars:\n    left: terminal_sessions\n    right: none\n"
-    } else if (navigationCheck) {
-        "frontend:\n  new_line_key: shift_enter\n  sidebars:\n    left: history_index\n    right: none\n"
+        "frontend:\n  new_line_key: shift_enter\n  sidebars:\n    active_left: null\n    active_right: terminal_sessions\n"
+    } else if (navigationCheck || sidebarHistoryCheck) {
+        "frontend:\n  new_line_key: shift_enter\n  sidebars:\n    active_left: null\n    active_right: history_index\n"
     } else "frontend: {}\n"
     SystemCoroutineFileSystem.writeString(Path(home, "settings.yml"),
         "backend:\n  daemon_ttl_seconds: $idleTtl\n  new_session:\n    model: test-model\n  session_title:\n    enabled: false\n$frontendSettings")
-    val historyCheck = environmentVariable("KODEX_CHECK_HISTORY") == "1"
-    require(!navigationCheck || !terminalCheck && !historyCheck && environmentVariable("KODEX_CHECK_CAPABILITIES") != "1")
+    require(!navigationCheck || !terminalCheck && !historyCheck && !capabilityCheck)
     val terminal = if (terminalCheck) {
-        check(!historyCheck && environmentVariable("KODEX_CHECK_CAPABILITIES") != "1")
+        check(!historyCheck && !capabilityCheck)
         check(SystemFileSystem.exists(Path(temporaryDirectory, "emit-terminal-inspector")))
         TerminalInspectorFixture(temporaryDirectory, intentScenario)
     } else null
     if (historyCheck) seedHistoryProductFixture(home)
-    if (intentScenario == "legacy") seedCommandIntentLegacyProductFixture(home)
+    if (intentScenario == "reopen") seedCommandIntentReopenFixture(home)
     val capabilities = try {
-        if (!historyCheck && environmentVariable("KODEX_CHECK_CAPABILITIES") == "1") {
+        if (sidebarHistoryCheck) seedSidebarHistoryIndexFixture(home)
+        if (!historyCheck && capabilityCheck) {
             prepareCapabilityProductFixture(home)
         } else null
     } catch (failure: Throwable) {

@@ -5,6 +5,7 @@ import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.*
 import io.github.stream29.kodex.app.session.contract.AgentParentAnchor
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
@@ -19,14 +20,10 @@ public actual fun collectApplicationFrame(viewModel: ApplicationViewModel): Appl
         val navigation = viewModel.navigation.collectAsState().value
         val tabs = collectApplicationTabBar(navigation)
         val popup = viewModel.popup.collectAsState().value
-        val selected = navigation.selectedSession
-        val surface = selected?.let { key(ApplicationChildKey(it)) {
-            val selectedAgent = it.selectedAgent
-            val agent = if (selectedAgent === it.rootAgent) tabs.tabs.firstOrNull { tab -> tab.target === it }?.agent
-                else selectedAgent.collectAsState().value
-            agent to it.lifecycle.collectAsState().value
-        } }
-        RootFrame(navigation, popup, tabs, surface?.first, surface?.second)
+        val selected = navigation.selectedTab
+        val agent = tabs.tabs.firstOrNull { it.target === selected }?.agent
+        val lifecycle = selected?.let { key(ApplicationChildKey(it)) { it.lifecycle.collectAsState().value } }
+        RootFrame(navigation, popup, tabs, agent, lifecycle)
     }
 
 private class RootFrame(
@@ -41,71 +38,83 @@ private class RootFrame(
 public actual fun ApplicationPersistedSurfaceContent(
     frame: ApplicationFrame, agent: @Composable (AgentViewModel) -> Unit, status: @Composable (String) -> Unit,
 ) {
-    val selected = frame.navigation.selectedSession ?: return
+    val selected = frame.navigation.selectedTab ?: return
     key(ApplicationChildKey(selected)) {
         val child = frame.selectedAgent
         if (child != null) key(ApplicationChildKey(child)) { agent(child) }
         else status(when (val lifecycle = frame.selectedLifecycle) {
             is PersistedSessionLifecycleState.Failed -> lifecycle.detail
-            PersistedSessionLifecycleState.Closed -> "Session view closed."
-            else -> "Loading Session…"
+            PersistedSessionLifecycleState.Closed -> "Agent view closed."
+            else -> "Loading Agent…"
         })
     }
 }
 
 @Composable
 public actual fun rememberAgentPageActionTarget(
-    session: PersistedSessionViewModel, agent: AgentViewModel,
+    tab: AgentTabViewModel, agent: AgentViewModel,
 ): AgentPageActionTarget {
-    val mounted = remember(ApplicationChildKey(session), ApplicationChildKey(agent)) { mutableStateOf(false) }
+    val mounted = remember(ApplicationChildKey(tab), ApplicationChildKey(agent)) { mutableStateOf(false) }
     DisposableEffect(mounted) {
         mounted.value = true
         onDispose { mounted.value = false }
     }
-    return remember(mounted) { AgentPageActionTarget(session, agent) { mounted.value && session.selectedAgent.value === agent } }
+    return remember(mounted) { AgentPageActionTarget(tab, agent) { mounted.value && tab.agent.value === agent } }
 }
 
 @Composable
 public actual fun rememberApplicationIndexNavigation(
     viewModel: ApplicationViewModel, frame: ApplicationFrame, onOperationFailure: (Throwable) -> Unit,
 ): HistoryIndexNavigation? {
-    val session = frame.navigation.selectedSession ?: return null
-    val agent = frame.selectedAgent ?: return null
-    val isChild = frame.tabs.tabs.firstOrNull { it.target === session }?.agent !== agent
-    val completion = if (isChild) key(ApplicationChildKey(session), ApplicationChildKey(agent)) {
-        val anchor = remember(session, agent) { session.hasCompletionAnchor(agent) }
-        anchor.collectAsState(initial = false)
-    } else null
     val scope = rememberCoroutineScope()
+    val tab = frame.navigation.selectedTab ?: return null
+    val agent = frame.selectedAgent ?: return null
+    val parentId = frame.navigation.parentAgentIds[tab.agentId]
+    val parent = frame.tabs.tabs.firstOrNull { it.target.agentId == parentId }
+    val parentBinding = parent?.agent
+    val completion = if (parent != null && parentBinding != null) key(
+        ApplicationChildKey(parent.target), ApplicationChildKey(parentBinding),
+        ApplicationChildKey(tab), ApplicationChildKey(agent),
+    ) {
+        remember { parent.target.observeCompletionAnchor(tab.agentId) }.collectAsState(initial = false)
+    } else null
     val report = rememberUpdatedState(onOperationFailure)
-    return remember(viewModel, ApplicationChildKey(session), ApplicationChildKey(agent), isChild, completion) {
-        fun command(block: suspend (() -> Boolean) -> Unit) {
+    return remember(viewModel, ApplicationChildKey(tab), ApplicationChildKey(agent), parentId,
+        ApplicationChildKey(parent?.target), ApplicationChildKey(parentBinding), completion,
+    ) {
+        fun command(block: suspend (AgentPageActionTarget) -> Unit) {
             val selection = viewModel.navigation.value
-            if (selection.selectedSession !== session || session.selectedAgent.value !== agent) return
+            val source = AgentPageActionTarget(tab, agent) { viewModel.navigation.value === selection }
+            if (selection.selectedTab !== tab || tab.agent.value !== agent || !source.isCurrent()) return
             scope.launch {
-                val isTabSelected = { viewModel.navigation.value === selection }
-                try { block(isTabSelected) }
+                try { block(source) }
                 catch (cancelled: CancellationException) { throw cancelled }
-                catch (failure: Throwable) { if (isTabSelected()) report.value(failure) }
+                catch (failure: Throwable) { if (source.isCurrent()) report.value(failure) }
             }
         }
         HistoryIndexNavigation(
             agent.historyIndex,
             enterChild = { target, child ->
-                if (target.viewModel === agent.historyIndex) command { selected ->
-                    session.enterChild(agent, target.index, target.generation, target.revision, child, selected)
+                if (target.viewModel === agent.historyIndex) command { source ->
+                    viewModel.enterChild(source, target.index, target.generation, target.revision, child)
                 }
             },
-            returnToParent = if (isChild) { anchor ->
-                command { selected ->
+            returnToParent = if (parentId != null) { anchor ->
+                command { source ->
                     val type = when (anchor) {
                         HistoryIndexParentAnchor.Creation -> AgentParentAnchor.Creation
                         HistoryIndexParentAnchor.Completion -> AgentParentAnchor.Completion
                     }
-                    session.returnToParent(agent, type, selected)
+                    viewModel.returnToParent(source, type)
                 }
             } else null,
-            hasCompletionAnchor = { completion?.value == true },
+            hasCompletionAnchor = {
+                val selection = viewModel.navigation.value
+                completion?.value == true && selection.selectedTab === tab && tab.agent.value === agent &&
+                    selection.parentAgentIds[tab.agentId] == parentId &&
+                    parent != null && parent.target.agent.value === parentBinding &&
+                    selection.tabs.any { it === parent.target }
+            },
         )
     }
 }

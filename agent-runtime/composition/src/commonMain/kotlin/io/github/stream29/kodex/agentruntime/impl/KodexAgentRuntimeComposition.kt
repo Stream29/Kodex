@@ -342,10 +342,7 @@ private class AgentRuntimeImpl(
             awaits.flatMap { it.arguments.terminalIds }.distinct().mapNotNull { id ->
                 val session = activeSessions[id] ?: return@mapNotNull null
                 val code = session.exitCode.value ?: return@mapNotNull null
-                val name = checkNotNull(session.arguments.name?.takeIf(String::isNotBlank)) {
-                    "Registered terminal $id has no intent name."
-                }
-                StableTerminalExitedEvent(id, name, session.arguments.command, code)
+                StableTerminalExitedEvent(id, session.arguments.name, session.arguments.command, code)
             }
         }
         val exitedIds = exited.mapTo(mutableSetOf()) { it.sessionId }

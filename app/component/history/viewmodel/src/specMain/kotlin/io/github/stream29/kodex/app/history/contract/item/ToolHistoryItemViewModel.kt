@@ -100,7 +100,7 @@ public sealed interface ToolHistoryItemHeader {
 }
 
 public sealed interface CommandExecutionHistoryAction {
-    /** Single-line display name from this call only; empty for an unnamed historical call. */
+    /** Single-line intent name recorded by this call. */
     public data class Run(
         public val intentName: String,
     ) : CommandExecutionHistoryAction

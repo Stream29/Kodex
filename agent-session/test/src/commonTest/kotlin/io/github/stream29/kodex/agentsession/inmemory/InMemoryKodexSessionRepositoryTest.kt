@@ -8,10 +8,14 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getLlmRequestMetaAtOrNull
 import io.github.stream29.kodex.agentstorage.contract.getUnstableAtOrNull
@@ -45,13 +49,14 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotSame
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 private fun settings(name: String = ""): KodexAgentSettings =
-    KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = name)
+    KodexAgentSettings(model = OpenAiModelId("test-model"), name = name)
 
 private fun userMessage(): StableUserMessage =
     StableUserMessage(
@@ -63,7 +68,7 @@ private suspend fun KodexSessionRepository.createInitialized(
 ): Int {
     val index = create()
     open(index).runtime.modify { storage ->
-        storage.initialize(settings.copy(threadName = settings.threadName.ifEmpty { "Session $index" }))
+        storage.initialize(settings.copy(name = settings.name.ifEmpty { "Session $index" }))
     }
     return index
 }
@@ -74,6 +79,40 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
     } closeWith {
         cancelAndJoin()
     } asContextForEach {
+        test("sparse fork recovery follows the retained checkpoint across reopen and is discarded on revert") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val sourceId = repository.createInitialized(settings("source"))
+            val source = repository.open(sourceId)
+            val checkpoint = StableContextCompaction(encryptedContent = "compact")
+            val (old, packedAt) = source.runtime.modify {
+                val old = it.commit(StableAssistantMessage(listOf(ContentItem.OutputText("outside"))))
+                it.commit(UnstableSnapshot(emptyList()))
+                old to it.commit(checkpoint)
+            }
+            val fork = source.runtime.modify { checkNotNull(repository.createAgentFork(sourceId, source, null)) }
+            assertEquals("source", fork.boundarySettings.name)
+            val target = repository.open(fork.sessionId)
+            assertEquals(packedAt, target.storage.latestIndex())
+            assertNull(target.storage.getCommitExact(old))
+            assertEquals(checkpoint, target.storage.getCommitExact(packedAt, AgentCommitType.IndexTypes)?.commit)
+            assertEquals(emptyList(), target.storage.getUnstableAtOrNull(packedAt))
+            assertEquals(KodexAgentStateValue.AssistantMessage, target.runtime.state.value)
+            val initialTurn = target.storage.getSettingsAt(packedAt).turnId
+            val next = target.runtime.appendUserMessage(listOf(ContentItem.InputText("fork reply")))
+            assertEquals(packedAt + 1, next)
+            assertNotEquals(initialTurn, target.storage.getSettingsAt(next).turnId)
+            assertEquals(KodexAgentStateValue.UserMessage, target.runtime.state.value)
+            target.runtime.modify { it.revert(packedAt + 1) }
+            repository.closeSession(fork.sessionId)
+            val reopened = repository.open(fork.sessionId)
+            assertEquals(KodexAgentStateValue.AssistantMessage, reopened.runtime.state.value)
+            reopened.runtime.modify { it.revert(packedAt) }
+            assertEquals(KodexAgentStateValue.Empty, reopened.runtime.state.value)
+            assertEquals(0, reopened.storage.latestIndex())
+            assertEquals(KodexAgentStateValue.AssistantMessage, source.runtime.state.value)
+            assertNotNull(source.storage.getCommitExact(old))
+        }
+
         test("catalog samples residency and running without activating entries") {
             val entered = CompletableDeferred<Unit>()
             val client = mockOpenAiClient {
@@ -159,7 +198,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
 
             assertEquals(0, first)
             assertEquals(1, second)
-            assertEquals("Session 0", repository.open(first).storage.getSettingsAt(0).threadName)
+            assertEquals("Session 0", repository.open(first).storage.getSettingsAt(0).name)
             assertEquals(listOf(first, second), repository.list())
             assertEquals(
                 listOf(
@@ -167,7 +206,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
                     Triple(second, "Named", secondLastActivityAt),
                 ),
                 repository.listEntries().map { entry ->
-                    Triple(entry.entryIndex, entry.threadName, entry.lastActivityAt)
+                    Triple(entry.entryIndex, entry.name, entry.lastActivityAt)
                 },
             )
         }
@@ -184,7 +223,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             assertEquals(listOf(activeIndex), repository.listEntries(includeArchived = false).map { it.entryIndex })
             val allEntries = repository.listEntries(includeArchived = true)
             assertEquals(listOf(archivedIndex, activeIndex), allEntries.map { it.entryIndex })
-            assertEquals(listOf("archived", "active"), allEntries.map { it.threadName })
+            assertEquals(listOf("archived", "active"), allEntries.map { it.name })
             assertEquals(listOf(true, false), allEntries.map { it.archived })
             assertEquals(listOf(archivedIndex, activeIndex), repository.list())
 
@@ -246,12 +285,12 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             val target = repository.open(targetIndex)
             val latest = target.storage.latestIndex()
             target.runtime.updateSettings(
-                target.storage.getSettingsAt(latest).copy(threadName = "[fork] Source"),
+                target.storage.getSettingsAt(latest).copy(name = "[fork] Source"),
             )
 
             assertEquals(listOf(1), target.storage.getFirstCommitsIn(0..latest, AgentCommitType.IndexTypes).map { it.index })
             assertEquals(userMessage(), target.storage.getCommitAtOrBefore(1, AgentCommitType.IndexTypes)?.commit)
-            assertEquals("[fork] Source", target.storage.getSettingsAt(2).threadName)
+            assertEquals("[fork] Source", target.storage.getSettingsAt(2).name)
         }
 
         test("owns each runtime for the complete Agent session lifecycle") {
@@ -409,7 +448,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
                     assertFalse(first.coroutineContext[Job]?.isActive ?: true)
                     val reopened = repository.open(index)
                     assertNotSame(first, reopened)
-                    assertEquals("ttl-memory", reopened.storage.getSettingsAt(0).threadName)
+                    assertEquals("ttl-memory", reopened.storage.getSettingsAt(0).name)
                 } finally {
                     repository.cancelAndJoin()
                 }

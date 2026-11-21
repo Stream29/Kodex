@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.tool.awaitevent
 
+import io.github.stream29.kodex.tool.intentname.isValidIntentName
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -15,9 +16,11 @@ import kotlin.time.toDuration
 @Serializable
 public data class AwaitEventArguments(
     public val events: List<AwaitEventInput>,
+    public val name: String,
 ) {
     init {
         require(events.isNotEmpty()) { "await_event requires at least one event." }
+        require(name.isValidIntentName()) { "`name` must be nonblank, single-line text." }
     }
 
     public val terminalIds: Set<Int>
@@ -75,19 +78,25 @@ public sealed interface AwaitEventInput {
 /** Parses a new model call, not a historical record. Unknown fields and quoted integers are invalid. */
 public fun decodeAwaitEventArguments(input: String): AwaitEventArguments {
     val json = Json.parseToJsonElement(input)
-    val events = (json as? JsonObject)?.get("events") as? JsonArray
+    val fields = json as? JsonObject
+        ?: throw IllegalArgumentException("await_event requires an arguments object.")
+    val name = fields["name"] as? JsonPrimitive
+    require(name?.isString == true && name.content.isValidIntentName()) {
+        "`name` must be nonblank, single-line text."
+    }
+    val events = fields["events"] as? JsonArray
         ?: throw IllegalArgumentException("await_event requires an events array.")
     for (event in events) {
-        val fields = event as? JsonObject
+        val eventFields = event as? JsonObject
             ?: throw IllegalArgumentException("await_event events must be objects.")
-        val tag = fields["type"] as? JsonPrimitive
+        val tag = eventFields["type"] as? JsonPrimitive
         require(tag?.isString == true) { "await_event event type must be a string." }
         val integerField = when (tag.content) {
             "terminal_exited" -> "session_id"
             "timeout" -> "duration_ms"
             else -> continue
         }
-        val value = fields[integerField] as? JsonPrimitive
+        val value = eventFields[integerField] as? JsonPrimitive
         require(value != null && !value.isString && value.content.all { it in '0'..'9' }) {
             "await_event $integerField must be a positive JSON integer."
         }

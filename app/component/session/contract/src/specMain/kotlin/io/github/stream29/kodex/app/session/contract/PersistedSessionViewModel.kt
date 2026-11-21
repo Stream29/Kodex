@@ -3,8 +3,6 @@ package io.github.stream29.kodex.app.session.contract
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
 import kotlin.time.Instant
 
 /**
@@ -26,9 +24,9 @@ import kotlin.time.Instant
  * commands retain [AgentSettingsViewModel] admission and cancellation semantics.
  * Unmounting a renderer or selecting another tab does not close this handle.
  */
-public interface PersistedSessionViewModel : AgentSettingsViewModel, AutoCloseable {
+public interface PersistedSessionViewModel : AgentSettingsViewModel, AgentTabViewModel {
     /** Root/tab display name projected from this persisted Session's settings. */
-    public val name: StateFlow<String>
+    override val name: StateFlow<String>
 
     /**
      * Renames this captured Session, not the latest selected tab.
@@ -52,25 +50,13 @@ public interface PersistedSessionViewModel : AgentSettingsViewModel, AutoCloseab
     /** Borrowed child replaced on reactivation; null means no current renderable Agent. */
     public val rootAgent: StateFlow<AgentViewModel?>
 
-    /** The visible Agent in this tab; other open ancestors retain their local owners. */
-    public val selectedAgent: StateFlow<AgentViewModel?> get() = rootAgent
+    override val agent: StateFlow<AgentViewModel?> get() = rootAgent
 
-    /** Only a current creation row from [source] can open a direct child. */
-    public suspend fun enterChild(
-        source: AgentViewModel, index: Int, generation: Long, revision: Long, childAgentId: Int,
-        isTabSelected: () -> Boolean,
-    ): Unit = Unit
-
-    /** Whether this child's completion has a return target in its direct parent's history. */
-    public fun hasCompletionAnchor(source: AgentViewModel): Flow<Boolean> = flowOf(false)
-
-    /** Pops one local view, then optionally scrolls its parent to the child's event. */
-    public suspend fun returnToParent(
-        source: AgentViewModel, anchor: AgentParentAnchor, isTabSelected: () -> Boolean,
-    ): Unit = Unit
+    /** Rejects navigation from a cached root whose persisted Session now resolves to another Agent. */
+    public suspend fun requireOriginalRoot(): Unit = Unit
 
     /** Local loading/open/failure/closed rendering; independent of Agent running state. */
-    public val lifecycle: StateFlow<PersistedSessionLifecycleState>
+    override val lifecycle: StateFlow<PersistedSessionLifecycleState>
 
     /**
      * Reads the first stored timestamp in index order on each menu opening.
@@ -89,28 +75,6 @@ public interface PersistedSessionViewModel : AgentSettingsViewModel, AutoCloseab
      * @throws kotlinx.coroutines.CancellationException if caller waiting or owner is cancelled.
      */
     public suspend fun readUpdatedAt(): Instant?
-
-    /**
-     * Forks the exact current [source] before [untilExclusive] into a new
-     * persisted root Session and returns its index.
-     *
-     * The boundary preserves initialization and need not correspond to a materialized row.
-     * A foreign child handle, stale generation, invalid boundary, or running source fails without
-     * modifying this Session. Forking does not change application navigation or
-     * open the returned Session. Local admission captures the current binding;
-     * the backend retains its cache/generation/running checks.
-     *
-     * @throws IllegalArgumentException if source is not this handle's current exact Agent.
-     * @throws IllegalStateException if the current binding/Agent is not ready.
-     * @throws Exception if generation/boundary/running admission, storage, or transport fails.
-     * @throws kotlinx.coroutines.CancellationException if caller waiting or owner is cancelled;
-     * accepted backend work is not undone.
-     */
-    public suspend fun fork(
-        source: AgentViewModel,
-        untilExclusive: Int,
-        expectedGeneration: Long,
-    ): Int
 
     /**
      * Closes the owning RPC view first, then the local projection owner, and

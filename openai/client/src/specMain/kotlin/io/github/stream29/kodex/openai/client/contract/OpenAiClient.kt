@@ -116,6 +116,8 @@ public interface OpenAiClient : AutoCloseable {
      *
      * A retryable stream failure may end the flow without a terminal event;
      * consumers must not infer success merely from flow completion.
+     * A caller that needs transport observations can collect [withReadObservations]
+     * instead of collecting the protocol events directly.
      *
      * @param model OpenAI model identifier.
      * @param input Ordered Responses input items.

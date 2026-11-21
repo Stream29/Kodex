@@ -106,7 +106,7 @@ val offscreenHistoryToolsTest by testSuite {
                 val pollOutput = "POLL_UNCHANGED_" + "long output ".repeat(18)
                 val run = StableCommandExecution(
                     "recorded-exec", action = StableCommandExecutionAction.ExecCommand(ExecCommandArguments(
-                        "fixture-command", yieldTimeMillis = 1000,
+                        "fixture-command", name = "Read recorded output", yieldTimeMillis = 1000,
                     )), result = StableCommandExecutionResult.Output(UnifiedExecOutput(
                         "private-exec-chunk", 0.5, exitCode = exitCode, originalTokenCount = 7, output = output,
                     )),
@@ -126,9 +126,9 @@ val offscreenHistoryToolsTest by testSuite {
                     }
                 }
                 try {
-                    scene.settle { scene.hasDescription("History tool: Run a command") &&
+                    scene.settle { scene.hasDescription("History tool: Read recorded output") &&
                         scene.hasDescription("History tool: Poll terminal output") }
-                    scene.clickDescription("History tool: Run a command")
+                    scene.clickDescription("History tool: Read recorded output")
                     scene.clickDescription("History tool: Poll terminal output")
                     scene.settle { scene.hasText(output) && scene.hasText(pollOutput) }
                     fun layout(value: String): TextLayoutResult {

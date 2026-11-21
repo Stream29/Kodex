@@ -127,10 +127,10 @@ private class ComposeAgentPageScope(
     }
 
     @Composable
-    override fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, enabled: Boolean) {
+    override fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, autoFocus: Boolean) {
         @Composable fun Editor() {
             WithAdaptiveEditor {
-                ComposerContent(viewModel, newLineKey, autoFocus = enabled, enabled = enabled)
+                ComposerContent(viewModel, newLineKey, autoFocus = autoFocus)
             }
         }
         if (composerFocus == null) Editor() else WithUiEditorFocus(composerFocus) { Editor() }

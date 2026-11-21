@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarCallbacks
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarContent
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarState
@@ -15,19 +15,19 @@ import io.github.stream29.kodex.cli.sessiontabbar.MosaicSessionTabMenuPlacement
 import io.github.stream29.kodex.cli.sessiontabbar.rememberMosaicSessionTabBarRenderer
 
 /**
- * Maps persisted host fixtures to component presentation identities for renderer tests.
+ * Maps Agent tab fixtures to component presentation identities for renderer tests.
  */
 @Composable
 internal fun SessionTabBar(
     tabs: List<SessionTabRenderState>,
     runningIndicatorFrame: State<String>,
     columns: Int,
-    onSelectTab: (PersistedSessionViewModel) -> Unit,
-    onOpenTabMenu: (PersistedSessionViewModel, String, TuiPopupAnchor, IntOffset?) -> Unit,
+    onSelectTab: (AgentTabViewModel) -> Unit,
+    onOpenTabMenu: (AgentTabViewModel, String, TuiPopupAnchor, IntOffset?) -> Unit,
     onSelectNewSession: () -> Unit,
     onOpenSessions: () -> Unit,
 ) {
-    val targets = remember { mutableListOf<PersistedSessionViewModel>() }
+    val targets = remember { mutableListOf<AgentTabViewModel>() }
     val entries = tabs.mapIndexed { index, tab ->
         val targetId = targets.indexOfFirst { it === tab.target }.takeIf { it >= 0 }
             ?: targets.size.also { targets.add(tab.target) }
@@ -55,7 +55,7 @@ internal fun SessionTabBar(
 
             override fun selectNewSession() = onSelectNewSession()
 
-            override fun openSessions() = onOpenSessions()
+            override val sessionsAction: () -> Unit = onOpenSessions
         },
         renderer = rememberMosaicSessionTabBarRenderer(columns, runningIndicatorFrame),
         onOpenTabMenu = { request ->

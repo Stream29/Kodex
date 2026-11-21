@@ -3,6 +3,7 @@ package io.github.stream29.kodex.agentsession.contract
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.AgentStopEvent
 import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -46,8 +47,8 @@ public interface KodexSessionEntry {
     /** The persisted Agent ID of this Session's root. It is not the Session ID. */
     public val rootAgentId: Int
 
-    /** The latest thread name, or `null` while the entry is uninitialized. */
-    public val threadName: String?
+    /** The latest root Agent name, or `null` while the entry is uninitialized. */
+    public val name: String?
 
     /** Exact timestamp zero for this entry, or `null` when timestamp zero is absent. */
     public val createdAt: Instant?
@@ -78,6 +79,15 @@ public data class StoredAgent(
     public val parentAgentId: Int?,
     public val completed: Boolean,
 )
+
+/** An unopened, independent Session and its source settings at the captured fork boundary. */
+public data class AgentForkCopy(
+    public val sessionId: Int,
+    public val boundarySettings: KodexAgentSettings,
+)
+
+/** The source's live owner changed before storage capture. */
+public class AgentForkSourceChanged : IllegalStateException("The fork source's active owner changed.")
 
 /**
  * One collection of root Session entries owning in-memory [KodexAgentSession] residency and TTL.
@@ -121,8 +131,20 @@ public interface KodexSessionRepository : CoroutineScope {
     /** Creates one uninitialized direct Agent, then returns its entry index. */
     public suspend fun create(): Int
 
-    /** Materializes a full copy of the source entry as one unopened direct entry. */
+    /** Internal full-entry copy used by storage operations; not the Agent fork command. */
     public suspend fun createFork(sourceEntryIndex: Int): Int
+
+    /**
+     * Copies the effective history of the exact source Agent to a new root. A null boundary
+     * captures the latest window; otherwise the boundary is exclusive. Returns null for a
+     * missing Agent. [expectedOwner] is the owner already locked by the caller, or null for a
+     * nonresident source. A changed owner rejects the capture rather than rebinding it.
+     */
+    public suspend fun createAgentFork(
+        sourceAgentId: Int,
+        expectedOwner: KodexAgentSession?,
+        untilExclusive: Int?,
+    ): AgentForkCopy?
 
     /** Opens (or reuses) one root Session entry and grants/renews its residency TTL. */
     public suspend fun open(entryIndex: Int): KodexAgentSession

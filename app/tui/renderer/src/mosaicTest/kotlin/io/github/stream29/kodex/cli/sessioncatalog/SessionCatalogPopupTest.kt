@@ -66,7 +66,7 @@ val sessionCatalogPopupTest by testSuite {
         }
     }
 
-    test("full popup preserves row order, archive checkbox and fork-only navigation semantics") {
+    test("full popup preserves row order and archives without opening or dismissing the catalog") {
         val ports = RenderCatalogPorts()
         withCatalog(ports) { vm ->
             runMosaicTest {
@@ -87,14 +87,12 @@ val sessionCatalogPopupTest by testSuite {
                 assertTrue("Index: 7" in menu, menu)
                 assertTrue("Created at:" in menu, menu)
                 assertFalse("Updated at:" in menu, menu)
-                sendKeyEvent(KeyboardEvent(KeyboardEvent.Down))
-                catalogSnapshot("")
-                sendKeyEvent(KeyboardEvent(KeyboardEvent.Down))
-                catalogSnapshot("")
+                assertTrue("[Delete]" in menu, menu)
+                assertFalse("[Fork]" in menu, menu)
                 sendKeyEvent(KeyboardEvent(13))
-                awaitCatalogCondition { ports.calls == listOf("load:false", "load:true", "fork:7", "load:true") }
+                awaitCatalogCondition { vm.state.value.sessions.firstOrNull()?.archived == true }
                 catalogSnapshot("[first]")
-                assertEquals(listOf("load:false", "load:true", "fork:7", "load:true"), ports.calls)
+                assertEquals(listOf("load:false", "load:true", "archive:7", "load:true"), ports.calls)
                 assertEquals(emptyList(), ports.opened)
                 assertEquals(emptyList(), ports.dismissed)
             }
@@ -490,10 +488,6 @@ private class RenderCatalogPorts : SessionCatalogDependencies, SessionCatalogInt
     override suspend fun unarchive(sessionIndex: Int) {
         calls += "unarchive:$sessionIndex"
         entries = entries.map { if (it.sessionIndex == sessionIndex) it.copy(archived = false) else it }
-    }
-    override suspend fun fork(sessionIndex: Int): Int {
-        calls += "fork:$sessionIndex"
-        return 42
     }
     override suspend fun delete(sessionIndex: Int): Boolean {
         calls += "delete:$sessionIndex"

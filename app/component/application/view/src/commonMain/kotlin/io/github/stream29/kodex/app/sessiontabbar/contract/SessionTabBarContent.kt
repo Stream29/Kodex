@@ -8,13 +8,16 @@ public actual fun SessionTabBarContent(
     callbacks: SessionTabBarCallbacks,
     renderer: SessionTabBarRenderer,
     onOpenTabMenu: (SessionTabMenuRequest) -> Unit,
+    showSessions: Boolean,
 ) {
     val currentState by rememberUpdatedState(state)
     val currentCallbacks by rememberUpdatedState(callbacks)
     val currentOnOpenTabMenu by rememberUpdatedState(onOpenTabMenu)
     renderer.Frame(
         state,
-        sessions = { renderer.Sessions { currentCallbacks.openSessions() } },
+        sessions = if (showSessions && callbacks.sessionsAction != null) ({
+            renderer.Sessions { currentCallbacks.sessionsAction?.invoke() }
+        }) else null,
         tab = { tab, index ->
             key(tab.identity) {
                 renderer.Tab(

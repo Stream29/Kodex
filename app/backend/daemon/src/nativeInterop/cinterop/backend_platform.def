@@ -13,11 +13,11 @@ package = io.github.stream29.kodex.backend.cinterop
 static inline int kodex_backend_wide(const char *input, WCHAR *output, int size) {
     return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, input, -1, output, size);
 }
-static inline int64_t kodex_backend_lock(const char *path) {
+static inline int64_t kodex_backend_lock(const char *path, int create) {
     WCHAR wide[32768];
     if (!kodex_backend_wide(path, wide, 32768)) return -2;
     HANDLE h = CreateFileW(wide, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
-        NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        NULL, create ? OPEN_ALWAYS : OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     if (h == INVALID_HANDLE_VALUE) {
         DWORD error = GetLastError();
         return error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION ? -1 : -2;
@@ -37,17 +37,35 @@ static inline int kodex_backend_alive(int64_t pid) {
     int alive = WaitForSingleObject(h, 0) == WAIT_TIMEOUT;
     CloseHandle(h); return alive;
 }
-static inline int64_t kodex_backend_spawn(const char *home) {
-    WCHAR executable[32768], working[32768], command[33000];
+static inline int64_t kodex_backend_spawn(const char *home, const char *startup_output) {
+    WCHAR executable[32768], working[32768], output[32768], command[33000];
     if (GetModuleFileNameW(NULL, executable, 32768) == 0 ||
-        !kodex_backend_wide(home, working, 32768)) return -1;
-    _snwprintf(command, 33000, L"\"%ls\" backend start", executable);
+        !kodex_backend_wide(home, working, 32768) ||
+        !kodex_backend_wide(startup_output, output, 32768)) return -1;
+    _snwprintf(command, 33000, L"\"%ls\" backend start --detached-cwd", executable);
+    SECURITY_ATTRIBUTES attributes = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    HANDLE log = CreateFileW(output, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        &attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    HANDLE input = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (log == INVALID_HANDLE_VALUE || input == INVALID_HANDLE_VALUE) {
+        if (log != INVALID_HANDLE_VALUE) CloseHandle(log);
+        if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
+        return -1;
+    }
     STARTUPINFOW startup; PROCESS_INFORMATION process;
     memset(&startup, 0, sizeof(startup)); memset(&process, 0, sizeof(process));
     startup.cb = sizeof(startup);
-    if (!CreateProcessW(executable, command, NULL, NULL, FALSE,
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = input;
+    startup.hStdOutput = log;
+    startup.hStdError = log;
+    int started = CreateProcessW(executable, command, NULL, NULL, TRUE,
         DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB,
-        NULL, working, &startup, &process)) return -1;
+        NULL, working, &startup, &process);
+    CloseHandle(input);
+    CloseHandle(log);
+    if (!started) return -1;
     int64_t pid = process.dwProcessId;
     CloseHandle(process.hThread); CloseHandle(process.hProcess);
     return pid;
@@ -62,14 +80,14 @@ static inline int64_t kodex_backend_spawn(const char *home) {
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
-static inline int64_t kodex_backend_lock(const char *path) {
-    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+static inline int64_t kodex_backend_lock(const char *path, int create) {
+    int fd = open(path, (create ? (O_RDWR | O_CREAT) : O_RDONLY) | O_CLOEXEC | O_NOFOLLOW, 0600);
     if (fd < 0) return -2;
-    if (fchmod(fd, 0600) != 0) { close(fd); return -2; }
     if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
         int busy = errno == EWOULDBLOCK || errno == EAGAIN;
         close(fd); return busy ? -1 : -2;
     }
+    if (create && fchmod(fd, 0600) != 0) { close(fd); return -2; }
     return fd;
 }
 static inline int kodex_backend_unlock(int64_t fd) { return close((int)fd); }
@@ -87,7 +105,7 @@ static inline int kodex_backend_random(void *data, int count) {
 }
 static inline int kodex_backend_chdir(const char *path) { return chdir(path); }
 static inline int kodex_backend_alive(int64_t pid) { return kill((pid_t)pid, 0) == 0 || errno == EPERM; }
-static inline int64_t kodex_backend_spawn(const char *home) {
+static inline int64_t kodex_backend_spawn(const char *home, const char *startup_output) {
     char executable[32768];
 #ifdef __APPLE__
     uint32_t size = sizeof(executable);
@@ -99,10 +117,8 @@ static inline int64_t kodex_backend_spawn(const char *home) {
 #endif
     char resolved[32768];
     if (realpath(executable, resolved) == NULL) return -1;
-    char output[32768];
-    snprintf(output, sizeof(output), "%s/log/backend-startup.log", home);
     int input = open("/dev/null", O_RDONLY | O_CLOEXEC);
-    int log = open(output, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+    int log = open(startup_output, O_WRONLY | O_APPEND | O_CLOEXEC | O_NOFOLLOW);
     if (input < 0 || log < 0) {
         if (input >= 0) close(input); if (log >= 0) close(log); return -1;
     }
@@ -122,7 +138,7 @@ static inline int64_t kodex_backend_spawn(const char *home) {
         if (chdir(home) != 0 ||
             dup2(input, 0) < 0 || dup2(log, 1) < 0 || dup2(log, 2) < 0) _exit(127);
         if (input > 2) close(input); if (log > 2) close(log);
-        char *argv[] = { resolved, "backend", "start", NULL };
+        char *argv[] = { resolved, "backend", "start", "--detached-cwd", NULL };
         execv(resolved, argv);
         _exit(127);
     }

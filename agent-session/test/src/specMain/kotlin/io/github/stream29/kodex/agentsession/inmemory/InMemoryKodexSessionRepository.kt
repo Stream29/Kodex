@@ -2,6 +2,7 @@
 
 package io.github.stream29.kodex.agentsession.inmemory
 
+import io.github.stream29.kodex.agentsession.contract.AgentForkCopy
 import io.github.stream29.kodex.agentsession.contract.DefaultKodexSessionRenewalInterval
 import io.github.stream29.kodex.agentsession.contract.DefaultKodexSessionTtl
 import io.github.stream29.kodex.agentsession.contract.IndexedAgentStopEvent
@@ -28,6 +29,7 @@ public expect class InMemoryKodexSessionRepository : KodexSessionRepository {
     override suspend fun getEntry(entryIndex: Int): KodexSessionEntry
     override suspend fun create(): Int
     override suspend fun createFork(sourceEntryIndex: Int): Int
+    override suspend fun createAgentFork(sourceAgentId: Int, expectedOwner: KodexAgentSession?, untilExclusive: Int?): AgentForkCopy?
     override suspend fun open(entryIndex: Int): KodexAgentSession
     override suspend fun openAgent(agentId: Int): KodexAgentSession?
     override suspend fun getAgentRecord(agentId: Int): StoredAgent?

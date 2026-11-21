@@ -180,7 +180,7 @@ val agentHistoryModelsTest by testSuite {
                         1 -> storage.commit(userMessage("one"))
                         4 -> storage.commit(userMessage("four"))
                         9 -> storage.commit(userMessage("nine"))
-                        else -> storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(0))
+                        else -> storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), Instant.fromEpochSeconds(0))
                     }
                 }
             }
@@ -213,7 +213,7 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(0))
+                storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), Instant.fromEpochSeconds(0))
                 storage.commit(textTool("older"))
                 storage.commit(textTool("newer"))
                 storage.commit(userMessage("breaker"))
@@ -269,14 +269,16 @@ val agentHistoryModelsTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             try {
                 val runtime = repository.open(repository.create()).runtime
-                val terminal = StableTerminalExitedEvent(37, "Run fixture", command = "./fixture", exitCode = 1)
+                val terminal = StableTerminalExitedEvent(37, name = "Check fixture exit", command = "./fixture", exitCode = 1)
                 val schedule = StableScheduleEvent(8, "next task")
                 runtime.modify { storage ->
                     storage.initialize(KodexAgentSettings(OpenAiModelId("test")))
                     storage.commit(userMessage("Start"))
                     storage.commit(textTool("before"))
                     storage.commit(
-                        StableAwait("await", null, AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(37))), StableAwaitEventResult.Failure("fixture")),
+                        StableAwait("await",
+                            arguments = AwaitEventArguments(events = listOf(AwaitEventInput.TerminalExited(37)), name = "Wait for fixture exit"),
+                            result = StableAwaitEventResult.Failure("fixture")),
                     )
                     storage.commit(terminal)
                     storage.commit(textTool("after"))
@@ -349,7 +351,7 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(0))
+                storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), Instant.fromEpochSeconds(0))
                 storage.commit(textTool("older"))
                 storage.commit(textTool("newer"))
             }
@@ -523,10 +525,13 @@ val agentHistoryModelsTest by testSuite {
             runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
                 storage.commit(userMessage("one"), Instant.fromEpochSeconds(100))
-                storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(101))
-                storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(102))
+                storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), Instant.fromEpochSeconds(101))
+                storage.commit(LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0), Instant.fromEpochSeconds(102))
                 storage.commit(userMessage("four"), Instant.fromEpochSeconds(111))
-                for (i in 5..8) storage.commit(LlmRequestMeta.Response(0L), Instant.fromEpochSeconds(111))
+                for (i in 5..8) storage.commit(
+                    LlmRequestMeta.Response(0L, elapsedNanoseconds = 1_000_000L, outputTokens = 0),
+                    Instant.fromEpochSeconds(111),
+                )
                 storage.commit(userMessage("nine"), Instant.fromEpochSeconds(125))
             }
             val model = createAgentHistoryViewModel(
@@ -731,7 +736,7 @@ val agentHistoryModelsTest by testSuite {
                 val settings = KodexAgentSettings(model = OpenAiModelId("test-model"))
                 storage.initialize(settings)
                 storage.commit(UnstableSnapshot(listOf(pending)))
-                storage.commit(settings.copy(threadName = "updated"))
+                storage.commit(settings.copy(name = "updated"))
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {

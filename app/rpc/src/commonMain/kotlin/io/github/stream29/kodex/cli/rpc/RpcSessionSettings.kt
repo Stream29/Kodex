@@ -74,7 +74,7 @@ public actual class RpcSessionSettingsSource private constructor(
     private fun available(revision: Long): SessionSettingsDataState.Available {
         val value = binding.settings.value
         return SessionSettingsDataState.Available(SessionSettingsSnapshot(
-            revision, value.threadName.ifBlank { "Agent #${binding.agentId}" },
+            revision, value.name.ifBlank { "Agent #${binding.agentId}" },
             value.configuration(), editable = true, canRenameSession = canRenameSession,
         ))
     }
@@ -122,7 +122,7 @@ public actual class RpcSessionSettingsSource private constructor(
         val expected = (state.value as? SessionSettingsDataState.Available)?.snapshot ?: return false
         if (expected.revision != expectedRevision) return false
         binding.settings.editField(
-            expected.sessionName, { it.threadName }, { it.copy(threadName = sessionName) }, ::checkOwner,
+            expected.sessionName, { it.name }, { it.copy(name = sessionName) }, ::checkOwner,
         )
     }
 

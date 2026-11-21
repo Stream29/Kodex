@@ -25,8 +25,8 @@ private class NativeBackendPlatformLock(private var descriptor: Long) : BackendP
     }
 }
 
-internal actual fun openBackendPlatformLock(path: String): BackendPlatformLock? {
-    val descriptor = kodex_backend_lock(path)
+internal actual fun openBackendPlatformLock(path: String, create: Boolean): BackendPlatformLock? {
+    val descriptor = kodex_backend_lock(path, if (create) 1 else 0)
     if (descriptor == -1L) return null
     if (descriptor < 0) throw IOException("Cannot inspect the backend instance lock.")
     return NativeBackendPlatformLock(descriptor)
@@ -42,8 +42,8 @@ public actual fun randomBackendPassword(): String {
     }
 }
 
-public actual fun launchIndependentBackend(home: Path): Long {
-    val pid = kodex_backend_spawn(home.toString())
+public actual fun launchIndependentBackend(home: Path, startupOutput: Path): Long {
+    val pid = kodex_backend_spawn(home.toString(), startupOutput.toString())
     check(pid > 0) { "Unable to start an independent backend process." }
     return pid
 }

@@ -98,11 +98,12 @@ val offscreenSessionCatalogTest by testSuite {
                 scene.escape()
                 scene.settle { !scene.hasText("Archive") }
                 scene.openCatalogMenuAccessible(7)
-                scene.settle { scene.hasText("Archive") }
+                scene.settle { scene.overlayTextFocused("Archive") && scene.hasText("Delete") }
+                assertFalse(scene.hasText("Fork"))
                 scene.key(Key.Tab)
-                scene.key(Key.Tab)
+                scene.settle { scene.overlayTextFocused("Delete") }
                 scene.key(Key.Enter)
-                scene.settle { ports.calls.contains("fork:7") }
+                scene.settle { vm.deleteTarget.value?.viewModel?.sessionIndex == 7 && scene.overlayTextFocused("Cancel") }
                 assertFalse(ports.calls.contains("delete:7"))
                 assertTrue(ports.opened.isEmpty())
                 scene.frame()
@@ -147,7 +148,7 @@ val offscreenSessionCatalogTest by testSuite {
         }
     } }
 
-    test("archive filter and fork use the real menu while primary open dismisses only after completion") { offscreenTest {
+    test("catalog menus archive and unarchive without opening; primary open dismisses only after completion") { offscreenTest {
         val ports = CatalogPorts()
         withCatalogFixture(ports) { vm ->
             val visible = mutableStateOf(true)
@@ -169,22 +170,31 @@ val offscreenSessionCatalogTest by testSuite {
                 assertFalse(scene.nodes().any {
                     it.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text.startsWith("Updated at:") } == true
                 })
-                scene.click("Fork")
-                scene.settle { ports.calls.contains("fork:7") && scene.hasText("first") && !scene.hasText("Index: 7") }
+                assertTrue(scene.hasText("Delete"))
+                assertFalse(scene.hasText("Fork"))
+                scene.click("Archive")
+                scene.settle {
+                    vm.state.value.sessions.any { it.sessionIndex == 7 && it.archived } &&
+                        scene.hasText("first") && !scene.hasText("Index: 7")
+                }
                 assertTrue(ports.opened.isEmpty())
                 assertEquals(0, ports.dismissals)
                 scene.openCatalogMenu(8)
                 scene.settle { scene.hasText("Unarchive") }
+                assertTrue(scene.hasText("Delete"))
+                assertFalse(scene.hasText("Fork"))
                 scene.click("Unarchive")
-                scene.settle { ports.calls.contains("unarchive:8") && !scene.hasText("Unarchive") }
+                scene.settle {
+                    vm.state.value.sessions.any { it.sessionIndex == 8 && !it.archived } && !scene.hasText("Unarchive")
+                }
                 ports.openGate = CompletableDeferred()
-                scene.click("first")
-                scene.settle { ports.opened == listOf(7) }
+                scene.click("archived")
+                scene.settle { ports.opened == listOf(8) }
                 assertEquals(0, ports.dismissals)
                 ports.openGate!!.complete(Unit)
                 scene.settle { scene.hasText("closed") }
                 assertEquals(1, ports.dismissals)
-                assertEquals(listOf("load:false", "load:true", "fork:7", "load:true", "unarchive:8", "load:true"), ports.calls)
+                assertEquals(listOf("load:false", "load:true", "archive:7", "load:true", "unarchive:8", "load:true"), ports.calls)
             } finally { scene.close() }
         }
     } }
@@ -199,10 +209,10 @@ val offscreenSessionCatalogTest by testSuite {
                     @Composable
                     override fun ContextMenu(
                         entry: SessionCatalogEntry, origin: SessionCatalogMenuOrigin, onDismiss: () -> Unit,
-                        onFork: () -> Unit, onArchive: () -> Unit, onUnarchive: () -> Unit, onDelete: () -> Unit,
+                        onArchive: () -> Unit, onUnarchive: () -> Unit, onDelete: () -> Unit,
                     ) {
-                        captured = CapturedCatalogMenu(onDismiss, onFork, onArchive, onDelete)
-                        graphical.ContextMenu(entry, origin, onDismiss, onFork, onArchive, onUnarchive, onDelete)
+                        captured = CapturedCatalogMenu(onDismiss, onArchive, onUnarchive, onDelete)
+                        graphical.ContextMenu(entry, origin, onDismiss, onArchive, onUnarchive, onDelete)
                     }
                 }
                 SessionCatalogContent(vm, renderer, { throw it })
@@ -217,20 +227,20 @@ val offscreenSessionCatalogTest by testSuite {
                 scene.openCatalogMenu(8)
                 scene.settle { scene.hasText("Index: 8") }
                 val next = assertNotNull(captured)
-                old.dismiss(); old.fork(); old.archive(); old.delete()
+                old.dismiss(); old.archive(); old.unarchive(); old.delete()
                 scene.settle { scene.hasText("Index: 8") && scene.nodes().any {
                     it.config.getOrNull(SemanticsProperties.Focused) == true &&
                         it.children.any { child -> child.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == "Archive" } == true }
                 } }
                 assertEquals(listOf("load:false"), ports.calls)
                 assertNull(vm.deleteTarget.value)
-                ports.entries = ports.entries.map { if (it.sessionIndex == 8) it.copy(threadName = "replacement") else it }
+                ports.entries = ports.entries.map { if (it.sessionIndex == 8) it.copy(name = "replacement") else it }
                 vm.refresh()
                 scene.settle { scene.hasText("replacement") && !scene.hasText("Index: 8") && scene.nodes().any {
                     it.config.getOrNull(SemanticsProperties.Focused) == true &&
                         it.children.any { child -> child.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == "Close" } == true }
                 } }
-                next.fork(); next.archive(); next.delete()
+                next.archive(); next.unarchive(); next.delete()
                 scene.settle { scene.hasText("replacement") }
                 assertEquals(listOf("load:false", "load:false"), ports.calls)
                 assertNull(vm.deleteTarget.value)
@@ -285,9 +295,10 @@ val offscreenSessionCatalogTest by testSuite {
         } }
     }
 
-    for (fork in listOf(false, true)) {
-        test("unmount cancels only the renderer caller without replaying or closing the catalog fork=$fork") { offscreenTest {
-            val ports = CatalogPorts().apply { if (fork) forkGate = CompletableDeferred() else openGate = CompletableDeferred() }
+    for (archive in listOf(false, true)) {
+        val action = if (archive) "archive" else "open"
+        test("unmount cancels only the $action caller without replaying or closing the catalog") { offscreenTest {
+            val ports = CatalogPorts().apply { if (archive) archiveGate = CompletableDeferred() else openGate = CompletableDeferred() }
             withCatalogFixture(ports) { vm ->
                 val visible = mutableStateOf(true)
                 val failures = mutableListOf<Throwable>()
@@ -296,20 +307,21 @@ val offscreenSessionCatalogTest by testSuite {
                 }
                 try {
                     scene.settle { scene.hasText("first") }
-                    if (fork) {
+                    if (archive) {
                         scene.openCatalogMenu(7)
-                        scene.settle { scene.hasText("Fork") }
-                        scene.click("Fork")
+                        scene.settle { scene.hasText("Archive") }
+                        scene.click("Archive")
                     } else scene.click("first")
-                    scene.settle { if (fork) ports.calls.contains("fork:7") else ports.opened == listOf(7) }
+                    scene.settle { if (archive) ports.calls.contains("archive:7") else ports.opened == listOf(7) }
                     visible.value = false
                     scene.settle { scene.hasText("closed") && ports.cancellations == 1 }
-                    ports.forkGate?.complete(Unit); ports.openGate?.complete(Unit)
+                    ports.archiveGate?.complete(Unit); ports.openGate?.complete(Unit)
                     vm.refresh()
                     assertTrue(failures.isEmpty())
                     assertEquals(0, ports.dismissals)
-                    assertEquals(if (fork) 1 else 0, ports.calls.count { it == "fork:7" })
-                    assertEquals(if (fork) emptyList() else listOf(7), ports.opened)
+                    assertEquals(if (archive) 1 else 0, ports.calls.count { it == "archive:7" })
+                    assertEquals(if (archive) emptyList() else listOf(7), ports.opened)
+                    assertFalse(vm.state.value.sessions.single().archived)
                 } finally { scene.close() }
             }
         } }
@@ -335,7 +347,7 @@ val offscreenSessionCatalogTest by testSuite {
 }
 
 private data class CapturedCatalogMenu(
-    val dismiss: () -> Unit, val fork: () -> Unit, val archive: () -> Unit, val delete: () -> Unit,
+    val dismiss: () -> Unit, val archive: () -> Unit, val unarchive: () -> Unit, val delete: () -> Unit,
 )
 
 private suspend fun withCatalogFixture(ports: CatalogPorts, block: suspend (SessionCatalogViewModel) -> Unit) {
@@ -380,7 +392,7 @@ private class CatalogPorts : SessionCatalogDependencies, SessionCatalogInteracti
     var cancellations = 0
     var onDismiss: () -> Unit = {}
     var loadGate: CompletableDeferred<Unit>? = null
-    var forkGate: CompletableDeferred<Unit>? = null
+    var archiveGate: CompletableDeferred<Unit>? = null
     var openGate: CompletableDeferred<Unit>? = null
     var openFailure: Throwable? = null
     var deleteResult = true
@@ -391,16 +403,12 @@ private class CatalogPorts : SessionCatalogDependencies, SessionCatalogInteracti
     }
     override suspend fun archive(sessionIndex: Int) {
         calls += "archive:$sessionIndex"
+        try { archiveGate?.await() } catch (failure: CancellationException) { cancellations++; throw failure }
         entries = entries.map { if (it.sessionIndex == sessionIndex) it.copy(archived = true) else it }
     }
     override suspend fun unarchive(sessionIndex: Int) {
         calls += "unarchive:$sessionIndex"
         entries = entries.map { if (it.sessionIndex == sessionIndex) it.copy(archived = false) else it }
-    }
-    override suspend fun fork(sessionIndex: Int): Int {
-        calls += "fork:$sessionIndex"
-        try { forkGate?.await() } catch (failure: CancellationException) { cancellations++; throw failure }
-        return 99
     }
     override suspend fun delete(sessionIndex: Int): Boolean {
         calls += "delete:$sessionIndex"

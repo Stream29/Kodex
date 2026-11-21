@@ -8,7 +8,8 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
-import io.github.stream29.kodex.agentstorage.sqlite.initializeSqlitePhaseOneSchema
+import io.github.stream29.kodex.agentstorage.sqlite.initializeKodexHomeDatabase
+import io.github.stream29.kodex.agentstorage.sqlite.recomputeSessionCatalog
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
@@ -46,18 +47,21 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
             val home = services.settings.contextSettings.value.kodexHome
             SystemCoroutineFileSystem.createDirectories(home)
             openSqliteConnection(Path(home, "kodex.db")).use { db ->
-                initializeSqlitePhaseOneSchema(db)
+                initializeKodexHomeDatabase(db)
                 db.execute("INSERT INTO sessions(session_id) VALUES(12), (90)")
                 db.execute("INSERT INTO agents(agent_id, session_id, parent_agent_id) VALUES(90, 12, NULL), (12, 90, NULL), (91, 12, 90)")
                 for ((id, title) in listOf(90L to "Owner of Session 12", 12L to "Unrelated owner", 91L to "The child")) {
                     db.execute(
                         """INSERT INTO agent_commits VALUES(?, 'settings', 0, ?, '2026-11-18T00:00:00Z')""",
                         listOf(id, KodexAgentSettings(
-                            model = OpenAiModelId("test-model"), threadName = title,
+                            model = OpenAiModelId("test-model"), name = title,
                             requestUserInputMode = RequestUserInputMode.AskUser,
                         ).encodePayloadJson()),
                     )
                 }
+                db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES(90), (12)")
+                db.recomputeSessionCatalog(90)
+                db.recomputeSessionCatalog(12)
             }
             withInMemoryRpc(services::register) { raw ->
                 val client = RestoringRpcClient(raw)
@@ -68,6 +72,10 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertFailsWith<SessionNotFound> { global.getRootAgentId(91) }
                 assertFailsWith<AgentNotFound> { runtime.keepAgentAlive(999) }
                 assertFailsWith<AgentNotActive> { runtime.getLatestIndex(90) }
+                assertEquals(
+                    mapOf(12 to "Owner of Session 12", 90 to "Unrelated owner"),
+                    global.getSessionCatalog(true).associate { it.sessionIndex to it.name },
+                )
                 assertFalse(global.getSessionCatalog(true).any { it.isActive })
                 runtime.keepAgentAlive(91)
                 assertFalse(global.getSessionCatalog(true).any { it.isActive })
@@ -186,7 +194,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertEquals(defaults.serviceTier, current.serviceTier)
                 assertEquals(defaults.requestUserInputMode, current.requestUserInputMode)
                 assertEquals(cwd, current.cwd)
-                assertEquals("Session $secondSession", current.threadName)
+                assertEquals("Session $secondSession", current.name)
                 assertNotEquals(original.turnId, current.turnId)
                 assertNotEquals(original.windowId, current.windowId)
                 assertEquals(0, services.runtime.getLatestIndex(second))
@@ -257,7 +265,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertTrue(global.getSessionCatalog(false).isEmpty())
                 assertTrue(global.getSessionCatalog(true).single().archived)
                 global.unarchiveSession(index)
-                val copy = global.forkSession(index)
+                val copy = global.forkAgent(agentId)
                 assertNotEquals(index, copy)
                 assertTrue(global.deleteSession(copy))
                 assertTrue(global.deleteSession(index))
@@ -299,12 +307,15 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                     val message = Path(home, "sessions", index.toString(), "index", "$state.json")
                     mirrored { fs.metadataOrNull(message) != null && fs.readString(message).contains("SQLite mutation") }
                     global.archiveSession(index)
-                    assertEquals(listOf(listOf(1L)), db.query("SELECT archived FROM sessions"))
+                    assertEquals(
+                        listOf(listOf(1L)),
+                        db.query("SELECT completed FROM agents WHERE agent_id = ?", listOf(agentId.toLong())),
+                    )
                     val marker = Path(home, "sessions", index.toString(), "archive.mark")
                     mirrored { fs.metadataOrNull(marker) != null }
                     global.unarchiveSession(index)
                     mirrored { fs.metadataOrNull(marker) == null }
-                    val fork = global.forkSession(index)
+                    val fork = global.forkAgent(agentId)
                     assertEquals(listOf(listOf(2L)), db.query("SELECT count(*) FROM sessions"))
                     val forkMessage = Path(home, "sessions", fork.toString(), "index", "$state.json")
                     mirrored { fs.metadataOrNull(forkMessage) != null && fs.readString(forkMessage).contains("SQLite mutation") }

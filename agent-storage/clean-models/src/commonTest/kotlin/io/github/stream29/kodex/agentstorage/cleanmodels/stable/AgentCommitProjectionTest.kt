@@ -13,7 +13,7 @@ val agentCommitProjectionTest by testSuite {
     test("root projection rejects metadata and runtime snapshots") {
         val records: List<AgentCommit> = listOf(
             KodexAgentSettings(OpenAiModelId("fixture")),
-            LlmRequestMeta.Response(totalTokens = 5L),
+            LlmRequestMeta.Response(totalTokens = 5L, elapsedNanoseconds = 1_000_000L, outputTokens = 0),
             UnstableSnapshot(emptyList()),
             SteerSnapshot(emptyList()),
             AskUserSnapshot(emptyList()),

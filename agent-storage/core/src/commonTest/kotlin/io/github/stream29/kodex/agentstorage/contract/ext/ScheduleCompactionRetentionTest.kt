@@ -48,8 +48,14 @@ val scheduleCompactionRetentionTest by testSuite {
         val first = StableScheduleEvent(1, "")
         val second = StableScheduleEvent(2, "next task")
         storage.commit(first)
-        storage.commit(StableAwait("await", null, AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(37))), StableAwaitEventResult.Failure("fixture")))
-        val terminalIndex = storage.commit(StableTerminalExitedEvent(37, "Run fixture", command = "fixture", exitCode = 0))
+        storage.commit(
+            StableAwait(
+                "await", null,
+                AwaitEventArguments(listOf(AwaitEventInput.TerminalExited(37)), name = "Wait for fixture"),
+                StableAwaitEventResult.Failure("fixture"),
+            ),
+        )
+        val terminalIndex = storage.commit(StableTerminalExitedEvent(37, name = "Run fixture", command = "fixture", exitCode = 0))
         val retained = storage.buildCompactionRetainedItems(terminalIndex)
         assertEquals(listOf<CompactionRetainedItem>(first), retained)
         storage.commit(StableContextCompaction(encryptedContent = "first checkpoint", retainedItems = retained))

@@ -4,13 +4,17 @@ import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentParentAnchor
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupsViewModel
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.io.files.Path
 
-/** An already selected Agent under an exact Session tab. Selection lifetime is supplied by the page host. */
+/** An already selected Agent under its exact tab. Selection lifetime is supplied by the page host. */
 public class AgentPageActionTarget(
-    public val session: PersistedSessionViewModel,
+    public val tab: AgentTabViewModel,
     public val agent: AgentViewModel,
     private val isSelected: () -> Boolean,
 ) {
@@ -20,10 +24,10 @@ public class AgentPageActionTarget(
 /**
  * Application-level ViewModel contract.
  *
- * It owns opened Session registries, tab navigation, the current exclusive
- * popup child, registry commands, and shutdown. It does not own settings,
+ * It owns ordered Agent tabs, selection, the current exclusive popup child,
+ * Session management commands, and shutdown. It does not own settings,
  * models, authentication, or Agent execution state. Implementations receive
- * the original typed Session registry, draft/catalog/Settings/Login factories
+ * a typed frontend registry, draft/catalog/Settings/Login factories
  * and directory-picker inputs; no renderer or backend resource is exposed here.
  *
  * Suspending commands serialize admission and navigation mutation. The caller
@@ -48,6 +52,8 @@ public interface ApplicationViewModel : AutoCloseable {
     public val navigation: StateFlow<ApplicationNavigationState>
     /** Stable reusable child, separate from persisted tabs; never recreated by navigation. */
     public val newSession: NewSessionViewModel
+    /** Stable, lazy grouped catalog; independent of selected Agents and exclusive popups. */
+    public val sessionCatalog: SessionGroupsViewModel? get() = null
     /** The exclusive overlay; children are borrowed by its renderer. */
     public val popup: StateFlow<ApplicationPopupState>
 
@@ -59,6 +65,17 @@ public interface ApplicationViewModel : AutoCloseable {
      * @throws kotlinx.coroutines.CancellationException if the caller is cancelled.
      */
     public suspend fun openSession(sessionIndex: Int): PersistedSessionViewModel
+
+    /** Opens or reuses an exact Agent, with no Session archive/unarchive side effect. */
+    public suspend fun openAgent(agentId: Int): AgentTabViewModel
+
+    /** Validates the exact creation row both before and after opening its child. */
+    public suspend fun enterChild(
+        source: AgentPageActionTarget, index: Int, generation: Long, revision: Long, childAgentId: Int,
+    ): Unit
+
+    /** Selects the direct parent without closing the child, then attempts the requested anchor. */
+    public suspend fun returnToParent(source: AgentPageActionTarget, anchor: AgentParentAnchor): Unit
 
     /**
      * Selects the captured [target] at its current position after acquiring admission.
@@ -72,7 +89,7 @@ public interface ApplicationViewModel : AutoCloseable {
      * @throws kotlinx.coroutines.CancellationException if cancelled while waiting
      * for admission; no selection is made by that waiting call.
      */
-    public suspend fun selectTab(target: PersistedSessionViewModel): Boolean
+    public suspend fun selectTab(target: AgentTabViewModel): Boolean
 
     /**
      * Selects the existing singleton without creating a backend Session or a child.
@@ -80,6 +97,9 @@ public interface ApplicationViewModel : AutoCloseable {
      * @throws kotlinx.coroutines.CancellationException if cancelled during admission.
      */
     public suspend fun selectNewSession(): Unit
+
+    /** Selects the existing draft and changes only its own working directory. */
+    public suspend fun selectNewSessionInDirectory(cwd: Path): Unit
 
     /**
      * Closes one child handle without deleting persisted Session data.
@@ -95,7 +115,7 @@ public interface ApplicationViewModel : AutoCloseable {
      * @throws kotlinx.coroutines.CancellationException if caller waiting is cancelled;
      * navigation already updated before a release wait is not rolled back.
      */
-    public suspend fun closeTab(target: PersistedSessionViewModel): Boolean
+    public suspend fun closeTab(target: AgentTabViewModel): Boolean
 
     /**
      * Archives one exact persisted child and closes its tab after Archive succeeds.
@@ -127,14 +147,6 @@ public interface ApplicationViewModel : AutoCloseable {
      * backend work already accepted is not cancelled or automatically retried.
      */
     public suspend fun submitNewSession(expectedRevision: Long): PersistedSessionViewModel?
-
-    /**
-     * Creates a popup-scoped catalog without loading it; caller requests first refresh.
-     * @throws IllegalStateException if the Application is closed.
-     * @throws Exception if child creation fails, preserving the current popup.
-     * @throws kotlinx.coroutines.CancellationException if cancelled during admission.
-     */
-    public suspend fun openSessionCatalogPopup(): ApplicationPopupState.SessionCatalog
 
     /**
      * Opens Settings for the exact currently-owned [target], or no Session for null.
@@ -175,6 +187,9 @@ public interface ApplicationViewModel : AutoCloseable {
         sessionIndex: Int,
     ): ApplicationPopupState.DeleteSession
 
+    /** Opens Delete only for the captured root tab, not for a same-index replacement. */
+    public suspend fun openDeleteSessionPopup(target: PersistedSessionViewModel): ApplicationPopupState.DeleteSession?
+
     /**
      * Opens independently disposable Login, retaining the exact Settings [returnTo].
      * Dismissal restores that same Settings child; target closure closes both.
@@ -187,7 +202,7 @@ public interface ApplicationViewModel : AutoCloseable {
     ): ApplicationPopupState.Login
 
     /**
-     * Opens a directory picker for the singleton, an owned Session or its current Agent.
+     * Opens a directory picker for the singleton, an owned Session or exact Agent.
      * @throws IllegalArgumentException if target is no longer owned/current.
      * @throws IllegalStateException if the Application is closed.
      * @throws Exception if child creation fails, preserving the current popup.

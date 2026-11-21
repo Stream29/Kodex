@@ -114,7 +114,7 @@ val backendSubagentCompletionTest by testSuite(compartment = { TestCompartment.R
                         parkParent -> flowOf(
                             ResponsesStreamEvent.OutputItemDone(0, ResponseItem.FunctionCall(
                                 name = "await_event", callId = "await_completion_fixture",
-                                arguments = """{"events":[{"type":"user_message"}]}""",
+                                arguments = """{"name":"Wait for a user message","events":[{"type":"user_message"}]}""",
                             )),
                             ResponsesStreamEvent.Completed(Response(id = "park", endTurn = false)),
                         )

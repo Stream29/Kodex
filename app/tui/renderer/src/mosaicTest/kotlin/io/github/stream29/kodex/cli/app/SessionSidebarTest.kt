@@ -48,12 +48,16 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
+import io.github.stream29.kodex.utils.shellclient.Shell
+import io.github.stream29.kodex.utils.shellclient.ShellType
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.io.files.Path
 import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -105,7 +109,10 @@ val sessionSidebarTest by testSuite {
                             }
                         }
                     }
-                    awaitSnapshotContaining("View output")
+                    val menu = awaitSnapshotContaining("View output")
+                    assertTrue("Terminal #7" in menu, menu)
+                    assertTrue("Close session" in menu, menu)
+                    assertFalse("long test command" in menu, menu)
                     assertEquals(0, session.readCount)
                     sendKeyEvent(KeyboardEvent(13))
                     val latest = awaitSnapshotContaining("cell")
@@ -375,11 +382,16 @@ val sessionSidebarTest by testSuite {
         }
     }
 
-    test("terminal hover uses the unnamed fallback and still shows the complete command") {
+    test("terminal hover shows the registered name and complete command without optional metadata") {
         val session = TestAgentShellSession(
             sessionId = 42,
             command = "echo first\necho second",
+            name = "Inspect command output",
         )
+        val registry = object : AgentShellSessionRegistry {
+            override val activeSessions = MutableStateFlow<Map<Int, AgentShellSession>>(mapOf(42 to session))
+        }
+        session.read = { offset, _ -> StdoutSlice(byteArrayOf(), byteArrayOf(), 0u, offset, offset, offset) }
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
@@ -394,7 +406,8 @@ val sessionSidebarTest by testSuite {
                         )
                     }
                     SidebarShellHoverContent(
-                        interaction = mosaicShellHover(request),
+                        interaction = remember(request) { mosaicShellHover(request) },
+                        registry = registry,
                         renderer = rememberMosaicSidebarOverlayRenderer(30, 7),
                         onHoverChanged = {},
                         onDismiss = {},
@@ -404,9 +417,68 @@ val sessionSidebarTest by testSuite {
             }
 
             val snapshot = awaitSnapshotContaining("echo second")
+            assertTrue("Inspect command output" in snapshot, snapshot)
             assertTrue("Terminal #42" in snapshot, snapshot)
             assertTrue("echo first" in snapshot, snapshot)
+            assertFalse("Workdir:" in snapshot, snapshot)
+            assertFalse("Shell:" in snapshot, snapshot)
         }
+    }
+
+    test("terminal hover starts after its delay and shows metadata, full command and growing output") {
+        val session = TestAgentShellSession(
+            sessionId = 42, command = "echo first\necho second", name = "Live terminal",
+            workdir = "/tmp/example", shell = Shell(ShellType.Bash, Path("/bin/bash")),
+        )
+        val registry = object : AgentShellSessionRegistry {
+            override val activeSessions = MutableStateFlow<Map<Int, AgentShellSession>>(mapOf(42 to session))
+        }
+        val newest = "first line\nnew line\n".encodeToByteArray()
+        var source = "first line\n".encodeToByteArray()
+        var blocked by mutableStateOf(false)
+        var released by mutableStateOf(false)
+        var dismissed by mutableStateOf(false)
+        session.read = { offset, limit ->
+            if (offset == newest.size.toULong()) {
+                blocked = true
+                try { awaitCancellation() } finally { released = true }
+            }
+            val start = offset.toInt()
+            val end = minOf(source.size, start + limit.toInt())
+            StdoutSlice(source.copyOfRange(start, end), byteArrayOf(), 0u, offset, end.toULong(), source.size.toULong())
+        }
+        runMosaicTest {
+            val initial = setContentAndSnapshot {
+                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    val anchor = rememberTuiPopupAnchor()
+                    val request = remember(anchor) { ShellSessionInteractionRequest(SessionSidebarSide.Left, session, anchor) }
+                    TuiPopupHost(Modifier.width(80).height(16)) {
+                        Text("sidebar blocked=$blocked dismissed=$dismissed released=$released", Modifier.tuiPopupAnchor(anchor))
+                        SidebarShellHoverContent(
+                            interaction = remember(request) { mosaicShellHover(request) },
+                            registry = registry,
+                            renderer = rememberMosaicSidebarOverlayRenderer(64, 15),
+                            onHoverChanged = {},
+                            onDismiss = { dismissed = true },
+                        )
+                    }
+                }
+            }
+            assertFalse("echo second" in initial, initial)
+            assertEquals(0, session.readCount)
+            val snapshot = awaitSnapshotContaining("first line")
+            listOf("Live terminal", "Terminal #42", "Workdir: /tmp/example", "Shell: /bin/bash", "echo first", "echo second")
+                .forEach { assertTrue(it in snapshot, snapshot) }
+            source = newest
+            val updated = awaitSnapshotContaining("new line")
+            assertTrue("Reading output" in updated, updated)
+            awaitSnapshotContaining("blocked=true")
+            session.exitCode.value = 0
+            session.completed.value = true
+            val hidden = awaitSnapshotContaining("dismissed=true released=true")
+            assertFalse("Live terminal" in hidden, hidden)
+        }
+        assertEquals(0, session.closeCount)
     }
 
     test("historyIndexRendersAConnectedOldestFirstTimeline") {
@@ -440,7 +512,7 @@ val sessionSidebarTest by testSuite {
         }
     }
 
-    test("historyIndexContextMenuShowsIndexAndChecksOut") {
+    test("historyIndexContextMenuShowsIndexAndRunsGoTo") {
         var checkOutCount = 0
         runMosaicTest {
             setContentAndSnapshot {
@@ -452,13 +524,14 @@ val sessionSidebarTest by testSuite {
                         anchor = anchor,
                         clickPosition = null,
                         index = 42,
+                        timestamp = null,
+                        actions = listOf(HistoryIndexMenuAction("GoTo", "Go to") { checkOutCount += 1 }),
                         onDismissRequest = {},
-                        onCheckOut = { checkOutCount += 1 },
                     )
                 }
             }
             }
-            val snapshot = awaitSnapshotContaining("Check out")
+            val snapshot = awaitSnapshotContaining("Go to")
             assertTrue("Index: 42" in snapshot, snapshot)
 
             sendKeyEvent(KeyboardEvent(codepoint = 13))
@@ -468,7 +541,7 @@ val sessionSidebarTest by testSuite {
         assertEquals(1, checkOutCount)
     }
 
-    test("historyIndexHoverIsOpaqueAndFollowsThePointer") {
+    test("history Index hover is opaque outside the row edge") {
         val viewModel = TestHistoryIndexViewModel(
             entries = listOf(
                 HistoryIndexEntry(
@@ -478,7 +551,6 @@ val sessionSidebarTest by testSuite {
                 ),
             ),
         )
-        var request: HistoryIndexInteractionRequest? = null
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
@@ -497,13 +569,10 @@ val sessionSidebarTest by testSuite {
                             generation = 0,
                             index = 7,
                             anchor = anchor,
-                        ).also {
-                            it.pointerPosition = IntOffset(x = 4, y = 0)
-                        }
+                        )
                     }
-                    request = current
                     HistoryIndexHoverContent(
-                        interaction = mosaicIndexHover(current),
+                        interaction = remember(current) { mosaicIndexHover(current) },
                         renderer = rememberMosaicIndexOverlayRenderer(30, 7),
                         onHoverChanged = {},
                         onDismiss = {},
@@ -513,48 +582,9 @@ val sessionSidebarTest by testSuite {
             }
             val snapshot = awaitSnapshotContaining("Complete content")
             assertTrue("User message" in snapshot, snapshot)
-            assertFalse("Index: 7" in snapshot, snapshot)
-            assertEquals(5, snapshot.lines()[1].indexOf("User message"), snapshot)
+            assertTrue("Index: 7" in snapshot, snapshot)
+            assertEquals(6, snapshot.lines()[1].indexOf("User message"), snapshot)
             assertTrue("User message    x" in snapshot.lines()[1], snapshot)
-
-            request?.pointerPosition = IntOffset(x = 10, y = 0)
-            val moved = awaitSnapshot()
-            assertEquals(11, moved.lines()[1].indexOf("User message"), moved)
-        }
-    }
-
-    test("historyIndexRowTracksTheLastPointerPosition") {
-        val viewModel = TestHistoryIndexViewModel(
-            entries = listOf(
-                HistoryIndexEntry(
-                    index = 7,
-                    kind = HistoryIndexEntryKind.UserMessage,
-                    summary = "Content",
-                ),
-            ),
-        )
-        var request: HistoryIndexInteractionRequest? = null
-        runMosaicTest {
-            setContentAndSnapshot {
-                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                HistoryIndexSidebarBody(
-                    viewModel = viewModel,
-                    columns = 20,
-                    rows = 1,
-                    onHoverChanged = { current, hovered ->
-                        if (hovered) request = current
-                    },
-                )
-            }
-            }
-
-            sendMouseEvent(MouseEvent(4, 0, MouseEvent.Type.Motion))
-            awaitSnapshot()
-            assertEquals(IntOffset(x = 4, y = 0), request?.pointerPosition)
-
-            sendMouseEvent(MouseEvent(9, 0, MouseEvent.Type.Motion))
-            awaitSnapshot()
-            assertEquals(IntOffset(x = 9, y = 0), request?.pointerPosition)
         }
     }
 
@@ -1043,10 +1073,12 @@ val sessionSidebarTest by testSuite {
 private class TestAgentShellSession(
     override val sessionId: Int = 1,
     command: String = "sleep 1",
-    name: String? = null,
+    name: String = "Run terminal fixture",
+    workdir: String? = null,
+    shell: Shell? = null,
 ) : AgentShellSession {
     override val arguments: ExecCommandArguments =
-        ExecCommandArguments(command = command, name = name, yieldTimeMillis = 10_000)
+        ExecCommandArguments(command = command, name = name, workdir = workdir, shell = shell, yieldTimeMillis = 10_000)
     override val completed = MutableStateFlow(false)
     override val exitCode = MutableStateFlow<Int?>(null)
     var read: suspend (ULong, UInt) -> StdoutSlice = { _, _ -> error("Unexpected shell read") }

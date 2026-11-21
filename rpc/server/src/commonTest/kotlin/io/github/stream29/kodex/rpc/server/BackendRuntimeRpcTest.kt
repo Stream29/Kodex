@@ -7,7 +7,8 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
-import io.github.stream29.kodex.agentstorage.sqlite.initializeSqlitePhaseOneSchema
+import io.github.stream29.kodex.agentstorage.sqlite.initializeKodexHomeDatabase
+import io.github.stream29.kodex.agentstorage.sqlite.recomputeSessionCatalog
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -51,7 +52,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
         class Process(override val registrationNonce: String) : UnifiedExecProcessSession {
             override val sessionId = 42
             override val cwd = Path("/fixture")
-            override val arguments = ExecCommandArguments("same command", yieldTimeMillis = 1_000)
+            override val arguments = ExecCommandArguments("same command", name = "Exercise terminal access", yieldTimeMillis = 1_000)
             override val exitCode = MutableStateFlow<Int?>(null)
             var touched = 0
             override suspend fun readOutput(offset: ULong, limit: UInt): StdoutSlice {
@@ -88,9 +89,11 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                             StableReasoning(ResponseItem.Reasoning(encryptedContent = "test-reasoning")),
                             UnstableSnapshot(emptyList()),
                             LlmRequestMeta.Response(
-                                0,
-                                TokenUsage(0, 0, 0),
-                                TokenCountDiagnostics(requestId = "test", turnStateReceived = true),
+                                totalTokens = 0,
+                                elapsedNanoseconds = 1_000_000L,
+                                outputTokens = 0,
+                                usage = TokenUsage(0, 0, 0),
+                                diagnostics = TokenCountDiagnostics(requestId = "test", turnStateReceived = true),
                             ),
                         ),
                     )
@@ -132,8 +135,8 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
             val tail = rpc.getLatestIndex(index)
             assertTrue(rpc.compareAndSetSettings(index, old, old))
             assertEquals(tail, rpc.getLatestIndex(index))
-            assertTrue(rpc.compareAndSetSettings(index, old, old.copy(threadName = "changed")))
-            assertFalse(rpc.compareAndSetSettings(index, old, old.copy(threadName = "stale")))
+            assertTrue(rpc.compareAndSetSettings(index, old, old.copy(name = "changed")))
+            assertFalse(rpc.compareAndSetSettings(index, old, old.copy(name = "stale")))
             assertEquals(nonce, rpc.getCacheNonce(index))
         }
     }
@@ -256,6 +259,27 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
         }
     }
 
+    test("an archived root can still resume while its completed bit is set") {
+        val entered = CompletableDeferred<Unit>()
+        val client = mockOpenAiClient { createResponse { flow { entered.complete(Unit); awaitCancellation() } } }
+        runtimeFixture(client) { repository, index, backend ->
+            val entry = repository.getEntry(index)
+            entry.archive()
+            assertTrue(repository.getEntry(index).archived)
+            assertTrue(checkNotNull(repository.getAgentRecord(entry.rootAgentId)).completed)
+            val session = repository.openSessions.value.getValue(index)
+            session.runtime.appendUserMessage(listOf(ContentItem.InputText("resume archived root")))
+            withInMemoryRpc(registerServices = { registerService(AgentRuntimeRpc::class) { backend } }) { raw ->
+                val rpc = RestoringRpcClient(raw).withService<AgentRuntimeRpc>()
+                assertTrue(rpc.requestResume(entry.rootAgentId))
+                entered.await()
+                rpc.cancelRunningTurn(entry.rootAgentId)
+                rpc.getRunningTurnFlow(entry.rootAgentId).first { !it }
+            }
+            assertTrue(repository.getEntry(index).archived)
+        }
+    }
+
     test("stop cancels current operation while a cancelled waiter does not") {
         val entered = CompletableDeferred<Unit>()
         val client = mockOpenAiClient {
@@ -335,7 +359,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 val operation = async { runtime.forcedCompact(index) }
                 try {
                     entered.await()
-                    val first = before.copy(threadName = "accepted-during-compaction")
+                    val first = before.copy(name = "accepted-during-compaction")
                     assertTrue(runtime.compareAndSetSettings(index, before, first))
                     val latest = first.copy(model = OpenAiModelId("updated-model"))
                     assertTrue(runtime.compareAndSetSettings(index, first, latest))
@@ -349,7 +373,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                         AgentCommitType.SettingsTypes,
                         1,
                     ).single().commit as KodexAgentSettings
-                    assertEquals(latest.threadName, published.threadName)
+                    assertEquals(latest.name, published.name)
                     assertEquals(latest.model, published.model)
                     assertEquals(
                         checkpoint,
@@ -433,7 +457,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                             0,
                             ResponseItem.FunctionCall(
                                 name = "await_event",
-                                arguments = """{"events":[{"type":"user_message"}]}""",
+                                arguments = """{"name":"Wait for user input","events":[{"type":"user_message"}]}""",
                                 callId = "await_1",
                             ),
                         ),
@@ -569,7 +593,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 AgentCommitType.SettingsTypes,
                 1,
             ).single().commit as KodexAgentSettings
-            assertTrue(rpc.compareAndSetSettings(index, old, old.copy(threadName = "manual")))
+            assertTrue(rpc.compareAndSetSettings(index, old, old.copy(name = "manual")))
             release.complete(Unit)
             titleJob.await().join()
             session.runtime.appendUserMessage(listOf(ContentItem.InputText("second")))
@@ -582,7 +606,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                     rpc.getLatestIndex(index),
                     AgentCommitType.SettingsTypes,
                     1,
-                ).single().commit as KodexAgentSettings).threadName,
+                ).single().commit as KodexAgentSettings).name,
             )
             assertEquals(1, calls)
         }
@@ -641,7 +665,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
             release.complete(Unit)
             rpc.getLatestIndexFlow(index).first {
                 (rpc.getLastCommitsIn(index, nonce, 0, it, AgentCommitType.SettingsTypes, 1)
-                    .single().commit as KodexAgentSettings).threadName == "automatic"
+                    .single().commit as KodexAgentSettings).name == "automatic"
             }
             assertEquals(
                 changed.instructions,
@@ -705,12 +729,14 @@ internal suspend fun runtimeFixture(
     val root = Path(SystemTemporaryDirectory, "kodex-rpc-runtime-${Random.nextLong()}")
     val repoOwner = CoroutineScope(coroutineContext + SupervisorJob())
     try {
-        // Existing runtime cases exercise the first root imported from a pre-cutover Home.
+        // Keep the fixtures' existing root Agent ID 0 while preparing the live schema.
         SystemCoroutineFileSystem.createDirectories(root)
         openSqliteConnection(Path(root, "kodex.db")).use { db ->
-            initializeSqlitePhaseOneSchema(db)
+            initializeKodexHomeDatabase(db)
             db.execute("INSERT INTO sessions(session_id) VALUES(0)")
             db.execute("INSERT INTO agents(agent_id, session_id) VALUES(0, 0)")
+            db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES(0)")
+            db.recomputeSessionCatalog(0)
         }
         val repository = repoOwner.SqliteKodexSessionRepository(root, testKodexAgentDependencies(client))
         try {
@@ -718,7 +744,7 @@ internal suspend fun runtimeFixture(
             val index = 0
             val session = repository.open(index)
             session.runtime.modify {
-                it.initialize(KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = "Session $index"))
+                it.initialize(KodexAgentSettings(model = OpenAiModelId("test-model"), name = "Session $index"))
             }
             attachSessionTitleGeneration(
                 scope = session.runtime,

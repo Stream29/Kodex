@@ -11,6 +11,7 @@ import io.github.stream29.kodex.cli.historyindex.LocalHistoryIndexNavigation
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -26,7 +27,6 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
-import com.jakewharton.mosaic.ui.Spacer
 import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
@@ -34,17 +34,23 @@ import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionGroupFocus
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.cli.components.rememberRunningIndicatorFrame
-import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.tuiColorSchemeFor
+import io.github.stream29.kodex.cli.sessioncatalog.SessionGroupsContent
+import io.github.stream29.kodex.cli.sessioncatalog.rememberMosaicSessionGroupsRenderer
 import io.github.stream29.kodex.cli.sessiontabbar.rememberMosaicSessionTabBarRenderer
 import io.github.stream29.kodex.cli.settings.NewLineKey
+import io.github.stream29.kodex.cli.settings.SidebarContent
+import io.github.stream29.kodex.cli.settings.ToolWindowId
+import io.github.stream29.kodex.cli.settings.ToolWindowSide
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.io.files.Path
 
 @Composable
 public actual fun SessionTreeCliScreen(
@@ -64,58 +70,41 @@ public actual fun SessionTreeCliScreen(
     val sidebarConfiguration by sidebarSettings.state.collectAsState()
     val tabProjection = frame.tabs
     val tabStates = tabProjection.tabs
-    val selectedPersisted = navigation.selectedSession
     val selectedAgent = frame.selectedAgent
-    val overlays = rememberApplicationOverlays(
-        selectedAgent, sidebarConfiguration.left, sidebarConfiguration.right, popup,
-    )
-    val historyRenderStates = rememberHistoryRenderStates(tabStates, selectedAgent?.history)
-    val sessionSummary = summarizeOpenSessions(tabStates)
+    val activeLeft = sidebarConfiguration.activeLeft
+    val activeRight = sidebarConfiguration.activeRight
+    // Existing right-hand renderers still consume their body kind, not preference state.
+    val rightContent = when (activeRight) {
+        ToolWindowId.HistoryIndex -> SidebarContent.HistoryIndex
+        ToolWindowId.TerminalSessions -> SidebarContent.TerminalSessions
+        null, ToolWindowId.Sessions -> SidebarContent.None
+    }
+    val overlays = rememberApplicationOverlays(selectedAgent, SidebarContent.None, rightContent, popup)
+    val historyRenderStates = rememberHistoryRenderStates(tabStates)
+    val agentSummary = summarizeOpenAgents(tabStates)
     val runningFrame = rememberRunningIndicatorFrame(
-        active = sessionSummary.runningSessionCount > 0,
+        active = agentSummary.runningAgentCount > 0,
     )
-    TerminalTitleEffect(sessionSummary.sessionCount, sessionSummary.runningSessionCount)
+    TerminalTitleEffect(agentSummary.agentCount, agentSummary.runningAgentCount)
 
     val columns = terminal.size.columns.coerceAtLeast(1)
     val rows = (terminal.size.rows - 1 - reservedRows.coerceAtLeast(0)).coerceAtLeast(1)
     LaunchedEffect(sidebarSettings, columns) { sidebarSettings.initializeViewport(columns) }
     val scope = rememberCoroutineScope()
-    var leftSidebarPinnedExpanded by remember { mutableStateOf(false) }
-    var leftSidebarExpandButtonHovered by remember { mutableStateOf(false) }
-    var leftSidebarSurfaceHovered by remember { mutableStateOf(false) }
     var leftSidebarResizing by remember { mutableStateOf(false) }
     var leftSidebarResizeColumns by remember { mutableStateOf<Int?>(null) }
-    var rightSidebarPinnedExpanded by remember { mutableStateOf(false) }
-    var rightSidebarExpandButtonHovered by remember { mutableStateOf(false) }
-    var rightSidebarSurfaceHovered by remember { mutableStateOf(false) }
     var rightSidebarResizing by remember { mutableStateOf(false) }
     var rightSidebarResizeColumns by remember { mutableStateOf<Int?>(null) }
-    val leftSidebarDropdown = rememberTuiDropdownState()
-    val rightSidebarDropdown = rememberTuiDropdownState()
     val tabMenu = (overlays.menu as? ApplicationOverlayMenu.Tab)?.opening
     val historyMenu = (overlays.menu as? ApplicationOverlayMenu.History)?.opening
-    val leftSidebarExpanded = leftSidebarPinnedExpanded ||
-        leftSidebarExpandButtonHovered ||
-        leftSidebarSurfaceHovered ||
-        leftSidebarResizing ||
-        leftSidebarDropdown.expanded ||
-        (overlays.menu as? ApplicationOverlayMenu.Sidebar)?.side == SessionSidebarSide.Left ||
-        overlays.hover?.side == SessionSidebarSide.Left
-    val rightSidebarExpanded = rightSidebarPinnedExpanded ||
-        rightSidebarExpandButtonHovered ||
-        rightSidebarSurfaceHovered ||
-        rightSidebarResizing ||
-        rightSidebarDropdown.expanded ||
-        (overlays.menu as? ApplicationOverlayMenu.Sidebar)?.side == SessionSidebarSide.Right ||
-        overlays.hover?.side == SessionSidebarSide.Right
     val leftSidebarPreferredColumns =
         leftSidebarResizeColumns ?: sidebarConfiguration.leftWidth
     val rightSidebarPreferredColumns =
         rightSidebarResizeColumns ?: sidebarConfiguration.rightWidth
     val targetSidebarColumns = resolveSessionSidebarColumns(
         columns = columns,
-        leftColumns = if (leftSidebarExpanded) leftSidebarPreferredColumns else 0,
-        rightColumns = if (rightSidebarExpanded) rightSidebarPreferredColumns else 0,
+        leftColumns = if (activeLeft != null) leftSidebarPreferredColumns else 0,
+        rightColumns = if (activeRight != null) rightSidebarPreferredColumns else 0,
     )
     val animatedLeftSidebarColumns by animateIntAsState(
         targetValue = targetSidebarColumns.left,
@@ -127,25 +116,15 @@ public actual fun SessionTreeCliScreen(
     )
     val displayedSidebarColumns = resolveSessionSidebarColumns(
         columns = columns,
-        leftColumns = leftSidebarResizeColumns ?: animatedLeftSidebarColumns,
-        rightColumns = rightSidebarResizeColumns ?: animatedRightSidebarColumns,
+        leftColumns = if (activeLeft != null) leftSidebarResizeColumns ?: animatedLeftSidebarColumns else 0,
+        rightColumns = if (activeRight != null) rightSidebarResizeColumns ?: animatedRightSidebarColumns else 0,
     )
     val leftSidebarColumns = displayedSidebarColumns.left
     val rightSidebarColumns = displayedSidebarColumns.right
-    val leftExpandButtonBridgesHoverAnimation = leftSidebarExpandButtonHovered &&
-        !leftSidebarPinnedExpanded &&
-        leftSidebarColumns < targetSidebarColumns.left
-    val rightExpandButtonBridgesHoverAnimation = rightSidebarExpandButtonHovered &&
-        !rightSidebarPinnedExpanded &&
-        rightSidebarColumns < targetSidebarColumns.right
-    val showLeftSidebarExpandButton =
-        (!leftSidebarExpanded && leftSidebarColumns == 0) ||
-            leftExpandButtonBridgesHoverAnimation
-    val showRightSidebarExpandButton =
-        (!rightSidebarExpanded && rightSidebarColumns == 0) ||
-            rightExpandButtonBridgesHoverAnimation
     val contentColumns = displayedSidebarColumns.content
-    val contentRows = (rows - SessionTabBarRows).coerceAtLeast(0)
+    val contentRows = (rows - ApplicationTopBarRows).coerceAtLeast(0)
+    val leftPanelVisible = leftSidebarColumns > SessionSidebarSplitterColumns && contentRows > 0
+    val rightPanelVisible = rightSidebarColumns > SessionSidebarSplitterColumns && contentRows > 0
     val currentSelectedAgent by rememberUpdatedState(selectedAgent)
     val currentApplicationPopup by rememberUpdatedState(popup)
     val composerFocusRequester = remember(selectedAgent) { FocusRequester() }
@@ -158,6 +137,23 @@ public actual fun SessionTreeCliScreen(
         else -> null
     }
     val runtimeDropdowns = RuntimeConfigurationDropdowns.remember(runtimeConfiguration)
+
+    fun runWindowCommand(command: suspend () -> Unit) {
+        scope.launch {
+            try {
+                command()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                onOperationFailure(failure)
+            }
+        }
+    }
+
+    fun collapseWindow(side: ToolWindowSide) {
+        if (side == ToolWindowSide.Right) overlays.clearSide(SessionSidebarSide.Right)
+        runWindowCommand { sidebarSettings.collapse(side) }
+    }
 
     fun updateShellSessionRowHover(
         request: ShellSessionInteractionRequest,
@@ -180,20 +176,18 @@ public actual fun SessionTreeCliScreen(
         leftSidebarResizing,
         leftSidebarResizeColumns,
         sidebarConfiguration.leftWidth,
-        leftSidebarExpanded,
+        leftPanelVisible,
         animatedLeftSidebarColumns,
         targetSidebarColumns.left,
     ) {
+        if (!leftPanelVisible) {
+            leftSidebarResizing = false
+            leftSidebarResizeColumns = null
+            return@LaunchedEffect
+        }
         val resized = leftSidebarResizeColumns ?: return@LaunchedEffect
-        if (
-            !leftSidebarResizing &&
-            (
-                !leftSidebarExpanded ||
-                    (
-                        sidebarConfiguration.leftWidth == resized &&
-                            animatedLeftSidebarColumns == targetSidebarColumns.left
-                        )
-                )
+        if (!leftSidebarResizing && sidebarConfiguration.leftWidth == resized &&
+            animatedLeftSidebarColumns == targetSidebarColumns.left
         ) {
             leftSidebarResizeColumns = null
         }
@@ -202,20 +196,18 @@ public actual fun SessionTreeCliScreen(
         rightSidebarResizing,
         rightSidebarResizeColumns,
         sidebarConfiguration.rightWidth,
-        rightSidebarExpanded,
+        rightPanelVisible,
         animatedRightSidebarColumns,
         targetSidebarColumns.right,
     ) {
+        if (!rightPanelVisible) {
+            rightSidebarResizing = false
+            rightSidebarResizeColumns = null
+            return@LaunchedEffect
+        }
         val resized = rightSidebarResizeColumns ?: return@LaunchedEffect
-        if (
-            !rightSidebarResizing &&
-            (
-                !rightSidebarExpanded ||
-                    (
-                        sidebarConfiguration.rightWidth == resized &&
-                            animatedRightSidebarColumns == targetSidebarColumns.right
-                        )
-                )
+        if (!rightSidebarResizing && sidebarConfiguration.rightWidth == resized &&
+            animatedRightSidebarColumns == targetSidebarColumns.right
         ) {
             rightSidebarResizeColumns = null
         }
@@ -226,6 +218,9 @@ public actual fun SessionTreeCliScreen(
     TuiTheme(colorScheme = tuiColorSchemeFor(terminal.theme)) {
         TuiPopupHost {
             val menuRenderer = remember(this) { MosaicApplicationMenuRenderer(this) }
+            val groupsRenderer = rememberMosaicSessionGroupsRenderer(
+                columns = (leftSidebarColumns - SessionSidebarSplitterColumns).coerceAtLeast(0),
+            )
             Column(modifier = Modifier.width(columns).height(rows)) {
                 ApplicationTabBarContent(
                     viewModel = viewModel,
@@ -233,37 +228,25 @@ public actual fun SessionTreeCliScreen(
                     projection = tabProjection,
                     renderer = rememberMosaicSessionTabBarRenderer(columns, runningFrame),
                     onOperationFailure = onOperationFailure,
+                    showSessions = false,
                     onBeforeNewOrCatalog = { overlays.clear() },
                     onOpenTabMenu = { request ->
                         overlays.openMenu(ApplicationOverlayMenu.Tab(request))
                     },
                 )
+                if (rows >= ApplicationTopBarRows) {
+                    ToolWindowBar(terminal.size.columns, activeLeft, activeRight, onToggle = { id ->
+                        if (id.side == ToolWindowSide.Right) overlays.clearSide(SessionSidebarSide.Right)
+                        runWindowCommand { sidebarSettings.toggle(id) }
+                    })
+                }
                 Box(modifier = Modifier.width(columns).height(contentRows)) {
                     Row(modifier = Modifier.width(columns).height(contentRows)) {
                         if (leftSidebarColumns > 0) {
-                            SessionSidebar(
+                            SessionSidebarFrame(
                                 side = SessionSidebarSide.Left,
-                                content = sidebarConfiguration.left,
-                                selectedAgent = selectedAgent,
-                                dropdownState = leftSidebarDropdown,
                                 columns = leftSidebarColumns,
                                 rows = contentRows,
-                                onHoverChanged = { leftSidebarSurfaceHovered = it },
-                                onToggleExpanded = {
-                                    leftSidebarPinnedExpanded = !leftSidebarPinnedExpanded
-                                    if (!leftSidebarPinnedExpanded) {
-                                        leftSidebarDropdown.dismiss()
-                                        overlays.clearSide(SessionSidebarSide.Left)
-                                    }
-                                },
-                                onShellSessionHoverChanged = ::updateShellSessionRowHover,
-                                onOpenShellSessionMenu = { request ->
-                                    overlays.openMenu(ApplicationOverlayMenu.Shell(SessionSidebarSide.Left, mosaicShellMenu(request)))
-                                },
-                                onHistoryIndexHoverChanged = ::updateHistoryIndexRowHover,
-                                onOpenHistoryIndexMenu = { request ->
-                                    overlays.openMenu(ApplicationOverlayMenu.Index(SessionSidebarSide.Left, mosaicIndexMenu(request)))
-                                },
                                 resizable = clampSessionSidebarResize(
                                     columns = columns,
                                     oppositeColumns = rightSidebarColumns,
@@ -304,7 +287,7 @@ public actual fun SessionTreeCliScreen(
                                             if (accepted != sidebarConfiguration.leftWidth) {
                                                 scope.launch {
                                                     try {
-                                                        resizeApplicationSidebar(sidebarSettings, SessionSidebarSide.Left, accepted)
+                                                        sidebarSettings.resizeLeft(accepted)
                                                     } catch (failure: CancellationException) {
                                                         throw failure
                                                     } catch (_: Throwable) {
@@ -317,7 +300,36 @@ public actual fun SessionTreeCliScreen(
                                         }
                                     }
                                 },
-                            )
+                            ) { panelColumns ->
+                                if (leftPanelVisible) {
+                                    val catalog = viewModel.sessionCatalog
+                                    if (catalog == null) Text("Sessions unavailable", Modifier.width(panelColumns))
+                                    else {
+                                        val selectedTab = navigation.selectedTab
+                                        val focus = if (selectedAgent != null && selectedTab != null) {
+                                            key(selectedAgent.settings) {
+                                                val agentSettings by selectedAgent.settings.collectAsState()
+                                                SessionGroupFocus(
+                                                    cwd = agentSettings.cwd.toString(),
+                                                    agentId = selectedTab.agentId,
+                                                )
+                                            }
+                                        } else null
+                                        SessionGroupsContent(
+                                            viewModel = catalog,
+                                            focus = focus,
+                                            renderer = groupsRenderer,
+                                            onNewInGroup = { cwd ->
+                                                overlays.clear()
+                                                if (cwd == null) viewModel.selectNewSession()
+                                                else viewModel.selectNewSessionInDirectory(Path(cwd))
+                                            },
+                                            onCollapse = { collapseWindow(ToolWindowSide.Left) },
+                                            onFailure = onOperationFailure,
+                                        )
+                                    }
+                                }
+                            }
                         }
                         Box(modifier = Modifier.width(contentColumns).height(contentRows)) {
                             ApplicationPageContent(
@@ -347,7 +359,7 @@ public actual fun SessionTreeCliScreen(
                                         },
                                     )
                                 },
-                                persistedSession = { selected ->
+                                agentTab = { selected ->
                                     ApplicationPersistedSurfaceContent(frame, agent = { agent ->
                                         val pageTarget = rememberAgentPageActionTarget(selected, agent)
                                         AgentRuntimeScreen(
@@ -360,7 +372,7 @@ public actual fun SessionTreeCliScreen(
                                             composerFocusRequester = composerFocusRequester,
                                             onOpenHistoryEntryContextMenu = { generation, storageIndex, item, anchor, position ->
                                                 overlays.openMenu(ApplicationOverlayMenu.History(ApplicationHistoryMenuOpening(
-                                                    session = selected,
+                                                    tab = selected,
                                                     agent = agent,
                                                     generation = generation,
                                                     storageIndex = storageIndex,
@@ -382,19 +394,11 @@ public actual fun SessionTreeCliScreen(
                         if (rightSidebarColumns > 0) {
                             SessionSidebar(
                                 side = SessionSidebarSide.Right,
-                                content = sidebarConfiguration.right,
+                                content = rightContent,
                                 selectedAgent = selectedAgent,
-                                dropdownState = rightSidebarDropdown,
                                 columns = rightSidebarColumns,
                                 rows = contentRows,
-                                onHoverChanged = { rightSidebarSurfaceHovered = it },
-                                onToggleExpanded = {
-                                    rightSidebarPinnedExpanded = !rightSidebarPinnedExpanded
-                                    if (!rightSidebarPinnedExpanded) {
-                                        rightSidebarDropdown.dismiss()
-                                        overlays.clearSide(SessionSidebarSide.Right)
-                                    }
-                                },
+                                onToggleExpanded = { collapseWindow(ToolWindowSide.Right) },
                                 onShellSessionHoverChanged = ::updateShellSessionRowHover,
                                 onOpenShellSessionMenu = { request ->
                                     overlays.openMenu(ApplicationOverlayMenu.Shell(SessionSidebarSide.Right, mosaicShellMenu(request)))
@@ -443,7 +447,7 @@ public actual fun SessionTreeCliScreen(
                                             if (accepted != sidebarConfiguration.rightWidth) {
                                                 scope.launch {
                                                     try {
-                                                        resizeApplicationSidebar(sidebarSettings, SessionSidebarSide.Right, accepted)
+                                                        sidebarSettings.resizeRight(accepted)
                                                     } catch (failure: CancellationException) {
                                                         throw failure
                                                     } catch (_: Throwable) {
@@ -459,79 +463,6 @@ public actual fun SessionTreeCliScreen(
                             )
                         }
                     }
-                    if (showLeftSidebarExpandButton || showRightSidebarExpandButton) {
-                        Row(modifier = Modifier.width(columns).height(SessionSidebarCollapsedButtonRows)) {
-                            if (showLeftSidebarExpandButton) {
-                                SessionSidebarExpandButton(
-                                    side = SessionSidebarSide.Left,
-                                    onHoverChanged = { hovered ->
-                                        leftSidebarExpandButtonHovered = hovered &&
-                                            canExpandSessionSidebar(
-                                                columns = columns,
-                                                requestedColumns =
-                                                    sidebarConfiguration.leftWidth,
-                                                oppositeColumns = if (rightSidebarExpanded) {
-                                                    rightSidebarPreferredColumns
-                                                } else {
-                                                    0
-                                                },
-                                            )
-                                    },
-                                    onExpand = {
-                                        if (
-                                            canExpandSessionSidebar(
-                                                columns = columns,
-                                                requestedColumns =
-                                                    sidebarConfiguration.leftWidth,
-                                                oppositeColumns = if (rightSidebarExpanded) {
-                                                    rightSidebarPreferredColumns
-                                                } else {
-                                                    0
-                                                },
-                                            )
-                                        ) {
-                                            leftSidebarPinnedExpanded = true
-                                        }
-                                    },
-                                )
-                            }
-                            Spacer(Modifier.weight(1f))
-                            if (showRightSidebarExpandButton) {
-                                SessionSidebarExpandButton(
-                                    side = SessionSidebarSide.Right,
-                                    onHoverChanged = { hovered ->
-                                        rightSidebarExpandButtonHovered = hovered &&
-                                            canExpandSessionSidebar(
-                                                columns = columns,
-                                                requestedColumns =
-                                                    sidebarConfiguration.rightWidth,
-                                                oppositeColumns = if (leftSidebarExpanded) {
-                                                    leftSidebarPreferredColumns
-                                                } else {
-                                                    0
-                                                },
-                                            )
-                                    },
-                                    onExpand = {
-                                        if (
-                                            canExpandSessionSidebar(
-                                                columns = columns,
-                                                requestedColumns =
-                                                    sidebarConfiguration.rightWidth,
-                                                oppositeColumns = if (leftSidebarExpanded) {
-                                                    leftSidebarPreferredColumns
-                                                } else {
-                                                    0
-                                                },
-                                            )
-                                        ) {
-                                            rightSidebarPinnedExpanded = true
-                                        }
-                                    },
-                                )
-                            }
-                        }
-                    }
                 }
             }
 
@@ -539,10 +470,7 @@ public actual fun SessionTreeCliScreen(
                 overlays, selectedAgent,
                 rememberMosaicSidebarOverlayRenderer(contentColumns, contentRows),
                 rememberMosaicIndexOverlayRenderer(contentColumns, contentRows),
-                isSideVisible = { side ->
-                    if (side == SessionSidebarSide.Left) leftSidebarExpanded && leftSidebarColumns > 0
-                    else rightSidebarExpanded && rightSidebarColumns > 0
-                },
+                isSideVisible = { side -> side == SessionSidebarSide.Right && rightPanelVisible },
                 onShellOutputFallback = {
                     val owner = currentSelectedAgent
                     scope.launch {
@@ -552,23 +480,13 @@ public actual fun SessionTreeCliScreen(
                         ) currentComposerFocusRequester.requestFocus()
                     }
                 },
-            )
-            SessionSidebarContentMenu(
-                dropdownState = leftSidebarDropdown,
-                selected = sidebarConfiguration.left,
-                onSelect = { content ->
-                    overlays.clearSide(SessionSidebarSide.Left)
-                    scope.launch { selectApplicationSidebarContent(sidebarSettings, SessionSidebarSide.Left, content) }
+                application = viewModel,
+                focusEditedComposer = { owner ->
+                    if (currentSelectedAgent === owner) currentComposerFocusRequester.requestFocus()
                 },
+                onOperationFailure = onOperationFailure,
             )
-            SessionSidebarContentMenu(
-                dropdownState = rightSidebarDropdown,
-                selected = sidebarConfiguration.right,
-                onSelect = { content ->
-                    overlays.clearSide(SessionSidebarSide.Right)
-                    scope.launch { selectApplicationSidebarContent(sidebarSettings, SessionSidebarSide.Right, content) }
-                },
-            )
+            groupsRenderer.Overlays()
             ApplicationMenusContent(
                 viewModel = viewModel,
                 navigation = navigation,
@@ -604,4 +522,4 @@ public actual fun SessionTreeCliScreen(
     }
 }
 
-private const val SessionTabBarRows: Int = 1
+private const val ApplicationTopBarRows: Int = 2

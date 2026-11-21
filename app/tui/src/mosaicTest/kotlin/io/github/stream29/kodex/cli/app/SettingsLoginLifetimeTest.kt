@@ -22,7 +22,9 @@ import io.github.stream29.kodex.app.mcpsettings.*
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.settings.contract.*
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
+import io.github.stream29.kodex.cli.settings.ToolWindowId
 import io.github.stream29.kodex.rpc.server.defaultBackendSettings
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.app.test.deleteTestDirectory
@@ -69,8 +71,15 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
                     val snapshot = awaitRootGeometry(width, groupLeft, settingsColumn)
                     val lines = snapshot.lines()
                     val topBar = lines.first()
+                    val toolBar = lines[1]
                     assertEquals(width, topBar.terminalCellWidth(), snapshot)
                     assertEquals(width - 3, topBar.indexOf("[+]"), snapshot)
+                    assertFalse("[Sessions]" in topBar || "[Sess]" in topBar, snapshot)
+                    if (width < 40) {
+                        assertTrue(toolBar.startsWith("[Sess]") && toolBar.endsWith("[Idx] [Term]"), snapshot)
+                    } else {
+                        assertTrue(toolBar.startsWith("[Sessions]") && toolBar.endsWith("[History] [Terminal]"), snapshot)
+                    }
                     assertEquals(
                         groupLeft,
                         lines.first { "Start a new session" in it }.indexOf("Start a new session"),
@@ -83,6 +92,55 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
                     )
                     assertTrue(lines.all { it.terminalCellWidth() <= width }, snapshot)
                 }
+                state.size.value = Terminal.Size(32, 3)
+                val short = awaitRootText("[Sess]")
+                assertTrue("[+]" in short.lines().first(), short)
+                assertTrue(short.lines()[1].endsWith("[Idx] [Term]"), short)
+                assertFalse("Start a new session" in short, short)
+            }
+        }
+    }
+
+    test("tool windows switch independently and keep the New Session draft") {
+        withSettingsApplication { app ->
+            val root = object : ApplicationViewModel by app.viewModel {
+                override val sessionCatalog = null
+            }
+            val draft = root.newSession
+            draft.composer.update("draft kept", 3)
+            runSettingsRootTest {
+                state.size.value = Terminal.Size(120, 40)
+                setContentAndSnapshot { SessionTreeCliScreen(root, app.newLineKey, app.sidebarSettings) }
+
+                clickText(awaitRootText("[Sessions]"), "[Sessions]")
+                awaitRootText("Sessions unavailable")
+                val initialWidths = app.sidebarSettings.state.value
+                assertEquals(ToolWindowId.Sessions, initialWidths.activeLeft)
+                assertNull(initialWidths.activeRight)
+
+                clickText(awaitRootText("[History]"), "[History]")
+                val history = awaitRootText("No Agent selected")
+                assertTrue("History Index" in history && "[History Index]" !in history, history)
+                assertEquals(ToolWindowId.HistoryIndex, app.sidebarSettings.state.value.activeRight)
+
+                clickText(awaitRootText("[Terminal]"), "[Terminal]")
+                val terminal = awaitRootText("Terminal sessions")
+                assertTrue("No Agent selected" in terminal, terminal)
+                val switched = app.sidebarSettings.state.value
+                assertEquals(ToolWindowId.TerminalSessions, switched.activeRight)
+                assertEquals(ToolWindowId.Sessions, switched.activeLeft)
+                assertEquals(initialWidths.rightWidth, switched.rightWidth)
+
+                clickText(terminal, "[—]")
+                awaitRootCondition { app.sidebarSettings.state.value.activeRight == null }
+                assertEquals(ToolWindowId.Sessions, app.sidebarSettings.state.value.activeLeft)
+                clickText(awaitRootText("[Sessions]"), "[Sessions]")
+                awaitRootCondition { app.sidebarSettings.state.value.activeLeft == null }
+
+                assertSame(draft, root.newSession)
+                assertEquals(ApplicationTabSelection.NewSession, root.navigation.value.selection)
+                assertEquals("draft kept", draft.composer.state.value.text)
+                assertEquals(3, draft.composer.state.value.cursorOffset)
             }
         }
     }
@@ -291,7 +349,7 @@ val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealT
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     val current = collectApplicationFrame(root).tabs
                     projection = current
-                    Text(current.tabs.joinToString(prefix = "Tabs:[", postfix = "]") { it.target.sessionIndex.toString() })
+                    Text(current.tabs.joinToString(prefix = "Tabs:[", postfix = "]") { (it.target as PersistedSessionViewModel).sessionIndex.toString() })
                 }
                 }
                 val survivorIdentity = requireNotNull(projection).state.tabs.single().identity
@@ -515,7 +573,7 @@ private class BoundSettingsRoot(
         popup.value = if (application.popup.value === original) owner else application.popup.value
         return true
     }
-    override suspend fun closeTab(target: PersistedSessionViewModel): Boolean =
+    override suspend fun closeTab(target: AgentTabViewModel): Boolean =
         application.closeTab(target).also {
             if (application.popup.value === ApplicationPopupState.Closed) {
                 popup.value = ApplicationPopupState.Closed

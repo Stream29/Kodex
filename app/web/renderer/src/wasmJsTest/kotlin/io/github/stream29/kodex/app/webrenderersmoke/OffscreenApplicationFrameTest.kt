@@ -8,26 +8,28 @@ import io.github.stream29.kodex.app.session.contract.*
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.ui.UiText
 import io.github.stream29.kodex.cli.app.*
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexParentAnchor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlin.test.*
 
 val offscreenApplicationFrameTest by testSuite {
     test("a retained child page action cannot become current again after leaving its mount") { offscreenTest {
-        val root = object : SidebarTestAgent() { override val running = MutableStateFlow(false) }
-        val a = SidebarTestAgent()
-        val b = SidebarTestAgent()
-        val tab = object : NavigationSession(12, "root Session", root) {
-            override val selectedAgent = MutableStateFlow<AgentViewModel?>(a)
-            override val lifecycle = MutableStateFlow<PersistedSessionLifecycleState>(PersistedSessionLifecycleState.Open)
-        }
+        val a = NavigationAgent()
+        val b = NavigationAgent()
+        val tab = NavigationAgentTab(12, "child A", a)
+        val other = NavigationAgentTab(13, "child B", b)
         val opened = mutableListOf<AgentViewModel>()
-        val app = object : NavigationApplication(listOf(tab)) {
+        val app = object : NavigationApplication(listOf(tab, other)) {
             override val popup = MutableStateFlow<ApplicationPopupState>(ApplicationPopupState.Closed)
             override suspend fun openAgentSettingsPopup(target: AgentPageActionTarget): ApplicationPopupState.Settings? {
-                assertSame(tab, target.session)
-                if (target.isCurrent()) opened += target.agent
+                if (target.isCurrent()) {
+                    assertSame(navigation.value.selectedTab, target.tab)
+                    opened += target.agent
+                }
                 return null
             }
         }
@@ -38,8 +40,9 @@ val offscreenApplicationFrameTest by testSuite {
             rootActions = rememberApplicationRootActions(app) { throw IllegalStateException("Unexpected action failure", it) }
             val frame = collectApplicationFrame(app)
             ApplicationPersistedSurfaceContent(frame, { selected ->
-                page = rememberAgentPageActionTarget(tab, selected)
-                assertSame(root, frame.tabs.tabs.single().agent)
+                page = rememberAgentPageActionTarget(assertNotNull(frame.navigation.selectedTab), selected)
+                assertSame(a, frame.tabs.tabs.first().agent)
+                assertSame(b, frame.tabs.tabs.last().agent)
                 UiText("Agent page")
             }, { UiText(it) })
         }
@@ -48,17 +51,66 @@ val offscreenApplicationFrameTest by testSuite {
             val first = page
             rootActions.openAgentSettings(first)
             scene.settle("first child settings action") { opened.size == 1 }
-            tab.selectedAgent.value = b
+            app.selectTab(other)
             scene.settle("replacement child mount") { page.agent === b && page.isCurrent() }
             assertFalse(first.isCurrent())
             rootActions.openAgentSettings(first)
             rootActions.openAgentSettings(page)
             scene.settle("replacement child settings action") { opened.size == 2 }
             assertEquals(listOf<AgentViewModel>(a, b), opened)
-            tab.selectedAgent.value = a
+            app.selectTab(tab)
             scene.settle("remounted first child") { page.agent === a && page.isCurrent() }
             assertFalse(first.isCurrent())
-            assertSame(root, tab.rootAgent.value)
+            assertSame(a, tab.agent.value)
+        } finally { scene.close() }
+    } }
+
+    test("closing the parent stops completion observation but keeps its return action") { offscreenTest {
+        val completion = MutableStateFlow(false)
+        var observations = 0
+        var disposals = 0
+        val child = NavigationAgentTab(42, "Child", NavigationAgent())
+        val parent = object : NavigationSession(1, "Parent", NavigationAgent()) {
+            override fun observeCompletionAnchor(childAgentId: Int) = flow {
+                assertEquals(child.agentId, childAgentId)
+                observations++
+                try { emitAll(completion) } finally { disposals++ }
+            }
+        }
+        val returned = mutableListOf<AgentParentAnchor>()
+        val app = object : NavigationApplication(listOf(parent, child)) {
+            override val popup = MutableStateFlow<ApplicationPopupState>(ApplicationPopupState.Closed)
+            override suspend fun returnToParent(source: AgentPageActionTarget, anchor: AgentParentAnchor) {
+                assertSame(child, source.tab)
+                returned += anchor
+            }
+        }
+        app.navigation.value = ApplicationNavigationState(
+            listOf(parent, child), ApplicationTabSelection.SelectedTab(1), mapOf(child.agentId to parent.agentId),
+        )
+        var returnToParent: (() -> Unit)? = null
+        val scene = OffscreenScene.create {
+            val frame = collectApplicationFrame(app)
+            val index = rememberApplicationIndexNavigation(app, frame) { throw it }
+            val navigate = index?.returnToParent
+            if (index != null && navigate != null) {
+                // Same provider/actions used by both actual sidebar renderers.
+                returnToParent = { navigate(HistoryIndexParentAnchor.Creation) }
+                UiText(if (index.hasCompletionAnchor()) "Matched completion" else "Return to parent")
+            }
+        }
+        try {
+            scene.settle { observations == 1 && scene.hasText("Return to parent") }
+            completion.value = true
+            scene.settle { scene.hasText("Matched completion") }
+            app.navigation.value = app.navigation.value.copy(
+                tabs = listOf(child), selection = ApplicationTabSelection.SelectedTab(0),
+            )
+            scene.settle { disposals == 1 && scene.hasText("Return to parent") }
+            assertFalse(scene.hasText("Matched completion"))
+            assertEquals(1, observations)
+            assertNotNull(returnToParent).invoke()
+            scene.settle { returned == listOf(AgentParentAnchor.Creation) }
         } finally { scene.close() }
     } }
 
@@ -67,7 +119,7 @@ val offscreenApplicationFrameTest by testSuite {
         val first = object : NavigationSession(1, "first", agent) {
             override val lifecycle = MutableStateFlow<PersistedSessionLifecycleState>(PersistedSessionLifecycleState.Failed("first failure"))
         }.also { it.rootAgent.value = null }
-        val second = object : NavigationSession(1, "second", agent) {
+        val second = object : NavigationSession(2, "second", agent) {
             override val lifecycle = MutableStateFlow<PersistedSessionLifecycleState>(PersistedSessionLifecycleState.Loading)
         }.also { it.rootAgent.value = null }
         val app = object : NavigationApplication(listOf(first, second)) {
@@ -86,12 +138,12 @@ val offscreenApplicationFrameTest by testSuite {
         try {
             scene.settle { scene.hasText("first failure") }
             app.navigation.value = app.navigation.value.copy(selection = ApplicationTabSelection.SelectedTab(1))
-            scene.settle { frame?.navigation?.selectedSession === second && scene.hasText("Loading Session…") }
+            scene.settle { frame?.navigation?.selectedSession === second && scene.hasText("Loading Agent…") }
             assertTrue(seen.filter { it.first === second }.all { it.second == PersistedSessionLifecycleState.Loading })
             val frozen = assertNotNull(frame)
             first.lifecycle.value = PersistedSessionLifecycleState.Closed
             scene.advance()
-            assertTrue(scene.hasText("Loading Session…"))
+            assertTrue(scene.hasText("Loading Agent…"))
             second.lifecycle.value = PersistedSessionLifecycleState.Open
             second.rootAgent.value = agent
             scene.settle { frame.selectedAgent === agent && scene.hasText("Agent surface") }
@@ -100,9 +152,9 @@ val offscreenApplicationFrameTest by testSuite {
             assertSame(agent, frame.tabs.tabs.single { it.target === second }.agent)
             second.rootAgent.value = null
             second.lifecycle.value = PersistedSessionLifecycleState.Closed
-            scene.settle { scene.hasText("Session view closed.") && !scene.hasText("Agent surface") }
+            scene.settle { scene.hasText("Agent view closed.") && !scene.hasText("Agent surface") }
             app.navigation.value = app.navigation.value.copy(selection = ApplicationTabSelection.NewSession)
-            scene.settle { frame.navigation.selectedSession == null && !scene.hasText("Session view closed.") }
+            scene.settle { frame.navigation.selectedSession == null && !scene.hasText("Agent view closed.") }
             scene.frame()
         } finally { scene.close() }
         assertEquals(0, first.closeCount + second.closeCount + agent.closeCount + app.closeCount)

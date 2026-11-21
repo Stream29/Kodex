@@ -25,8 +25,10 @@ val awaitEventToolsTest by testSuite {
         assertFalse(spec.strict)
         val schema = Json.encodeToJsonElement(ObjectPropertyDefinition.serializer(), spec.parameters).jsonObject
         assertEquals(JsonPrimitive(false), schema["additionalProperties"])
-        assertEquals(JsonArray(listOf(JsonPrimitive("events"))), schema["required"])
-        val events = schema.getValue("properties").jsonObject.getValue("events").jsonObject
+        assertEquals(setOf(JsonPrimitive("name"), JsonPrimitive("events")), assertIs<JsonArray>(schema["required"]).toSet())
+        val properties = schema.getValue("properties").jsonObject
+        assertEquals(JsonPrimitive("string"), properties.getValue("name").jsonObject["type"])
+        val events = properties.getValue("events").jsonObject
         assertEquals(JsonPrimitive(1), events["minItems"])
         val branches = assertIs<JsonArray>(events.getValue("items").jsonObject.getValue("oneOf"))
         val fieldsByType = branches.associate { branch ->
@@ -60,13 +62,13 @@ val awaitEventToolsTest by testSuite {
             AwaitEventInput.TerminalExited(11),
             AwaitEventInput.Timeout(5000),
             AwaitEventInput.Timeout(250),
-        ))
+        ), name = "等待后台任务 🧪")
         val encoded = OpenAiJsonCodec.encodeToString(AwaitEventArguments.serializer(), inputs)
         assertEquals(inputs, decodeAwaitEventArguments(encoded))
         assertEquals(setOf(11), inputs.terminalIds)
         val started = Instant.parse("2026-11-18T00:00:00.001Z")
         assertEquals(started + 250.milliseconds, inputs.timeoutAt(started))
-        assertNull(AwaitEventArguments(listOf(AwaitEventInput.UserMessage)).timeoutAt(started))
+        assertNull(AwaitEventArguments(listOf(AwaitEventInput.UserMessage), name = "Wait for input").timeoutAt(started))
         assertFailsWith<IllegalArgumentException> {
             inputs.timeoutAt(Instant.fromEpochSeconds(Long.MAX_VALUE) - 1.milliseconds)
         }
@@ -74,25 +76,41 @@ val awaitEventToolsTest by testSuite {
 
     test("strict model input rejects legacy, empty or malformed variants") {
         for (input in listOf(
-            "{}",
-            """{"terminals":[11]}""",
-            """{"events":[]}""",
-            """{"events":null}""",
-            """{"events":[{"type":"schedule_triggered"}],"terminals":[]}""",
-            """{"events":[{"type":"schedule_triggered","id":2}]}""",
-            """{"events":[{}]}""",
-            """{"events":[{"type":"unknown"}]}""",
-            """{"events":[{"type":"terminal_exited"}]}""",
-            """{"events":[{"type":"terminal_exited","session_id":true}]}""",
-            """{"events":[{"type":"terminal_exited","session_id":"11"}]}""",
-            """{"events":[{"type":"terminal_exited","session_id":2147483648}]}""",
-            """{"events":[{"type":"timeout","duration_ms":0}]}""",
-            """{"events":[{"type":"timeout","duration_ms":-1}]}""",
-            """{"events":[{"type":"timeout","duration_ms":0.01}]}""",
-            """{"events":[{"type":"timeout","duration_ms":9223372036854775807}]}""",
+            "",
+            ""","terminals":[11]""",
+            ""","events":[]""",
+            ""","events":null""",
+            ""","events":[{"type":"schedule_triggered"}],"terminals":[]""",
+            ""","events":[{"type":"schedule_triggered","id":2}]""",
+            ""","events":[{}]""",
+            ""","events":[{"type":"unknown"}]""",
+            ""","events":[{"type":"terminal_exited"}]""",
+            ""","events":[{"type":"terminal_exited","session_id":true}]""",
+            ""","events":[{"type":"terminal_exited","session_id":"11"}]""",
+            ""","events":[{"type":"terminal_exited","session_id":2147483648}]""",
+            ""","events":[{"type":"timeout","duration_ms":0}]""",
+            ""","events":[{"type":"timeout","duration_ms":-1}]""",
+            ""","events":[{"type":"timeout","duration_ms":0.01}]""",
+            ""","events":[{"type":"timeout","duration_ms":9223372036854775807}]""",
         )) {
-            assertFailsWith<IllegalArgumentException>(input) { decodeAwaitEventArguments(input) }
+            assertFailsWith<IllegalArgumentException>(input) {
+                decodeAwaitEventArguments("""{"name":"Wait for input"$input}""")
+            }
         }
+    }
+
+    test("new await arguments reject missing, non-string and non-single-line names") {
+        val common = """"events":[{"type":"user_message"}]"""
+        for (literal in listOf(null, "null", "123", "false", "{}", "[]", "\"\"")) {
+            val field = literal?.let { ""","name":$it""" }.orEmpty()
+            val rejected = assertFailsWith<IllegalArgumentException> { decodeAwaitEventArguments("{$common$field}") }
+            assertEquals("`name` must be nonblank, single-line text.", rejected.message)
+        }
+        for (invalid in listOf("", " \u3000 ", "one\ttwo", "one\ntwo", "one\u0085two", "one\u2028two", "one\u2029two")) {
+            assertFailsWith<IllegalArgumentException> { AwaitEventArguments(listOf(AwaitEventInput.UserMessage), invalid) }
+            assertFailsWith<IllegalArgumentException> { decodeAwaitEventArguments("""{$common,"name":${JsonPrimitive(invalid)}}""") }
+        }
+        assertEquals(" 等待输入 🧪 ", decodeAwaitEventArguments("""{$common,"name":" 等待输入 🧪 "}""").name)
     }
 
     test("AwaitEventOutput round-trips instant timestamp through JSON") {

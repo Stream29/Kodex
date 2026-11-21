@@ -14,9 +14,10 @@ import kotlin.test.*
 import kotlin.time.Instant
 
 private fun seeded(): SqliteConnection = openInMemorySqliteConnection().also {
-    ensureSqlitePhaseOneSchema(it)
-    it.execute("INSERT INTO sessions VALUES(0,0)")
+    initializeKodexHomeDatabase(it)
+    it.execute("INSERT INTO sessions VALUES(0)")
     it.execute("INSERT INTO agents(agent_id, session_id) VALUES(0,0)")
+    it.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES(0)")
 }
 
 val sqliteSubagentEventTest by testSuite {
@@ -26,10 +27,11 @@ val sqliteSubagentEventTest by testSuite {
         val completion = StableSubagentCompletedEvent(92)
         try {
             openSqliteConnection(path).use { db ->
-                initializeSqlitePhaseOneSchema(db)
+                initializeKodexHomeDatabase(db)
                 db.execute("INSERT INTO sessions(session_id) VALUES(12), (90)")
                 db.execute("""INSERT INTO agents(agent_id, session_id, parent_agent_id)
                     VALUES(90, 12, NULL), (91, 12, 90), (92, 12, 91), (12, 90, NULL)""")
+                db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES(12), (90)")
                 val directParent = SqliteAgentStorage(db, 91)
                 assertEquals(0, directParent.commit(spawn))
                 // Rows produced before reclassification used the same wire name and payload.
@@ -143,7 +145,7 @@ val sqliteStorageTest by testSuite {
                 storage,
                 AgentCommitType.LlmRequestMetaTypes,
                 LlmRequestMeta.Initialization(0),
-                LlmRequestMeta.Response(42),
+                LlmRequestMeta.Response(42, elapsedNanoseconds = 10_000_000L, outputTokens = 6),
                 askSpacer,
             )
             checkSparseFamily(
@@ -160,7 +162,7 @@ val sqliteStorageTest by testSuite {
             storage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("c")), phase = MessagePhase.Commentary)) // 3
             storage.commit(LlmRequestMeta.Compaction(3)) // 4
             storage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("f")), phase = MessagePhase.FinalAnswer)) // 5
-            storage.commit(LlmRequestMeta.Response(4)) // 6
+            storage.commit(LlmRequestMeta.Response(4, elapsedNanoseconds = 1_000_000L, outputTokens = 1)) // 6
             storage.commit(StableAssistantMessage(listOf(ContentItem.OutputText("n")), phase = null)) // 7
 
             assertEquals(
@@ -199,14 +201,14 @@ val sqliteStorageTest by testSuite {
         }
     }
 
-    test("ensure schema initializes empty databases and rejects incomplete or unsupported schema") {
+    test("schema verification rejects incomplete or unsupported schema") {
         openInMemorySqliteConnection().use { db ->
-            ensureSqlitePhaseOneSchema(db)
-            ensureSqlitePhaseOneSchema(db)
-            db.execute("DROP VIEW session_catalog")
-            assertFailsWith<IllegalStateException> { ensureSqlitePhaseOneSchema(db) }
-            db.execute("PRAGMA user_version=2")
-            assertFailsWith<IllegalStateException> { ensureSqlitePhaseOneSchema(db) }
+            initializeKodexHomeDatabase(db)
+            requireKodexHomeDatabase(db)
+            db.execute("DROP TABLE session_catalog_view")
+            assertFailsWith<IllegalStateException> { requireKodexHomeDatabase(db) }
+            db.execute("PRAGMA user_version=99")
+            assertFailsWith<IllegalStateException> { requireKodexHomeDatabase(db) }
         }
     }
 

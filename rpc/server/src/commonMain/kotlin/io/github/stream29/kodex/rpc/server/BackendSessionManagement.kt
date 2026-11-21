@@ -1,11 +1,12 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.agentsession.contract.AgentForkCopy
+import io.github.stream29.kodex.agentsession.contract.AgentForkSourceChanged
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.contract.RunningSubagentsPreventDeletion
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
-import io.github.stream29.kodex.agentstorage.contract.getSettingsAt
 import io.github.stream29.kodex.agentstorage.contract.getSettingsAtOrNull
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
@@ -20,7 +21,7 @@ import io.github.stream29.kodex.rpc.models.SessionSpawnRejection
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.utils.rpcexception.AgentNotFound
-import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
+import io.github.stream29.kodex.utils.rpcexception.AgentNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
 import io.github.stream29.kodex.utils.rpcexception.SessionHasRunningSubagents
 import kotlinx.coroutines.CoroutineScope
@@ -59,18 +60,8 @@ internal class BackendSessionManagement(
 
     suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> = inBackend {
         commands.withLock {
-            repository.listEntries(includeArchived).map { entry ->
-                SessionCatalogEntry(
-                    sessionIndex = entry.entryIndex,
-                    threadName = entry.threadName,
-                    createdAt = entry.createdAt,
-                    updatedAt = entry.lastActivityAt,
-                    archived = entry.archived,
-                    running = entry.running,
-                    isActive = entry.isActive,
-                    rootAgentId = entry.rootAgentId,
-                )
-            }.sortedWith(compareByDescending<SessionCatalogEntry> { it.updatedAt }.thenByDescending { it.sessionIndex })
+            repository.listEntries(includeArchived).map { it.toCatalogEntry() }
+                .sortedWith(compareByDescending<SessionCatalogEntry> { it.updatedAt }.thenByDescending { it.sessionIndex })
         }
     }
 
@@ -154,52 +145,63 @@ internal class BackendSessionManagement(
         }
     }
 
-    suspend fun forkSession(sessionIndex: Int): Int = fork(sessionIndex, null, null)
+    suspend fun forkAgent(agentId: Int): Int = fork(agentId, null, null)
 
-    suspend fun forkSessionHistory(
-        sessionIndex: Int,
+    suspend fun forkAgentHistory(
+        agentId: Int,
         untilExclusive: Int,
         expectedCacheNonce: Long,
-    ): Int = fork(sessionIndex, untilExclusive, expectedCacheNonce)
+    ): Int = fork(agentId, untilExclusive, expectedCacheNonce)
 
     @OptIn(ExperimentalUuidApi::class)
-    private suspend fun fork(sourceIndex: Int, boundary: Int?, nonce: Long?): Int = inBackend {
+    private suspend fun fork(agentId: Int, boundary: Int?, nonce: Long?): Int = inBackend {
         commands.withLock {
-            withManagementSource(sourceIndex, requireActive = nonce != null) { source ->
-                require(source.runtime.runningTurn.value == null) { "Cannot fork a running Agent." }
-                source.runtime.modify { sourceStorage ->
+            if (repository.getAgentRecord(agentId) == null) throw AgentNotFound()
+            val source = repository.openSessions.value[agentId]?.takeIf { it.coroutineContext.job.isActive }
+            if (nonce != null && source == null) throw AgentNotActive()
+            var copy: AgentForkCopy? = null
+            suspend fun capture() {
+                currentCoroutineContext().ensureActive()
+                // Keep the allocation receipt even if backend cancellation arrives during the copy.
+                withContext(NonCancellable) {
+                    copy = repository.createAgentFork(agentId, source, boundary) ?: throw AgentNotFound()
+                }
+            }
+            try {
+                if (source == null) {
+                    capture()
+                } else {
                     require(source.runtime.runningTurn.value == null) { "Cannot fork a running Agent." }
-                    if (nonce != null && source.storage.cacheNonce.value != nonce) throw CacheNonceMismatch()
-                    val latest = sourceStorage.latestIndex()
-                    require(latest >= 0) { "Cannot fork an uninitialized Session." }
-                    val until = boundary ?: (latest + 1)
-                    require(until > 0 && until <= latest + 1) { "Invalid fork boundary." }
-                    val settings = sourceStorage.getSettingsAt(until - 1)
-                    val targetIndex = repository.createFork(sourceIndex)
-                    try {
-                        val target = repository.open(targetIndex)
-                        try {
-                            target.runtime.modify { storage ->
-                                if (boundary != null) storage.revert(until)
-                                storage.commit(
-                                    settings.copy(
-                                        turnId = Uuid.generateV7().toString(),
-                                        turnState = null,
-                                        threadName = "[fork] ${settings.threadName.trim().ifEmpty { "Session $targetIndex" }}",
-                                    ),
-                                )
-                            }
-                        } finally {
-                            withContext(NonCancellable) { repository.closeSession(targetIndex) }
-                        }
-                        targetIndex
-                    } catch (failure: Throwable) {
-                        withContext(NonCancellable) {
-                            runCatching { repository.delete(targetIndex) }.onFailure(failure::addSuppressed)
-                        }
-                        throw failure
+                    source.runtime.modify {
+                        if (nonce != null && source.storage.cacheNonce.value != nonce) throw CacheNonceMismatch()
+                        capture()
                     }
                 }
+                val (targetIndex, settings) = checkNotNull(copy)
+                val target = repository.open(targetIndex)
+                try {
+                    target.runtime.modify { storage ->
+                        storage.commit(
+                            settings.copy(
+                                turnId = Uuid.generateV7().toString(),
+                                turnState = null,
+                                name = "[fork] ${settings.name.trim().ifEmpty { "Session $targetIndex" }}",
+                            ),
+                        )
+                    }
+                } finally {
+                    withContext(NonCancellable) { repository.closeSession(targetIndex) }
+                }
+                targetIndex
+            } catch (_: AgentForkSourceChanged) {
+                throw AgentNotActive()
+            } catch (failure: Throwable) {
+                copy?.let { (targetIndex, _) ->
+                    withContext(NonCancellable) {
+                        runCatching { repository.delete(targetIndex) }.onFailure(failure::addSuppressed)
+                    }
+                }
+                throw failure
             }
         }
     }
@@ -219,7 +221,7 @@ internal class BackendSessionManagement(
         val index = repository.create()
         try {
             val session = repository.open(index)
-            session.runtime.modify { it.initialize(initialSettings.copy(threadName = name(index))) }
+            session.runtime.modify { it.initialize(initialSettings.copy(name = name(index))) }
             if (attachAutoTitle) {
                 attachSessionTitleGeneration(
                     scope = session.runtime,
@@ -234,25 +236,6 @@ internal class BackendSessionManagement(
                 runCatching { repository.delete(index) }.onFailure(failure::addSuppressed)
             }
             throw failure
-        }
-    }
-
-    private suspend fun <T> withManagementSource(
-        index: Int,
-        requireActive: Boolean,
-        block: suspend (KodexAgentSession) -> T,
-    ): T {
-        requireEntry(index)
-        val active = repository.openSessions.value[repository.getRootAgentId(index)]?.takeIf { it.coroutineContext.job.isActive }
-        if (requireActive && active == null) throw SessionNotActive()
-        if (active != null) {
-            return block(active)
-        }
-        val temporary = repository.open(index)
-        return try {
-            block(temporary)
-        } finally {
-            withContext(NonCancellable) { repository.closeSession(index) }
         }
     }
 

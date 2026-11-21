@@ -88,7 +88,7 @@ private class OverlayShell : SidebarShellInteraction {
 
 private class OverlayProcess : AgentShellSession {
     override val sessionId = 1
-    override val arguments = ExecCommandArguments("test", yieldTimeMillis = 10_000)
+    override val arguments = ExecCommandArguments("test", name = "Inspect overlay fixture", yieldTimeMillis = 10_000)
     override val completed = MutableStateFlow(false)
     override val exitCode = MutableStateFlow<Int?>(null)
     override suspend fun readOutput(offset: ULong, limit: UInt): Nothing = error("Unexpected shell read")

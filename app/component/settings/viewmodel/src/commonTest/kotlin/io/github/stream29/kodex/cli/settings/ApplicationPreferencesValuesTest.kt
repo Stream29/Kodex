@@ -8,10 +8,12 @@ import kotlin.test.assertFailsWith
 
 @OptIn(ExperimentalSerializationApi::class)
 val applicationPreferencesValuesTest by testSuite {
-    test("sidebars default to history index and terminal sessions with original standalone widths") {
+    test("tool windows default to collapsed with original standalone widths") {
         val sidebars = SidebarSettings()
-        assertEquals(SidebarContent.HistoryIndex, sidebars.left)
-        assertEquals(SidebarContent.TerminalSessions, sidebars.right)
+        assertEquals(null, sidebars.activeLeft)
+        assertEquals(null, sidebars.activeRight)
+        assertFailsWith<IllegalArgumentException> { sidebars.copy(activeLeft = ToolWindowId.HistoryIndex) }
+        assertFailsWith<IllegalArgumentException> { sidebars.copy(activeRight = ToolWindowId.Sessions) }
         assertEquals(28, DefaultSidebarWidthColumns)
         assertEquals(4, MinimumSidebarWidthColumns)
         assertEquals(DefaultSidebarWidthColumns, sidebars.leftWidth)

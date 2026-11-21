@@ -31,8 +31,8 @@ public interface AgentPageRenderScope {
     )
     @Composable public fun UserInput(viewModel: RequestUserInputViewModel, state: RequestUserInputState.Pending)
     @Composable public fun PendingSteer()
-    /** [enabled] also controls initial focus, leaving pending-tool focus with its exact child. */
-    @Composable public fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, enabled: Boolean)
+    /** [autoFocus] controls initial focus only; the editor remains available during a question. */
+    @Composable public fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, autoFocus: Boolean)
 }
 
 public interface AgentPageRenderer {

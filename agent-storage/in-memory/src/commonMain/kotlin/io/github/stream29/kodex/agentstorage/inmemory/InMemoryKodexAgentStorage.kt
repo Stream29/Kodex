@@ -18,6 +18,7 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 private data class InMemoryRow(
+    val index: Int,
     val commits: List<AgentCommit>,
     val createdAt: Instant,
 )
@@ -44,8 +45,12 @@ public actual class InMemoryKodexAgentStorage private constructor(
 
     public actual override val uri: String = "memory:${identity.hashCode().toUInt().toString(16)}"
 
-    public actual override suspend fun latestIndex(): Int = mutex.withLock {
-        rowsByIndex.lastIndex
+    public actual override suspend fun latestIndex(): Int = mutex.withLock { tailIndex() }
+
+    private fun tailIndex(): Int = rowsByIndex.lastOrNull()?.index ?: -1
+
+    private fun rowPositionAtOrAfter(index: Int): Int = rowsByIndex.binarySearchBy(index) { it.index }.let {
+        if (it < 0) -it - 1 else it
     }
 
     public actual override suspend fun countCommitsIn(
@@ -55,11 +60,11 @@ public actual class InMemoryKodexAgentStorage private constructor(
         if (range.isEmpty() || types.isEmpty()) return 0
         require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
         return mutex.withLock {
-            if (rowsByIndex.isEmpty() || range.first > rowsByIndex.lastIndex) return@withLock 0
-            val endInclusive = minOf(range.last, rowsByIndex.lastIndex)
             var count = 0
-            for (idx in range.first..endInclusive) {
-                for (commit in rowsByIndex[idx].commits) {
+            for (position in rowPositionAtOrAfter(range.first)..rowsByIndex.lastIndex) {
+                val row = rowsByIndex[position]
+                if (row.index > range.last) break
+                for (commit in row.commits) {
                     if (commit.commitType in types) {
                         count++
                     }
@@ -78,14 +83,13 @@ public actual class InMemoryKodexAgentStorage private constructor(
         if (limit == 0 || range.isEmpty() || types.isEmpty()) return emptyList()
         require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
         return mutex.withLock {
-            if (rowsByIndex.isEmpty() || range.first > rowsByIndex.lastIndex) return@withLock emptyList()
-            val endInclusive = minOf(range.last, rowsByIndex.lastIndex)
             buildList(minOf(limit, 64)) {
-                for (idx in range.first..endInclusive) {
-                    val row = rowsByIndex[idx]
+                for (position in rowPositionAtOrAfter(range.first)..rowsByIndex.lastIndex) {
+                    val row = rowsByIndex[position]
+                    if (row.index > range.last) break
                     for (commit in row.commits) {
                         if (commit.commitType in types) {
-                            add(IndexedAgentCommit(idx, commit, row.createdAt))
+                            add(IndexedAgentCommit(row.index, commit, row.createdAt))
                             if (size == limit) return@buildList
                         }
                     }
@@ -103,16 +107,16 @@ public actual class InMemoryKodexAgentStorage private constructor(
         if (limit == 0 || range.isEmpty() || types.isEmpty()) return emptyList()
         require(range.first >= 0) { "Index lower bound ${range.first} must be non-negative." }
         return mutex.withLock {
-            if (rowsByIndex.isEmpty() || range.first > rowsByIndex.lastIndex) return@withLock emptyList()
-            val endInclusive = minOf(range.last, rowsByIndex.lastIndex)
+            val afterLast = if (range.last == Int.MAX_VALUE) rowsByIndex.size else rowPositionAtOrAfter(range.last + 1)
             val reversed = ArrayList<IndexedAgentCommit>(minOf(limit, 64))
-            outer@ for (idx in endInclusive downTo range.first) {
-                val row = rowsByIndex[idx]
+            outer@ for (position in (afterLast - 1) downTo 0) {
+                val row = rowsByIndex[position]
+                if (row.index < range.first) break
                 val commitsAtIdx = row.commits
                 for (i in commitsAtIdx.indices.reversed()) {
                     val commit = commitsAtIdx[i]
                     if (commit.commitType in types) {
-                        reversed.add(IndexedAgentCommit(idx, commit, row.createdAt))
+                        reversed.add(IndexedAgentCommit(row.index, commit, row.createdAt))
                         if (reversed.size == limit) break@outer
                     }
                 }
@@ -128,8 +132,9 @@ public actual class InMemoryKodexAgentStorage private constructor(
         validateCommitBatch(commits)
         val sorted = commits.sortedBy { it.commitType.ordinal }
         return mutex.withLock {
-            val nextIndex = rowsByIndex.size
-            rowsByIndex.add(InMemoryRow(sorted, timestamp))
+            check(tailIndex() < Int.MAX_VALUE) { "Agent storage index is exhausted." }
+            val nextIndex = tailIndex() + 1
+            rowsByIndex.add(InMemoryRow(nextIndex, sorted, timestamp))
             nextIndex
         }
     }
@@ -137,9 +142,7 @@ public actual class InMemoryKodexAgentStorage private constructor(
     public actual override suspend fun revert(untilExclusive: Int) {
         require(untilExclusive >= 0) { "Revert boundary $untilExclusive must be non-negative." }
         mutex.withLock {
-            if (untilExclusive < rowsByIndex.size) {
-                rowsByIndex.subList(untilExclusive, rowsByIndex.size).clear()
-            }
+            rowsByIndex.subList(rowPositionAtOrAfter(untilExclusive), rowsByIndex.size).clear()
             for (idx in rowsByIndex.indices) {
                 val row = rowsByIndex[idx]
                 if (row.commits.any { it is SteerSnapshot && it.events.isNotEmpty() }) {
@@ -157,6 +160,16 @@ public actual class InMemoryKodexAgentStorage private constructor(
         /** Creates the uninitialized storage backing a freshly spawned AgentSession. */
         public actual fun empty(agentId: Int?): InMemoryKodexAgentStorage =
             InMemoryKodexAgentStorage(mutableListOf(), agentId)
+
+        public actual fun importCommits(agentId: Int?, commits: List<IndexedAgentCommit>): InMemoryKodexAgentStorage {
+            val rows = commits.groupBy { it.index }.entries.sortedBy { it.key }.mapTo(mutableListOf()) { (index, group) ->
+                require(index >= 0 && group.all { it.createdAt == group.first().createdAt })
+                val values = group.map { it.commit }.sortedBy { it.commitType.ordinal }
+                validateCommitBatch(values)
+                InMemoryRow(index, values, group.first().createdAt)
+            }
+            return InMemoryKodexAgentStorage(rows, agentId)
+        }
     }
 }
 
@@ -176,5 +189,5 @@ private fun initialRows(initialSettings: KodexAgentSettings): MutableList<InMemo
         settings,
         LlmRequestMeta.Initialization(0L),
     ).sortedBy { it.commitType.ordinal }
-    return mutableListOf(InMemoryRow(commits, timestamp))
+    return mutableListOf(InMemoryRow(0, commits, timestamp))
 }

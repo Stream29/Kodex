@@ -44,6 +44,7 @@ import io.github.stream29.kodex.tool.unifiedexec.KodexHomeEnvironmentVariable
 import io.github.stream29.kodex.tool.unifiedexec.KodexInvocationIdEnvironmentVariable
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlin.random.Random
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -208,7 +209,7 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                         if (concurrentSettingsUpdate) {
                             concurrentSettingsUpdate = false
                             assertTrue(backend.runtime.compareAndSetSettings(sessionIndex, expect,
-                                expect.copy(cwd = unrelatedDirectory, threadName = concurrentTitle ?: expect.threadName)))
+                                expect.copy(cwd = unrelatedDirectory, name = concurrentTitle ?: expect.name)))
                         }
                         return backend.runtime.compareAndSetSettings(sessionIndex, expect, update)
                     }
@@ -224,7 +225,7 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                             executeCliToolCommand(assertIs<KodexToolLeafCommand>(leaf), services,
                                 env = { null }, readStdin = { stdin }, writeStdout = lines::add)
                         }
-                        assertEquals(expectedExit, exit, lines.toString())
+                        assertEquals(expectedExit, exit, "${args.take(2)}: $lines")
                     }
                     assertFalse(lines.single().contains(stdin.takeIf(String::isNotEmpty) ?: "Fixture reply lost"))
                     return CliToolJson.decodeFromString(CliOperationEnvelope.serializer(), lines.single())
@@ -267,7 +268,12 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                 val target = checkNotNull(error.agentId)
                 val targetSession = checkNotNull(error.sessionId)
                 concurrentSettingsUpdate = true
-                assertTrue(cli(listOf("session", "rename", "--session", "$targetSession", "--name", " first title "), "", 0).ok)
+                val rename = cli(listOf("session", "rename", "--session", "$targetSession", "--name", " first title "), "", 0)
+                assertTrue(rename.ok)
+                val renameResult = checkNotNull(rename.result).jsonObject
+                assertEquals("first title", renameResult.getValue("name").jsonPrimitive.content)
+                assertFalse("thread_name" in renameResult)
+                assertFalse("threadName" in renameResult)
                 val renamed = cli(listOf("agent", "status", "--agent", "$target"), "", 0).result?.jsonObject
                 assertEquals(unrelatedDirectory.toString(), renamed?.get("cwd")?.jsonPrimitive?.content)
                 concurrentTitle = "frontend title"
@@ -278,14 +284,14 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                 assertTrue(cli(listOf("session", "archive", "--session", "$targetSession"), "", 0).ok)
                 val archived = backend.global.getSessionCatalog(true).single { it.sessionIndex == targetSession }
                 assertTrue(archived.archived)
-                assertEquals("frontend title", archived.threadName)
+                assertEquals("frontend title", archived.name)
                 assertTrue(cli(listOf("session", "unarchive", "--session", "$targetSession"), "", 0).ok)
                 assertFalse(backend.global.getSessionCatalog(true).single { it.sessionIndex == targetSession }.archived)
                 assertTrue(cli(listOf("agent", "stop", "--agent", "$target"), "", 0).ok)
                 backend.runtime.getRunningTurnFlow(target).first { !it }
                 val index = backend.runtime.getLatestIndex(target)
                 assertEquals(index.toString(), cli(listOf("agent", "clear-pending", "--agent", "$target"), "", 0).result("latest_index"))
-                val forked = cli(listOf("session", "fork", "--session", "$targetSession"), "", 0)
+                val forked = cli(listOf("agent", "fork", "--agent", "$target"), "", 0)
                 val fork = forked.result("session_id")!!.toInt()
                 assertEquals(backend.global.getRootAgentId(fork).toString(), forked.result("root_agent_id"))
                 assertTrue(fork != targetSession && backend.global.getSessionCatalog(true).any { it.sessionIndex == fork })
@@ -543,10 +549,13 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                     val archived = services.global.createSession(root)
                     services.global.archiveSession(archived)
                     val expectedCatalog = services.global.getSessionCatalog(includeArchived = true)
-                    val list = CliToolJson.decodeFromJsonElement(
-                        CliSessionCatalogOutput.serializer(), checkNotNull(query(listOf("session", "list")).result),
-                    ).sessions
+                    val catalogResult = checkNotNull(query(listOf("session", "list")).result)
+                    val list = CliToolJson.decodeFromJsonElement(CliSessionCatalogOutput.serializer(), catalogResult).sessions
+                    val row = catalogResult.jsonObject.getValue("sessions").jsonArray.single().jsonObject
                     assertEquals(listOf(sessionId), list.map { it.sessionId })
+                    assertEquals("Session $sessionId", row.getValue("name").jsonPrimitive.content)
+                    assertFalse("thread_name" in row)
+                    assertFalse("threadName" in row)
                     val fullList = CliToolJson.decodeFromJsonElement(
                         CliSessionCatalogOutput.serializer(),
                         checkNotNull(query(listOf("session", "list", "--include-archived")).result),
@@ -556,11 +565,12 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                     assertEquals(expectedCatalog.map { it.rootAgentId }, fullList.map { it.rootAgentId })
                     assertTrue(fullList.single { it.sessionId == archived }.archived)
 
-                    val status = CliToolJson.decodeFromJsonElement(
-                        CliAgentStatusOutput.serializer(),
-                        checkNotNull(query(listOf("agent", "status", "--agent", rootId.toString())).result),
-                    )
+                    val statusResult = checkNotNull(query(listOf("agent", "status", "--agent", rootId.toString())).result).jsonObject
+                    val status = CliToolJson.decodeFromJsonElement(CliAgentStatusOutput.serializer(), statusResult)
                     assertEquals(rootId, status.agentId)
+                    assertEquals("Session $sessionId", statusResult.getValue("name").jsonPrimitive.content)
+                    assertFalse("thread_name" in statusResult)
+                    assertFalse("threadName" in statusResult)
                     assertEquals(OpenAiModelId("gpt-6-astra"), status.model)
                     assertEquals("2099-01-01T00:00:00Z", status.now)
                     assertEquals(258_400L, status.contextWindow?.effectiveWindowTokens)
@@ -617,6 +627,8 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                     assertTrue(toolLines.any { it.startsWith("kodex schedule create\t") })
                     assertTrue(toolLines.any { it.startsWith("kodex session list\t") })
                     assertTrue(toolLines.any { it.startsWith("kodex agent status\t") })
+                    assertTrue(toolLines.any { it.startsWith("kodex agent fork\t") })
+                    assertTrue(toolLines.none { it.startsWith("kodex session fork\t") })
                     assertTrue(toolLines.none { it.startsWith("kodex session status\t") })
                     assertTrue(toolLines.any { it.startsWith("kodex search\t") })
                     assertTrue(toolLines.any { it.startsWith("kodex image\t") })

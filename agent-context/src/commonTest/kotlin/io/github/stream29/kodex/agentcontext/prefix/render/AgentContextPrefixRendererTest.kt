@@ -53,12 +53,14 @@ val agentContextPrefixRendererTest by testSuite {
             rendered,
         )
         assertContains(renderToolCliInstructions(RequestUserInputMode.AskUser), "kodex ask")
+        assertContains(renderToolCliInstructions(RequestUserInputMode.AskUser), "kodex agent complete [--agent ID]")
     }
 
     test("NoQuestion mode omits kodex ask and instructs autonomous execution") {
         val noQuestionText = renderToolCliInstructions(RequestUserInputMode.NoQuestion)
         assertFalse(noQuestionText.contains("kodex ask"))
         assertContains(noQuestionText, "NoQuestion")
+        assertContains(noQuestionText, "kodex agent complete [--agent ID]")
 
         val rendered = contextPrefix(requestUserInputMode = RequestUserInputMode.NoQuestion).render()
         assertEquals(
@@ -68,6 +70,38 @@ val agentContextPrefixRendererTest by testSuite {
             ),
             rendered,
         )
+    }
+
+    test("both question modes distinguish child delegation, independent work, and rejected delegation") {
+        for (mode in listOf(RequestUserInputMode.AskUser, RequestUserInputMode.NoQuestion)) {
+            val instructions = contextPrefix(requestUserInputMode = mode).render()
+                .filterIsInstance<ResponseItem.Message>()
+                .single { it.role == MessageRole.Developer }
+                .content.filterIsInstance<ContentItem.InputText>().single().text
+            assertContains(
+                instructions,
+                "`kodex agent spawn --name NAME (--message TEXT | --stdin)`: Delegate a task to a direct child " +
+                    "of the calling Agent in the current Session. Supply a self-contained task.",
+                message = mode.toString(),
+            )
+            assertContains(
+                instructions,
+                "`kodex session spawn [--message TEXT | --stdin]`: Create an independent Session only when " +
+                    "the user requests a separate line of work.",
+                message = mode.toString(),
+            )
+            assertContains(
+                instructions,
+                "If child creation is unavailable or rejected, report the blocker; do not fall back to `kodex session spawn`.",
+                message = mode.toString(),
+            )
+        }
+    }
+
+    test("documents fork as an Agent command, not a Session command") {
+        val instructions = renderToolCliInstructions(RequestUserInputMode.AskUser)
+        assertContains(instructions, "`kodex agent fork --agent ID`")
+        assertFalse(instructions.lineSequence().any { it.startsWith("- `kodex session ") && "fork" in it })
     }
 
     test("renders global and project AGENTS.md sources in discovery order") {

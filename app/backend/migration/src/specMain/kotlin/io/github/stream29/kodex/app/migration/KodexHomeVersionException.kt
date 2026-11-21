@@ -1,15 +1,12 @@
 package io.github.stream29.kodex.app.migration
 
 /**
- * Home preparation cannot accept the persisted version.
+ * Home preflight or preparation cannot accept the persisted format.
  *
- * The preparation factory throws this for a non-regular, unreadable or malformed
- * `version.json`, a non-canonical version, a version newer than the running
- * application, or a missing version or remaining migrations at its final
- * post-preparation check.
- * Version read and parse failures retain their underlying [cause] when available.
- * Filesystem metadata failures and migration action failures are not universally
- * wrapped in this exception.
+ * This includes legacy or unknown generations, unreadable or invalid checkpoints,
+ * a newer checkpoint, an incompatible database, and unsupported initialization
+ * states. Inspection failures retain their [cause] when available. Migration
+ * action failures propagate separately.
  */
 public open class KodexHomeVersionException(
     message: String,
@@ -17,13 +14,12 @@ public open class KodexHomeVersionException(
 ) : IllegalStateException(message, cause)
 
 /**
- * Home preparation rejected the Session layout of an unversioned Home.
+ * Home preflight or preparation found an unexpected entry or type in an
+ * unprepared Home or its startup infrastructure.
  *
- * This includes a non-directory Sessions root, noncanonical visible entry names,
- * non-directory entries, missing/invalid required timeline layout, and invalid
- * or inconsistent latest pointers. Hidden entries and unknown user data are not
- * rewritten by baseline validation. Layout and pointer validation failures retain
- * their [cause] when available; cancellation is not wrapped.
+ * An unprepared Home may contain only initialization artifacts and known
+ * process infrastructure. Preparation does not remove arbitrary entries to
+ * make such a Home eligible.
  */
 public class KodexHomeLayoutException(
     message: String,

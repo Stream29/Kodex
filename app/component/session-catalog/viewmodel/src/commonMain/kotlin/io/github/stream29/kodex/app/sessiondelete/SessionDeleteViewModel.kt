@@ -5,13 +5,13 @@ import io.github.stream29.kodex.app.sessiondelete.contract.SessionDeleteViewMode
 
 public actual fun createSessionDeleteViewModel(
     sessionIndex: Int,
-    threadName: String?,
+    name: String?,
     dependencies: SessionDeleteDependencies,
-): SessionDeleteViewModel = DefaultSessionDeleteViewModel(sessionIndex, threadName, dependencies)
+): SessionDeleteViewModel = DefaultSessionDeleteViewModel(sessionIndex, name, dependencies)
 
 private class DefaultSessionDeleteViewModel(
     override val sessionIndex: Int,
-    override val threadName: String?,
+    override val name: String?,
     private val dependencies: SessionDeleteDependencies,
 ) : SessionDeleteViewModel {
     override var isActive: Boolean = true

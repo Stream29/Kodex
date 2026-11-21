@@ -4,10 +4,13 @@ import androidx.compose.runtime.*
 import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
+import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.application.contract.TerminalOutputReader
+import io.github.stream29.kodex.cli.agent.canEditHistory
 import io.github.stream29.kodex.cli.historyindex.*
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -131,16 +134,26 @@ public actual fun ApplicationSidebarOverlaysContent(
     shellRenderer: SidebarShellRenderer, indexRenderer: HistoryIndexRenderer,
     isSideVisible: (SessionSidebarSide) -> Boolean,
     onShellOutputFallback: () -> Unit,
+    application: ApplicationViewModel?,
+    focusEditedComposer: (AgentViewModel) -> Unit,
+    onOperationFailure: (Throwable) -> Unit,
 ) {
     val currentAgent by rememberUpdatedState(selectedAgent)
     val currentVisibility by rememberUpdatedState(isSideVisible)
+    val focus by rememberUpdatedState(focusEditedComposer)
+    val report by rememberUpdatedState(onOperationFailure)
+    val scope = rememberCoroutineScope()
     when (val hover = state.hover) {
         is ApplicationOverlayHover.Shell -> {
-            val sessions = selectedAgent?.shellSessions?.activeSessions?.collectAsState()?.value
-            val valid = sessions?.values?.any { it === hover.interaction.session } == true && hover.interaction.isPlaced
+            val registry = selectedAgent?.shellSessions
+            val sessions = registry?.activeSessions?.collectAsState()?.value
+            val lifecycle = selectedAgent?.lifecycle?.collectAsState()?.value
+            val session = hover.interaction.session
+            val valid = sessions?.get(session.sessionId) === session && hover.interaction.isPlaced &&
+                isSideVisible(hover.side) && lifecycle == AgentLifecycleState.Open
             LaunchedEffect(hover, valid) { if (!valid) state.dismissHover(hover) }
             if (valid) SidebarShellHoverContent(
-                hover.interaction, shellRenderer,
+                hover.interaction, registry, shellRenderer,
                 { state.popupHoverChanged(hover, it) }, { state.dismissHover(hover) },
             )
         }
@@ -190,9 +203,36 @@ public actual fun ApplicationSidebarOverlaysContent(
             }
         }
         is ApplicationOverlayMenu.Index -> {
-            val valid = menu.opening.interaction.target.viewModel === selectedAgent?.historyIndex && menu.opening.interaction.isPlaced
+            val agent = selectedAgent
+            val tab = application?.navigation?.collectAsState()?.value?.selectedTab
+            val origin = menu.opening.interaction
+            val valid = origin.target.viewModel === agent?.historyIndex && origin.isPlaced && isSideVisible(menu.side)
             LaunchedEffect(menu, valid) { if (!valid) state.dismissMenu(menu) }
-            if (valid) HistoryIndexMenuContent(menu.opening, indexRenderer) { state.dismissMenu(menu) }
+            if (valid) {
+                val canEdit = if (tab == null) false else {
+                    val running by agent.running.collectAsState()
+                    val runtime by agent.state.collectAsState()
+                    runtime.canEditHistory(running)
+                }
+                fun isCurrent(): Boolean = currentAgent === agent && currentVisibility(menu.side) && origin.isPlaced &&
+                    origin.target.isCurrent() &&
+                    (application == null || tab != null && application.isSelectedHistoryAgent(tab, agent))
+                HistoryIndexMenuContent(
+                    menu.opening, indexRenderer,
+                    canEdit = canEdit,
+                    admit = { state.menu === menu && isCurrent() },
+                    edit = { command, target, text ->
+                        if (application != null && tab != null && isCurrent() &&
+                            agent.canEditBoundHistory() && state.dismissMenu(menu)
+                        ) scope.launch {
+                            if (!isCurrent() || !agent.canEditBoundHistory()) return@launch
+                            try { application.editHistory(tab, agent, target.index, target.generation, command, text, focus) }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (failure: Throwable) { report(failure) }
+                        }
+                    },
+                ) { state.dismissMenu(menu) }
+            }
         }
         else -> Unit
     }

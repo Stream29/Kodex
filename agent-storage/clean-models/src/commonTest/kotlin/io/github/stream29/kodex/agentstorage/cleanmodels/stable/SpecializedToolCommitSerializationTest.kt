@@ -50,7 +50,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
         val awaitEvent = StableAwait(
             callId = "call_await_event",
             itemId = ResponseItemId("item_await_event"),
-            arguments = AwaitEventArguments(listOf(1, 3).map { AwaitEventInput.TerminalExited(it) }),
+            arguments = AwaitEventArguments(listOf(1, 3).map { AwaitEventInput.TerminalExited(it) }, name = "Wait for either terminal"),
             result = StableAwaitEventResult.Output(
                 AwaitEventOutput(Instant.parse("2026-11-16T00:00:00Z")),
             ),
@@ -85,6 +85,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
                 action = StableCommandExecutionAction.ExecCommand(
                     ExecCommandArguments(
                         command = "./gradlew check",
+                        name = "Verify project checks",
                         workdir = "Kodex",
                         yieldTimeMillis = 10_000,
                         maxOutputTokens = 20_000,
@@ -127,7 +128,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
 
         assertFailsWith<SerializationException> {
             specializedToolJson.decodeFromString<WorkCommit>(
-                """{"type":"command_execution_tool_event","call_id":"call_exec_command","action":{"type":"exec_command","arguments":{"cmd":"./gradlew check"}},"result":{"type":"failure","message":"failed"}}""",
+                """{"type":"command_execution_tool_event","call_id":"call_exec_command","action":{"type":"exec_command","arguments":{"cmd":"./gradlew check","name":"Verify project checks"}},"result":{"type":"failure","message":"failed"}}""",
             )
         }
         assertFailsWith<SerializationException> {

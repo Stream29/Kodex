@@ -502,7 +502,7 @@ val openAiFailureTransportTest by testSuite {
 }
 
 @OptIn(InternalAPI::class)
-private class SseMockEngine(private val handler: MockRequestHandler) : HttpClientEngineFactory<MockEngineConfig> {
+internal class SseMockEngine(private val handler: MockRequestHandler) : HttpClientEngineFactory<MockEngineConfig> {
     override fun create(block: MockEngineConfig.() -> Unit): HttpClientEngine =
         object : MockEngine(MockEngineConfig().apply(block).apply { addHandler(handler) }) {
             override val supportedCapabilities = super.supportedCapabilities + SSECapability

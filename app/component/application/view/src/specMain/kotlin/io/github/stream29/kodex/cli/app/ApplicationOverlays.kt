@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.app
 import androidx.compose.runtime.Composable
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
+import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.cli.historyindex.*
 import io.github.stream29.kodex.cli.settings.SidebarContent
 
@@ -76,4 +77,7 @@ public expect fun ApplicationSidebarOverlaysContent(
     shellRenderer: SidebarShellRenderer, indexRenderer: HistoryIndexRenderer,
     isSideVisible: (SessionSidebarSide) -> Boolean = { true },
     onShellOutputFallback: () -> Unit = {},
+    application: ApplicationViewModel? = null,
+    focusEditedComposer: (AgentViewModel) -> Unit = {},
+    onOperationFailure: (Throwable) -> Unit = { throw it },
 ): Unit

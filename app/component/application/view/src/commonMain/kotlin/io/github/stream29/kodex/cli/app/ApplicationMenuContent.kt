@@ -8,9 +8,10 @@ import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.cli.agent.canEditHistory
 import io.github.stream29.kodex.cli.components.formatPopupTimestamp
-import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.app.agent.contract.editableHistoryText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.datetime.TimeZone
@@ -22,14 +23,14 @@ public actual fun applicationTabMenuEntries(
     onRename: () -> Unit, onClose: () -> Unit, onCloseAndArchive: () -> Unit, onDelete: () -> Unit,
 ): List<ApplicationMenuEntry> = listOf(
     ApplicationMenuEntry.Information("session-index-information", buildList {
-        add("Index: $sessionIndex")
+        add("Session #$sessionIndex")
         createdAt?.let { add("Created at: $it") }
         updatedAt?.let { add("Updated at: $it") }
     }),
-    ApplicationMenuEntry.Action("rename", "Rename", onRename),
-    ApplicationMenuEntry.Action("close", "Close", onClose),
-    ApplicationMenuEntry.Action("close-and-archive", "Close and archive", onCloseAndArchive),
-    ApplicationMenuEntry.Action("delete", "Delete", onDelete),
+    ApplicationMenuEntry.Action("rename", "Rename Session", onRename),
+    ApplicationMenuEntry.Action("close", "Close Agent tab", onClose),
+    ApplicationMenuEntry.Action("close-and-archive", "Archive Session and close tab", onCloseAndArchive),
+    ApplicationMenuEntry.Action("delete", "Delete Session", onDelete),
 )
 
 public actual fun applicationHistoryMenuEntries(
@@ -73,21 +74,26 @@ public actual fun ApplicationTabMenuContent(
     val valid = targetIsOpen && renderer.isTabPlaced(current.placement)
     LaunchedEffect(current, valid) { if (!valid) onDismiss(current) }
     if (!valid) return
-    val created = rememberApplicationMenuTimestamp(current) { current.target.readCreatedAt() }
-    val updated = rememberApplicationMenuTimestamp(current) { current.target.readUpdatedAt() }
     val name = current.target.name.collectAsState().value
-    val entries = listOf(ApplicationMenuEntry.Information("session-name-information", listOf(name))) + applicationTabMenuEntries(
-        current.target.sessionIndex, created, updated,
-        onRename = { onRename(current) }, onClose = { onClose(current) },
-        onCloseAndArchive = { onCloseAndArchive(current) }, onDelete = { onDelete(current) },
-    )
+    val root = current.target as? PersistedSessionViewModel
+    val entries = listOf(ApplicationMenuEntry.Information("agent-name-information", listOf(name, "Agent #${current.target.agentId}"))) +
+        if (root == null) listOf(ApplicationMenuEntry.Action("close", "Close Agent tab") { onClose(current) })
+        else {
+            val created = rememberApplicationMenuTimestamp(current) { root.readCreatedAt() }
+            val updated = rememberApplicationMenuTimestamp(current) { root.readUpdatedAt() }
+            applicationTabMenuEntries(
+                root.sessionIndex, created, updated,
+                onRename = { onRename(current) }, onClose = { onClose(current) },
+                onCloseAndArchive = { onCloseAndArchive(current) }, onDelete = { onDelete(current) },
+            )
+        }
     key(current) { renderer.Tab(current.placement, entries) { onDismiss(current) } }
 }
 
 @Composable
 public actual fun ApplicationHistoryMenuContent(
     opening: ApplicationHistoryMenuOpening?,
-    selectedSession: PersistedSessionViewModel?,
+    selectedTab: AgentTabViewModel?,
     selectedAgent: AgentViewModel?,
     renderer: ApplicationMenuRenderer,
     onDismiss: (ApplicationHistoryMenuOpening) -> Unit,
@@ -99,14 +105,13 @@ public actual fun ApplicationHistoryMenuContent(
     val state = current.agent.state.collectAsState().value
     val running = current.agent.running.collectAsState().value
     val window = current.agent.history.historyItems.collectAsState().value
-    val rootAgent = current.session.rootAgent.collectAsState().value
     val message = current.item as? MessageHistoryItemViewModel
     val messageState = message?.state?.collectAsState()?.value
     val display = current.displayOption.takeIf {
         (messageState as? MessageHistoryItemState.Ready)?.event is StableAssistantMessage
     }
     val canEdit = state.canEditHistory(running)
-    val targetMatches = current.session === selectedSession && current.agent === selectedAgent &&
+    val targetMatches = current.tab === selectedTab && current.agent === selectedAgent &&
         (canEdit || display != null) && window.size > 0 && current.generation == window.generation &&
         current.agent.history.contains(current.generation, current.storageIndex)
     val placed = renderer.isHistoryPlaced(current.placement)
@@ -117,7 +122,7 @@ public actual fun ApplicationHistoryMenuContent(
     val entries = buildList {
         if (canEdit) addAll(applicationHistoryMenuEntries(
             message?.index, timestamp, { onRevert(current) },
-            if (rootAgent === current.agent) ({ onFork(current) }) else null,
+            { onFork(current) },
             text?.let { value -> { onRevertAndEdit(current, value) } },
         ))
         display?.let { add(ApplicationMenuEntry.Action("history-display-mode", it.label, it.onToggle)) }
@@ -163,14 +168,7 @@ public actual fun AgentHistoryRevertContent(agent: AgentViewModel?, renderer: Ap
 
 public actual fun MessageHistoryItemState?.revertAndEditText(): String? {
     val message = (this as? MessageHistoryItemState.Ready)?.event as? StableUserMessage ?: return null
-    if (message.content.any { it is ContentItem.InputImage }) return null
-    return message.content.joinToString("") {
-        when (it) {
-            is ContentItem.InputText -> it.text
-            is ContentItem.OutputText -> it.text
-            is ContentItem.InputImage -> error("Image content cannot be edited in the text composer.")
-        }
-    }
+    return message.editableHistoryText()
 }
 
 public actual suspend fun revertAndEdit(agent: AgentViewModel, storageIndex: Int, generation: Long, text: String) {

@@ -2,6 +2,7 @@
 
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.app.migration.KodexHomeVersionException
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.agentschedule.contract.nextCronTriggerAt
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
@@ -11,7 +12,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentComm
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.backend.BackendEndpoint
-import io.github.stream29.kodex.backend.BackendInstance
+import io.github.stream29.kodex.backend.host.discoverReadyBackend
 import io.github.stream29.kodex.backend.host.connectBackend
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.mcp.contract.McpCatalogTool
@@ -129,7 +130,7 @@ internal suspend fun resolveToolBackendOrNull(
     target: CliBackendTarget?,
     defaultHome: Path,
     env: (String) -> String? = ::environmentVariable,
-    discover: suspend (Path) -> BackendEndpoint? = BackendInstance::discover,
+    discover: suspend (Path) -> BackendEndpoint? = ::discoverReadyBackend,
     connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
 ): Pair<Path, BackendEndpoint?> {
     val rawHome = target?.backendHome ?: env(KodexHomeEnvironmentVariable)?.takeIf { it.isNotBlank() }
@@ -143,7 +144,7 @@ internal suspend fun resolveToolBackend(
     target: CliBackendTarget?,
     defaultHome: Path,
     env: (String) -> String? = ::environmentVariable,
-    discover: suspend (Path) -> BackendEndpoint? = BackendInstance::discover,
+    discover: suspend (Path) -> BackendEndpoint? = ::discoverReadyBackend,
     connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
 ): Pair<Path, BackendEndpoint> {
     val (resolvedHome, endpoint) = resolveToolBackendOrNull(target, defaultHome, env, discover, connect)
@@ -163,7 +164,7 @@ internal suspend fun dispatchCliWithToolRpc(
     defaultHome: Path,
     output: (message: String, error: Boolean) -> Unit,
     env: (String) -> String? = ::environmentVariable,
-    discover: suspend (Path) -> BackendEndpoint? = BackendInstance::discover,
+    discover: suspend (Path) -> BackendEndpoint? = ::discoverReadyBackend,
     connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
     openServices: suspend (Path, BackendEndpoint, suspend (RpcServices) -> Int) -> Int =
         { home, endpoint, use ->
@@ -241,10 +242,12 @@ internal suspend fun dispatchCliWithToolRpc(
                         currentCoroutineContext().ensureActive()
                         exitCode?.let { return@invokeTool it } // A known reply survives connection teardown failure.
                         if (entered) throw failure
+                        val reason = (failure as? KodexHomeVersionException)?.message
+                            ?: "Could not connect to the selected backend."
                         if (toolLeaf is AgentSqlCommand) return@invokeTool writeAgentSqlError(
-                            AgentSqlError.UNAVAILABLE, "Could not connect to the selected backend.",
+                            AgentSqlError.UNAVAILABLE, reason,
                         ) { output(it, false) }
-                        writeOperationFailure("connection_failed", "Could not connect to the selected backend.",
+                        writeOperationFailure("connection_failed", reason,
                             "connect", CliOperationOutcome.Failed,
                             (toolLeaf as? ExplicitAgentOperation)?.agentId ?: (toolLeaf as? AgentCompleteCommand)?.agentId,
                             (toolLeaf as? ExplicitSessionOperation)?.sessionId, write = { output(it, false) })
@@ -524,7 +527,7 @@ private suspend fun executeSessionAgentOperation(
                 phase = "list"
                 val rows = services.global.getSessionCatalog(command.includeArchived).map { entry ->
                     CliSessionCatalogRow(
-                        entry.sessionIndex, entry.rootAgentId, entry.threadName, entry.archived, entry.running,
+                        entry.sessionIndex, entry.rootAgentId, entry.name, entry.archived, entry.running,
                         entry.isActive, entry.createdAt?.toString(), entry.updatedAt?.toString(),
                     )
                 }
@@ -666,13 +669,13 @@ private suspend fun executeSessionAgentOperation(
                 renameSessionTitle(services.runtime, rootId, command.name) { mutationStarted = true }
                 buildJsonObject {
                     put("session_id", command.sessionId)
-                    put("thread_name", command.name)
+                    put("name", command.name)
                 }
             }
-            is SessionForkCommand -> {
+            is AgentForkCommand -> {
                 phase = "fork"
                 mutationStarted = true
-                val forked = services.global.forkSession(command.sessionId)
+                val forked = services.global.forkAgent(command.agentId)
                 sessionId = forked
                 val rootId = services.global.getRootAgentId(forked)
                 buildJsonObject {
@@ -781,12 +784,12 @@ private suspend fun renameSessionTitle(
         }
     }
     var current = read()
-    val originalTitle = current.threadName
+    val originalTitle = current.name
     repeat(12) {
-        if (current.threadName != originalTitle) conflict()
-        if (current.threadName == name) return
+        if (current.name != originalTitle) conflict()
+        if (current.name == name) return
         onCompareAndSet(true)
-        if (runtime.compareAndSetSettings(id, current, current.copy(threadName = name))) return
+        if (runtime.compareAndSetSettings(id, current, current.copy(name = name))) return
         onCompareAndSet(false) // A false CAS attests no title write by this attempt.
         current = read()
     }
@@ -834,7 +837,7 @@ private suspend fun readAgentStatus(services: RpcServices, agentId: Int, now: ()
         }
     }
     return CliAgentStatusOutput(
-        agentId, settings.threadName, settings.cwd.toString(), settings.model, settings.reasoning.effort,
+        agentId, settings.name, settings.cwd.toString(), settings.model, settings.reasoning.effort,
         settings.serviceTier, settings.requestUserInputMode, running, latestIndex, now().toString(), contextWindow,
     )
 }

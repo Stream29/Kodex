@@ -4,24 +4,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberUpdatedState
 
-internal data class OpenSessionSummary(
-    val sessionCount: Int,
-    val runningSessionCount: Int,
+internal data class OpenAgentSummary(
+    val agentCount: Int,
+    val runningAgentCount: Int,
 )
 
-internal fun summarizeOpenSessions(tabs: List<SessionTabRenderState>): OpenSessionSummary {
-    return OpenSessionSummary(
-        sessionCount = tabs.size,
-        runningSessionCount = tabs.count(SessionTabRenderState::running),
+internal fun summarizeOpenAgents(tabs: List<SessionTabRenderState>): OpenAgentSummary {
+    return OpenAgentSummary(
+        agentCount = tabs.size,
+        runningAgentCount = tabs.count(SessionTabRenderState::running),
     )
 }
 
-internal fun terminalTitleText(sessionCount: Int, runningCount: Int): String {
-    require(sessionCount >= 0) { "Session count cannot be negative." }
-    require(runningCount in 0..sessionCount) {
-        "Running count must belong to the counted sessions."
+internal fun terminalTitleText(agentCount: Int, runningCount: Int): String {
+    require(agentCount >= 0) { "Agent count cannot be negative." }
+    require(runningCount in 0..agentCount) {
+        "Running count must belong to the counted Agents."
     }
-    return "$sessionCount sessions ($runningCount running)"
+    return "$agentCount ${if (agentCount == 1) "agent" else "agents"} ($runningCount running)"
 }
 
 internal fun terminalTitleControlSequence(title: String): String =
@@ -41,11 +41,11 @@ public actual fun resetTerminalTitle(): Unit {
 
 @Composable
 internal fun TerminalTitleEffect(
-    sessionCount: Int,
+    agentCount: Int,
     runningCount: Int,
     write: (String) -> Unit = { sequence -> print(sequence) },
 ) {
-    val title = terminalTitleText(sessionCount, runningCount)
+    val title = terminalTitleText(agentCount, runningCount)
     val currentWrite = rememberUpdatedState(write)
     DisposableEffect(title) {
         writeTerminalTitle(title, currentWrite.value)

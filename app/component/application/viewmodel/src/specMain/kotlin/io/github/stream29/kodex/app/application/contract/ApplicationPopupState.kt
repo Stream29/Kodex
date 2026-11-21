@@ -2,7 +2,7 @@ package io.github.stream29.kodex.app.application.contract
 
 import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
+import io.github.stream29.kodex.app.session.contract.AgentTabViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
 import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameViewModel
@@ -31,15 +31,11 @@ public sealed interface ApplicationPopupState {
     /** Exact open handle accepted by [ApplicationViewModel.dismissPopup]. */
     public sealed interface Open : ApplicationPopupState
 
-    /** Render the catalog child; its initial refresh is requested by the caller. */
-    public class SessionCatalog(
-        public val viewModel: SessionCatalogViewModel,
-    ) : Open
-
     /** Captured persisted tab or no target; null never rebinds to later selection. */
     public class Settings(
         public val target: PersistedSessionViewModel?,
         public val viewModel: SettingsViewModel,
+        public val owner: AgentTabViewModel? = target,
     ) : Open
 
     /** Render the Rename child's draft and confirmation for its captured target. */
@@ -66,6 +62,6 @@ public sealed interface ApplicationPopupState {
 
 /** Application ownership adapter; interaction behavior is defined by [SessionRenameViewModel]. */
 public interface RenameSessionPopupViewModel : SessionRenameViewModel {
-    /** Exact captured Session, used by the parent to validate child ownership. */
-    public val target: PersistedSessionViewModel
+    /** Optional exact tab owner; directory Rename need not open or select a tab. */
+    public val target: PersistedSessionViewModel?
 }

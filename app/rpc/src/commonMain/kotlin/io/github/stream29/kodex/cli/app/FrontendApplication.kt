@@ -7,8 +7,6 @@ import io.github.stream29.kodex.app.application.contract.*
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerDependencies
 import io.github.stream29.kodex.app.pathpicker.createDirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
-import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
 import io.github.stream29.kodex.app.settings.contract.*
 import io.github.stream29.kodex.app.settings.createOpenAiLoginViewModel
 import io.github.stream29.kodex.app.settings.createSessionSettingsViewModel
@@ -69,16 +67,12 @@ public actual suspend fun <R> withFrontendApplication(
         }
         root = createApplicationViewModel(
             sessionViews, draftFactory,
-            SessionCatalogViewModelFactory { dependencies, interactions ->
-                DefaultSessionCatalogViewModel(frontendScope, dependencies, interactions)
-            },
-            catalogDependencies = RpcSessionCatalogDependencies(services.global),
             SettingsViewModelFactory { arguments ->
                 val source = if (arguments.agent != null) {
                     val selected = arguments.agent as? RpcAgentViewModel ?: error("Unknown frontend Agent view.")
-                    val session = checkNotNull(arguments.target)
                     RpcSessionSettingsSource(
-                        selected, frontendScope, arguments.isAgentPageCurrent, canRenameSession = session.rootAgent.value === selected,
+                        selected, frontendScope, arguments.isAgentPageCurrent,
+                        canRenameSession = arguments.target?.rootAgent?.value === selected,
                     )
                 } else when (val target = arguments.target) {
                     is RpcSessionView -> RpcSessionSettingsSource(target, frontendScope)
@@ -109,6 +103,7 @@ public actual suspend fun <R> withFrontendApplication(
             CoroutineScope(frontendScope.coroutineContext + CoroutineExceptionHandler { _, error ->
                 reportUnhandledError(error)
             }),
+            sessionGroups = RpcApplicationSessionCatalog(services, sessionViews),
         )
         application = root
         frontendScope.launch(start = CoroutineStart.UNDISPATCHED) {

@@ -257,6 +257,7 @@ moduleTree("tool") {
     module("await-event")
     module("core")
     module("image-generation")
+    module("intent-name")
     module("plan")
     moduleTree("read-media") {
         module("contract")

@@ -9,13 +9,13 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":app-component-application-view"))
+            api(project(":app-component-session-catalog-view"))
             api(project(":app-tui-components"))
             api(libs.mosaic.runtime)
         }
         named("mosaicMain").dependencies {
             implementation(project(":app-component-widgets"))
             implementation(project(":app-component-path-picker-view"))
-            implementation(project(":app-component-session-catalog-view"))
             implementation(project(":app-component-settings-view"))
             implementation(project(":app-tui-components"))
             implementation(project(":utils-external-url"))

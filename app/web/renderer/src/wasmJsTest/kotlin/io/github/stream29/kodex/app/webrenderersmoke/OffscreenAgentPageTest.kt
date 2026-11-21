@@ -126,7 +126,7 @@ val offscreenAgentPageTest by testSuite {
         val probe = AgentPageProbe()
         val scene = OffscreenScene.create { ProbedAgentPage(agent, probe) }
         try {
-            scene.settle { scene.hasText("History first") && scene.hasText("Composer enabled=true") }
+            scene.settle { scene.hasText("History first") && scene.hasText("Composer autoFocus=true") }
             assertSame(agent.history, probe.history)
             assertSame(agent.composer, probe.composer)
             assertTrue(probe.canEdit)
@@ -134,7 +134,7 @@ val offscreenAgentPageTest by testSuite {
             scene.settle { scene.hasText("  ↳ Queued once") }
             assertEquals(1, probe.calls.count { it == "pending" })
             assertEquals(listOf("history", "pending", "composer"), probe.calls)
-            assertTrue(scene.text("  ↳ Queued once").boundsInWindow.top < scene.text("Composer enabled=true").boundsInWindow.top)
+            assertTrue(scene.text("  ↳ Queued once").boundsInWindow.top < scene.text("Composer autoFocus=true").boundsInWindow.top)
             agent.running.value = true
             scene.settle { !probe.canEdit && scene.hasText("Stop") }
             agent.running.value = false
@@ -147,20 +147,21 @@ val offscreenAgentPageTest by testSuite {
             try { scene.close(); assertPageBorrowed(agent) } finally { agent.closeFixture() }
         }
     } }
-    test("shared pending branches borrow exact children and disable only ordinary Composer focus and editing") { runtimeScene { _, runtime, owner ->
+    test("pending question keeps the ordinary Composer mounted without requesting its initial focus") { runtimeScene { _, runtime, owner ->
         val agent = pageAgent("pending", runtime, owner)
         val probe = AgentPageProbe()
         val scene = OffscreenScene.create { ProbedAgentPage(agent, probe) }
         try {
-            scene.settle { probe.enabled == true }
+            scene.settle { probe.autoFocus == true }
             agent.inputPorts.pending.value = inputEvent(20)
-            scene.settle { probe.input != null && probe.enabled == false && scene.hasText("Scope: Which scope?") }
+            scene.settle { probe.input != null && probe.autoFocus == false && scene.hasText("Scope: Which scope?") }
+            assertSame(agent.composer, probe.composer)
             assertSame(agent.requestUserInput, probe.input)
             assertSame<RequestUserInputState?>(agent.requestUserInput.state.value, probe.inputState)
             assertEquals(listOf("history", "input", "composer"), probe.calls)
             assertEquals(1, probe.pendingPanels)
             agent.inputPorts.pending.value = null
-            scene.settle { probe.input == null && probe.enabled == true }
+            scene.settle { probe.input == null && probe.autoFocus == true }
             assertEquals(0, probe.pendingPanels)
             assertEquals("retained pending", agent.composer.state.value.text)
             scene.frame()
@@ -223,9 +224,9 @@ private fun ProbedAgentPage(agent: PageTestAgent, probe: AgentPageProbe) {
                     @Composable
                     override fun PendingSteer() { probe.calls += "pending"; slots.PendingSteer() }
                     @Composable
-                    override fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, enabled: Boolean) {
-                        probe.calls += "composer"; probe.composer = viewModel; probe.enabled = enabled
-                        UiText("Composer enabled=$enabled")
+                    override fun Composer(viewModel: ComposerViewModel, newLineKey: NewLineKey, autoFocus: Boolean) {
+                        probe.calls += "composer"; probe.composer = viewModel; probe.autoFocus = autoFocus
+                        UiText("Composer autoFocus=$autoFocus")
                     }
                 })
             }
@@ -241,7 +242,7 @@ private class AgentPageProbe {
     var composer: ComposerViewModel? = null
     var input: RequestUserInputViewModel? = null
     var inputState: RequestUserInputState.Pending? = null
-    var enabled: Boolean? = null
+    var autoFocus: Boolean? = null
     var canEdit = false
 }
 

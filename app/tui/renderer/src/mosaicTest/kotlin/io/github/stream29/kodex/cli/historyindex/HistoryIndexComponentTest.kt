@@ -1,12 +1,8 @@
 package io.github.stream29.kodex.cli.historyindex
 
-import io.github.stream29.kodex.cli.app.SessionSidebarSide
-import io.github.stream29.kodex.cli.app.SidebarHoverPopupPositionProvider
-import io.github.stream29.kodex.cli.app.SidebarHoverPopupSurface
 import io.github.stream29.kodex.cli.app.mosaicIndexHover
 import io.github.stream29.kodex.cli.app.mosaicIndexMenu
 import io.github.stream29.kodex.cli.app.rememberMosaicIndexOverlayRenderer
-import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.formatPopupTimestamp as formatHistoryIndexTimestamp
 
 import androidx.compose.runtime.getValue
@@ -25,19 +21,21 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import com.jakewharton.mosaic.ui.unit.IntSize
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAskUserEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryKind
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexWindow
 import io.github.stream29.kodex.cli.components.LazyListState
-import io.github.stream29.kodex.cli.components.TuiPopupAnchorBounds
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
+import io.github.stream29.kodex.openai.PlanItemArg
+import io.github.stream29.kodex.openai.StepStatus
+import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
@@ -48,7 +46,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.datetime.TimeZone
 import kotlin.test.*
 import kotlin.time.Instant
-import kotlin.time.Duration.Companion.milliseconds
 
 val historyIndexRendererTest by testSuite {
     test("child parent rows appear once before and after sparse entries in a narrow Index") {
@@ -81,14 +78,30 @@ val historyIndexRendererTest by testSuite {
         }
     }
 
-    test("the creation row offers a right-aligned Enter button without scrolling the parent") {
+    test("creation-row hover stays outside the right-aligned Enter and Enter does not scroll the parent") {
         val vm = RenderIndex(listOf(entry(7, "Created #91").copy(createdChildAgentId = 91)))
         val opened = mutableListOf<Pair<HistoryIndexTarget, Int>>()
         val navigation = HistoryIndexNavigation(vm, { target, child -> opened.add(target to child) })
+        var hovering by mutableStateOf<HistoryIndexInteractionRequest?>(null)
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
-                    HistoryIndexSidebarBody(vm, columns = 26, rows = 6, navigation = navigation)
+                    TuiPopupHost(Modifier.width(60).height(12)) {
+                        Column {
+                            Text("Header")
+                            HistoryIndexSidebarBody(
+                                vm, columns = 26, rows = 6, navigation = navigation,
+                                onHoverChanged = { request, entered -> if (entered) hovering = request },
+                            )
+                        }
+                        val current = hovering
+                        HistoryIndexHoverContent(
+                            interaction = remember(current) { current?.let(::mosaicIndexHover) },
+                            renderer = rememberMosaicIndexOverlayRenderer(34, 11),
+                            onHoverChanged = {},
+                            onDismiss = { hovering = null },
+                        )
+                    }
                 }
             }
             val snapshot = awaitContaining("[Enter]")
@@ -97,6 +110,13 @@ val historyIndexRendererTest by testSuite {
             assertTrue("Created #91" in row)
             assertEquals(26, row.trimEnd().length)
             val x = row.indexOf("[Enter]") + 2
+            sendMouseEvent(MouseEvent(3, y, MouseEvent.Type.Motion))
+            val visible = awaitContaining("User message")
+            assertEquals(27, visible.lines()[y].indexOf("User message"), visible)
+            assertTrue("[Enter]" in visible.lines()[y], visible)
+            sendMouseEvent(MouseEvent(10, y, MouseEvent.Type.Motion))
+            val moved = snapshotNow()
+            assertEquals(27, moved.lines()[y].indexOf("User message"), moved)
             sendMouseEvent(MouseEvent(x, y, MouseEvent.Type.Press, MouseEvent.Button.Left))
             sendMouseEvent(MouseEvent(x, y, MouseEvent.Type.Release, MouseEvent.Button.Left))
             snapshotNow()
@@ -107,20 +127,10 @@ val historyIndexRendererTest by testSuite {
         }
     }
 
-    test("keyboard menu Details renders redacted question rows and never their raw fallback") {
-        val secret = StableAskUserEvent(
-            askId = 1,
-            arguments = RequestUserInputArgs(listOf(RequestUserInputQuestion("password", "Password", "Enter password", isSecret = true))),
-            response = RequestUserInputResponse(mapOf(
-                "password" to RequestUserInputAnswer(listOf("SECRET")),
-            )),
-        )
-        val vm = RenderIndex(listOf(
-            entry(7, "Question").copy(
-                detail = HistoryIndexEntryDetail(HistoryIndexEntryKind.RequestUserInput, "SECRET raw fallback", secret),
-            ),
-        ))
+    test("editable keyboard menu runs the supplied action before its owner dismisses") {
+        val vm = RenderIndex(listOf(entry(7, "Full message body").copy(editableUserText = "Original text")))
         var visible by mutableStateOf(false)
+        val events = mutableListOf<String>()
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
@@ -128,32 +138,45 @@ val historyIndexRendererTest by testSuite {
                         val anchor = rememberTuiPopupAnchor()
                         Text("entry", Modifier.tuiPopupAnchor(anchor))
                         val request = remember(anchor) {
-                            HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor), null)
+                            mosaicIndexMenu(HistoryIndexMenuRequest(
+                                HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor), null,
+                            ))
                         }
                         HistoryIndexMenuContent(
-                            if (visible) mosaicIndexMenu(request) else null,
+                            if (visible) request else null,
                             rememberMosaicIndexOverlayRenderer(0, 0),
-                            { visible = false },
-                        )
+                            canEdit = true,
+                            edit = { command, target, text ->
+                                assertTrue(visible)
+                                assertSame(vm, target.viewModel)
+                                assertEquals(7, target.index)
+                                assertNull(text)
+                                events += command.name
+                                visible = false
+                            },
+                        ) { events += "dismiss"; visible = false }
                     }
                 }
             }
             visible = true
-            awaitContaining("Details")
+            val menu = awaitContaining("Revert and edit")
+            assertTrue("Go to" in menu && "Revert to here" in menu && "Fork from here" in menu, menu)
+            assertFalse("Details" in menu, menu)
+            assertFalse("Full message body" in menu, menu)
             sendKeyEvent(KeyboardEvent(codepoint = 9))
             snapshotNow()
             sendKeyEvent(KeyboardEvent(codepoint = 13))
-            val snapshot = awaitContaining("[hidden]")
-            assertTrue("Password: Enter password" in snapshot, snapshot)
-            assertFalse("SECRET" in snapshot, snapshot)
+            assertFalse("Revert to here" in snapshotNow())
+            assertEquals(listOf(HistoryIndexCommand.Revert.name), events)
             assertTrue(vm.scrolled.isEmpty())
-            visible = false
         }
     }
 
-    test("keyboard Details pages read-only text and invalidates with its opening") {
-        val vm = RenderIndex(listOf(entry(7, (0..80).joinToString("\n") { "detail-line-$it" })))
-        var visible by mutableStateOf(false)
+    test("hover scrolls full Agent message and keeps its heading") {
+        val body = "Author: root\nRecipient: child\n" + (0..80).joinToString("\n") { "detail-line-$it" }
+        val vm = RenderIndex(listOf(entry(7, "Message").copy(
+            detail = HistoryIndexEntryDetail(HistoryIndexEntryKind.AgentMessage, body),
+        )))
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
@@ -161,37 +184,25 @@ val historyIndexRendererTest by testSuite {
                         val anchor = rememberTuiPopupAnchor()
                         Text("entry", Modifier.tuiPopupAnchor(anchor))
                         val request = remember(anchor) {
-                            HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor), null)
+                            mosaicIndexHover(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor))
                         }
-                        HistoryIndexMenuContent(
-                            if (visible) mosaicIndexMenu(request) else null,
-                            rememberMosaicIndexOverlayRenderer(0, 0),
-                            { visible = false },
-                        )
+                        HistoryIndexHoverContent(request, rememberMosaicIndexOverlayRenderer(50, 8), {}, {})
                     }
                 }
             }
-            visible = true
-            awaitContaining("Check out", "placed opening")
-            sendKeyEvent(KeyboardEvent(codepoint = 9))
-            snapshotNow()
-            sendKeyEvent(KeyboardEvent(codepoint = 13))
-            val initial = awaitContaining("Back", "Details activation")
-            assertTrue("detail-line-0" in initial, initial)
-            sendKeyEvent(KeyboardEvent(KeyboardEvent.PageDown))
-            val paged = snapshotNow()
-            assertFalse("detail-line-0" in paged, paged)
-            assertTrue("Back" in paged, paged)
-            sendKeyEvent(KeyboardEvent(KeyboardEvent.PageUp))
-            assertTrue("detail-line-0" in snapshotNow())
-            sendKeyEvent(KeyboardEvent(codepoint = 27))
-            awaitContaining("Check out", "Escape to menu")
-            sendKeyEvent(KeyboardEvent(codepoint = 13))
-            awaitContaining("Back", "restored Details focus")
-            assertTrue(vm.scrolled.isEmpty(), "Back restores Details focus rather than invoking Check out.")
-            vm.replaceSameIndex()
-            awaitIndexCondition { !visible }
-            assertFalse("Back" in snapshotNow())
+            val initial = awaitContaining("detail-line-0")
+            assertTrue("Agent message" in initial, initial)
+            assertTrue("Author: root" in initial && "Recipient: child" in initial, initial)
+            val lines = initial.lines()
+            val bodyY = lines.indexOfFirst { "detail-line-0" in it }
+            val bodyX = lines[bodyY].indexOf("detail-line-0") + 1
+            repeat(3) {
+                sendMouseEvent(MouseEvent(bodyX, bodyY, MouseEvent.Type.Press, MouseEvent.Button.WheelDown))
+                snapshotNow()
+            }
+            val scrolled = awaitContaining("detail-line-8")
+            assertFalse("detail-line-0" in scrolled, scrolled)
+            assertTrue("Agent message" in scrolled, scrolled)
             assertTrue(vm.scrolled.isEmpty())
         }
     }
@@ -277,7 +288,7 @@ val historyIndexRendererTest by testSuite {
             assertTrue(vm.isActive)
         }
     }
-    test("pointer is renderer-local and row request captures exact child generation index revision") {
+    test("moving within the row preserves the exact hover request and its target becomes stale after revision") {
         val vm = RenderIndex(listOf(entry(7, "Content")))
         var request: HistoryIndexInteractionRequest? = null
         runMosaicTest {
@@ -290,14 +301,13 @@ val historyIndexRendererTest by testSuite {
             }
             sendMouseEvent(MouseEvent(4, 0, MouseEvent.Type.Motion))
             snapshotNow()
-            assertEquals(IntOffset(4, 0), request?.pointerPosition)
-            assertSame(vm, request?.viewModel)
-            assertEquals(7, request?.index)
-            assertEquals(11L, request?.generation)
+            val oldRequest = assertNotNull(request)
+            assertSame(vm, oldRequest.viewModel)
+            assertEquals(7, oldRequest.index)
+            assertEquals(11L, oldRequest.generation)
             sendMouseEvent(MouseEvent(9, 0, MouseEvent.Type.Motion))
             snapshotNow()
-            assertEquals(IntOffset(9, 0), request?.pointerPosition)
-            val oldRequest = requireNotNull(request)
+            assertSame(oldRequest, request)
             vm.replaceSameIndex()
             snapshotNow()
             assertFalse(oldRequest.isCurrent())
@@ -334,25 +344,52 @@ val historyIndexRendererTest by testSuite {
     }
     for (kind in HistoryIndexEntryKind.entries) {
         test("hover classification $kind renders full title and detail") {
+            val vm = RenderIndex(listOf(entry(7, "Summary").copy(detail = HistoryIndexEntryDetail(kind, "Complete detail"))))
             runMosaicTest {
                 setContentAndSnapshot {
                     io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                     TuiPopupHost(Modifier.width(70).height(12)) {
                         val anchor = rememberTuiPopupAnchor()
                         Text("entry", Modifier.tuiPopupAnchor(anchor))
-                        val presentation = historyIndexDetailPresentation(HistoryIndexEntryDetail(kind, "Complete detail"))
-                        SidebarHoverPopupSurface(
-                            anchor, SessionSidebarSide.Left, null,
-                            presentation.title, presentation.content, 60, 10, presentation.questionRows,
-                            TuiTheme.colorScheme.onSurface, {},
-                        )
+                        val request = remember(anchor) {
+                            mosaicIndexHover(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor))
+                        }
+                        HistoryIndexHoverContent(request, rememberMosaicIndexOverlayRenderer(60, 10), {}, {})
                     }
                 }
                 }
                 val snapshot = awaitContaining("Complete detail")
                 assertTrue(expectedIndexKindName(kind) in snapshot, snapshot)
-                assertFalse("Index:" in snapshot, snapshot)
+                assertTrue("Index: 7" in snapshot, snapshot)
+                assertFalse("Timestamp:" in snapshot, snapshot)
             }
+        }
+    }
+    test("hover renders typed Plan explanation and all step statuses instead of fallback") {
+        val plan = StablePlanUpdate("plan", arguments = UpdatePlanArgs("Explanation", listOf(
+            PlanItemArg("Pending step", StepStatus.Pending),
+            PlanItemArg("Current step", StepStatus.InProgress),
+            PlanItemArg("Finished step", StepStatus.Completed),
+        )))
+        val vm = RenderIndex(listOf(entry(7, "Plan").copy(
+            detail = HistoryIndexEntryDetail(HistoryIndexEntryKind.PlanUpdate, "raw fallback", plan = plan),
+        )))
+        runMosaicTest {
+            setContentAndSnapshot {
+                io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
+                    TuiPopupHost(Modifier.width(65).height(12)) {
+                        val anchor = rememberTuiPopupAnchor()
+                        Text("entry", Modifier.tuiPopupAnchor(anchor))
+                        val request = remember(anchor) {
+                            mosaicIndexHover(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor))
+                        }
+                        HistoryIndexHoverContent(request, rememberMosaicIndexOverlayRenderer(60, 11), {}, {})
+                    }
+                }
+            }
+            val snapshot = awaitContaining("[x] Finished step")
+            assertTrue("Explanation" in snapshot && "[ ] Pending step" in snapshot && "[>] Current step" in snapshot, snapshot)
+            assertFalse("raw fallback" in snapshot, snapshot)
         }
     }
     test("hover uses shared read-only questions projection and never reveals secret answers") {
@@ -370,24 +407,27 @@ val historyIndexRendererTest by testSuite {
                 "secret" to RequestUserInputAnswer(listOf("never-render-secret")),
             )),
         )
+        val timestamp = Instant.parse("2026-10-03T01:02:03Z")
+        val vm = RenderIndex(listOf(entry(7, "Question").copy(
+            detail = HistoryIndexEntryDetail(HistoryIndexEntryKind.RequestUserInput, "fallback", event),
+            timestamp = timestamp,
+        )))
         runMosaicTest {
             setContentAndSnapshot {
                 io.github.stream29.kodex.app.ui.WithMosaicComponentRenderers {
                 TuiPopupHost(Modifier.width(65).height(12)) {
                     val anchor = rememberTuiPopupAnchor()
                     Text("entry", Modifier.tuiPopupAnchor(anchor))
-                    val presentation = historyIndexDetailPresentation(
-                        HistoryIndexEntryDetail(HistoryIndexEntryKind.RequestUserInput, "fallback", event),
-                    )
-                    SidebarHoverPopupSurface(
-                        anchor, SessionSidebarSide.Left, null,
-                        presentation.title, presentation.content, 60, 11, presentation.questionRows,
-                        TuiTheme.colorScheme.onSurface, {},
-                    )
+                    val request = remember(anchor) {
+                        mosaicIndexHover(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor))
+                    }
+                    HistoryIndexHoverContent(request, rememberMosaicIndexOverlayRenderer(60, 11), {}, {})
                 }
             }
             }
             val snapshot = awaitContaining("[hidden]")
+            assertTrue("Index: 7" in snapshot, snapshot)
+            assertTrue("Timestamp: ${formatHistoryIndexTimestamp(timestamp, TimeZone.currentSystemDefault())}" in snapshot, snapshot)
             assertTrue("Layout: Which layout?" in snapshot, snapshot)
             assertTrue("[● Compact]" in snapshot, snapshot)
             assertTrue("Use less space" in snapshot, snapshot)
@@ -432,24 +472,26 @@ val historyIndexRendererTest by testSuite {
                     val request = remember(anchor) {
                         HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Left, vm, 11, 7, anchor), null)
                     }
-                    HistoryIndexMenuContent(mosaicIndexMenu(request), rememberMosaicIndexOverlayRenderer(0, 0), {})
+                    val opening = remember(request) { mosaicIndexMenu(request) }
+                    HistoryIndexMenuContent(opening, rememberMosaicIndexOverlayRenderer(0, 0)) {}
                 }
             }
             }
-            val initial = awaitContaining("Check out")
+            val initial = awaitContaining("Go to")
             assertTrue("Index: 7" in initial, initial)
             assertFalse("Timestamp:" in initial, initial)
             assertFalse("Revert" in initial, initial)
             assertFalse("Fork" in initial, initial)
-            vm.updateEntry(entry(7, "Content").copy(messageTimestamp = Instant.parse("2026-10-03T01:02:03Z")))
-            assertTrue("UTC" in awaitContaining("Timestamp:"))
+            val timestamp = Instant.parse("2026-10-03T01:02:03Z")
+            vm.updateEntry(entry(7, "Content").copy(timestamp = timestamp))
+            awaitContaining("Timestamp: ${formatHistoryIndexTimestamp(timestamp, TimeZone.currentSystemDefault())}")
             sendKeyEvent(KeyboardEvent(codepoint = 13))
             snapshotNow()
             assertEquals(listOf(7), vm.scrolled)
             assertTrue(vm.isActive)
         }
     }
-    test("same-index local revision invalidates an old menu without retargeting Check out") {
+    test("same-index local revision invalidates an old menu without retargeting Go to") {
         val vm = RenderIndex(listOf(entry(7, "Content")))
         var dismissals = 0
         runMosaicTest {
@@ -461,14 +503,15 @@ val historyIndexRendererTest by testSuite {
                     val request = remember(anchor) {
                         HistoryIndexMenuRequest(HistoryIndexInteractionRequest(HistoryIndexSide.Right, vm, 11, 7, anchor), null)
                     }
-                    HistoryIndexMenuContent(mosaicIndexMenu(request), rememberMosaicIndexOverlayRenderer(0, 0), { dismissals++ })
+                    val opening = remember(request) { mosaicIndexMenu(request) }
+                    HistoryIndexMenuContent(opening, rememberMosaicIndexOverlayRenderer(0, 0)) { dismissals++ }
                 }
             }
             }
-            awaitContaining("Check out")
+            awaitContaining("Go to")
             vm.replaceSameIndex()
             val closed = snapshotNow()
-            assertFalse("Check out" in closed, closed)
+            assertFalse("Go to" in closed, closed)
             assertTrue(dismissals > 0)
             assertTrue(vm.scrolled.isEmpty())
         }
@@ -478,7 +521,7 @@ val historyIndexRendererTest by testSuite {
         assertEquals("2026-10-03 01:02:03 UTC+00:00", formatHistoryIndexTimestamp(time, TimeZone.UTC))
         assertEquals("2026-10-03 09:02:03 UTC+08:00", formatHistoryIndexTimestamp(time, TimeZone.of("Asia/Singapore")))
     }
-    test("menu helper honors pointer opening position and exposes only information and Check out") {
+    test("menu helper honors pointer opening position and exposes only information and Go to") {
         var checkedOut = 0
         runMosaicTest {
             setContentAndSnapshot {
@@ -486,7 +529,10 @@ val historyIndexRendererTest by testSuite {
                 TuiPopupHost(Modifier.width(70).height(10)) {
                     val anchor = rememberTuiPopupAnchor()
                     Text("entry", Modifier.tuiPopupAnchor(anchor))
-                    HistoryIndexContextMenuPopup(anchor, IntOffset(5, 2), 42, {}, { checkedOut++ })
+                    HistoryIndexContextMenuPopup(
+                        anchor, IntOffset(5, 2), 42, null,
+                        listOf(HistoryIndexMenuAction("GoTo", "Go to") { checkedOut++ }), {},
+                    )
                 }
             }
             }
@@ -499,18 +545,6 @@ val historyIndexRendererTest by testSuite {
             snapshotNow()
             assertEquals(1, checkedOut)
         }
-    }
-    test("both popup sides and terminal boundaries use pointer geometry only") {
-        val anchor = TuiPopupAnchorBounds(IntOffset(20, 2), IntSize(10, 1))
-        val size = IntSize(80, 24)
-        val popup = IntSize(15, 4)
-        assertEquals(IntOffset(25, 3), SidebarHoverPopupPositionProvider(
-            SessionSidebarSide.Left, 60, 20, IntOffset(4, 0)).calculatePosition(anchor, size, popup))
-        assertEquals(IntOffset(9, 3), SidebarHoverPopupPositionProvider(
-            SessionSidebarSide.Right, 60, 20, IntOffset(4, 0)).calculatePosition(anchor, size, popup))
-        val bottom = TuiPopupAnchorBounds(IntOffset(79, 23), IntSize(1, 1))
-        assertEquals(IntOffset(64, 19), SidebarHoverPopupPositionProvider(
-            SessionSidebarSide.Left, 60, 20, null).calculatePosition(bottom, size, popup))
     }
 }
 
@@ -556,14 +590,6 @@ private suspend fun TestMosaic<String>.awaitContaining(text: String, stage: Stri
     }
     assertTrue(text in snapshot, "$stage: expected $text\n$snapshot")
     return snapshot
-}
-
-private suspend fun TestMosaic<String>.awaitIndexCondition(condition: () -> Boolean) {
-    repeat(100) {
-        if (condition()) return
-        try { awaitSnapshot(50.milliseconds) } catch (_: TimeoutCancellationException) { }
-    }
-    assertTrue(condition(), draw().render(AnsiLevel.NONE, supportsKittyUnderlines = false))
 }
 
 private fun expectedIndexKindName(kind: HistoryIndexEntryKind): String = when (kind) {

@@ -233,7 +233,7 @@ val offscreenSessionTabBarTest by testSuite {
 private class TabCommands(private val tag: String, private val commands: MutableList<String>) : SessionTabBarCallbacks {
     override fun select(identity: SessionTabIdentity) { commands += "$tag:select:${identity.value}" }
     override fun selectNewSession() { commands += "$tag:new" }
-    override fun openSessions() { commands += "$tag:sessions" }
+    override val sessionsAction: () -> Unit = { commands += "$tag:sessions" }
 }
 
 private fun OffscreenScene.tabSelected(id: String) = nodes().any {

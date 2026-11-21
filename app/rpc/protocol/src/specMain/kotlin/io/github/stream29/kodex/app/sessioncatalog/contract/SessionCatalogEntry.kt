@@ -7,19 +7,19 @@ import kotlin.time.Instant
 /**
  * Lightweight persisted Session summary that does not open its runtime.
  *
- * Render identity by [sessionIndex], an optional human label by [threadName],
+ * Render identity by [sessionIndex], an optional human label by [name],
  * and archive, running and activity flags independently; none implies another.
  * Missing timestamps mean unavailable metadata, not an epoch value.
  *
  * @property sessionIndex Current backend addressing number, not permanent identity across deletion/reuse.
- * @property threadName Optional non-blank title; null renders as `Session <index>`.
+ * @property name Optional non-blank title; null renders as `Session <index>`.
  * @property archived Persisted archive flag; independent of running/owner residency.
  * @throws IllegalArgumentException if the index is negative or the name is blank.
  */
 @Serializable
 public data class SessionCatalogEntry(
     public val sessionIndex: Int,
-    public val threadName: String? = null,
+    public val name: String? = null,
     /** Exact timestamp at index zero; null when that record is absent. */
     public val createdAt: Instant? = null,
     /** Latest persisted timestamp, also used for catalog activity ordering and relative labels. */
@@ -46,8 +46,8 @@ public data class SessionCatalogEntry(
             "A Session catalog index must not be negative."
         }
         require(rootAgentId >= 0) { "A root Agent ID must not be negative." }
-        require(threadName == null || threadName.isNotBlank()) {
-            "A Session catalog thread name must be null or non-blank."
+        require(name == null || name.isNotBlank()) {
+            "A Session catalog name must be null or non-blank."
         }
     }
 }

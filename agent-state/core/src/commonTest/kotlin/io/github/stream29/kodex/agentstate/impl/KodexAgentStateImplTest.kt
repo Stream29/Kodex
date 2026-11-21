@@ -67,6 +67,7 @@ import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.TokenUsage
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import io.github.stream29.kodex.openai.client.test.withFixtureResponseReadTiming
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
@@ -94,6 +95,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 val kodexAgentStateImplTest by testSuite {
     testFixture {
@@ -359,6 +361,7 @@ val kodexAgentStateImplTest by testSuite {
                     createResponse { request ->
                         requests += request
                         flowOf(
+                            ResponsesStreamEvent.Created(Response(id = "response_1")),
                             ResponsesStreamEvent.OutputItemDone(0, reasoningItem),
                             ResponsesStreamEvent.OutputItemDone(1, assistantItem),
                             ResponsesStreamEvent.Completed(
@@ -368,7 +371,7 @@ val kodexAgentStateImplTest by testSuite {
                                     endTurn = true,
                                 ),
                             ),
-                        )
+                        ).withFixtureResponseReadTiming(2.milliseconds)
                     }
                 },
                 storage = storage,
@@ -389,6 +392,9 @@ val kodexAgentStateImplTest by testSuite {
                 storage.getIndexEntryExact(3),
             )
             assertEquals(12L, checkNotNull(storage.getLlmRequestMetaAt(4)).totalTokens)
+            val measurement = assertIs<LlmRequestMeta.Response>(storage.getLlmRequestMetaAt(4))
+            assertEquals(2_000_000L, measurement.elapsedNanoseconds)
+            assertEquals(2L, measurement.outputTokens)
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
         }
 
@@ -948,7 +954,7 @@ val kodexAgentStateImplTest by testSuite {
                 storage = storage,
             )
             agent.appendUserMessage(userMessage("Compact without usage.").content)
-            storage.commit(LlmRequestMeta.Response(90L))
+            storage.commit(LlmRequestMeta.Response(90L, elapsedNanoseconds = 1_000_000L, outputTokens = 0))
 
             val compactIndex = agent.forcedCompact()
 
@@ -979,7 +985,7 @@ val kodexAgentStateImplTest by testSuite {
             compactionStarted.await()
 
             val settingsUpdate = async(start = CoroutineStart.UNDISPATCHED) {
-                agent.updateSettings(settings().copy(threadName = "After compaction"))
+                agent.updateSettings(settings().copy(name = "After compaction"))
             }
             val settingsAt = settingsUpdate.await()
             assertEquals(2, settingsAt)
@@ -996,8 +1002,8 @@ val kodexAgentStateImplTest by testSuite {
                 ),
                 storage.getIndexEntryAt(compactedAt),
             )
-            assertEquals("After compaction", storage.getSettingsAt(settingsAt).threadName)
-            assertEquals("After compaction", storage.getSettingsAt(compactedAt).threadName)
+            assertEquals("After compaction", storage.getSettingsAt(settingsAt).name)
+            assertEquals("After compaction", storage.getSettingsAt(compactedAt).name)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
         }
 
@@ -1184,13 +1190,13 @@ val kodexAgentStateImplTest by testSuite {
             }
             requestStarted.await()
 
-            val settingsAt = agent.updateSettings(settings().copy(threadName = "Updated while active"))
+            val settingsAt = agent.updateSettings(settings().copy(name = "Updated while active"))
             running.cancel()
             running.join()
 
             assertTrue(running.isCancelled)
             assertEquals(settingsAt, agent.latestIndex.value)
-            assertEquals("Updated while active", storage.getSettingsAt(settingsAt).threadName)
+            assertEquals("Updated while active", storage.getSettingsAt(settingsAt).name)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
         }
 

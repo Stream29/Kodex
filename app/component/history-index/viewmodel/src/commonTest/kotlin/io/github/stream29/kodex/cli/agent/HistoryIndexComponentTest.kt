@@ -2,7 +2,6 @@ package io.github.stream29.kodex.cli.agent
 
 import de.infix.testBalloon.framework.core.testSuite
 import de.infix.testBalloon.framework.core.TestCompartment
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
@@ -137,16 +136,21 @@ val historyIndexComponentTest by testSuite(compartment = { TestCompartment.RealT
         }
     }
 
-    test("timestamp is populated on Message entries only") {
+    test("timestamp is taken from each index entry without a sparse floor fallback") {
         val deps = IndexPorts(production = false)
         val time = Instant.parse("2026-10-03T01:02:03Z")
-        deps.timeline.values.putAll(mapOf(2 to message("message"), 5 to StableContextCompaction(encryptedContent = "enc")))
+        deps.timeline.values.putAll(mapOf(
+            2 to message("message"),
+            4 to message("no exact timestamp"),
+            5 to StableContextCompaction(encryptedContent = "enc"),
+        ))
         deps.timestamp.values.putAll(mapOf(2 to time, 5 to time))
         deps.latestIndex.value = 5
         withIndex(deps) { vm ->
-            val window = vm.awaitWindow { it.indexes == listOf(2, 5) }
-            assertEquals(time, assertNotNull(window.entryAtOrNull(2)).messageTimestamp)
-            assertNull(assertNotNull(window.entryAtOrNull(5)).messageTimestamp)
+            val window = vm.awaitWindow { it.indexes == listOf(2, 4, 5) }
+            assertEquals(time, assertNotNull(window.entryAtOrNull(2)).timestamp)
+            assertNull(assertNotNull(window.entryAtOrNull(4)).timestamp)
+            assertEquals(time, assertNotNull(window.entryAtOrNull(5)).timestamp)
         }
     }
 
@@ -251,11 +255,7 @@ private class IndexPorts(production: Boolean = true) : HistoryIndexDependencies 
             when (types) {
                 AgentCommitType.IndexTypes -> timeline.indexesIn(range).mapNotNull { idx ->
                     timeline.values[idx]?.let { entry ->
-                        val createdAt = if (entry is AgentCommit.Steerable) {
-                            timestamp.values[idx] ?: Instant.DISTANT_PAST
-                        } else {
-                            Instant.DISTANT_PAST
-                        }
+                        val createdAt = timestamp.values[idx] ?: Instant.DISTANT_PAST
                         IndexedAgentCommit(idx, entry, createdAt)
                     }
                 }.takeLast(limit)

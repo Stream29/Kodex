@@ -115,7 +115,7 @@ private fun ToolCollapsed(
 }
 
 private fun ToolHistoryItemHeader.CommandExecution.summary(): String = when (val action = action) {
-    is CommandExecutionHistoryAction.Run -> action.intentName.ifEmpty { UnnamedCommandHistoryTitle }
+    is CommandExecutionHistoryAction.Run -> action.intentName
     is CommandExecutionHistoryAction.Interact -> "Write to terminal"
     is CommandExecutionHistoryAction.Wait -> "Poll terminal output"
 }

@@ -5,6 +5,7 @@ package io.github.stream29.kodex.agentstorage.sqlite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.decodePayloadJson
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
@@ -30,6 +31,7 @@ public actual class SqliteAgentStorage actual constructor(
     private val mutex: Mutex,
     private val requireAccess: () -> Unit,
     private val onHistoryChanged: ((Set<AgentCommitType>?) -> Unit)?,
+    private val onSessionGroupsChanged: ((Map<String?, Boolean>) -> Unit)?,
 ) : MutableKodexAgentStorage {
     internal val sqlAgentId: Long = agentId.also { require(it >= 0) { "Invalid agent id: $it" } }.toLong()
 
@@ -38,13 +40,23 @@ public actual class SqliteAgentStorage actual constructor(
         return mutex.withLock { withContext(Dispatchers.IO) { requireAccess(); block() } }
     }
 
-    private suspend fun <T> write(changedTypes: Set<AgentCommitType>?, block: () -> T): T {
+    private suspend fun <T> write(changedTypes: Set<AgentCommitType>?, block: () -> Pair<T, Boolean>): T {
         currentCoroutineContext().ensureActive()
         return mutex.withLock {
             withContext(NonCancellable) {
                 withContext(Dispatchers.IO) {
                     requireAccess()
-                    connection.transaction { block() }.also { onHistoryChanged?.invoke(changedTypes) }
+                    val (result, groups) = connection.transaction {
+                        val before = connection.sessionCatalogGroup(agentId)
+                        val (result, changedCatalog) = block()
+                        val groups = if (changedCatalog && before != null) {
+                            connection.recordSessionGroupMutation(before, connection.sessionCatalogGroup(agentId))
+                        } else emptyMap()
+                        result to groups
+                    }
+                    if (groups.isNotEmpty()) onSessionGroupsChanged?.invoke(groups)
+                    onHistoryChanged?.invoke(changedTypes)
+                    result
                 }
             }
         }
@@ -130,7 +142,8 @@ public actual class SqliteAgentStorage actual constructor(
                     listOf(sqlAgentId, wireType, nextIndex.toLong(), payloadJson, timestampStr),
                 )
             }
-            nextIndex
+            connection.appendSessionCatalog(sqlAgentId, nextIndex, timestampStr, sorted.filterIsInstance<KodexAgentSettings>().singleOrNull())
+            nextIndex to true
         }
         return index to encoded.map { (_, timelineName, payloadJson) -> timelineName to payloadJson }
     }
@@ -143,10 +156,13 @@ public actual class SqliteAgentStorage actual constructor(
                 """DELETE FROM agent_commits WHERE agent_id = ? AND "index" >= ?""",
                 listOf(sqlAgentId, untilExclusive.toLong()),
             )
+            val changed = connection.changes() != 0
             connection.execute(
                 """UPDATE agent_commits SET payload_json = ? WHERE agent_id = ? AND type = ?""",
                 listOf(emptySteerJson, sqlAgentId, AgentCommitType.Steer.wireName),
             )
+            if (changed) connection.recomputeSessionCatalog(agentId)
+            Unit to changed
         }
     }
 }

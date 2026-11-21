@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.agentstorage.sqlite.SqliteSchemaVersion
 import io.github.stream29.kodex.rpc.models.*
 import io.github.stream29.kodex.utils.sqlite.SqliteReadFailure
 import io.github.stream29.kodex.utils.sqlite.SqliteReadFailureKind
@@ -26,6 +27,7 @@ internal class BackendAgentSql(private val database: Path) {
         AgentSqlSchema.functions.toSet(),
         AgentSqlInputBytes,
         AgentSqlCellBytes,
+        requiredUserVersion = SqliteSchemaVersion,
     )
 
     fun schema(): AgentSqlSchemaResult = AgentSqlSchema
@@ -45,6 +47,7 @@ internal class BackendAgentSql(private val database: Path) {
         } catch (failure: SqliteReadFailure) {
             when (failure.kind) {
                 SqliteReadFailureKind.Unavailable -> failed(started, AgentSqlError.UNAVAILABLE, "The selected backend database is unavailable.")
+                SqliteReadFailureKind.IncompatibleSchema -> failed(started, AgentSqlError.UNAVAILABLE, "The selected backend database needs a compatible Kodex Home schema.")
                 SqliteReadFailureKind.Denied -> failed(started, AgentSqlError.DENIED, "The query is outside the public read-only model.")
                 SqliteReadFailureKind.InvalidStatement -> failed(started, AgentSqlError.INVALID_INPUT, "Pass one valid read-only SQL statement.")
                 SqliteReadFailureKind.Timeout -> failed(started, AgentSqlError.TIMEOUT, "Query deadline exceeded.")
@@ -116,27 +119,29 @@ private fun text(name: String, nullable: Boolean = false) = AgentSqlColumn(name,
 
 private val AgentSqlSchema = AgentSqlSchemaResult(
     relations = listOf(
-        AgentSqlRelation("sessions", false, listOf(integer("session_id"), integer("archived")),
-            listOf("session_id"), listOf("idx_sessions_archived(archived, session_id)")),
-        AgentSqlRelation("agents", false, listOf(integer("agent_id"), integer("session_id"), integer("parent_agent_id", true)),
-            listOf("agent_id"), emptyList()),
+        AgentSqlRelation("sessions", false, listOf(integer("session_id")), listOf("session_id"), emptyList()),
+        AgentSqlRelation("agents", false,
+            listOf(integer("agent_id"), integer("session_id"), integer("parent_agent_id", true), integer("completed")),
+            listOf("agent_id"), listOf("idx_agents_root_session(session_id) WHERE parent_agent_id IS NULL")),
         AgentSqlRelation("agent_commits", false,
             listOf(integer("agent_id"), text("type"), integer("index"), text("payload_json"), text("created_at")),
             listOf("agent_id", "type", "index"),
             listOf("commits_global_index(agent_id, index, type)", "commits_settings_cwd(json_extract(payload_json, '$.cwd'), agent_id, index DESC) WHERE type='settings'")),
-        AgentSqlRelation("session_catalog", true,
-            listOf(integer("session_id"), integer("archived"), text("thread_name", true), text("cwd", true),
-                text("created_at", true), text("updated_at", true)), emptyList(), emptyList()),
+        AgentSqlRelation("session_catalog_view", false,
+            listOf(integer("root_agent_id"), text("name", true), text("cwd", true),
+                text("created_at", true), text("updated_at", true)), listOf("root_agent_id"), emptyList()),
     ),
     functions = listOf("avg", "coalesce", "count", "json_extract", "max", "min", "round", "sum"),
     payloadPaths = mapOf(
-        "settings" to listOf("$.threadName", "$.cwd"),
+        "settings" to listOf("$.name", "$.cwd"),
         "event_terminal_exited" to listOf("$.session_id", "$.exit_code"),
         "llm_request_meta_response" to listOf("$.total_tokens", "$.latency_ms"),
     ),
     examples = listOf(
-        AgentSqlExample("Recently updated archived sessions",
-            "SELECT session_id, thread_name, cwd, updated_at FROM session_catalog WHERE archived=1 ORDER BY updated_at DESC, session_id DESC LIMIT 30"),
+        AgentSqlExample("Recently updated archived sessions (root agents.completed = 1)",
+            "SELECT a.session_id, c.name, c.cwd, c.updated_at FROM session_catalog_view AS c JOIN agents AS a ON a.agent_id = c.root_agent_id WHERE a.completed=1 ORDER BY c.updated_at DESC, a.session_id DESC LIMIT 30"),
+        AgentSqlExample("Latest settings name for Agent 12",
+            """SELECT coalesce(json_extract(payload_json,'$.name'), '') AS name FROM agent_commits WHERE agent_id=12 AND type='settings' ORDER BY "index" DESC LIMIT 1"""),
         AgentSqlExample("Recent terminal exits for Agent 12",
             """SELECT "index", json_extract(payload_json,'$.session_id') AS terminal_id, json_extract(payload_json,'$.exit_code') AS exit_code FROM agent_commits WHERE agent_id=12 AND type='event_terminal_exited' AND "index">=0 ORDER BY "index" DESC LIMIT 30"""),
         AgentSqlExample("Latency and total tokens for requests by Agent 12",
