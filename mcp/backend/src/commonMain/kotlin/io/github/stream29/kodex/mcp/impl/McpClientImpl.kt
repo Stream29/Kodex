@@ -215,7 +215,7 @@ internal class McpClientOwner(
             .getOrElse { failure ->
                 return ConnectionAttempt.Failed(McpClientFailureReason.Transport, failure)
             }
-        val client = Client(Implementation(name = "kodex", version = "0.7.5"))
+        val client = Client(Implementation(name = "kodex", version = "0.8.0"))
         val transportClosed = MutableStateFlow(false)
         transport.onClose {
             transportClosed.value = true
