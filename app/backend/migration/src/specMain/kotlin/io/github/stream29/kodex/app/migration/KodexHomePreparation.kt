@@ -32,10 +32,21 @@ public expect suspend fun preflightKodexHome(
 ): Unit
 
 /**
+ * Checks whether a Backend may start to prepare [home]. In addition to the
+ * layouts accepted by [preflightKodexHome], this admits recognized recent
+ * SQLite Homes for further verification and upgrade under exclusive ownership.
+ * It does not authorize readers, management requests, or opening business data.
+ */
+public expect suspend fun preflightKodexHomeStartup(
+    home: Path,
+    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+): Unit
+
+/**
  * Prepares [home] for this application and returns a [KodexHomeHandle] owned by
  * this scope.
  *
- * Preparation first performs [preflightKodexHome], then rechecks under
+ * Preparation first performs [preflightKodexHomeStartup], then rechecks under
  * each acquired lease. An absent marker is eligible for initialization only
  * when the Home contains no data and at most recognized startup infrastructure.
  * A fresh Home publishes an initializing marker, creates and atomically
@@ -49,9 +60,10 @@ public expect suspend fun preflightKodexHome(
  * applicable migrations, their actions own validation of their compatible
  * inputs; the latest schema is required once the last action completes.
  *
- * After preflight, preparation obtains a shared read lease. If initialization
- * or migration is needed, it releases that lease, obtains an exclusive write
- * lease, and reacquires a shared read lease before returning. The returned
+ * On the current-generation path, preparation first obtains a shared read
+ * lease. Initialization and migrations require an exclusive write lease;
+ * recognized recent older Homes take this lease without opening a shared
+ * reader first. Preparation reacquires a shared read lease before returning. The returned
  * handle retains that shared lease. Its lifetime is bound to this scope's
  * owner [kotlinx.coroutines.Job]: owner cancellation releases the lease, and
  * owner completion waits for cleanup. Keep the owner alive while using Home

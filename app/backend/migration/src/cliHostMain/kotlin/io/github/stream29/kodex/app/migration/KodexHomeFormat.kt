@@ -1,15 +1,20 @@
 package io.github.stream29.kodex.app.migration
 
+import io.github.stream29.kodex.agentstorage.sqlite.KodexHomeDatabaseApplicationId
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import kotlinx.io.Buffer
 import kotlinx.io.files.Path
+import kotlinx.io.readByteArray
 
 internal sealed interface HomeFormat {
     data object Fresh : HomeFormat
     data class Initializing(val databasePublished: Boolean) : HomeFormat
     data class Ready(val checkpoint: MigrationVersion) : HomeFormat
+    data class RecentLegacy(val source: MigrationVersion) : HomeFormat
+    data class Upgrading(val source: MigrationVersion, val attempt: String) : HomeFormat
 }
 
 internal suspend fun inspectHome(
@@ -29,27 +34,29 @@ internal suspend fun inspectHome(
     if (!version.isRegularFile || !fileSystem.isDirectEntry(versionPath)) {
         throw incompatibleHome(home, "The version marker is not a regular file: $versionPath")
     }
-    val marker = try {
-        parseHomeMarker(fileSystem.readBytes(versionPath, MaxVersionFileBytes).decodeToString(throwOnInvalidSequence = true))
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (failure: Exception) {
-        throw incompatibleHome(home, "Unreadable or unsupported version marker: $versionPath", failure)
+    val versionText = inspectHomeRead(home, "Unreadable or unsupported version marker: $versionPath") {
+        fileSystem.readBytes(versionPath, MaxVersionFileBytes).decodeToString(throwOnInvalidSequence = true)
+            .trim(::isJsonWhitespace)
+    }
+    recentLegacySource(versionText)?.let { source ->
+        requireRecentHomeUpgradeAvailable(home, currentVersion)
+        requireRecentHomeLayout(home, fileSystem, upgrading = false)
+        return@inspectHomeRead HomeFormat.RecentLegacy(source)
+    }
+    val marker = inspectHomeRead(home, "Unreadable or unsupported version marker: $versionPath") {
+        parseHomeMarker(versionText)
     }
     if (marker.checkpoint > currentVersion) {
         throw incompatibleHome(home, "Checkpoint ${marker.checkpoint} is newer than application $currentVersion")
     }
+    marker.upgrading?.let { upgrade ->
+        requireRecentHomeLayout(home, fileSystem, upgrading = true)
+        return@inspectHomeRead upgrade
+    }
     if (!marker.initializing) {
         // The first check never opens SQLite or touches its WAL/SHM. The ready fast
         // path does not enumerate business data or apply the fresh layout restrictions.
-        if (requireDirectoryIfPresent(home, Path(home, ".locks"), fileSystem)) {
-            val backend = Path(home, ".locks", "backend")
-            if (requireDirectoryIfPresent(home, backend, fileSystem)) {
-                requireStartupFile(home, Path(backend, "instance.lock"), fileSystem)
-            }
-            val leases = homeLeaseDirectory(home)
-            if (requireDirectoryIfPresent(home, leases, fileSystem)) requireHomeLeaseFiles(home, leases, fileSystem)
-        }
+        requireExistingHomeLocks(home, fileSystem)
         requireHomeDatabaseHeader(home, fileSystem)
         return@inspectHomeRead HomeFormat.Ready(marker.checkpoint)
     }
@@ -66,13 +73,16 @@ internal suspend fun inspectHome(
     HomeFormat.Initializing(databasePublished = published)
 }
 
-private data class HomeMarker(val checkpoint: MigrationVersion, val initializing: Boolean)
+private data class HomeMarker(
+    val checkpoint: MigrationVersion,
+    val initializing: Boolean,
+    val upgrading: HomeFormat.Upgrading?,
+)
 
-private fun parseHomeMarker(encoded: String): HomeMarker {
+private fun parseHomeMarker(objectText: String): HomeMarker {
     // This envelope contains only simple tokens. Reading the fields explicitly
     // lets us reject duplicates, escapes and unknown fields rather than decoding
     // them as aliases of the supported format.
-    val objectText = encoded.trim(::isJsonWhitespace)
     require(objectText.startsWith('{') && objectText.endsWith('}'))
     val members = mutableMapOf<String, String>()
     for (part in objectText.substring(1, objectText.lastIndex).split(',')) {
@@ -81,15 +91,110 @@ private fun parseHomeMarker(encoded: String): HomeMarker {
         require(members.put(name, token) == null) { "Duplicate marker member: $name" }
     }
     require(members.remove("generation") == HomeGeneration.toString()) { "Unsupported Home generation" }
-    val checkpoint = requireNotNull(members.remove("checkpoint")) { "Missing checkpoint" }
-    require(checkpoint.startsWith('"') && checkpoint.endsWith('"')) { "Expected a string checkpoint" }
-    val initializing = members.remove("state")?.let { state ->
-        require(state == "\"initializing\"") { "Unknown initialization state" }
-        true
-    } ?: false
+    val token = requireNotNull(members.remove("checkpoint")) { "Missing checkpoint" }
+    require(token.startsWith('"') && token.endsWith('"')) { "Expected a string checkpoint" }
+    val checkpoint = MigrationVersion(token.substring(1, token.lastIndex))
+    val state = members.remove("state")
+    val upgrading = when (state) {
+        null, "\"initializing\"" -> null
+        "\"upgrading\"" -> {
+            require(checkpoint == RecentHomeUpgradeTarget) { "Unsupported recent Home upgrade target" }
+            val source = requireNotNull(members.remove("source")?.let(::recentLegacySource)) {
+                "Unsupported recent Home source"
+            }
+            val attempt = requireNotNull(members.remove("attempt")) { "Missing recent Home upgrade attempt" }
+            require(attempt.startsWith('"') && attempt.endsWith('"')) { "Expected a string upgrade attempt" }
+            val value = attempt.substring(1, attempt.lastIndex)
+            require(UpgradeAttempt.matches(value)) { "Invalid recent Home upgrade attempt" }
+            HomeFormat.Upgrading(source, value)
+        }
+        else -> error("Unknown Home marker state")
+    }
     require(members.isEmpty()) { "Unknown marker members" }
-    return HomeMarker(MigrationVersion(checkpoint.substring(1, checkpoint.lastIndex)), initializing)
+    return HomeMarker(checkpoint, initializing = state == "\"initializing\"", upgrading = upgrading)
 }
+
+private fun recentLegacySource(token: String): MigrationVersion? = when (token) {
+    "\"0.7.3\"", "\"0.7.5\"" -> MigrationVersion(token.substring(1, token.lastIndex))
+    else -> null
+}
+
+private fun requireRecentHomeUpgradeAvailable(home: Path, currentVersion: MigrationVersion) {
+    if (currentVersion < RecentHomeUpgradeTarget) {
+        throw incompatibleHome(home, "A recent Home upgrade requires application $RecentHomeUpgradeTarget or newer")
+    }
+}
+
+private suspend fun requireExistingHomeLocks(home: Path, fileSystem: CoroutineFileSystem) {
+    if (!requireDirectoryIfPresent(home, Path(home, ".locks"), fileSystem)) return
+    val backend = Path(home, ".locks", "backend")
+    if (requireDirectoryIfPresent(home, backend, fileSystem)) {
+        requireStartupFile(home, Path(backend, "instance.lock"), fileSystem)
+    }
+    val leases = homeLeaseDirectory(home)
+    if (requireDirectoryIfPresent(home, leases, fileSystem)) requireHomeLeaseFiles(home, leases, fileSystem)
+}
+
+private suspend fun requireRecentHomeLayout(home: Path, fileSystem: CoroutineFileSystem, upgrading: Boolean) {
+    requireExistingHomeLocks(home, fileSystem)
+    requireStartupFile(home, Path(home, MarkerTemporaryFile), fileSystem)
+    for (suffix in listOf("-journal", "-wal", "-shm")) {
+        requireStartupFile(home, Path(home, "$HomeDatabaseFile$suffix"), fileSystem)
+    }
+    if (fileSystem.list(home).any { it.name in StagingDatabaseFiles }) {
+        throw invalidHomeLayout(home, "A recent Home contains files reserved for new Home initialization")
+    }
+    if (readRecentDatabaseSignature(home, fileSystem) == RecentDatabaseSignature.Target && !upgrading) {
+        throw incompatibleHome(home, "The current SQLite signature requires a recent Home upgrade marker")
+    }
+}
+
+internal suspend fun requireRecentUpgradeTargetHeader(home: Path, fileSystem: CoroutineFileSystem) {
+    if (readRecentDatabaseSignature(home, fileSystem) != RecentDatabaseSignature.Target) {
+        throw incompatibleHome(home, "The recent Home upgrade did not publish the current SQLite header")
+    }
+}
+
+private enum class RecentDatabaseSignature { Legacy, Target }
+
+private suspend fun readRecentDatabaseSignature(home: Path, fileSystem: CoroutineFileSystem): RecentDatabaseSignature {
+    val database = Path(home, HomeDatabaseFile)
+    val metadata = fileSystem.metadataOrNull(database)
+    if (metadata?.isRegularFile != true || metadata.size < 512 || !fileSystem.isDirectEntry(database)) {
+        throw incompatibleHome(home, "Missing or invalid SQLite database: $database")
+    }
+    // The main-file header is only a physical admission check. The bridge must
+    // still validate the logical schema with any committed WAL before converting.
+    val header = fileSystem.useSource(database) { source ->
+        val buffer = Buffer()
+        while (buffer.size < RecentSqliteHeaderSize) {
+            val count = source.readAtMostTo(buffer, RecentSqliteHeaderSize - buffer.size)
+            if (count <= 0) break
+        }
+        buffer.readByteArray()
+    }
+    if (header.size.toLong() != RecentSqliteHeaderSize ||
+        !header.copyOfRange(0, RecentSqliteHeaderMagic.size).contentEquals(RecentSqliteHeaderMagic)
+    ) {
+        throw incompatibleHome(home, "Invalid SQLite header: $database")
+    }
+    val pageSize = header.sqliteInteger(16, 2).let { if (it == 1) 65_536 else it }
+    val userVersion = header.sqliteInteger(60, 4)
+    val appId = header.sqliteInteger(68, 4)
+    if (pageSize !in 512..65_536 || (pageSize and (pageSize - 1)) != 0 || metadata.size % pageSize != 0L ||
+        header.sqliteInteger(18, 1) !in 1..2 || header.sqliteInteger(19, 1) !in 1..2
+    ) {
+        throw incompatibleHome(home, "Unexpected SQLite header for a recent Home upgrade: $database")
+    }
+    return when {
+        appId == 0 && userVersion == LegacyHomeSchemaVersion -> RecentDatabaseSignature.Legacy
+        appId == KodexHomeDatabaseApplicationId && userVersion == RecentUpgradeSchemaVersion -> RecentDatabaseSignature.Target
+        else -> throw incompatibleHome(home, "Unexpected SQLite signature for a recent Home upgrade: $database")
+    }
+}
+
+private fun ByteArray.sqliteInteger(offset: Int, length: Int): Int =
+    (offset until offset + length).fold(0) { result, index -> (result shl 8) or (this[index].toInt() and 0xff) }
 
 internal suspend fun writeHomeMarker(
     home: Path,
@@ -97,6 +202,23 @@ internal suspend fun writeHomeMarker(
     fileSystem: CoroutineFileSystem,
     initializing: Boolean = false,
 ) {
+    val status = if (initializing) ",\"state\":\"initializing\"" else ""
+    replaceHomeMarker(home, """{"generation":$HomeGeneration,"checkpoint":"$checkpoint"$status}""", fileSystem)
+}
+
+internal suspend fun writeUpgradingHomeMarker(
+    home: Path, source: MigrationVersion, attempt: String, fileSystem: CoroutineFileSystem,
+) {
+    require(recentLegacySource("\"$source\"") == source)
+    require(UpgradeAttempt.matches(attempt)) { "Invalid recent Home upgrade attempt" }
+    replaceHomeMarker(
+        home,
+        """{"generation":$HomeGeneration,"checkpoint":"$RecentHomeUpgradeTarget","state":"upgrading","source":"$source","attempt":"$attempt"}""",
+        fileSystem,
+    )
+}
+
+private suspend fun replaceHomeMarker(home: Path, content: String, fileSystem: CoroutineFileSystem) {
     val temporary = Path(home, MarkerTemporaryFile)
     fileSystem.metadataOrNull(temporary)?.let { metadata ->
         if (!metadata.isRegularFile || !fileSystem.isDirectEntry(temporary)) {
@@ -105,12 +227,9 @@ internal suspend fun writeHomeMarker(
         // An interrupted write cannot have changed the published marker.
         fileSystem.delete(temporary)
     }
-    val status = if (initializing) ",\"state\":\"initializing\"" else ""
     var primary: Throwable? = null
     try {
-        fileSystem.writeString(
-            temporary, """{"generation":$HomeGeneration,"checkpoint":"$checkpoint"$status}""", mustCreate = true,
-        )
+        fileSystem.writeString(temporary, content, mustCreate = true)
         fileSystem.atomicMove(temporary, Path(home, HomeVersionFile))
     } catch (failure: Throwable) {
         primary = failure
@@ -215,16 +334,17 @@ private suspend fun requireDirectoryIfPresent(
     return true
 }
 
-internal suspend fun CoroutineFileSystem.isDirectEntry(path: Path): Boolean {
-    val resolved = try {
-        resolve(path)
+internal suspend fun CoroutineFileSystem.isDirectEntry(path: Path): Boolean =
+    try {
+        resolve(path) == Path(resolve(checkNotNull(path.parent)), path.name)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: kotlinx.io.IOException) {
-        return false
+        false
+    } catch (_: IllegalStateException) {
+        // On Darwin, realpath can throw this if a lease entry is renamed after the existence check.
+        false
     }
-    return resolved == Path(resolve(checkNotNull(path.parent)), path.name)
-}
 
 internal fun homeLeaseDirectory(home: Path): Path = Path(home, ".locks", "home")
 
@@ -251,9 +371,15 @@ private fun isJsonWhitespace(character: Char): Boolean =
     character == ' ' || character == '\t' || character == '\r' || character == '\n'
 
 internal const val HomeVersionFile: String = "version.json"
+internal val RecentHomeUpgradeTarget: MigrationVersion = MigrationVersion("0.8.0")
 private const val HomeGeneration: Int = 1
+private const val LegacyHomeSchemaVersion: Int = 1
+private const val RecentUpgradeSchemaVersion: Int = 2
+private const val RecentSqliteHeaderSize: Long = 100
+private val RecentSqliteHeaderMagic = "SQLite format 3\u0000".encodeToByteArray()
 private const val MarkerTemporaryFile: String = ".kodex-version.json.tmp"
 private const val MaxVersionFileBytes: Long = 4_096
-private val MarkerMember = Regex("""[ \t\r\n]*"([a-z]+)"[ \t\r\n]*:[ \t\r\n]*([0-9]+|"[a-z0-9.]+")[ \t\r\n]*""")
+private val MarkerMember = Regex("""[ \t\r\n]*"([a-z]+)"[ \t\r\n]*:[ \t\r\n]*([0-9]+|"[a-z0-9.-]+")[ \t\r\n]*""")
+private val UpgradeAttempt = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 private const val LeaseUuid = "[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 private val HomeLeaseFile = Regex("""(?:[1-9][0-9]*\.(?:read|write)\.lock|\.lock-$LeaseUuid\.tmp|\.stale-lock-$LeaseUuid\.json)""")

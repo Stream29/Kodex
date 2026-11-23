@@ -40,16 +40,43 @@ val settingsCompatibilityEvidenceTest by testSuite(compartment = { TestCompartme
         }
     }
 
-    test("retired settings values are rejected without rewriting the actual Home file") {
+    test("recent settings aliases are read without rewriting the actual Home file") {
         withSettingsDirectory { directory ->
             val path = Path(directory, "settings.yml")
-            for (field in listOf("new_session: {reasoning_effort: ultra}", "session_title: {reasoning_effort: ultra}",
-                "new_session: {service_tier: fast}")) {
-                val fixture = "backend:\n  $field\n"
-                writeFixture(path, fixture)
-                assertFailsWith<IllegalArgumentException> { UnifiedSettingsStore.open(directory, backendDefaults()) }
-                assertEquals(fixture, SystemCoroutineFileSystem.readString(path))
-            }
+            val fixture = """
+                backend:
+                  new_session: {reasoning_effort: ultra, service_tier: fast}
+                  session_title: {reasoning_effort: ultra}
+                frontend:
+                  sidebars: {left: history_index, right: terminal_sessions}
+                  private_extension: keep
+            """.trimIndent()
+            writeFixture(path, fixture)
+            val store = UnifiedSettingsStore.open(directory, backendDefaults())
+            assertEquals(ReasoningEffort.Max, store.backendSettings.value.newSession.reasoningEffort)
+            assertEquals(ReasoningEffort.Max, store.backendSettings.value.sessionTitle.reasoningEffort)
+            assertEquals(ServiceTier.Fast, store.backendSettings.value.newSession.serviceTier)
+            assertEquals(ToolWindowId.TerminalSessions, store.frontendSettings.value.sidebars.activeRight)
+            assertEquals(fixture, SystemCoroutineFileSystem.readString(path))
+        }
+    }
+
+    test("only the published recent sidebar options are accepted and explicit current keys win") {
+        val defaults = CliFrontendSettings()
+        fun activeRight(entries: String) =
+            decodeCliFrontendSettingsFile(yamlMap("sidebars: {$entries}"), defaults).sidebars.activeRight
+
+        assertEquals(ToolWindowId.HistoryIndex, activeRight("left: history_index, right: none"))
+        assertEquals(null, activeRight("left: history_index, active_right: null"))
+        assertEquals(null, activeRight("left: none, right: none"))
+        assertEquals(ToolWindowId.HistoryIndex, activeRight("right: terminal_sessions, active_right: history_index"))
+        assertFailsWith<IllegalArgumentException> { activeRight("right: unsupported") }
+        withSettingsDirectory { directory ->
+            val path = Path(directory, "settings.yml")
+            val fixture = "backend:\n  new_session: {service_tier: unavailable}\n"
+            writeFixture(path, fixture)
+            assertFailsWith<IllegalArgumentException> { UnifiedSettingsStore.open(directory, backendDefaults()) }
+            assertEquals(fixture, SystemCoroutineFileSystem.readString(path))
         }
     }
 
@@ -135,9 +162,6 @@ val settingsCompatibilityEvidenceTest by testSuite(compartment = { TestCompartme
         assertEquals(emptyList(), frontend.hooks)
         assertEquals(frontend, decodeCliFrontendSettingsFile(
             yamlMap(encodeCliFrontendSettingsFile(frontend)), CliFrontendSettings(),
-        ))
-        assertEquals(CliFrontendSettings(), decodeCliFrontendSettingsFile(
-            yamlMap("sidebars: {left: history_index, right: terminal_sessions}"), CliFrontendSettings(),
         ))
     }
 }

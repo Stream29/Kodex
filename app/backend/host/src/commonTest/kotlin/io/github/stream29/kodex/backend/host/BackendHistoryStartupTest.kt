@@ -22,6 +22,7 @@ import io.github.stream29.kodex.rpc.local.withLocalRpcClient
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
 import kotlin.random.Random
+import kotlin.test.assertContains
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -158,7 +159,7 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
 
     val legacyHomes = listOf("0.7.5" to true, "0.7.4" to true, "0.5.2" to true, null to true, "0.5.2" to false)
     for ((oldVersion, hasDatabase) in legacyHomes) {
-        test("backend entries leave a legacy Home untouched (marker=$oldVersion, sqlite=$hasDatabase)") {
+        test("backend entries reject unsupported legacy data without changing it (marker=$oldVersion, sqlite=$hasDatabase)") {
             val fs = SystemCoroutineFileSystem
             suspend fun snapshot(directory: Path): Map<Path, ByteArray?> = buildMap {
                 for (path in fs.list(directory)) {
@@ -192,20 +193,38 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                     fs.writeString(Path(session, "settings", "0.json"), """{"model":"fixture","threadName":"Legacy file session"}""")
                     fs.writeString(Path(session, "index", "0.json"), """{"type":"user_message","content":[{"type":"input_text","text":"From 0.5.2 file"}]}""")
                 }
+                fun assertUnchanged(before: Map<Path, ByteArray?>, after: Map<Path, ByteArray?>) {
+                    assertEquals(before.keys, after.keys)
+                    for ((path, bytes) in before) assertContentEquals(bytes, after.getValue(path), path.toString())
+                }
                 val before = snapshot(home)
-                assertFailsWith<KodexHomeVersionException> {
+                assertFailsWith<KodexHomeVersionException> { ensureBackend(home) }
+                assertFailsWith<KodexHomeVersionException> { connectBackend(home, 18080) }
+                assertFailsWith<KodexHomeVersionException> { discoverReadyBackend(home) }
+                assertNull(BackendInstance.discover(home))
+                assertUnchanged(before, snapshot(home))
+
+                val startupFailure = assertFailsWith<KodexHomeVersionException> {
                     withTimeout(10.seconds) {
                         runBackendHost(home, Path(home, "codex"), Path(home, "agents"),
                             createClient = { error("Rejected Home must not open services") })
                     }
                 }
-                assertFailsWith<KodexHomeVersionException> { ensureBackend(home) }
-                assertFailsWith<KodexHomeVersionException> { connectBackend(home, 18080) }
-                assertFailsWith<KodexHomeVersionException> { discoverReadyBackend(home) }
                 assertNull(BackendInstance.discover(home))
                 val after = snapshot(home)
-                assertEquals(before.keys, after.keys)
-                for ((path, bytes) in before) assertContentEquals(bytes, after.getValue(path), path.toString())
+                if (oldVersion == "0.7.5" && hasDatabase) {
+                    // The legacy checkpoint and header admit a preparation attempt. The
+                    // owned snapshot rejects this incomplete schema before publication.
+                    assertContains(startupFailure.message.orEmpty(), "Incomplete or unexpected recent Kodex SQLite schema")
+                    val directories = setOf(Path(home, ".locks"), Path(home, ".locks", "home"), Path(home, ".locks", "backend"))
+                    val lock = Path(home, ".locks", "backend", "instance.lock")
+                    assertEquals(directories + lock, after.keys - before.keys)
+                    for (directory in directories) assertEquals(null, after.getValue(directory))
+                    assertContentEquals(byteArrayOf(), after.getValue(lock))
+                    assertUnchanged(before, after - (directories + lock))
+                } else {
+                    assertUnchanged(before, after)
+                }
             } finally {
                 withContext(NonCancellable) { removeHost(home) }
             }

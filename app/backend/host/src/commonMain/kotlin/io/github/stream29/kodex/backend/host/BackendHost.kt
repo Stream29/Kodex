@@ -5,6 +5,7 @@ package io.github.stream29.kodex.backend.host
 import io.github.stream29.kodex.app.migration.CurrentKodexApplicationVersion
 import io.github.stream29.kodex.app.migration.KodexHomeHandle
 import io.github.stream29.kodex.app.migration.preflightKodexHome
+import io.github.stream29.kodex.app.migration.preflightKodexHomeStartup
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.backend.*
 import io.github.stream29.kodex.cli.notification.collectNotificationHooks
@@ -58,7 +59,7 @@ public actual suspend fun runBackendHost(
     }
     val hostJob = currentCoroutineContext().job
     val absoluteHome = if (home.isAbsolute) home else Path(SystemCoroutineFileSystem.resolve(Path(".")), home.toString())
-    preflightKodexHome(absoluteHome)
+    preflightKodexHomeStartup(absoluteHome)
     val instance = BackendInstance.acquire(absoluteHome)
     val lifecycle = createBackendLifecycle()
     val replyFinished = CompletableDeferred<Unit>()
@@ -285,6 +286,8 @@ public actual suspend fun connectBackend(home: Path, port: Int): BackendEndpoint
 }
 
 public actual suspend fun ensureBackend(home: Path): BackendEndpoint {
+    // The short detached-start wait is not suitable for copying a legacy
+    // database. For such a Home, preflight directs the caller to backend start.
     preflightKodexHome(home)
     val current = BackendInstance.discover(home)
     if (current != null) return verifyReadyBackend(current)

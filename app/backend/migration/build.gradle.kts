@@ -48,6 +48,7 @@ kotlin {
                 implementation(project(":agent-storage-sqlite"))
                 implementation(project(":utils-sqlite"))
                 implementation(project(":utils-filesystem-lease"))
+                implementation(libs.kotlinx.serialization.json)
             }
         }
     }

@@ -71,7 +71,7 @@ internal fun decodeCliFrontendSettingsFile(root: YamlMap, defaults: CliFrontendS
         sidebars = root.get<YamlMap>("sidebars")?.let { sidebars ->
             CliSidebarSettings(
                 activeLeft = sidebars.value("active_left", defaults.sidebars.activeLeft),
-                activeRight = sidebars.value("active_right", defaults.sidebars.activeRight),
+                activeRight = sidebars.recentHomeRightTool(defaults.sidebars.activeRight),
             )
         } ?: defaults.sidebars,
         hooks = root.value("hooks", defaults.hooks),
@@ -117,12 +117,30 @@ internal fun encodeCliFrontendSettingsFile(value: CliFrontendSettings): String =
 
 private fun YamlMap.reasoningEffort(default: ReasoningEffort): ReasoningEffort {
     val node = get<YamlNode>("reasoning_effort") ?: return default
-    // The provider serializer still recognizes its historical wire values; Home YAML does not.
-    require(SplitSettingsYaml.decodeFromYamlNode<String>(node) != "ultra") {
-        "Use max for reasoning_effort."
-    }
+    // The recent Home format accepted the provider's `ultra` alias.
     return SplitSettingsYaml.decodeFromYamlNode<ReasoningEffort>(node)
 }
+
+private fun YamlMap.recentHomeRightTool(default: ToolWindowId?): ToolWindowId? {
+    if (get<YamlNode>("active_right") != null) return value("active_right", default)
+    val left = get<YamlNode>("left")
+    val right = get<YamlNode>("right")
+    if (left == null && right == null) return default
+
+    // Both former tools now share the right slot. Prefer the former right
+    // choice when both were open, without rewriting the user's settings file.
+    val leftTool = left?.let(::decodeRecentSidebar)
+    val rightTool = right?.let(::decodeRecentSidebar)
+    return rightTool ?: leftTool
+}
+
+private fun decodeRecentSidebar(node: YamlNode): ToolWindowId? =
+    when (val value = SplitSettingsYaml.decodeFromYamlNode<String>(node)) {
+        "none" -> null
+        "history_index" -> ToolWindowId.HistoryIndex
+        "terminal_sessions" -> ToolWindowId.TerminalSessions
+        else -> throw IllegalArgumentException("Unsupported recent Home sidebar '$value'.")
+    }
 
 private inline fun <reified T> YamlMap.value(name: String, default: T): T {
     val node = get<YamlNode>(name) ?: return default
@@ -131,7 +149,7 @@ private inline fun <reified T> YamlMap.value(name: String, default: T): T {
 
 private fun decodeServiceTier(value: String): ServiceTier = when (value) {
     "default" -> ServiceTier.Default
-    "priority" -> ServiceTier.Fast
+    "priority", "fast" -> ServiceTier.Fast
     "flex" -> ServiceTier.Flex
     "ultrafast" -> ServiceTier.Ultrafast
     else -> throw IllegalArgumentException("Unsupported service tier '$value'.")
