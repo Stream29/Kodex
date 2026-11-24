@@ -8,12 +8,22 @@ private val currentDdl = SqliteSchema.split(';').map(String::trim).filter(String
 // SQLite keeps the CREATE statement text, excluding the final semicolon, in sqlite_schema.
 private val currentSchema = (currentDdl + "CREATE TABLE sqlite_sequence(name,seq)").toSet()
 
-public actual fun initializeKodexHomeDatabase(connection: SqliteConnection) {
-    connection.transaction {
-        check(connection.query("PRAGMA main.application_id") == listOf(listOf(0L)) &&
+private fun requireFreshDatabase(connection: SqliteConnection) {
+    check(
+        connection.query("PRAGMA main.application_id") == listOf(listOf(0L)) &&
             connection.query("PRAGMA main.user_version") == listOf(listOf(0L)) &&
-            connection.query("SELECT 1 FROM main.sqlite_schema LIMIT 1").isEmpty()
-        ) { "Cannot initialize SQLite: the database is not fresh." }
+            connection.query("SELECT 1 FROM main.sqlite_schema LIMIT 1").isEmpty(),
+    ) { "Cannot initialize SQLite: the database is not fresh." }
+}
+
+public actual fun initializeKodexHomeDatabase(connection: SqliteConnection) {
+    requireFreshDatabase(connection)
+    connection.execute("PRAGMA main.page_size=$KodexHomeDatabasePageSize")
+    if (connection.query("PRAGMA main.page_size") != listOf(listOf(KodexHomeDatabasePageSize.toLong()))) {
+        connection.execute("VACUUM")
+    }
+    connection.transaction {
+        requireFreshDatabase(connection)
         currentDdl.forEach { connection.execute(it) }
         connection.execute("PRAGMA main.user_version=$SqliteSchemaVersion")
         connection.execute("PRAGMA main.application_id=$KodexHomeDatabaseApplicationId")

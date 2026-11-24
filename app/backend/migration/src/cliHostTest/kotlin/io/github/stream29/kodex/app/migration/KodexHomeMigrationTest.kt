@@ -16,11 +16,11 @@ import kotlin.test.assertTrue
 private val fs = homeTestFileSystem
 
 public val kodexHomeMigrationTest by testSuite {
-    test("application version is generated and the product registry is empty") {
+    test("application version is generated and the product registry lists expected migrations") {
         val version = CurrentKodexApplicationVersion
         assertEquals(MigrationVersion(GeneratedKodexApplicationVersion), version)
         assertSame(version, CurrentKodexApplicationVersion)
-        assertTrue(KodexHomeMigrations.isEmpty())
+        assertEquals(listOf(MigrationVersion("0.8.1")), KodexHomeMigrations.map { it.toVersion })
     }
 
     testFixture { newTestHome() } closeWith {
@@ -40,6 +40,9 @@ public val kodexHomeMigrationTest by testSuite {
                     assertFalse(fs.exists(Path(home, "settings.yml")))
                 } finally {
                     handle.closeAndJoin()
+                }
+                openExistingSqliteConnection(Path(home, HomeDatabaseFile)).use { db ->
+                    assertEquals(16384L, db.query("PRAGMA main.page_size").single().single())
                 }
             }
         }

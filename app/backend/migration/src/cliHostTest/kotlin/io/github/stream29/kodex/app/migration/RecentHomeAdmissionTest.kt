@@ -2,6 +2,7 @@ package io.github.stream29.kodex.app.migration
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.sqlite.KodexHomeDatabaseApplicationId
+import io.github.stream29.kodex.agentstorage.sqlite.SqliteSchemaVersion
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
 import kotlinx.io.IOException
@@ -101,7 +102,7 @@ public val recentHomeAdmissionTest by testSuite {
             }
         }
 
-        for ((appId, schema) in listOf(0 to 1, KodexHomeDatabaseApplicationId to 2)) {
+        for ((appId, schema) in listOf(0 to 1, KodexHomeDatabaseApplicationId to SqliteSchemaVersion)) {
             test("classifies the same upgrade attempt before and after the DB publication ($schema)") { home ->
                 writeHeaderFixture(home, appId, schema)
                 fs.writeString(Path(home, HomeVersionFile), upgradingMarker())
@@ -110,7 +111,7 @@ public val recentHomeAdmissionTest by testSuite {
                 preflightKodexHomeStartup(home, fs)
                 val refused = assertFailsWith<KodexHomeVersionException> { preflightKodexHome(home, fs) }
                 assertContains(refused.message.orEmpty(), "resume its upgrade")
-                if (schema == 2) requireRecentUpgradeTargetHeader(home, fs)
+                if (schema == SqliteSchemaVersion) requireRecentUpgradeTargetHeader(home, fs)
                 else assertFailsWith<KodexHomeVersionException> { requireRecentUpgradeTargetHeader(home, fs) }
                 assertEquals(before, rootSnapshot(home))
             }

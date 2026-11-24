@@ -3,10 +3,13 @@ package io.github.stream29.kodex.agentstorage.sqlite
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 
 /** Physical schema required by current repositories and the independent SQL reader. */
-public const val SqliteSchemaVersion: Int = 2
+public const val SqliteSchemaVersion: Int = 3
 
 /** SQLite header signature for databases prepared by the current Kodex Home format. */
 public const val KodexHomeDatabaseApplicationId: Int = 0x4B445830
+
+/** Default SQLite page size configured when initializing or rebuilding a Kodex Home database. */
+public const val KodexHomeDatabasePageSize: Int = 16384
 
 // language=SQL
 private const val AgentHistorySchema: String = """
@@ -63,7 +66,7 @@ CREATE TABLE agent_commits (
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     created_at TEXT NOT NULL,
     PRIMARY KEY (agent_id, type, "index")
-) STRICT, WITHOUT ROWID;
+) STRICT;
 
 CREATE INDEX commits_global_index ON agent_commits(agent_id, "index", type);
 CREATE INDEX commits_settings_cwd ON agent_commits(

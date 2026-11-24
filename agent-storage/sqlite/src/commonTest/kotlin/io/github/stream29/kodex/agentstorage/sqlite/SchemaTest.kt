@@ -37,8 +37,11 @@ private fun SqliteConnection.catalog(id: Int): List<Any?> =
 
 val sqliteSchemaTest by testSuite {
     test("live DDL and constraints exclude global settings and retired commit types") { withSchema { db ->
-        assertEquals(2L, db.query("PRAGMA user_version").single().single())
+        assertEquals(3L, db.query("PRAGMA user_version").single().single())
         assertEquals(KodexHomeDatabaseApplicationId.toLong(), db.query("PRAGMA application_id").single().single())
+        assertEquals(KodexHomeDatabasePageSize.toLong(), db.query("PRAGMA page_size").single().single())
+        assertEquals(listOf(listOf(0L, 1L)), db.query("SELECT wr, strict FROM pragma_table_list WHERE schema = 'main' AND name = 'agent_commits'"))
+        assertEquals(listOf(listOf(1L, 1L)), db.query("SELECT wr, strict FROM pragma_table_list WHERE schema = 'main' AND name = 'fork_context_recovery'"))
         assertEquals(setOf("sessions", "agents", "agent_commits", "session_catalog_view", "session_groups",
             "sqlite_sequence", "schedules", "fork_context_recovery"),
             db.query("SELECT name FROM sqlite_master WHERE type = 'table'").map { it[0] }.toSet())
@@ -65,7 +68,7 @@ val sqliteSchemaTest by testSuite {
     test("rechecking signed schema never stamps an old database or reruns initialization") {
         openInMemorySqliteConnection().use { db ->
             db.execute("CREATE TABLE sessions (session_id INTEGER PRIMARY KEY)")
-            db.execute("PRAGMA user_version=2")
+            db.execute("PRAGMA user_version=3")
             assertFailsWith<IllegalStateException> { requireKodexHomeDatabase(db) }
             assertFailsWith<IllegalStateException> { initializeKodexHomeDatabase(db) }
             assertEquals(listOf(listOf(0L)), db.query("PRAGMA application_id"))
