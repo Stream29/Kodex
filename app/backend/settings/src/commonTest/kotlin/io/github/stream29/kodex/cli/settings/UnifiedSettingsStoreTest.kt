@@ -34,7 +34,7 @@ val unifiedSettingsStoreTest by testSuite(compartment = { TestCompartment.RealTi
             val changed = original.frontend.copy(newLineKey = NewLineKey.Enter)
             assertTrue(store.compareAndSetFrontend(original.frontend, changed))
             assertEquals(original.backend, store.current.backend)
-            store.backendStore.update { it.copy(daemonTtlSeconds = -1) }
+            store.backendStore.update { it.copy(daemonTtlSeconds = 120) }
             assertEquals(changed, store.current.frontend)
             val reopened = UnifiedSettingsStore.open(directory, backendDefaults())
             assertEquals(store.current, reopened.current)
@@ -45,9 +45,9 @@ val unifiedSettingsStoreTest by testSuite(compartment = { TestCompartment.RealTi
             val store = UnifiedSettingsStore.open(directory, backendDefaults())
             SystemCoroutineFileSystem.createDirectories(directory)
             SystemCoroutineFileSystem.writeString(store.path, "backend:\n  daemon_ttl_seconds: 9\nfrontend: {}\n")
-            assertEquals(300L, store.current.backend.daemonTtlSeconds)
-            store.backendStore.update { it.copy(daemonTtlSeconds = -1) }
-            assertEquals(-1L, store.readCandidate().backend.daemonTtlSeconds)
+            assertEquals(-1L, store.current.backend.daemonTtlSeconds)
+            store.backendStore.update { it.copy(daemonTtlSeconds = 120) }
+            assertEquals(120L, store.readCandidate().backend.daemonTtlSeconds)
         }
     }
     test("reload validation and concurrent runtime changes cannot partially publish") {
@@ -61,7 +61,7 @@ val unifiedSettingsStoreTest by testSuite(compartment = { TestCompartment.RealTi
                 store.acceptReload(expected, candidate) { _, _ -> throw IllegalArgumentException("rejected") }
             }
             assertEquals(expected, store.current)
-            store.backendStore.update { it.copy(daemonTtlSeconds = -1) }
+            store.backendStore.update { it.copy(daemonTtlSeconds = 120) }
             assertFalse(store.acceptReload(expected, candidate) { _, _ -> })
             val latest = store.current
             assertTrue(store.acceptReload(latest, candidate) { _, _ -> })

@@ -7,11 +7,18 @@ import io.github.stream29.kodex.backend.cinterop.kodex_backend_unlock
 import io.github.stream29.kodex.backend.cinterop.kodex_backend_random
 import io.github.stream29.kodex.backend.cinterop.kodex_backend_spawn
 import io.github.stream29.kodex.backend.cinterop.kodex_backend_chdir
+import io.github.stream29.kodex.backend.cinterop.kodex_backend_configure_allocator
 import io.github.stream29.kodex.backend.cinterop.kodex_backend_install_signals
-import io.github.stream29.kodex.backend.cinterop.kodex_backend_stop_signal
+import io.github.stream29.kodex.backend.cinterop.kodex_backend_uninstall_signals
 import io.github.stream29.kodex.backend.cinterop.kodex_backend_alive
+import io.github.stream29.kodex.backend.cinterop.kodex_frontend_install_signals
+import io.github.stream29.kodex.backend.cinterop.kodex_frontend_stop_signal
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.io.IOException
 import kotlinx.io.files.Path
 
@@ -50,7 +57,32 @@ public actual fun launchIndependentBackend(home: Path, startupOutput: Path): Lon
 public actual fun setBackendWorkingDirectory(home: Path) {
     check(kodex_backend_chdir(home.toString()) == 0) { "Cannot enter Kodex Home." }
 }
-public actual fun installBackendSignals() { kodex_backend_install_signals() }
-public actual fun backendStopSignalReceived(): Boolean = kodex_backend_stop_signal() != 0
+
+public actual fun configureBackendAllocator() { kodex_backend_configure_allocator() }
+public actual fun installBackendSignals() { kodex_frontend_install_signals() }
+public actual fun backendStopSignalReceived(): Boolean = kodex_frontend_stop_signal() != 0
+
+public actual suspend fun <R> withBackendStopSignals(
+    onSignal: suspend () -> Unit,
+    block: suspend CoroutineScope.() -> R,
+): R {
+    check(kodex_backend_install_signals() == 0) { "Cannot install backend stop signal handlers." }
+    return AutoCloseable {
+        check(kodex_backend_uninstall_signals() == 0) { "Cannot restore previous backend stop signal handlers." }
+    }.use {
+        coroutineScope {
+            val waiter = launch(start = CoroutineStart.UNDISPATCHED) {
+                awaitBackendStopSignal()
+                onSignal()
+            }
+            try {
+                block()
+            } finally {
+                waiter.cancel()
+            }
+        }
+    }
+}
+
 public actual fun backendProcessAlive(pid: Long): Boolean = kodex_backend_alive(pid) != 0
 public actual fun exitKodexProcess(code: Int): Nothing = kotlin.system.exitProcess(code)

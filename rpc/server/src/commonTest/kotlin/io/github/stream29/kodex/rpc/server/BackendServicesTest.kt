@@ -222,7 +222,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 // Unknown RPC failures do not promise a concrete Exception type on Native.
                 assertTrue(runCatching { global.createSession(Path(".")) }.isFailure)
                 assertTrue(runCatching { global.getRootAgentId(index) }.isFailure)
-                assertTrue(runCatching { global.compareAndSetSettings(before, before.copy(daemonTtlSeconds = -1)) }.isFailure)
+                assertTrue(runCatching { global.compareAndSetSettings(before, before.copy(daemonTtlSeconds = 120)) }.isFailure)
                 assertTrue(runCatching { global.compareAndSetFrontendSettings(front, front.copy(newLineKey = io.github.stream29.kodex.cli.settings.NewLineKey.Enter)) }.isFailure)
                 assertTrue(runCatching { global.validateDirectory(DirectoryQuery(".", ".")) }.isFailure)
                 assertTrue(runCatching { global.listDirectories(DirectoryQuery(".", ".")) }.isFailure)

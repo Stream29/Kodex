@@ -33,6 +33,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -46,6 +47,16 @@ public actual suspend fun runBackendHost(
     agentsHome: Path,
     createClient: (OpenAiAuthStore) -> OpenAiClient,
     createLoginClient: () -> OpenAiLoginClient,
+): Unit = runBackendHostWithClock(home, codexHome, agentsHome, createClient, createLoginClient, Clock.System)
+
+internal suspend fun runBackendHostWithClock(
+    home: Path,
+    codexHome: Path,
+    agentsHome: Path,
+    createClient: (OpenAiAuthStore) -> OpenAiClient,
+    createLoginClient: () -> OpenAiLoginClient,
+    clock: Clock,
+    enableProcessStopSignals: Boolean = true,
 ): Unit = coroutineScope {
     suspend fun resolveDirectory(defaultDirectory: Path, requested: String?): String {
         require(requested == null || '\u0000' !in requested) { "The browser working directory contains NUL." }
@@ -63,6 +74,7 @@ public actual suspend fun runBackendHost(
     val instance = BackendInstance.acquire(absoluteHome)
     val lifecycle = createBackendLifecycle()
     val replyFinished = CompletableDeferred<Unit>()
+    val coreExiting = CompletableDeferred<Unit>()
     var services: BackendServices? = null
     var failed: Throwable? = null
     var port = 0
@@ -70,8 +82,10 @@ public actual suspend fun runBackendHost(
     var logging: ApplicationLoggingSession? = null
     var preparedHome: KodexHomeHandle? = null
     var primary: Throwable? = null
+    fun failureCause(failure: Throwable): Throwable =
+        generateSequence(failure) { if (it is CancellationException) it.cause else null }.take(16).last()
     fun reason(failure: Throwable): String {
-        val diagnostic = if (failure is CancellationException) failure.cause ?: failure else failure
+        val diagnostic = failureCause(failure)
         return diagnostic.message?.takeIf { it.isNotBlank() } ?: diagnostic::class.simpleName ?: "Backend failed."
     }
     suspend fun reportFailure(failure: Throwable) {
@@ -85,11 +99,22 @@ public actual suspend fun runBackendHost(
         }
     }
     suspend fun coreEnded() {
+        coreExiting.complete(Unit)
         if (lifecycle.state.value == BackendPhase.Starting || lifecycle.state.value == BackendPhase.Ready) {
             if (lifecycle.requestStop() == BackendStopAcceptance.Accepted) {
                 if (hostJob.isActive && failed == null) failed = IllegalStateException("Backend core ended unexpectedly.")
                 replyFinished.complete(Unit)
             }
+        }
+    }
+    suspend fun serveWithProcessSignals(block: suspend CoroutineScope.() -> Unit) {
+        if (enableProcessStopSignals) {
+            // Ktor registers its own signal handlers while starting the engine.
+            withBackendStopSignals(onSignal = {
+                if (lifecycle.requestStop() == BackendStopAcceptance.Accepted) replyFinished.complete(Unit)
+            }, block = block)
+        } else {
+            coroutineScope(block)
         }
     }
     try {
@@ -100,7 +125,6 @@ public actual suspend fun runBackendHost(
         val browserAccess = LocalBrowserAccess { requested -> resolveDirectory(handle.home, requested) }
         val identity = randomBackendPassword()
         val password = randomBackendPassword()
-        installBackendSignals()
         setBackendWorkingDirectory(handle.home)
         logging = initializeProcessLogging(handle.home, "Backend-${processId()}")
         val control = object : BackendControl {
@@ -112,7 +136,7 @@ public actual suspend fun runBackendHost(
                 put("phase", lifecycle.state.value.name.lowercase())
                 put("application_version", CurrentKodexApplicationVersion.toString())
                 put("business_protocol", BackendBusinessProtocol)
-                put("idle_ttl_seconds", services?.settings?.unified?.current?.backend?.daemonTtlSeconds ?: 300L)
+                put("idle_ttl_seconds", services?.settings?.unified?.current?.backend?.daemonTtlSeconds ?: -1L)
                 put("browser_grant_protocol", LocalBrowserGrantProtocol)
             }
             override fun ready() = lifecycle.state.value == BackendPhase.Ready && services != null
@@ -129,95 +153,91 @@ public actual suspend fun runBackendHost(
             check(control.ready()) { "The backend is not ready for business requests." }
             requireNotNull(services).register(this, allowAgentSql = admission == BackendConnectionAdmission.LocalCredential)
         }, browserAccess) { boundPort ->
-            port = boundPort
-            val endpoint = BackendEndpoint(identity, processId(), port, password, CurrentKodexApplicationVersion.toString())
-            instance.publish(endpoint)
-            published = endpoint
-            val work = launch {
-                try {
-                    if (!ensureBundledHomeGuide(handle.home)) {
-                        logger.warn { "Preserved custom or non-regular skills/kodex-home/SKILL.md; review it before following its Home instructions." }
-                    }
-                    withBackendServices(
-                        handle.home, codexHome, agentsHome,
-                        requiresPreparedHome = true,
-                        createClient = createClient, createLoginClient = createLoginClient,
-                        renewBackend = { lifecycle.renew() },
-                        backendRenewalInterval = {
-                            val value = services?.settings?.unified?.current?.backend?.daemonTtlSeconds ?: 300L
-                            backendHeartbeatIntervalMillis(value).milliseconds
-                        },
-                        checkAdmission = {
-                            check(lifecycle.state.value == BackendPhase.Ready) { "Backend business admission is closed." }
-                        },
-                    ) { backend ->
-                        try {
-                            services = backend
-                            val settings = backend.settings.unified
-                            lifecycle.updateIdleTimeout(ttl(settings.current.backend.daemonTtlSeconds))
-                            // One consumer is launched before the Ready business-admission publication.
-                            launch(start = CoroutineStart.UNDISPATCHED) {
-                                collectNotificationHooks(backend.notifications, { settings.current.backend.hooks }, handle.home)
-                            }
-                            launch {
-                                settings.backendSettings.collect { lifecycle.updateIdleTimeout(ttl(it.daemonTtlSeconds)) }
-                            }
-                            if (lifecycle.markReady()) awaitCancellation()
-                        } catch (failure: Throwable) {
-                            if (hostJob.isActive &&
-                                (lifecycle.state.value == BackendPhase.Starting || lifecycle.state.value == BackendPhase.Ready)
-                            ) failed = failure
-                            throw failure
-                        } finally {
-                            // Close admission before scoped service cleanup, not only after work completion.
-                            withContext(NonCancellable) {
-                                coreEnded()
-                                failed?.let { reportFailure(it) }
-                                backend.shutdownSessions()
+            serveWithProcessSignals {
+                port = boundPort
+                val endpoint = BackendEndpoint(identity, processId(), port, password, CurrentKodexApplicationVersion.toString())
+                instance.publish(endpoint)
+                published = endpoint
+                val work = launch {
+                    try {
+                        if (!ensureBundledHomeGuide(handle.home)) {
+                            logger.warn { "Preserved custom or non-regular skills/kodex-home/SKILL.md; review it before following its Home instructions." }
+                        }
+                        withBackendServices(
+                            handle.home, codexHome, agentsHome,
+                            requiresPreparedHome = true,
+                            createClient = createClient, createLoginClient = createLoginClient,
+                            renewBackend = { lifecycle.renew() },
+                            backendRenewalInterval = {
+                                val value = services?.settings?.unified?.current?.backend?.daemonTtlSeconds ?: -1L
+                                backendHeartbeatIntervalMillis(value).milliseconds
+                            },
+                            checkAdmission = {
+                                check(lifecycle.state.value == BackendPhase.Ready) { "Backend business admission is closed." }
+                            },
+                            clock = clock,
+                        ) { backend ->
+                            try {
+                                services = backend
+                                val settings = backend.settings.unified
+                                lifecycle.updateIdleTimeout(ttl(settings.current.backend.daemonTtlSeconds))
+                                // One consumer is launched before the Ready business-admission publication.
+                                launch(start = CoroutineStart.UNDISPATCHED) {
+                                    collectNotificationHooks(backend.notifications, { settings.current.backend.hooks }, handle.home)
+                                }
+                                launch {
+                                    settings.backendSettings.collect { lifecycle.updateIdleTimeout(ttl(it.daemonTtlSeconds)) }
+                                }
+                                if (lifecycle.markReady()) awaitCancellation()
+                            } catch (failure: Throwable) {
+                                if (hostJob.isActive &&
+                                    (lifecycle.state.value == BackendPhase.Starting || lifecycle.state.value == BackendPhase.Ready)
+                                ) failed = failureCause(failure)
+                                throw failure
+                            } finally {
+                                // Close admission before scoped service cleanup, not only after work completion.
+                                withContext(NonCancellable) {
+                                    coreEnded()
+                                    failed?.let { reportFailure(it) }
+                                    backend.shutdownSessions()
+                                }
                             }
                         }
+                    } catch (failure: Throwable) {
+                        if (failure !is CancellationException || hostJob.isActive &&
+                            (lifecycle.state.value == BackendPhase.Starting || lifecycle.state.value == BackendPhase.Ready)
+                        ) failed = failureCause(failure)
+                        if (failure is CancellationException) throw failure
+                    } finally {
+                        withContext(NonCancellable) {
+                            coreEnded()
+                            failed?.let { reportFailure(it) }
+                        }
                     }
-                } catch (failure: Throwable) {
-                    if (failure !is CancellationException || hostJob.isActive &&
-                        (lifecycle.state.value == BackendPhase.Starting || lifecycle.state.value == BackendPhase.Ready)
-                    ) failed = failure
-                    if (failure is CancellationException) throw failure
+                }
+                val expiry = launch { lifecycle.monitorIdleExpiry() }
+                try {
+                    val reason = lifecycle.awaitStop()
+                    if (reason == BackendStopReason.Manual) withTimeoutOrNull(5.seconds) { replyFinished.await() }
                 } finally {
                     withContext(NonCancellable) {
-                        coreEnded()
-                        failed?.let { reportFailure(it) }
+                        expiry.cancelAndJoin()
+                        if (lifecycle.state.value == BackendPhase.Starting || lifecycle.state.value == BackendPhase.Ready) {
+                            lifecycle.requestStop()
+                        }
+                        // A core already exiting has closed admission itself. Don't inject a
+                        // competing cancellation while it publishes and drains the failure.
+                        if (!coreExiting.isCompleted) work.cancel()
+                        work.join()
+                        lifecycle.finishStop()
                     }
-                }
-            }
-            val expiry = launch { lifecycle.monitorIdleExpiry() }
-            val signals = launch {
-                while (true) {
-                    if (backendStopSignalReceived()) {
-                        if (lifecycle.requestStop() == BackendStopAcceptance.Accepted) replyFinished.complete(Unit)
-                        return@launch
-                    }
-                    delay(200)
-                }
-            }
-            try {
-                val reason = lifecycle.awaitStop()
-                if (reason == BackendStopReason.Manual) withTimeoutOrNull(5.seconds) { replyFinished.await() }
-            } finally {
-                withContext(NonCancellable) {
-                    expiry.cancelAndJoin()
-                    signals.cancelAndJoin()
-                    if (lifecycle.state.value == BackendPhase.Starting || lifecycle.state.value == BackendPhase.Ready) {
-                        lifecycle.requestStop()
-                    }
-                    work.cancelAndJoin()
-                    lifecycle.finishStop()
                 }
             }
         }
     } catch (failure: Throwable) {
         primary = failure
         failed?.let { workFailure ->
-            if (workFailure !== failure.cause &&
+            if (workFailure !== failure && workFailure !== failure.cause &&
                 generateSequence<Throwable>(workFailure) { it.cause }.take(16).none { it === failure }
             ) failure.addSuppressed(workFailure)
         }

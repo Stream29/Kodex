@@ -13,6 +13,7 @@ import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResult
+import io.github.stream29.kodex.openai.client.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.control.backendControlRequest
@@ -32,6 +33,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.test.assertNull
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 
 val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
@@ -411,7 +413,13 @@ internal suspend fun withHost(
             }
         }
         val backend = launch {
-            runBackendHost(home, Path(home, "codex"), Path(home, "agents"), createClient = { mock })
+            runBackendHostWithClock(
+                home, Path(home, "codex"), Path(home, "agents"),
+                createClient = { mock },
+                createLoginClient = { OpenAiLoginClient() },
+                clock = Clock.System,
+                enableProcessStopSignals = false,
+            )
         }
         var endpoint: BackendEndpoint? = null
         try {

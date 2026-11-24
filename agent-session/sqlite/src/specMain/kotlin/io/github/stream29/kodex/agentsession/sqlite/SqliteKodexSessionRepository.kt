@@ -8,7 +8,10 @@ import io.github.stream29.kodex.utils.coroutines.CoroutineCloseable
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -70,12 +73,15 @@ public expect class SqliteKodexSessionRepository : KodexSessionRepository, Corou
 /**
  * Opens the existing, signed current `kodex.db` under [root]. Production callers hold an
  * already-prepared Home lease. [allowFresh] is only for isolated storage without Home state.
+ * SQLite initialization and failed/cancelled acquisition cleanup use [dispatcher]; after
+ * a successful return the caller owns the connection and must close it on the same lane.
  * @throws kotlinx.io.IOException if the required database is missing or incompatible.
  */
 public expect suspend fun openVerifiedKodexDatabase(
     root: Path,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     allowFresh: Boolean = false,
+    dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ): Pair<Path, SqliteConnection>
 
 public expect suspend fun CoroutineScope.SqliteKodexSessionRepository(
@@ -90,9 +96,9 @@ public expect suspend fun CoroutineScope.SqliteKodexSessionRepository(
 ): SqliteKodexSessionRepository
 
 /**
- * Opens a [SqliteKodexSessionRepository] borrowing a caller-owned [connection] and [mutex]
+ * Opens a [SqliteKodexSessionRepository] borrowing caller-owned [connection], [mutex] and [dispatcher]
  * on `kodex.db` (e.g. shared with a peer backend service); closing this repository leaves
- * [connection] open for its outer owner to close after all sharing services have stopped.
+ * the connection and dispatcher open for the outer owner to close after all sharing services stop.
  */
 public expect suspend fun CoroutineScope.SqliteKodexSessionRepository(
     root: Path,
@@ -105,5 +111,6 @@ public expect suspend fun CoroutineScope.SqliteKodexSessionRepository(
     onTurnActiveRenewal: suspend () -> Unit = {},
     turnRenewalInterval: () -> Duration = { DefaultKodexSessionRenewalInterval },
     reportMirrorFailure: (Throwable) -> Unit = {},
+    dispatcher: CoroutineDispatcher = Dispatchers.IO,
     onDeleteInTransaction: (sessionId: Int) -> Unit = {},
 ): SqliteKodexSessionRepository

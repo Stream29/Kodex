@@ -164,7 +164,7 @@ private data class BackendFile(
     @SerialName("session_title") val sessionTitle: TitleDefaultsFile,
     @SerialName("mcp_servers") val mcpServers: Map<String, McpServerConfiguration>,
     val hooks: List<NotificationHook> = emptyList(),
-    @SerialName("daemon_ttl_seconds") val daemonTtlSeconds: Long = 300,
+    @SerialName("daemon_ttl_seconds") val daemonTtlSeconds: Long = -1,
 )
 
 @Serializable

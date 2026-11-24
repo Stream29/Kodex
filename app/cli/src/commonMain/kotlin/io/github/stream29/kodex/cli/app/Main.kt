@@ -10,6 +10,7 @@ import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.backend.BackendInstance
 import io.github.stream29.kodex.backend.backendProcessAlive
 import io.github.stream29.kodex.backend.backendStopSignalReceived
+import io.github.stream29.kodex.backend.configureBackendAllocator
 import io.github.stream29.kodex.backend.exitKodexProcess
 import io.github.stream29.kodex.backend.host.connectBackend
 import io.github.stream29.kodex.backend.host.ensureBackend
@@ -37,6 +38,7 @@ public actual fun main(args: Array<String>) {
             defaultHome = home,
             output = ::printCliMessage,
         ) { command, invokeTool ->
+            if (command is BackendStartCommand) configureBackendAllocator()
             runLeafCommand(command, home, invokeTool)
         }
     }

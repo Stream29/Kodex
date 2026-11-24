@@ -7,8 +7,7 @@ import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRepository
 import io.github.stream29.kodex.agentschedule.contract.nextCronTriggerAt
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -23,6 +22,7 @@ import kotlin.time.Instant
 public actual class SqliteScheduleRepository internal constructor(
     private val connection: SqliteConnection,
     private val mutex: Mutex,
+    private val dispatcher: CoroutineDispatcher,
     private val requireAccess: () -> Unit,
     initialNextTriggerAt: Instant?,
 ) : ScheduleRepository {
@@ -34,7 +34,7 @@ public actual class SqliteScheduleRepository internal constructor(
     private suspend fun <T> read(block: () -> T): T {
         currentCoroutineContext().ensureActive()
         return mutex.withLock {
-            withContext(Dispatchers.IO) {
+            withContext(dispatcher) {
                 requireAccess()
                 block()
             }
@@ -45,7 +45,7 @@ public actual class SqliteScheduleRepository internal constructor(
         currentCoroutineContext().ensureActive()
         return mutex.withLock {
             withContext(NonCancellable) {
-                withContext(Dispatchers.IO) {
+                withContext(dispatcher) {
                     requireAccess()
                     connection.transaction {
                         block()
@@ -173,11 +173,12 @@ public actual class SqliteScheduleRepository internal constructor(
 public actual suspend fun SqliteScheduleRepository(
     connection: SqliteConnection,
     mutex: Mutex,
+    dispatcher: CoroutineDispatcher,
     requireAccess: () -> Unit,
 ): SqliteScheduleRepository {
     currentCoroutineContext().ensureActive()
     val earliest = mutex.withLock {
-        withContext(Dispatchers.IO) {
+        withContext(dispatcher) {
             requireAccess()
             queryEarliestTriggerUnsafe(connection)
         }
@@ -185,6 +186,7 @@ public actual suspend fun SqliteScheduleRepository(
     return SqliteScheduleRepository(
         connection = connection,
         mutex = mutex,
+        dispatcher = dispatcher,
         requireAccess = requireAccess,
         initialNextTriggerAt = earliest,
     )

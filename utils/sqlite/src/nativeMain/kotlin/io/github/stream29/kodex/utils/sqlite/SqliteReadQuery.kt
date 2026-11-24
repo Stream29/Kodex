@@ -6,12 +6,13 @@ import cnames.structs.sqlite3
 import cnames.structs.sqlite3_stmt
 import io.github.stream29.kodex.utils.sqlite.bundled.*
 import kotlinx.cinterop.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
+import kotlinx.coroutines.newSingleThreadContext
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlin.time.TimeMark
@@ -62,9 +63,13 @@ private val queryAuthorizer = staticCFunction {
     if (allowed) SQLITE_OK else SQLITE_DENY
 }
 
+// One lazily initialized OS thread for the process-wide read-only query lane.
+@OptIn(DelicateCoroutinesApi::class, ExperimentalCoroutinesApi::class)
+private val SqliteReadDispatcher by lazy { newSingleThreadContext("Kodex.SqliteRead") }
+
 public actual suspend fun <R> withSqliteReadQuery(
     path: Path, sql: String, policy: SqliteReadPolicy, deadline: TimeMark, read: (SqliteReadRows) -> R,
-): R = withContext(Dispatchers.IO) {
+): R = withContext(SqliteReadDispatcher) {
     val scope = QueryScope(policy, deadline, currentCoroutineContext().job)
     scope.checkBudget()
     if (sql.length > policy.inputBytes || sql.isBlank() || '\u0000' in sql ||

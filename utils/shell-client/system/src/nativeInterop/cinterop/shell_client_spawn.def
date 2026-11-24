@@ -10,16 +10,15 @@ headers = spawn.h unistd.h
 #define KODEX_ENVIRON (*_NSGetEnviron())
 #else
 #include <pty.h>
+#include <utmp.h>
 extern char **environ;
 #define KODEX_ENVIRON environ
 #endif
 
 #include <errno.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
 #include "kodex_close_inherited_fds.h"
 
 static inline size_t kodex_environment_name_length(const char *entry) {
@@ -67,9 +66,22 @@ static inline char **kodex_merge_environment(
     return merged;
 }
 
+static inline int kodex_open_shell_pty(int *master_fd, int *slave_fd) {
+    if (openpty(master_fd, slave_fd, NULL, NULL, NULL) != 0) return errno;
+    if (
+        fcntl(*master_fd, F_SETFD, FD_CLOEXEC) == 0 &&
+        fcntl(*slave_fd, F_SETFD, FD_CLOEXEC) == 0
+    ) return 0;
+    int failure = errno;
+    close(*master_fd);
+    close(*slave_fd);
+    return failure;
+}
+
 static inline int kodex_spawn_pty_shell(
     pid_t *pid,
-    int *master_fd,
+    int master_fd,
+    int slave_fd,
     const char *const *environment_overrides,
     size_t environment_override_count,
     const char *shell,
@@ -86,7 +98,7 @@ static inline int kodex_spawn_pty_shell(
         if (merged_environment == NULL) return ENOMEM;
     }
 
-    pid_t child = forkpty(master_fd, NULL, NULL, NULL);
+    pid_t child = fork();
     if (child < 0) {
         int fork_error = errno;
         free(merged_environment);
@@ -94,6 +106,9 @@ static inline int kodex_spawn_pty_shell(
     }
 
     if (child == 0) {
+        close(master_fd);
+        // login_tty may dup2 the slave onto itself if a parent stdio fd was closed.
+        if (fcntl(slave_fd, F_SETFD, 0) != 0 || login_tty(slave_fd) != 0) _exit(127);
 #if defined(__linux__) || defined(__APPLE__)
         if (kodex_close_inherited_fds() != 0) _exit(127);
 #endif
@@ -109,16 +124,6 @@ static inline int kodex_spawn_pty_shell(
         _exit(127);
     }
 
-    int descriptor_flags = fcntl(*master_fd, F_GETFD);
-    if (descriptor_flags == -1 || fcntl(*master_fd, F_SETFD, descriptor_flags | FD_CLOEXEC) == -1) {
-        int failure = errno;
-        close(*master_fd);
-        kill(child, SIGKILL);
-        int status;
-        while (waitpid(child, &status, 0) < 0 && errno == EINTR) { }
-        free(merged_environment);
-        return failure;
-    }
     free(merged_environment);
     *pid = child;
     return 0;

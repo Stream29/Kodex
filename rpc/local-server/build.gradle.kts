@@ -26,6 +26,7 @@ sourceSets {
     }
     commonTest.dependencies {
         implementation(project(":rpc-backend-control-client"))
+        implementation(libs.kotlinx.coroutines.test)
         implementation(libs.ktor.client.core)
         implementation(libs.ktor.client.websockets)
         implementation("io.ktor:ktor-network:${libs.versions.ktor.asProvider().get()}")

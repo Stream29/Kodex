@@ -1,11 +1,15 @@
 package io.github.stream29.kodex.backend
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Duration
@@ -16,23 +20,13 @@ public actual fun createBackendLifecycle(
     timeSource: TimeSource,
 ): BackendLifecycle = BackendLifecycleImpl(idleTimeout, timeSource)
 
-public actual suspend fun BackendLifecycle.monitorIdleExpiry(pollInterval: Duration) {
-    require(pollInterval.isPositive() && pollInterval.isFinite()) {
-        "The expiry poll interval must be finite and positive."
-    }
-    while (state.value == BackendPhase.Starting || state.value == BackendPhase.Ready) {
-        if (expireIfIdle()) return
-        delay(pollInterval)
-    }
-}
-
 private class BackendLifecycleImpl(
     timeout: Duration,
     timeSource: TimeSource,
 ) : BackendLifecycle {
     private val admission = Mutex()
     private val origin = timeSource.markNow()
-    private var idleTimeout = checkedTimeout(timeout)
+    private val idleTimeout = MutableStateFlow(checkedTimeout(timeout))
     private var lastRenewal = Duration.ZERO
     private val mutableState = MutableStateFlow(BackendPhase.Starting)
     private val stop = CompletableDeferred<BackendStopReason>()
@@ -57,7 +51,7 @@ private class BackendLifecycleImpl(
         val checked = checkedTimeout(timeout)
         admission.withLock {
             currentCoroutineContext().ensureActive()
-            idleTimeout = checked
+            idleTimeout.value = checked
         }
     }
 
@@ -75,11 +69,42 @@ private class BackendLifecycleImpl(
 
     override suspend fun expireIfIdle(): Boolean = admission.withLock {
         currentCoroutineContext().ensureActive()
-        if (state.value != BackendPhase.Ready || idleTimeout.isInfinite()) return@withLock false
-        if (origin.elapsedNow() - lastRenewal < idleTimeout) return@withLock false
+        val timeout = idleTimeout.value
+        if (state.value != BackendPhase.Ready || timeout.isInfinite()) return@withLock false
+        if (remainingIdleTime(timeout).isPositive()) return@withLock false
         beginStop(BackendStopReason.IdleTimeout)
         true
     }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override suspend fun monitorIdleExpiry() {
+        combine(state, idleTimeout) { phase, timeout -> phase to timeout }
+            .transformLatest { (phase, timeout) ->
+                when (phase) {
+                    BackendPhase.Starting -> Unit
+                    BackendPhase.Stopping, BackendPhase.Stopped -> emit(Unit)
+                    BackendPhase.Ready -> {
+                        if (timeout.isInfinite()) return@transformLatest
+                        while (true) {
+                            val remaining = admission.withLock {
+                                currentCoroutineContext().ensureActive()
+                                if (state.value != BackendPhase.Ready || idleTimeout.value != timeout) {
+                                    return@transformLatest
+                                }
+                                remainingIdleTime(timeout).also {
+                                    if (!it.isPositive()) beginStop(BackendStopReason.IdleTimeout)
+                                }
+                            }
+                            if (!remaining.isPositive()) return@transformLatest
+                            // Renewals only move the timestamp; recheck it at the original wake time.
+                            delay(remaining)
+                        }
+                    }
+                }
+            }.first()
+    }
+
+    private fun remainingIdleTime(timeout: Duration): Duration = timeout - (origin.elapsedNow() - lastRenewal)
 
     override suspend fun awaitStop(): BackendStopReason {
         currentCoroutineContext().ensureActive()

@@ -22,6 +22,7 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
@@ -44,14 +45,22 @@ val awaitDeadlineRunnerTest by testSuite(
     compartment = { TestCompartment.RealTime },
     testConfig = TestConfig.testScope(isEnabled = false, timeout = 20.seconds),
 ) {
-    test("persisted deadline survives automatic eviction and a backend restart, then wakes exactly once") {
+    test("persisted deadline survives restart and a transient deadline-check fault, then wakes exactly once") {
         withTimeout(15.seconds) {
             withAwaitHome { home ->
                 var requestCount = 0
                 val origin = Instant.parse("2026-11-18T00:00:00Z")
                 val wallTime = MutableStateFlow(origin)
+                val failNext = MutableStateFlow(false)
+                val transientSeen = CompletableDeferred<Unit>()
                 val clock = object : Clock {
-                    override fun now(): Instant = wallTime.value
+                    override fun now(): Instant {
+                        if (failNext.compareAndSet(true, false)) {
+                            transientSeen.complete(Unit)
+                            error("transient fixture failure while checking a persisted await deadline")
+                        }
+                        return wallTime.value
+                    }
                 }
                 testKodexAgentDependencies(mockOpenAiClient {
                     createResponse {
@@ -109,7 +118,9 @@ val awaitDeadlineRunnerTest by testSuite(
                         val repository = second.acquire().first
                         assertTrue(repository.openSessions.value.isEmpty())
                         assertEquals(origin + 90.seconds, repository.pendingAwaitDeadlines.value.getValue(agentId).timeoutAt)
+                        failNext.value = true
                         second.startAwaitDeadlineRunner()
+                        transientSeen.await()
                         val session = repository.openSessions.first { agentId in it }.getValue(agentId)
                         session.runtime.state.first { it == KodexAgentStateValue.AssistantMessage }
                         assertNull(repository.pendingAwaitDeadlines.value[agentId])
@@ -119,6 +130,7 @@ val awaitDeadlineRunnerTest by testSuite(
                         assertIs<StableAwaitEventResult.Output>(completed.result)
                         assertFalse(commits.any { it.commit.commitType == AgentCommitType.EventSchedule })
                         assertEquals(2, requestCount)
+                        assertFalse(second.runnerFailure.isCompleted)
                     } finally {
                         second.closeAndDrain()
                     }

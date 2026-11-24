@@ -85,6 +85,13 @@ public interface BackendLifecycle {
     public suspend fun expireIfIdle(): Boolean
 
     /**
+     * Host-owned expiry observer. Waits for readiness and a finite idle deadline, or returns
+     * when shutdown is accepted. Changes to the configured interval take effect immediately.
+     * The host should launch exactly one observer; its cancellation does not affect shutdown.
+     */
+    public suspend fun monitorIdleExpiry()
+
+    /**
      * Waits for the first accepted stop reason, not for resources to close.
      * The stop remains accepted even if any or all callers cancel this wait.
      *

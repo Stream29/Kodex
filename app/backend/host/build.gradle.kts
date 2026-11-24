@@ -40,5 +40,9 @@ kotlin {
             implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":rpc-client"))
         }
+        named("linuxX64Test").dependencies {
+            implementation(project(":agent-session-sqlite"))
+            implementation(project(":agent-session-test"))
+        }
     }
 }

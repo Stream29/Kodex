@@ -7,6 +7,7 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.readBytes
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.use
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.writeBytes
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -81,6 +82,29 @@ val processClientIoTest by testSuite(
         client.close()
 
         assertTrue(withTimeout(5.seconds) { process.exitCode.await() } != 0)
+    }
+
+    test("cancelling one pending reader leaves the endpoint available for the next read") {
+        val owner = Job()
+        val client = CoroutineScope(currentCoroutineContext() + owner).ProcessClient()
+        try {
+            val process = client.start(interactiveProcessCommand)
+            coroutineScope {
+                // The fixture cannot produce output until stdin arrives.
+                val abandonedRead = async(start = CoroutineStart.UNDISPATCHED) {
+                    process.stdout.readAtMostTo(Buffer(), 32)
+                }
+                withTimeout(10.seconds) { abandonedRead.cancelAndJoin() }
+                process.stdin.writeBytes("same endpoint\n".encodeToByteArray())
+                process.stdin.close()
+                val output = withTimeout(10.seconds) { process.stdout.readText() }
+                assertTrue("out=same endpoint" in output, output)
+                assertEquals(0, withTimeout(10.seconds) { process.exitCode.await() })
+            }
+        } finally {
+            client.close()
+            withContext(NonCancellable) { owner.cancelAndJoin() }
+        }
     }
 
     test("overlays configured environment variables on a real child process") {

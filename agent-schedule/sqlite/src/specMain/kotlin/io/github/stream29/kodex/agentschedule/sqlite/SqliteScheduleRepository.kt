@@ -6,6 +6,9 @@ package io.github.stream29.kodex.agentschedule.sqlite
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRepository
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlin.time.Instant
@@ -31,18 +34,20 @@ public expect class SqliteScheduleRepository : ScheduleRepository {
     /**
      * Deletes schedules targeting [sessionId] or any child `agents` row belonging to [sessionId]
      * inside an already-open transaction on the shared `kodex.db` connection while holding the
-     * shared database [Mutex] (must run before `DELETE FROM sessions` cascades `agents`).
+     * shared database [Mutex] on the connection's dispatcher (before `DELETE FROM sessions`
+     * cascades `agents`).
      */
     public fun deleteForSessionInTransaction(sessionId: Int)
 }
 
 /**
- * Opens a [SqliteScheduleRepository] sharing [connection] and [mutex] on `kodex.db`,
+ * Opens a [SqliteScheduleRepository] borrowing [connection], [mutex] and [dispatcher] on `kodex.db`,
  * reading its already-installed `schedules` schema to initialize [ScheduleRepository.nextTriggerAt].
  * @throws io.github.stream29.kodex.utils.sqlite.SqliteFailure if the schema cannot be read.
  */
 public expect suspend fun SqliteScheduleRepository(
     connection: SqliteConnection,
     mutex: Mutex,
+    dispatcher: CoroutineDispatcher = Dispatchers.IO,
     requireAccess: () -> Unit = {},
 ): SqliteScheduleRepository

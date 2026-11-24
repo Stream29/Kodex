@@ -35,23 +35,11 @@ internal fun CoroutineScope.requireOpen() {
     if (!isActive) throw ProcessException("Process client is closed.")
 }
 
-@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
-internal fun CoroutineScope.launchProcessCancellationGuard(
-    dispatcher: CoroutineDispatcher,
-    close: () -> Unit,
-): Job = launch(dispatcher, start = CoroutineStart.ATOMIC) {
-    try {
-        awaitCancellation()
-    } finally {
-        close()
-    }
-}
-
 // Capture before the cancellable dispatcher return, so an unclaimed resource
 // is closed even when its long-lived client remains active.
 internal suspend fun CoroutineScope.acquireProcessSession(
     dispatcher: CoroutineDispatcher,
-    acquire: () -> ProcessSession,
+    acquire: suspend () -> ProcessSession,
 ): ProcessSession {
     requireOpen()
     val ownerJob = requireNotNull(coroutineContext[Job])

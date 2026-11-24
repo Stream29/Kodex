@@ -65,6 +65,7 @@ public actual suspend fun <R> withBackendServices(
     backendRenewalInterval: () -> Duration,
     checkAdmission: () -> Unit,
     requiresPreparedHome: Boolean,
+    clock: Clock,
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R = withBackendServicesWithTitleGenerator(
     home = home,
@@ -78,6 +79,7 @@ public actual suspend fun <R> withBackendServices(
     backendRenewalInterval = backendRenewalInterval,
     checkAdmission = checkAdmission,
     requiresPreparedHome = requiresPreparedHome,
+    clock = clock,
     block = block,
 )
 
@@ -222,7 +224,16 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                     persistence = persistence,
                 )
                 coroutineScope {
-                    block(services)
+                    // Throw in the graph's scope rather than the independent persistence scope.
+                    // The host closes admission before waiting for persistence cleanup.
+                    val runnerMonitor = launch(start = CoroutineStart.UNDISPATCHED) {
+                        throw persistence.runnerFailure.await()
+                    }
+                    try {
+                        block(services)
+                    } finally {
+                        runnerMonitor.cancel()
+                    }
                 }
             } catch (error: Throwable) {
                 operationFailure = error
@@ -310,14 +321,17 @@ internal class LazySqliteBackendPersistence(
         CoroutineScope(owner.coroutineContext.minusKey(Job) + SupervisorJob())
     private val acquisitionMutex = Mutex()
     private val dbMutex = Mutex()
+    private val drainMutex = Mutex()
+    private var drainResult: Result<Unit>? = null
 
     @kotlin.concurrent.Volatile
     private var stopping = false
-    private var acquiredConnection: SqliteConnection? = null
+    private var acquiredDatabase: Pair<SqliteConnection, CloseableCoroutineDispatcher>? = null
     private var acquiredSessions: SqliteKodexSessionRepository? = null
     private var acquiredSchedules: SqliteScheduleRepository? = null
     private var scheduleRunnerJob: Job? = null
     private var awaitDeadlineRunnerJob: Job? = null
+    val runnerFailure = CompletableDeferred<Throwable>()
 
     private val lazyEntries = MutableStateFlow<List<Int>>(emptyList())
     private val lazyOpenSessions = MutableStateFlow<Map<Int, KodexAgentSession>>(emptyMap())
@@ -455,6 +469,7 @@ internal class LazySqliteBackendPersistence(
         checkAdmission()
     }
 
+    @OptIn(DelicateCoroutinesApi::class, ExperimentalCoroutinesApi::class)
     suspend fun acquire(
         requireExternalAdmission: Boolean = true,
     ): Pair<SqliteKodexSessionRepository, SqliteScheduleRepository> =
@@ -465,14 +480,22 @@ internal class LazySqliteBackendPersistence(
             if (existingSessions != null && existingSchedules != null) {
                 return@withLock existingSessions to existingSchedules
             }
-            val (resolvedHome, connection) =
-                openVerifiedKodexDatabase(home, SystemCoroutineFileSystem, allowFresh = !requiresPreparedHome)
+            val dispatcher = newSingleThreadContext("Kodex.SqliteMain")
+            val (resolvedHome, connection) = try {
+                openVerifiedKodexDatabase(
+                    home, SystemCoroutineFileSystem, allowFresh = !requiresPreparedHome, dispatcher = dispatcher,
+                )
+            } catch (error: Throwable) {
+                closeBackendResources(error, { dispatcher.close() })
+                throw error
+            }
             try {
                 lateinit var schedules: SqliteScheduleRepository
                 val sessions = persistenceScope.SqliteKodexSessionRepository(
                     root = resolvedHome,
                     connection = connection,
                     mutex = dbMutex,
+                    dispatcher = dispatcher,
                     dependencies = dependencies,
                     sessionTtl = sessionTtl,
                     onTurnActiveRenewal = renewBackend,
@@ -488,13 +511,11 @@ internal class LazySqliteBackendPersistence(
                     schedules = SqliteScheduleRepository(
                         connection = connection,
                         mutex = dbMutex,
+                        dispatcher = dispatcher,
                         requireAccess = { persistenceScope.ensureActive() },
                     )
                     currentCoroutineContext().ensureActive()
                     if (requireExternalAdmission) ensureAdmission() else ensureOpen()
-                    acquiredConnection = connection
-                    acquiredSessions = sessions
-                    acquiredSchedules = schedules
                     lazyEntries.value = sessions.entries.value
                     lazyOpenSessions.value = sessions.openSessions.value
                     lazyAwaitDeadlines.value = sessions.pendingAwaitDeadlines.value
@@ -516,26 +537,33 @@ internal class LazySqliteBackendPersistence(
                             notificationsShared.tryEmit(notification)
                         }
                     }
+                    acquiredDatabase = connection to dispatcher
+                    acquiredSessions = sessions
+                    acquiredSchedules = schedules
                     sessions to schedules
                 } catch (error: Throwable) {
-                    withContext(NonCancellable) { sessions.closeAndJoin() }
+                    closeBackendResources(error, { sessions.closeAndJoin() })
                     throw error
                 }
             } catch (error: Throwable) {
-                withContext(NonCancellable) {
-                    dbMutex.withLock { withContext(Dispatchers.IO) { connection.close() } }
-                }
+                closeBackendResources(
+                    error,
+                    { dbMutex.withLock { withContext(dispatcher) { connection.close() } } },
+                    { dispatcher.close() },
+                )
                 throw error
             }
         }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun startScheduleRunner(eventBus: AgentEventBus) {
-        scheduleRunnerJob = persistenceScope.launch {
-            while (isActive && !stopping) {
+        scheduleRunnerJob = persistenceScope.launchBackendRunner("schedule", { stopping }, runnerFailure) {
+            runBackendRunnerLoop({ stopping }, { error ->
+                BackendLogger.error(error) { "Schedule runner failed; will retry." }
+            }) {
                 val wakeTarget = lazyNextTriggerAt.transformLatest { nextTrigger ->
                     if (nextTrigger == null) return@transformLatest
-                    val waitDuration = nextTrigger - Clock.System.now()
+                    val waitDuration = nextTrigger - dependencies.clock.now()
                     if (waitDuration.isPositive()) {
                         delay(waitDuration)
                     }
@@ -543,23 +571,23 @@ internal class LazySqliteBackendPersistence(
                 }.first()
 
                 ensureOpen()
-                if (runCatching { checkAdmission() }.isFailure) {
+                if (!scheduleAdmissionOpen()) {
                     delay(20.milliseconds)
-                    continue
+                    return@runBackendRunnerLoop
                 }
                 val (sessions, schedules) = acquire(requireExternalAdmission = false)
-                val fireTime = Clock.System.now()
+                val fireTime = dependencies.clock.now()
                 val due = schedules.listDue(fireTime)
                 if (due.isEmpty()) {
                     if (fireTime < wakeTarget) {
                         delay(wakeTarget - fireTime + 1.milliseconds)
                     }
-                    continue
+                    return@runBackendRunnerLoop
                 }
                 var hadDeliveryFailure = false
                 for (record in due) {
                     ensureOpen()
-                    if (runCatching { checkAdmission() }.isFailure) {
+                    if (!scheduleAdmissionOpen()) {
                         hadDeliveryFailure = true
                         break
                     }
@@ -572,10 +600,16 @@ internal class LazySqliteBackendPersistence(
                                 description = record.description,
                             )
                             true
-                        } catch (deliveryFailure: Throwable) {
-                            val targetMissing = runCatching {
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
+                        } catch (deliveryFailure: Exception) {
+                            val targetMissing = try {
                                 sessions.getAgentRecord(record.agentId) == null
-                            }.getOrDefault(false)
+                            } catch (cancellation: CancellationException) {
+                                throw cancellation
+                            } catch (_: Exception) {
+                                false
+                            }
                             if (targetMissing) {
                                 BackendLogger.warn(deliveryFailure) {
                                     "Dropping orphan schedule ${record.scheduleId} for missing agent ${record.agentId}."
@@ -595,9 +629,11 @@ internal class LazySqliteBackendPersistence(
                             if (cronExpr == null) {
                                 schedules.delete(record.scheduleId)
                             } else {
-                                val nextAt = runCatching {
+                                val nextAt = try {
                                     nextCronTriggerAt(cronExpr, maxOf(fireTime, record.triggerAt))
-                                }.getOrElse { cronError ->
+                                } catch (cancellation: CancellationException) {
+                                    throw cancellation
+                                } catch (cronError: Exception) {
                                     BackendLogger.warn(cronError) {
                                         "Invalid cron expression on schedule ${record.scheduleId}; deleting."
                                     }
@@ -624,12 +660,24 @@ internal class LazySqliteBackendPersistence(
         }
     }
 
+    private fun scheduleAdmissionOpen(): Boolean = try {
+        checkAdmission()
+        true
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (_: IllegalStateException) {
+        false
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     fun startAwaitDeadlineRunner() {
-        awaitDeadlineRunnerJob = persistenceScope.launch {
+        awaitDeadlineRunnerJob = persistenceScope.launchBackendRunner("await_event", { stopping }, runnerFailure) {
+            val runnerScope = this
             val inFlight = MutableStateFlow(emptySet<Int>())
             val clock = dependencies.clock
-            while (isActive && !stopping) {
+            runBackendRunnerLoop({ stopping }, { error ->
+                BackendLogger.error(error) { "Await deadline runner failed; will retry." }
+            }) {
                 val candidates = combine(lazyAwaitDeadlines, inFlight) { deadlines, busy ->
                     deadlines.filterKeys { it !in busy }
                 }.transformLatest { deadlines ->
@@ -641,7 +689,7 @@ internal class LazySqliteBackendPersistence(
                 }.first()
                 for ((agentId, expected) in candidates) {
                     inFlight.update { it + agentId }
-                    launch {
+                    runnerScope.launch {
                         try {
                             ensureAdmission()
                             val repository = acquisitionMutex.withLock { acquiredSessions }
@@ -680,33 +728,34 @@ internal class LazySqliteBackendPersistence(
     }
 
     suspend fun closeAndDrain(): Unit = withContext(NonCancellable) {
-        val (sessions, connection) = acquisitionMutex.withLock {
-            stopping = true
-            scheduleRunnerJob?.cancel()
-            awaitDeadlineRunnerJob?.cancel()
-            val currentSessions = acquiredSessions
-            val currentConnection = acquiredConnection
-            acquiredSessions = null
-            acquiredSchedules = null
-            acquiredConnection = null
-            currentSessions to currentConnection
-        }
-        try {
-            scheduleRunnerJob?.join()
-            awaitDeadlineRunnerJob?.join()
-            sessions?.closeAndJoin()
-        } finally {
-            try {
-                persistenceScope.cancelAndJoin()
-            } finally {
-                if (connection != null) {
-                    dbMutex.withLock {
-                        withContext(Dispatchers.IO) {
-                            connection.close()
-                        }
-                    }
+        drainMutex.withLock {
+            val result = drainResult ?: runCatching {
+                val (sessions, database) = acquisitionMutex.withLock {
+                    stopping = true
+                    scheduleRunnerJob?.cancel()
+                    awaitDeadlineRunnerJob?.cancel()
+                    val current = acquiredSessions to acquiredDatabase
+                    acquiredSessions = null
+                    acquiredSchedules = null
+                    acquiredDatabase = null
+                    current
                 }
-            }
+                closeBackendResources(
+                    null,
+                    { scheduleRunnerJob?.join() },
+                    { awaitDeadlineRunnerJob?.join() },
+                    { sessions?.closeAndJoin() },
+                    { persistenceScope.cancelAndJoin() },
+                    {
+                        if (database != null) {
+                            val (connection, dispatcher) = database
+                            dbMutex.withLock { withContext(dispatcher) { connection.close() } }
+                        }
+                    },
+                    { database?.second?.close() },
+                )
+            }.also { drainResult = it }
+            result.getOrThrow()
         }
     }
 }

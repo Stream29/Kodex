@@ -57,6 +57,7 @@ kotlin {
                 cinterops.create("processClientWindows") {
                     defFile(project.file("src/nativeInterop/cinterop/process_client_windows.def"))
                     compilerOpts("-D_WIN32_WINNT=0x0600")
+                    compilerOpts("-I${project.file("src/nativeInterop/cinterop").absolutePath}")
                 }
             }
         }

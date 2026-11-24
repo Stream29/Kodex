@@ -40,7 +40,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.rpc.RpcServer
 import kotlinx.rpc.krpc.rpcServerConfig
@@ -60,9 +59,7 @@ public actual suspend fun <R> withLocalBackendServer(
     val transports = mutableSetOf<WebSocketRpcTransport>()
     var stopping = false
     val grants = BrowserGrants()
-    val expiry = launch {
-        while (true) { delay(1_000); grants.expire() }
-    }
+    val expiry = launch { grants.monitorExpiry() }
     val engine = embeddedServer(CIO, port = 0, host = "127.0.0.1") {
         install(WebSockets) { maxFrameSize = 16L * 1024 * 1024 }
         val pendingBrowserHellos = Semaphore(16)

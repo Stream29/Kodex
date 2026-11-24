@@ -26,6 +26,8 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TestTimeSource
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 
 val backendLifecycleTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
     test("starting is not ready and startup time does not consume the ready idle interval") {
@@ -262,14 +264,70 @@ val backendLifecycleTest by testSuite(testConfig = TestConfig.testScope(isEnable
         }
     }
 
-    test("expiry observer exits after manual stop and rejects invalid polling intervals") {
+    test("expiry observer exits after manual stop even with infinite TTL") {
         runTest {
-            val lifecycle = createBackendLifecycle()
-            assertFailsWith<IllegalArgumentException> { lifecycle.monitorIdleExpiry(Duration.ZERO) }
-            assertFailsWith<IllegalArgumentException> { lifecycle.monitorIdleExpiry(Duration.INFINITE) }
+            val lifecycle = createBackendLifecycle(Duration.INFINITE)
+            lifecycle.markReady()
+            val monitor = launch { lifecycle.monitorIdleExpiry() }
+            runCurrent()
             lifecycle.requestStop()
-            lifecycle.monitorIdleExpiry()
+            monitor.join()
             assertEquals(BackendStopReason.Manual, lifecycle.awaitStop())
+        }
+    }
+
+    test("infinite TTL does not wake and reload recomputes in both directions") {
+        runTest {
+            var reads = 0
+            val clock = countingTimeSource(testScheduler.timeSource) { reads++ }
+            val lifecycle = createBackendLifecycle(Duration.INFINITE, clock)
+            val monitor = launch { lifecycle.monitorIdleExpiry() }
+            advanceTimeBy(30_000)
+            assertEquals(0, reads)
+            lifecycle.markReady()
+            advanceTimeBy(30_000)
+            assertEquals(1, reads) // markReady only.
+
+            lifecycle.updateIdleTimeout(40.seconds)
+            runCurrent()
+            assertEquals(2, reads)
+            advanceTimeBy(5_000)
+            lifecycle.updateIdleTimeout(Duration.INFINITE)
+            runCurrent()
+            advanceTimeBy(30_000)
+            assertEquals(2, reads)
+            assertEquals(BackendPhase.Ready, lifecycle.state.value)
+
+            lifecycle.updateIdleTimeout(40.seconds)
+            runCurrent()
+            assertEquals(BackendStopReason.IdleTimeout, lifecycle.awaitStop())
+            monitor.join()
+        }
+    }
+
+    test("renewals do not reset the sleeping timer until its scheduled wake") {
+        runTest {
+            var reads = 0
+            val lifecycle = createBackendLifecycle(10.seconds, countingTimeSource(testScheduler.timeSource) { reads++ })
+            lifecycle.markReady()
+            val monitor = launch { lifecycle.monitorIdleExpiry() }
+            runCurrent()
+            assertEquals(2, reads)
+            advanceTimeBy(4_000)
+            assertTrue(lifecycle.renew())
+            runCurrent()
+            assertEquals(3, reads) // One clock read by renew; the old timer remains asleep.
+            advanceTimeBy(6_000)
+            runCurrent()
+            assertEquals(4, reads) // Wake at the original target, then sleep until the renewed deadline.
+            assertEquals(BackendPhase.Ready, lifecycle.state.value)
+            advanceTimeBy(3_999)
+            runCurrent()
+            assertEquals(BackendPhase.Ready, lifecycle.state.value)
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals(BackendStopReason.IdleTimeout, lifecycle.awaitStop())
+            monitor.join()
         }
     }
 
@@ -286,6 +344,18 @@ val backendLifecycleTest by testSuite(testConfig = TestConfig.testScope(isEnable
             observer.join()
             assertEquals(listOf(BackendPhase.Starting, BackendPhase.Ready, BackendPhase.Stopping), phases)
             assertEquals(BackendStopReason.Manual, lifecycle.awaitStop())
+        }
+    }
+}
+
+private fun countingTimeSource(source: TimeSource, onRead: () -> Unit): TimeSource = object : TimeSource {
+    override fun markNow(): TimeMark {
+        val mark = source.markNow()
+        return object : TimeMark {
+            override fun elapsedNow(): Duration {
+                onRead()
+                return mark.elapsedNow()
+            }
         }
     }
 }

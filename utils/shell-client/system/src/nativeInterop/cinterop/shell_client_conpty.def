@@ -1,11 +1,13 @@
 package = io.github.stream29.kodex.utils.shellclient.conpty
 
 headers = windows.h
+linkerOpts = -ladvapi32 -lbcrypt
 
 ---
 
 #define _WIN32_WINNT 0x0A00
 #include <windows.h>
+#include "kodex_windows_pipe.h"
 
 #ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
 #define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE ProcThreadAttributeValue(22, FALSE, TRUE, FALSE)
@@ -23,15 +25,26 @@ typedef VOID (WINAPI *kodex_close_pseudo_console)(HANDLE);
 
 typedef struct kodex_windows_pseudo_console {
     HANDLE pseudo_console;
+    kodex_close_pseudo_console close;
     HANDLE input_read;
     HANDLE output_write;
 } kodex_windows_pseudo_console;
 
-static inline void kodex_close_handle(HANDLE *handle) {
+static inline DWORD kodex_close_handle(HANDLE *handle) {
+    DWORD error = ERROR_SUCCESS;
     if (*handle != NULL) {
-        CloseHandle(*handle);
+        if (!CloseHandle(*handle)) error = GetLastError();
         *handle = NULL;
     }
+    return error;
+}
+
+static inline DWORD kodex_create_pty_job(HANDLE process, HANDLE *job) {
+    return kodex_windows_create_process_job(process, job);
+}
+
+static inline DWORD kodex_terminate_pty_tree(HANDLE process, HANDLE job) {
+    return kodex_windows_terminate_tree(process, job);
 }
 
 static inline int kodex_spawn_windows_pty(
@@ -49,7 +62,6 @@ static inline int kodex_spawn_windows_pty(
     HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
     kodex_create_pseudo_console create_pseudo_console;
     kodex_close_pseudo_console close_pseudo_console;
-    SECURITY_ATTRIBUTES security_attributes;
     HANDLE stdin_read = NULL;
     HANDLE stdin_write = NULL;
     HANDLE output_read = NULL;
@@ -86,25 +98,11 @@ static inline int kodex_spawn_windows_pty(
     close_pseudo_console = (kodex_close_pseudo_console)GetProcAddress(kernel32, "ClosePseudoConsole");
     if (create_pseudo_console == NULL || close_pseudo_console == NULL) return ERROR_CALL_NOT_IMPLEMENTED;
 
-    ZeroMemory(&security_attributes, sizeof(security_attributes));
-    security_attributes.nLength = sizeof(security_attributes);
-    security_attributes.bInheritHandle = TRUE;
-    if (!CreatePipe(&stdin_read, &stdin_write, &security_attributes, 0)) {
-        error = GetLastError();
-        goto fail;
-    }
-    if (!CreatePipe(&output_read, &output_write, &security_attributes, 0)) {
-        error = GetLastError();
-        goto fail;
-    }
-    if (!SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0)) {
-        error = GetLastError();
-        goto fail;
-    }
-    if (!SetHandleInformation(output_read, HANDLE_FLAG_INHERIT, 0)) {
-        error = GetLastError();
-        goto fail;
-    }
+    /* ConPTY is given the synchronous peers directly, not through inheritance. */
+    error = kodex_windows_private_pipe(&stdin_write, &stdin_read, FALSE, FALSE);
+    if (error != ERROR_SUCCESS) goto fail;
+    error = kodex_windows_private_pipe(&output_read, &output_write, TRUE, FALSE);
+    if (error != ERROR_SUCCESS) goto fail;
 
     size.X = columns;
     size.Y = rows;
@@ -113,7 +111,7 @@ static inline int kodex_spawn_windows_pty(
         error = HRESULT_CODE(pseudo_console_result);
         goto fail;
     }
-    // CreatePseudoConsole borrows these handles until ClosePseudoConsole.
+    // Keep our peer references until ClosePseudoConsole has been issued.
     pseudo_console_owner = (kodex_windows_pseudo_console *)HeapAlloc(
         GetProcessHeap(),
         HEAP_ZERO_MEMORY,
@@ -124,6 +122,7 @@ static inline int kodex_spawn_windows_pty(
         goto fail;
     }
     pseudo_console_owner->pseudo_console = pseudo_console;
+    pseudo_console_owner->close = close_pseudo_console;
     pseudo_console_owner->input_read = stdin_read;
     pseudo_console_owner->output_write = output_write;
     pseudo_console = NULL;
@@ -164,10 +163,6 @@ static inline int kodex_spawn_windows_pty(
 
     ZeroMemory(&startup_info, sizeof(startup_info));
     startup_info.StartupInfo.cb = sizeof(startup_info);
-    startup_info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup_info.StartupInfo.hStdInput = INVALID_HANDLE_VALUE;
-    startup_info.StartupInfo.hStdOutput = INVALID_HANDLE_VALUE;
-    startup_info.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
     startup_info.lpAttributeList = attribute_list;
     ZeroMemory(&process_info, sizeof(process_info));
     if (!CreateProcessW(
@@ -200,6 +195,10 @@ static inline int kodex_spawn_windows_pty(
 fail:
     if (attribute_list_initialized) DeleteProcThreadAttributeList(attribute_list);
     if (attribute_list != NULL) HeapFree(GetProcessHeap(), 0, attribute_list);
+    /* No reader owns these yet. Break the pipes before a pre-24H2 close
+       can block while writing the pseudo console's final output. */
+    kodex_close_handle(&stdin_write);
+    kodex_close_handle(&output_read);
     if (pseudo_console_owner != NULL) {
         if (pseudo_console_owner->pseudo_console != NULL && close_pseudo_console != NULL) {
             close_pseudo_console(pseudo_console_owner->pseudo_console);
@@ -211,25 +210,16 @@ fail:
         close_pseudo_console(pseudo_console);
     }
     kodex_close_handle(&stdin_read);
-    kodex_close_handle(&stdin_write);
-    kodex_close_handle(&output_read);
     kodex_close_handle(&output_write);
     return (int)error;
 }
 
-static inline void kodex_close_windows_pseudo_console(void *pseudo_console) {
-    HMODULE kernel32;
-    kodex_close_pseudo_console close_pseudo_console;
+static inline DWORD kodex_close_windows_pseudo_console(void *pseudo_console) {
     kodex_windows_pseudo_console *owner = (kodex_windows_pseudo_console *)pseudo_console;
-    if (owner == NULL) return;
-    kernel32 = GetModuleHandleW(L"kernel32.dll");
-    close_pseudo_console = kernel32 == NULL
-        ? NULL
-        : (kodex_close_pseudo_console)GetProcAddress(kernel32, "ClosePseudoConsole");
-    if (close_pseudo_console != NULL && owner->pseudo_console != NULL) {
-        close_pseudo_console(owner->pseudo_console);
-    }
-    kodex_close_handle(&owner->input_read);
-    kodex_close_handle(&owner->output_write);
+    if (owner == NULL) return ERROR_SUCCESS;
+    owner->close(owner->pseudo_console);
+    DWORD input_error = kodex_close_handle(&owner->input_read);
+    DWORD output_error = kodex_close_handle(&owner->output_write);
     HeapFree(GetProcessHeap(), 0, owner);
+    return input_error == ERROR_SUCCESS ? output_error : input_error;
 }

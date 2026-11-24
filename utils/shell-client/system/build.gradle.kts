@@ -65,6 +65,7 @@ kotlin {
             compilations.named("main") {
                 cinterops.create("shellClientConPty") {
                     defFile(project.file("src/nativeInterop/cinterop/shell_client_conpty.def"))
+                    compilerOpts("-I${rootProject.file("utils/process-client/src/nativeInterop/cinterop").absolutePath}")
                 }
             }
         }

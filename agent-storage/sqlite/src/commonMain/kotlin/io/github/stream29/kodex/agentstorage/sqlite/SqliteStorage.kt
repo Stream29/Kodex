@@ -13,8 +13,7 @@ import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.validateCommitBatch
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -29,6 +28,7 @@ public actual class SqliteAgentStorage actual constructor(
     public actual override val agentId: Int,
     public actual override val uri: String,
     private val mutex: Mutex,
+    private val dispatcher: CoroutineDispatcher,
     private val requireAccess: () -> Unit,
     private val onHistoryChanged: ((Set<AgentCommitType>?) -> Unit)?,
     private val onSessionGroupsChanged: ((Map<String?, Boolean>) -> Unit)?,
@@ -37,14 +37,14 @@ public actual class SqliteAgentStorage actual constructor(
 
     internal suspend fun <T> read(block: () -> T): T {
         currentCoroutineContext().ensureActive()
-        return mutex.withLock { withContext(Dispatchers.IO) { requireAccess(); block() } }
+        return mutex.withLock { withContext(dispatcher) { requireAccess(); block() } }
     }
 
     private suspend fun <T> write(changedTypes: Set<AgentCommitType>?, block: () -> Pair<T, Boolean>): T {
         currentCoroutineContext().ensureActive()
         return mutex.withLock {
             withContext(NonCancellable) {
-                withContext(Dispatchers.IO) {
+                withContext(dispatcher) {
                     requireAccess()
                     val (result, groups) = connection.transaction {
                         val before = connection.sessionCatalogGroup(agentId)

@@ -7,4 +7,4 @@ import kotlinx.coroutines.IO
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal actual val IoDispatcher: CoroutineDispatcher =
-    Dispatchers.IO.limitedParallelism(Int.MAX_VALUE, "Kodex.FileIO")
+    Dispatchers.IO.limitedParallelism(4, "Kodex.FileIO")

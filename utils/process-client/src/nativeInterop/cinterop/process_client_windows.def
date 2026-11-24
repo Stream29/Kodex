@@ -1,10 +1,85 @@
 package = io.github.stream29.kodex.utils.processclient.winspawn
 
 headers = windows.h
+linkerOpts = -ladvapi32 -lbcrypt
 
 ---
 
 #include <windows.h>
+#include "kodex_windows_pipe.h"
+
+static inline DWORD kodex_create_process_pipe(HANDLE *parent, HANDLE *child, BOOL parent_reads) {
+    return kodex_windows_private_pipe(parent, child, parent_reads, TRUE);
+}
+
+static inline DWORD kodex_create_process_job(HANDLE process, HANDLE *job) {
+    return kodex_windows_create_process_job(process, job);
+}
+
+static inline DWORD kodex_terminate_process_tree(HANDLE process, HANDLE job) {
+    return kodex_windows_terminate_tree(process, job);
+}
+
+typedef struct kodex_pipe_operation {
+    OVERLAPPED overlapped;
+    void *context;
+} kodex_pipe_operation;
+
+static inline HANDLE kodex_create_pipe_port(void) {
+    return CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1);
+}
+
+static inline DWORD kodex_associate_pipe(HANDLE port, HANDLE pipe) {
+    return CreateIoCompletionPort(pipe, port, 0, 0) == NULL ? GetLastError() : ERROR_SUCCESS;
+}
+
+static inline DWORD kodex_submit_pipe_io(
+    HANDLE pipe, kodex_pipe_operation *operation, void *context, void *buffer, DWORD count, BOOL reading
+) {
+    ZeroMemory(operation, sizeof(*operation));
+    operation->context = context;
+    BOOL ok = reading
+        ? ReadFile(pipe, buffer, count, NULL, &operation->overlapped)
+        : WriteFile(pipe, buffer, count, NULL, &operation->overlapped);
+    if (ok) return ERROR_SUCCESS; /* Even synchronous success queues a packet. */
+    DWORD error = GetLastError();
+    return error == ERROR_IO_PENDING ? ERROR_SUCCESS : error;
+}
+
+static inline void kodex_cancel_pipe_io(HANDLE pipe, kodex_pipe_operation *operation) {
+    /* ERROR_NOT_FOUND can race a dequeued packet. Neither result frees memory. */
+    CancelIoEx(pipe, &operation->overlapped);
+}
+
+static inline DWORD kodex_take_pipe_completion(HANDLE port, void **context, DWORD *count) {
+    OVERLAPPED *overlapped = NULL;
+    ULONG_PTR key;
+    *count = 0;
+    BOOL ok = GetQueuedCompletionStatus(port, count, &key, &overlapped, INFINITE);
+    DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+    *context = overlapped == NULL ? NULL : CONTAINING_RECORD(overlapped, kodex_pipe_operation, overlapped)->context;
+    return error;
+}
+
+static inline DWORD kodex_register_process_wait(HANDLE *wait, HANDLE process, WAITORTIMERCALLBACK callback, void *context) {
+    return RegisterWaitForSingleObject(wait, process, callback, context, INFINITE, WT_EXECUTEONLYONCE)
+        ? ERROR_SUCCESS : GetLastError();
+}
+
+static inline DWORD kodex_drain_process_wait(HANDLE wait) {
+    return UnregisterWaitEx(wait, INVALID_HANDLE_VALUE) ? ERROR_SUCCESS : GetLastError();
+}
+
+/* Short critical section for the terminate-versus-close linearization point. */
+static SRWLOCK kodex_process_watch_lock = SRWLOCK_INIT;
+
+static inline void kodex_lock_process_watch(void) {
+    AcquireSRWLockExclusive(&kodex_process_watch_lock);
+}
+
+static inline void kodex_unlock_process_watch(void) {
+    ReleaseSRWLockExclusive(&kodex_process_watch_lock);
+}
 
 static inline int kodex_spawn_windows_process(
     HANDLE *process_out,

@@ -56,7 +56,8 @@ public actual class SqliteKodexSessionRepository internal constructor(
     private val connection: SqliteConnection,
     private val agents: SqliteAgentRecords,
     private val mutex: Mutex,
-    private val ownsConnection: Boolean,
+    private val dispatcher: CoroutineDispatcher,
+    private val ownedDispatcher: CloseableCoroutineDispatcher? = null,
     initialEntries: List<Int>,
     initialDeadlines: Map<Int, PendingAwaitDeadline>,
     sessionTtl: Duration,
@@ -108,32 +109,44 @@ public actual class SqliteKodexSessionRepository internal constructor(
             withDbLock { if (!closed) groupNonces.runningChanged(runningGroupsLocked()) }
         }
     }
+    private val cleanupResult = CompletableDeferred<Result<Unit>>()
     private val cleanup = scope.launch(start = CoroutineStart.UNDISPATCHED) {
         try {
             awaitCancellation()
         } finally {
-            withContext(NonCancellable) {
-                lifecycleMutex.withLock {
-                    mutex.withLock { closed = true }
-                    val handles = residency.detachAllLocked()
-                    for (handle in handles) {
-                        residency.drainDetached(handle)
-                    }
-                    try {
-                        mirror.closeAndDrain()
-                    } finally {
-                        mirrorScope.cancel()
-                        if (ownsConnection) {
+            val result = runCatching {
+                withContext(NonCancellable) {
+                    if (ownedDispatcher == null) {
+                        drainRepository()
+                    } else {
+                        ownedDispatcher.use {
+                            connection.closeOnFailure({ withDbLock { it.close() } }) {
+                                drainRepository()
+                            }
                             withDbLock { connection.close() }
                         }
                     }
                 }
             }
+            cleanupResult.complete(result)
+            result.getOrThrow()
+        }
+    }
+
+    private suspend fun drainRepository() = lifecycleMutex.withLock {
+        mutex.withLock { closed = true }
+        try {
+            for (handle in residency.detachAllLocked()) {
+                residency.drainDetached(handle)
+            }
+            mirror.closeAndDrain()
+        } finally {
+            mirrorScope.cancel()
         }
     }
 
     private suspend fun <T> withDbLock(block: () -> T): T =
-        mutex.withLock { withContext(Dispatchers.IO) { block() } }
+        mutex.withLock { withContext(dispatcher) { block() } }
 
     private fun requireOpen() {
         check(!closed && coroutineContext[Job]?.isActive == true) { "Session repository is closed" }
@@ -469,6 +482,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
                     agentId = agentId,
                     uri = targetDirectory.toStorageUri(),
                     mutex = mutex,
+                    dispatcher = dispatcher,
                     requireAccess = { check(storageScope.isActive) { "Session storage is closed" } },
                     onHistoryChanged = { changedTypes ->
                         if (changedTypes == null || AgentCommitType.Unstable in changedTypes) {
@@ -583,6 +597,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
         withContext(NonCancellable) {
             this@SqliteKodexSessionRepository.coroutineContext[Job]?.cancelJobAndJoin()
             cleanup.join()
+            cleanupResult.await().getOrThrow()
         }
     }
 }
@@ -598,6 +613,7 @@ public actual suspend fun openVerifiedKodexDatabase(
     root: Path,
     fileSystem: CoroutineFileSystem,
     allowFresh: Boolean,
+    dispatcher: CoroutineDispatcher,
 ): Pair<Path, SqliteConnection> {
     if (allowFresh) fileSystem.createDirectories(root)
     val resolvedRoot = fileSystem.resolve(root)
@@ -609,7 +625,7 @@ public actual suspend fun openVerifiedKodexDatabase(
     if (!fresh && (dbMetadata?.isRegularFile != true || dbMetadata.size == 0L || fileSystem.resolve(dbPath) != dbPath)) {
         throw IOException("Authoritative SQLite session database is missing for existing Kodex Home: $dbPath")
     }
-    val connection = withContext(Dispatchers.IO) {
+    val connection = acquireDatabaseConnection(dispatcher) {
         try {
             val opened = if (fresh) openSqliteConnection(dbPath) else openExistingSqliteConnection(dbPath)
             opened.closeOnFailure { conn ->
@@ -629,6 +645,29 @@ public actual suspend fun openVerifiedKodexDatabase(
     return resolvedRoot to connection
 }
 
+internal suspend fun acquireDatabaseConnection(
+    dispatcher: CoroutineDispatcher,
+    open: () -> SqliteConnection,
+): SqliteConnection {
+    var acquired: SqliteConnection? = null
+    try {
+        // Record the handle before crossing a dispatcher boundary that may discard the result.
+        val connection = withContext(dispatcher) { open().also { acquired = it } }
+        currentCoroutineContext().ensureActive()
+        return connection
+    } catch (failure: Throwable) {
+        try {
+            acquired?.let { connection ->
+                withContext(NonCancellable) { withContext(dispatcher) { connection.close() } }
+            }
+        } catch (cleanup: Throwable) {
+            if (cleanup !== failure) failure.addSuppressed(cleanup)
+        }
+        throw failure
+    }
+}
+
+@OptIn(DelicateCoroutinesApi::class, ExperimentalCoroutinesApi::class)
 public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     root: Path,
     dependencies: KodexAgentDependencies,
@@ -640,31 +679,35 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     reportMirrorFailure: (Throwable) -> Unit,
 ): SqliteKodexSessionRepository {
     require(sessionTtl.isPositive()) { "sessionTtl must be positive: $sessionTtl" }
-    val (resolvedRoot, openedConnection) = openVerifiedKodexDatabase(root, fileSystem, allowFresh = true)
-    return openedConnection.closeOnFailure { connection ->
-        supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
-            val (initialEntries, initialDeadlines, agents) = withContext(Dispatchers.IO) {
-                Triple(querySessionInventory(connection), queryAwaitDeadlines(connection), SqliteAgentRecords(connection))
+    return newSingleThreadContext("Kodex.SqliteMain").closeOnFailure({ it.close() }) { dispatcher ->
+        val (resolvedRoot, openedConnection) =
+            openVerifiedKodexDatabase(root, fileSystem, allowFresh = true, dispatcher = dispatcher)
+        openedConnection.closeOnFailure({ withContext(dispatcher) { it.close() } }) { connection ->
+            supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
+                val (initialEntries, initialDeadlines, agents) = withContext(dispatcher) {
+                    Triple(querySessionInventory(connection), queryAwaitDeadlines(connection), SqliteAgentRecords(connection))
+                }
+                currentCoroutineContext().ensureActive()
+                scope.coroutineContext.ensureActive()
+                SqliteKodexSessionRepository(
+                    scope = scope,
+                    root = resolvedRoot,
+                    dependencies = dependencies,
+                    fileSystem = fileSystem,
+                    connection = connection,
+                    agents = agents,
+                    mutex = Mutex(),
+                    dispatcher = dispatcher,
+                    ownedDispatcher = dispatcher,
+                    initialEntries = initialEntries,
+                    initialDeadlines = initialDeadlines,
+                    sessionTtl = sessionTtl,
+                    origin = timeSource.markNow(),
+                    onTurnActiveRenewal = onTurnActiveRenewal,
+                    turnRenewalInterval = turnRenewalInterval,
+                    reportMirrorFailure = reportMirrorFailure,
+                )
             }
-            currentCoroutineContext().ensureActive()
-            scope.coroutineContext.ensureActive()
-            SqliteKodexSessionRepository(
-                scope = scope,
-                root = resolvedRoot,
-                dependencies = dependencies,
-                fileSystem = fileSystem,
-                connection = connection,
-                agents = agents,
-                mutex = Mutex(),
-                ownsConnection = true,
-                initialEntries = initialEntries,
-                initialDeadlines = initialDeadlines,
-                sessionTtl = sessionTtl,
-                origin = timeSource.markNow(),
-                onTurnActiveRenewal = onTurnActiveRenewal,
-                turnRenewalInterval = turnRenewalInterval,
-                reportMirrorFailure = reportMirrorFailure,
-            )
         }
     }
 }
@@ -680,13 +723,14 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     onTurnActiveRenewal: suspend () -> Unit,
     turnRenewalInterval: () -> Duration,
     reportMirrorFailure: (Throwable) -> Unit,
+    dispatcher: CoroutineDispatcher,
     onDeleteInTransaction: (sessionId: Int) -> Unit,
 ): SqliteKodexSessionRepository {
     require(sessionTtl.isPositive()) { "sessionTtl must be positive: $sessionTtl" }
     val resolvedRoot = fileSystem.resolve(root)
     return supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
         val (initialEntries, initialDeadlines, agents) = mutex.withLock {
-            withContext(Dispatchers.IO) {
+            withContext(dispatcher) {
                 requireKodexHomeDatabase(connection)
                 Triple(querySessionInventory(connection), queryAwaitDeadlines(connection), SqliteAgentRecords(connection))
             }
@@ -701,7 +745,7 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
             connection = connection,
             agents = agents,
             mutex = mutex,
-            ownsConnection = false,
+            dispatcher = dispatcher,
             initialEntries = initialEntries,
             initialDeadlines = initialDeadlines,
             sessionTtl = sessionTtl,

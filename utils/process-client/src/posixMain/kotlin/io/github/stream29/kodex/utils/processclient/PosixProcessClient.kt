@@ -1,55 +1,40 @@
-@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+@file:OptIn(
+    kotlinx.cinterop.ExperimentalForeignApi::class,
+    kotlinx.coroutines.DelicateCoroutinesApi::class,
+    kotlinx.coroutines.ExperimentalCoroutinesApi::class,
+    io.github.stream29.kodex.utils.processclient.NativeProcessAdapterApi::class,
+)
 
 package io.github.stream29.kodex.utils.processclient
 
-import io.github.stream29.kodex.utils.processclient.cinterop.kodex_spawn_process
-import io.github.stream29.kodex.utils.processclient.cinterop.kodex_process_create_pipe
-import io.github.stream29.kodex.utils.processclient.cinterop.kodex_process_write
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSink
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
+import io.github.stream29.kodex.utils.processclient.cinterop.kodex_process_create_pipe
+import io.github.stream29.kodex.utils.processclient.cinterop.kodex_spawn_process
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.CPointerVar
 import kotlinx.cinterop.IntVar
-import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.set
-import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
-import kotlinx.io.Buffer
-import kotlinx.io.IOException
-import kotlinx.io.RawSink
-import kotlinx.io.RawSource
-import kotlinx.io.readByteArray
-import platform.posix.ECHILD
-import platform.posix.EINTR
-import platform.posix.ESRCH
-import platform.posix.SIGKILL
 import platform.posix.close
 import platform.posix.errno
-import platform.posix.kill
-import platform.posix.read
-import platform.posix.waitpid
-import kotlin.concurrent.atomics.AtomicBoolean
-import kotlin.concurrent.atomics.ExperimentalAtomicApi
-import kotlin.time.Duration.Companion.seconds
 
 internal actual class PlatformProcessClient actual constructor(
     scope: CoroutineScope,
@@ -58,7 +43,7 @@ internal actual class PlatformProcessClient actual constructor(
     ProcessClient {
 
     actual override suspend fun start(command: ProcessCommand): ProcessSession =
-        this@PlatformProcessClient.acquireProcessSession(PosixProcessIoDispatcher) {
+        this@PlatformProcessClient.acquireProcessSession(Dispatchers.IO) {
             this@PlatformProcessClient.requireOpen()
             command.startPosixProcess(this@PlatformProcessClient)
         }
@@ -68,57 +53,87 @@ internal actual class PlatformProcessClient actual constructor(
     }
 }
 
-private val PosixProcessIoDispatcher: CoroutineDispatcher =
-    Dispatchers.IO.limitedParallelism(Int.MAX_VALUE, "Kodex.ProcessClientIO")
+private suspend fun ProcessCommand.startPosixProcess(ownerScope: CoroutineScope): ProcessSession {
+    val unadopted = mutableListOf<Int>()
+    val streams = mutableListOf<NativeProcessStream>()
+    var child: NativeProcessExit? = null
 
-private fun ProcessCommand.startPosixProcess(ownerScope: CoroutineScope): ProcessSession =
-    withPosixPipe { stdinRead, stdinWrite ->
-        withPosixPipe { outputRead, outputWrite ->
-            withPosixPipe { errorRead, errorWrite ->
-                arguments.withPosixStrings { argumentValues, argumentCount ->
-                    environment.entries.map { (name, value) -> "$name=$value" }
-                        .withPosixStrings { environmentValues, environmentCount ->
-                            memScoped {
-                                val pid = alloc<IntVar>()
-                                val processGroup = alloc<IntVar>()
-                                val result = kodex_spawn_process(
-                                    pid = pid.ptr,
-                                    process_group = processGroup.ptr,
-                                    stdin_read = stdinRead,
-                                    stdin_write = stdinWrite,
-                                    output_read = outputRead,
-                                    output_write = outputWrite,
-                                    error_read = errorRead,
-                                    error_write = errorWrite,
-                                    executable = executable,
-                                    arguments = argumentValues,
-                                    argument_count = argumentCount,
-                                    environment_overrides = environmentValues,
-                                    environment_override_count = environmentCount,
-                                    working_directory = workingDirectory.toString(),
-                                )
-                                if (result != 0) {
-                                    throw ProcessException(
-                                        "Failed to start process with $executable: error $result.",
-                                    )
-                                }
-                                PosixPipeTransfer(
-                                    value = PosixProcessSession(
-                                        pid = pid.value,
-                                        ownsProcessGroup = processGroup.value != 0,
-                                        stdinDescriptor = PosixDescriptor(stdinWrite),
-                                        stdoutDescriptor = PosixDescriptor(outputRead),
-                                        stderrDescriptor = PosixDescriptor(errorRead),
-                                        ownerScope = ownerScope,
-                                    ),
-                                    transferRead = true,
-                                )
-                            }
-                        }
-                }
-            }.let { session -> PosixPipeTransfer(session, transferRead = true) }
-        }.let { session -> PosixPipeTransfer(session, transferWrite = true) }
+    fun pipe(): Pair<Int, Int> = memScoped {
+        val descriptors = allocArray<IntVar>(2)
+        if (kodex_process_create_pipe(descriptors) != 0) {
+            throw ProcessException("Failed to create process pipe: errno $errno.")
+        }
+        val read = descriptors[0]
+        val write = descriptors[1]
+        unadopted.add(read)
+        unadopted.add(write)
+        read to write
     }
+
+    fun adopt(fd: Int): NativeProcessStream =
+        adoptNativeProcessStream(fd.toLong(), terminal = false).also {
+            unadopted.remove(fd)
+            streams.add(it)
+        }
+
+    fun closeUnadopted() {
+        unadopted.forEach { close(it) }
+        unadopted.clear()
+    }
+
+    try {
+        val (stdinRead, stdinWrite) = pipe()
+        val (outputRead, outputWrite) = pipe()
+        val (errorRead, errorWrite) = pipe()
+        // Initialize the reactor and adopt all parent ends before spawning. The child's
+        // ends are distinct open file descriptions and keep their blocking flags.
+        val stdin = adopt(stdinWrite)
+        val stdout = adopt(outputRead)
+        val stderr = adopt(errorRead)
+        val exit = arguments.withPosixStrings { argumentValues, argumentCount ->
+            environment.entries.map { (name, value) -> "$name=$value" }
+                .withPosixStrings { environmentValues, environmentCount ->
+                    memScoped {
+                        val pid = alloc<IntVar>()
+                        val processGroup = alloc<IntVar>()
+                        val result = kodex_spawn_process(
+                            pid = pid.ptr,
+                            process_group = processGroup.ptr,
+                            stdin_read = stdinRead,
+                            stdin_write = stdinWrite,
+                            output_read = outputRead,
+                            output_write = outputWrite,
+                            error_read = errorRead,
+                            error_write = errorWrite,
+                            executable = executable,
+                            arguments = argumentValues,
+                            argument_count = argumentCount,
+                            environment_overrides = environmentValues,
+                            environment_override_count = environmentCount,
+                            working_directory = workingDirectory.toString(),
+                        )
+                        if (result != 0) {
+                            throw ProcessException("Failed to start process with $executable: error $result.")
+                        }
+                        val root = pid.value.toLong()
+                        watchNativeProcessExit(root, if (processGroup.value != 0) root else 0L)
+                    }
+                }
+        }
+        child = exit
+        closeUnadopted()
+        return PosixProcessSession(stdin, stdout, stderr, exit, ownerScope)
+    } catch (failure: Throwable) {
+        closeUnadopted()
+        child?.terminate()
+        streams.forEach { it.requestClose() }
+        withContext(NonCancellable) {
+            for (stream in streams) suppressCleanup(failure) { stream.close() }
+            suppressCleanup(failure) { child?.close() }
+        }
+        throw failure
+    }
+}
 
 private inline fun <T> List<String>.withPosixStrings(
     block: (values: CPointer<CPointerVar<ByteVar>>?, count: ULong) -> T,
@@ -137,221 +152,80 @@ private inline fun <T> List<String>.withPosixStrings(
     }
 }
 
-private data class PosixPipeTransfer<T>(
-    val value: T,
-    val transferRead: Boolean = false,
-    val transferWrite: Boolean = false,
-)
-
-private fun <T> withPosixPipe(block: (read: Int, write: Int) -> PosixPipeTransfer<T>): T = memScoped {
-    val descriptors = allocArray<IntVar>(2)
-    checkPosixResult(kodex_process_create_pipe(descriptors), "create process pipe")
-    val read = descriptors[0]
-    val write = descriptors[1]
-    try {
-        val transfer = block(read, write)
-        if (!transfer.transferRead) close(read)
-        if (!transfer.transferWrite) close(write)
-        transfer.value
-    } catch (failure: Throwable) {
-        close(read)
-        close(write)
-        throw failure
-    }
-}
-
-@OptIn(ExperimentalAtomicApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
 private class PosixProcessSession(
-    private val pid: Int,
-    private val ownsProcessGroup: Boolean,
-    stdinDescriptor: PosixDescriptor,
-    stdoutDescriptor: PosixDescriptor,
-    stderrDescriptor: PosixDescriptor,
+    private val processStdin: NativeProcessStream,
+    private val processStdout: NativeProcessStream,
+    private val processStderr: NativeProcessStream,
+    private val processExit: NativeProcessExit,
     ownerScope: CoroutineScope,
 ) : ProcessSession {
-    private val processStdin = BlockingCoroutineRawSink(
-        PosixRawSink(stdinDescriptor),
-        PosixProcessIoDispatcher,
-    )
-    private val processStdout = BlockingCoroutineRawSource(
-        PosixRawSource(stdoutDescriptor),
-        PosixProcessIoDispatcher,
-    )
-    private val processStderr = BlockingCoroutineRawSource(
-        PosixRawSource(stderrDescriptor),
-        PosixProcessIoDispatcher,
-    )
     override val stdin: CoroutineRawSink = processStdin
     override val stdout: CoroutineRawSource = processStdout
     override val stderr: CoroutineRawSource = processStderr
     override val exitCode: Deferred<Int>
         field = CompletableDeferred()
-    private val closed = AtomicBoolean(false)
+    private val closeRequested = CompletableDeferred<Unit>()
     private val releaseResult = CompletableDeferred<Result<Unit>>()
-    private var cancellationGuard: Job? = null
-    private val exitObserver: Job
 
-    init {
-        cancellationGuard = ownerScope.launchProcessCancellationGuard(PosixProcessIoDispatcher) { runCatching { close() } }
-        exitObserver = ownerScope.launch(PosixProcessIoDispatcher, start = CoroutineStart.ATOMIC) {
-            try {
-                exitCode.complete(awaitExitCode())
-            } catch (failure: Throwable) {
-                exitCode.completeExceptionally(failure)
-            }
-        }
-        exitObserver.invokeOnCompletion { failure -> if (failure != null) runCatching { close() } }
-    }
-
-    override fun close() {
-        if (!closed.compareAndSet(expectedValue = false, newValue = true)) return
-        cancellationGuard?.cancel()
-        var cleanup: Throwable? = null
-        fun attempt(block: () -> Unit) {
-            try { block() } catch (failure: Throwable) {
-                val first = cleanup
-                if (first == null) cleanup = failure else if (first !== failure) first.addSuppressed(failure)
-            }
-        }
-        if (!exitCode.isCompleted) {
-            if (!ownsProcessGroup || (kill(-pid, SIGKILL) != 0 && errno != ESRCH)) {
-                if (kill(pid, SIGKILL) != 0 && errno != ESRCH) {
-                    val failure = ProcessException("Failed to terminate process $pid: errno $errno.")
-                    cleanup = failure
-                    exitCode.completeExceptionally(failure)
-                }
-            }
-        }
-        attempt { processStdin.closeImmediately() }
-        attempt { processStdout.closeImmediately() }
-        attempt { processStderr.closeImmediately() }
-        val failure = cleanup
-        releaseResult.complete(failure?.let { Result.failure(it) } ?: Result.success(Unit))
-        failure?.let { throw it }
-    }
-
-    override suspend fun closeAndJoin(): Unit = withContext(NonCancellable + PosixProcessIoDispatcher) {
-        var primary: Throwable? = null
+    // This child exists even if cancellation races with session handoff. Its
+    // owner cannot finish until pending I/O is invalidated and the child reaped.
+    private val lifecycle = ownerScope.launch(start = CoroutineStart.ATOMIC) {
         try {
-            withTimeout(7.seconds) {
-                runCatching { close() }
-                primary = releaseResult.await().exceptionOrNull()
-                cancellationGuard?.join()
-                exitObserver.join()
-                primary?.let { throw it }
-            }
-        } catch (waiting: Throwable) {
-            val first = primary
-            if (first != null && first !== waiting) { first.addSuppressed(waiting); throw first }
-            throw waiting
-        }
-    }
-
-    private fun awaitExitCode(): Int = memScoped {
-        val status = alloc<IntVar>()
-        while (true) {
-            when (waitpid(pid, status.ptr, 0)) {
-                pid -> return@memScoped decodeExitCode(status.value)
-                -1 -> when (errno) {
-                    EINTR -> continue
-                    ECHILD -> return@memScoped 0
-                    else -> throw ProcessException("Failed to observe process exit: errno $errno.")
+            publishExit()
+            closeRequested.await()
+        } finally {
+            close()
+            withContext(NonCancellable) {
+                var cleanup: Throwable? = null
+                suspend fun release(action: suspend () -> Unit) {
+                    try {
+                        action()
+                    } catch (failure: Throwable) {
+                        val first = cleanup
+                        if (first == null) cleanup = failure
+                        else if (first !== failure) first.addSuppressed(failure)
+                    }
                 }
-            }
-        }
-        error("Unreachable")
-    }
-}
-
-@OptIn(ExperimentalAtomicApi::class)
-private class PosixDescriptor(val value: Int) {
-    private val closed = AtomicBoolean(false)
-
-    val isOpen: Boolean
-        get() = !closed.load()
-
-    fun close() {
-        if (closed.compareAndSet(expectedValue = false, newValue = true)) {
-            close(value)
-        }
-    }
-}
-
-private class PosixRawSource(
-    private val descriptor: PosixDescriptor,
-) : RawSource {
-    override fun readAtMostTo(sink: Buffer, byteCount: Long): Long {
-        require(byteCount >= 0L) { "byteCount must not be negative." }
-        if (byteCount == 0L) return 0L
-        if (!descriptor.isOpen) throw IOException("Process output is closed.")
-
-        val bytes = ByteArray(minOf(byteCount, ProcessIoChunkSize).toInt())
-        while (true) {
-            val count = bytes.usePinned { pinned ->
-                read(descriptor.value, pinned.addressOf(0), bytes.size.toULong())
-            }
-            when {
-                count > 0L -> {
-                    sink.write(bytes, startIndex = 0, endIndex = count.toInt())
-                    return count
-                }
-
-                count == 0L -> return -1L
-                errno != EINTR -> throw IOException("Failed to read process output: errno $errno.")
+                release { processStdin.close() }
+                release { processStdout.close() }
+                release { processStderr.close() }
+                release { processExit.close() }
+                publishExit()
+                releaseResult.complete(cleanup?.let { Result.failure(it) } ?: Result.success(Unit))
             }
         }
     }
 
     override fun close() {
-        descriptor.close()
+        processExit.terminate()
+        processStdin.requestClose()
+        processStdout.requestClose()
+        processStderr.requestClose()
+        closeRequested.complete(Unit)
     }
-}
 
-private class PosixRawSink(
-    private val descriptor: PosixDescriptor,
-) : RawSink {
-    override fun write(source: Buffer, byteCount: Long) {
-        require(byteCount >= 0L && source.size >= byteCount) {
-            "byteCount must be within the source buffer."
-        }
-        var remaining = byteCount
-        while (remaining > 0L) {
-            val bytes = source.readByteArray(minOf(remaining, ProcessIoChunkSize).toInt())
-            var offset = 0
-            while (offset < bytes.size) {
-                if (!descriptor.isOpen) throw IOException("Process input is closed.")
-                val count = bytes.usePinned { pinned ->
-                    kodex_process_write(
-                        descriptor.value,
-                        pinned.addressOf(offset),
-                        (bytes.size - offset).toULong(),
-                    )
-                }
-                when {
-                    count > 0L -> offset += count.toInt()
-                    errno != EINTR -> throw IOException("Failed to write process input: errno $errno.")
-                }
-            }
-            remaining -= bytes.size
+    override suspend fun closeAndJoin(): Unit = withContext(NonCancellable) {
+        close()
+        lifecycle.join()
+        releaseResult.await().getOrThrow()
+    }
+
+    private suspend fun publishExit() {
+        if (exitCode.isCompleted) return
+        try {
+            exitCode.complete(processExit.await())
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            exitCode.completeExceptionally(failure)
         }
     }
+}
 
-    override fun flush() = Unit
-
-    override fun close() {
-        descriptor.close()
+private suspend inline fun suppressCleanup(primary: Throwable, action: () -> Unit) {
+    try {
+        action()
+    } catch (failure: Throwable) {
+        if (failure !== primary) primary.addSuppressed(failure)
     }
 }
-
-private fun checkPosixResult(result: Int, operation: String) {
-    if (result == -1) {
-        throw ProcessException("Failed to $operation: errno $errno.")
-    }
-}
-
-private fun decodeExitCode(status: Int): Int {
-    val signal = status and 0x7f
-    return if (signal == 0) (status ushr 8) and 0xff else 128 + signal
-}
-
-private const val ProcessIoChunkSize: Long = 8_192L

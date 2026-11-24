@@ -14,9 +14,23 @@ extern char **environ;
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+// The Kotlin/Native sysroot can predate Linux 5.3; both supported Linux ABIs
+// use this syscall number. Old kernels still return ENOSYS.
+#if !defined(SYS_pidfd_open) && (defined(__x86_64__) || defined(__aarch64__))
+#define SYS_pidfd_open 434
+#endif
+#endif
+#ifdef __APPLE__
+#include <sys/event.h>
+#endif
 #include "kodex_close_inherited_fds.h"
 
 static inline int kodex_process_create_pipe(int descriptors[2]) {
@@ -36,6 +50,156 @@ static inline int kodex_process_create_pipe(int descriptors[2]) {
     }
     return 0;
 #endif
+}
+
+static inline int kodex_process_configure_stream(int fd) {
+    int flags;
+    int result;
+    do { flags = fcntl(fd, F_GETFD); } while (flags < 0 && errno == EINTR);
+    if (flags < 0) return -1;
+    do { result = fcntl(fd, F_SETFD, flags | FD_CLOEXEC); } while (result < 0 && errno == EINTR);
+    if (result < 0) return -1;
+    do { flags = fcntl(fd, F_GETFL); } while (flags < 0 && errno == EINTR);
+    if (flags < 0) return -1;
+    do { result = fcntl(fd, F_SETFL, flags | O_NONBLOCK); } while (result < 0 && errno == EINTR);
+    return result;
+}
+
+static inline int kodex_process_create_wake_pipe(int descriptors[2]) {
+#ifdef __linux__
+    return pipe2(descriptors, O_CLOEXEC | O_NONBLOCK);
+#else
+    if (kodex_process_create_pipe(descriptors) < 0) return -1;
+    if (
+        kodex_process_configure_stream(descriptors[0]) == 0 &&
+        kodex_process_configure_stream(descriptors[1]) == 0
+    ) return 0;
+    int failure = errno;
+    close(descriptors[0]);
+    close(descriptors[1]);
+    errno = failure;
+    return -1;
+#endif
+}
+
+static inline void kodex_process_wake(int fd) {
+    char byte = 0;
+    // EAGAIN means an earlier notification is still in the pipe.
+    while (write(fd, &byte, 1) < 0 && errno == EINTR) { }
+}
+
+static inline void kodex_process_drain_wake(int fd) {
+    char bytes[4096];
+    while (read(fd, bytes, sizeof(bytes)) < 0 && errno == EINTR) { }
+}
+
+#define KODEX_POLL_READ 1
+#define KODEX_POLL_WRITE 2
+#define KODEX_POLL_ERROR 4
+#define KODEX_POLL_INVALID 8
+#define KODEX_POLL_HANGUP 16
+
+// Each row is {fd, interests, ready}. Keep nfds_t and struct pollfd inside C;
+// their ABI is not part of the commonized Native binding.
+static inline int kodex_process_poll(int *rows, int count, int timeout) {
+    struct pollfd local[64];
+    struct pollfd *fds = count <= 64 ? local : malloc((size_t)count * sizeof(*fds));
+    if (fds == NULL) {
+        errno = ENOMEM;
+        return -1;
+    }
+    for (int index = 0; index < count; index++) {
+        int interests = rows[index * 3 + 1];
+        fds[index].fd = rows[index * 3];
+        fds[index].events = (interests & KODEX_POLL_READ ? POLLIN : 0) |
+            (interests & KODEX_POLL_WRITE ? POLLOUT : 0);
+        fds[index].revents = 0;
+    }
+    int ready = poll(fds, (nfds_t)count, timeout);
+    int error = ready < 0 ? errno : 0;
+    if (ready > 0) {
+        for (int index = 0; index < count; index++) {
+            short events = fds[index].revents;
+            rows[index * 3 + 2] = (events & POLLIN ? KODEX_POLL_READ : 0) |
+                (events & POLLOUT ? KODEX_POLL_WRITE : 0) |
+                (events & POLLERR ? KODEX_POLL_ERROR : 0) |
+                (events & POLLNVAL ? KODEX_POLL_INVALID : 0) |
+                (events & POLLHUP ? KODEX_POLL_HANGUP : 0);
+        }
+    }
+    if (fds != local) free(fds);
+    if (ready < 0) errno = error;
+    return ready;
+}
+
+static inline int kodex_process_pty_eio_is_eof(void) {
+#ifdef __linux__
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+static inline int kodex_process_open_pidfd(pid_t pid) {
+#if defined(__linux__) && defined(SYS_pidfd_open)
+    int result;
+    do { result = (int)syscall(SYS_pidfd_open, pid, 0); } while (result < 0 && errno == EINTR);
+    return result;
+#else
+    return -1;
+#endif
+}
+
+static inline int kodex_process_open_exit_queue(void) {
+#ifdef __APPLE__
+    int fd = kqueue();
+    if (fd < 0) return -1;
+    if (fcntl(fd, F_SETFD, FD_CLOEXEC) == 0) return fd;
+    close(fd);
+#endif
+    return -1;
+}
+
+static inline int kodex_process_watch_kqueue(int fd, pid_t pid, long long token) {
+#ifdef __APPLE__
+    struct kevent change;
+    EV_SET(&change, pid, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, (void *)(intptr_t)token);
+    // Do not retry EV_ADD on EINTR: the change may already have taken effect.
+    return kevent(fd, &change, 1, NULL, 0, NULL);
+#else
+    return -1;
+#endif
+}
+
+static inline void kodex_process_unwatch_kqueue(int fd, pid_t pid) {
+#ifdef __APPLE__
+    struct kevent change;
+    EV_SET(&change, pid, EVFILT_PROC, EV_DELETE, 0, 0, NULL);
+    while (kevent(fd, &change, 1, NULL, 0, NULL) < 0 && errno == EINTR) { }
+#endif
+}
+
+static inline long long kodex_process_next_exit_event(int fd) {
+#ifdef __APPLE__
+    struct kevent event;
+    struct timespec no_wait = {0, 0};
+    int count;
+    do { count = kevent(fd, NULL, 0, &event, 1, &no_wait); } while (count < 0 && errno == EINTR);
+    if (count > 0) return (intptr_t)event.udata;
+    if (count < 0) return -1;
+#endif
+    return 0;
+}
+
+static inline int kodex_process_reap(pid_t pid, int *exit_code) {
+    int status;
+    pid_t result;
+    do { result = waitpid(pid, &status, WNOHANG); } while (result < 0 && errno == EINTR);
+    if (result <= 0) return result;
+    if (WIFEXITED(status)) *exit_code = WEXITSTATUS(status);
+    else if (WIFSIGNALED(status)) *exit_code = 128 + WTERMSIG(status);
+    else return 0;
+    return 1;
 }
 
 static inline size_t kodex_process_environment_name_length(const char *entry) {

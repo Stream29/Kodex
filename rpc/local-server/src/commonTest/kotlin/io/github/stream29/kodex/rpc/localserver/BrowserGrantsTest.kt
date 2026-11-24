@@ -1,10 +1,21 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package io.github.stream29.kodex.rpc.localserver
 
+import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.backend.*
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlin.test.*
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 import kotlin.time.TestTimeSource
 
 internal val browserGrantsTest by testSuite {
@@ -69,6 +80,70 @@ internal val browserGrantsTest by testSuite {
         }
         assertFailsWith<IllegalStateException> {
             grants.put(LocalBrowserGrant(LocalBrowserGrantProtocol, origin, "f".repeat(64), "/project"), "/project")
+        }
+    }
+}
+
+internal val browserGrantExpiryTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
+    test("empty registry does not wake and active peers expire at the earliest renewed deadline") {
+        runTest {
+            var reads = 0
+            val clock = object : TimeSource {
+                override fun markNow(): TimeMark {
+                    val mark = testScheduler.timeSource.markNow()
+                    return object : TimeMark {
+                        override fun elapsedNow(): Duration {
+                            reads++
+                            return mark.elapsedNow()
+                        }
+                    }
+                }
+            }
+            val grants = BrowserGrants(clock)
+            val first = Job()
+            val second = Job()
+            backgroundScope.launch { grants.monitorExpiry() }
+            try {
+                runCurrent()
+                assertNull(grants.earliestExpiry.value)
+                advanceTimeBy(120_000)
+                runCurrent()
+                assertEquals(0, reads)
+
+                val origin = "http://127.0.0.1:18801"
+                val a = "a".repeat(64)
+                val b = "b".repeat(64)
+                grants.put(LocalBrowserGrant(LocalBrowserGrantProtocol, origin, a, "/project"), "/project")
+                assertEquals("/project", grants.attach(a, origin, "/project", first))
+                assertEquals(180_000L, grants.earliestExpiry.value)
+                advanceTimeBy(10_000)
+                grants.put(LocalBrowserGrant(LocalBrowserGrantProtocol, origin, b, "/project"), "/project")
+                assertEquals("/project", grants.attach(b, origin, "/project", second))
+                advanceTimeBy(10_000)
+                assertTrue(grants.renew(a, origin))
+                assertEquals(190_000L, grants.earliestExpiry.value)
+
+                advanceTimeBy(49_999)
+                runCurrent()
+                assertTrue(first.isActive)
+                assertTrue(second.isActive)
+                advanceTimeBy(1)
+                runCurrent()
+                assertTrue(second.isCancelled)
+                assertTrue(first.isActive)
+                assertEquals(200_000L, grants.earliestExpiry.value)
+                advanceTimeBy(10_000)
+                runCurrent()
+                assertTrue(first.isCancelled)
+                assertNull(grants.earliestExpiry.value)
+                val readsWhenEmpty = reads
+                advanceTimeBy(120_000)
+                runCurrent()
+                assertEquals(readsWhenEmpty, reads)
+            } finally {
+                first.cancel()
+                second.cancel()
+            }
         }
     }
 }

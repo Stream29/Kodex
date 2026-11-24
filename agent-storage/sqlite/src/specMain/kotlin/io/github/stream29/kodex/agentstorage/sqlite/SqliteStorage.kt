@@ -7,11 +7,16 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.sync.Mutex
 import kotlin.time.Clock
 import kotlin.time.Instant
 
 /**
+ * [dispatcher] is borrowed; share it and [mutex] with the other users of [connection].
+ *
  * [onHistoryChanged] runs after commit under the database mutex. It receives changed types
  * or `null` for a revert. The callback must not suspend, reacquire the mutex, or throw.
  * [onSessionGroupsChanged] has the same after-commit boundary and is called only for roots
@@ -22,6 +27,7 @@ public expect class SqliteAgentStorage(
     agentId: Int,
     uri: String = "db:agent/$agentId",
     mutex: Mutex = Mutex(),
+    dispatcher: CoroutineDispatcher = Dispatchers.IO,
     requireAccess: () -> Unit = {},
     onHistoryChanged: ((Set<AgentCommitType>?) -> Unit)? = null,
     onSessionGroupsChanged: ((Map<String?, Boolean>) -> Unit)? = null,

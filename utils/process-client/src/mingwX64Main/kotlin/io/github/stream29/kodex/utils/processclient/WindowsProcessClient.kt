@@ -1,16 +1,17 @@
-@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, NativeProcessAdapterApi::class)
 
 package io.github.stream29.kodex.utils.processclient
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSink
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
+import io.github.stream29.kodex.utils.processclient.winspawn.kodex_create_process_job
+import io.github.stream29.kodex.utils.processclient.winspawn.kodex_create_process_pipe
 import io.github.stream29.kodex.utils.processclient.winspawn.kodex_spawn_windows_process
+import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.COpaquePointerVar
-import kotlinx.cinterop.CPointed
 import kotlinx.cinterop.CPointer
+import kotlinx.cinterop.MemScope
 import kotlinx.cinterop.UShortVar
-import kotlinx.cinterop.UIntVar
-import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.get
@@ -18,62 +19,37 @@ import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.plus
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.set
-import kotlinx.cinterop.sizeOf
 import kotlinx.cinterop.toKStringFromUtf16
-import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.IO
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
-import kotlinx.io.Buffer
-import kotlinx.io.IOException
-import kotlinx.io.RawSink
-import kotlinx.io.RawSource
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.files.Path
-import kotlinx.io.readByteArray
-import platform.windows.AssignProcessToJobObject
 import platform.windows.CloseHandle
-import platform.windows.CreateJobObjectW
-import platform.windows.CreatePipe
-import platform.windows.ERROR_BROKEN_PIPE
 import platform.windows.FreeEnvironmentStringsW
 import platform.windows.GetEnvironmentStringsW
-import platform.windows.GetExitCodeProcess
 import platform.windows.GetLastError
-import platform.windows.HANDLE_FLAG_INHERIT
-import platform.windows.INFINITE
-import platform.windows.ReadFile
 import platform.windows.ResumeThread
-import platform.windows.SECURITY_ATTRIBUTES
-import platform.windows.SetHandleInformation
-import platform.windows.TerminateJobObject
-import platform.windows.TerminateProcess
-import platform.windows.WAIT_OBJECT_0
-import platform.windows.WaitForSingleObject
-import platform.windows.WriteFile
-import kotlin.concurrent.atomics.AtomicBoolean
-import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Duration.Companion.seconds
 
 internal actual class PlatformProcessClient actual constructor(
     scope: CoroutineScope,
-) :
-    CoroutineScope by scope,
-    ProcessClient {
-
+) : CoroutineScope by scope, ProcessClient {
     actual override suspend fun start(command: ProcessCommand): ProcessSession =
-        this@PlatformProcessClient.acquireProcessSession(WindowsProcessIoDispatcher) {
-            this@PlatformProcessClient.requireOpen()
+        acquireProcessSession(WindowsProcessStart) {
+            requireOpen()
             command.startWindowsProcess(this@PlatformProcessClient)
         }
 
@@ -82,370 +58,236 @@ internal actual class PlatformProcessClient actual constructor(
     }
 }
 
-private val WindowsProcessIoDispatcher: CoroutineDispatcher =
-    Dispatchers.IO.limitedParallelism(Int.MAX_VALUE, "Kodex.ProcessClientIO")
+private val WindowsProcessStart = Dispatchers.IO.limitedParallelism(4, "Kodex.WindowsProcessStart")
 
-private fun ProcessCommand.startWindowsProcess(ownerScope: CoroutineScope): ProcessSession = memScoped {
-    val securityAttributes = alloc<SECURITY_ATTRIBUTES>().apply {
-        nLength = sizeOf<SECURITY_ATTRIBUTES>().toUInt()
-        lpSecurityDescriptor = null
-        bInheritHandle = 1
-    }
-    withWindowsPipe(securityAttributes.ptr) { stdinRead, stdinWrite ->
-        withWindowsPipe(securityAttributes.ptr) { outputRead, outputWrite ->
-            withWindowsPipe(securityAttributes.ptr) { errorRead, errorWrite ->
-                checkWindowsSuccess(
-                    SetHandleInformation(stdinWrite, HANDLE_FLAG_INHERIT.toUInt(), 0u),
-                    "make parent stdin handle non-inheritable",
-                )
-                checkWindowsSuccess(
-                    SetHandleInformation(outputRead, HANDLE_FLAG_INHERIT.toUInt(), 0u),
-                    "make parent stdout handle non-inheritable",
-                )
-                checkWindowsSuccess(
-                    SetHandleInformation(errorRead, HANDLE_FLAG_INHERIT.toUInt(), 0u),
-                    "make parent stderr handle non-inheritable",
-                )
-
-                val processHandle = alloc<COpaquePointerVar>()
-                val threadHandle = alloc<COpaquePointerVar>()
-                val environmentBlock = windowsEnvironmentBlock(environment)
-                val result = kodex_spawn_windows_process(
-                    process_out = processHandle.ptr,
-                    thread_out = threadHandle.ptr,
-                    command_line = windowsStringBuffer(windowsCommandLine()),
-                    working_directory = windowsStringBuffer(workingDirectory.windowsPath()),
-                    environment = environmentBlock,
-                    stdin_read = stdinRead,
-                    stdout_write = outputWrite,
-                    stderr_write = errorWrite,
-                )
-                if (result != 0) throw ProcessException("Failed to start process: error $result.")
-
-                val process = WindowsHandle(requireNotNull(processHandle.value))
-                val thread = requireNotNull(threadHandle.value)
-                val job = try {
-                    createWindowsProcessJob(process.value)
-                } catch (failure: Throwable) {
-                    TerminateProcess(process.value, 1u)
-                    process.close()
-                    closeWindowsHandle(thread)
-                    throw failure
-                }
-                try {
-                    if (ResumeThread(thread) == UInt.MAX_VALUE) {
-                        throw ProcessException("Failed to resume process: error ${GetLastError()}.")
-                    }
-                    WindowsPipeTransfer(
-                        value = WindowsProcessSession(
-                            process = process,
-                            job = job,
-                            stdinHandle = WindowsHandle(stdinWrite),
-                            stdoutHandle = WindowsHandle(outputRead),
-                            stderrHandle = WindowsHandle(errorRead),
-                            ownerScope = ownerScope,
-                        ),
-                        transferRead = true,
-                    )
-                } catch (failure: Throwable) {
-                    TerminateJobObject(job.value, 1u)
-                    job.close()
-                    process.close()
-                    throw failure
-                } finally {
-                    closeWindowsHandle(thread)
-                }
-            }.let { session -> WindowsPipeTransfer(session, transferRead = true) }
-        }.let { session -> WindowsPipeTransfer(session, transferWrite = true) }
-    }
-}
-
-private data class WindowsPipeTransfer<T>(
-    val value: T,
-    val transferRead: Boolean = false,
-    val transferWrite: Boolean = false,
-)
-
-private fun <T> withWindowsPipe(
-    securityAttributes: CPointer<SECURITY_ATTRIBUTES>,
-    block: (
-        read: CPointer<out CPointed>,
-        write: CPointer<out CPointed>,
-    ) -> WindowsPipeTransfer<T>,
-): T = memScoped {
-    val read = alloc<COpaquePointerVar>()
-    val write = alloc<COpaquePointerVar>()
-    checkWindowsSuccess(CreatePipe(read.ptr, write.ptr, securityAttributes, 0u), "create process pipe")
-    val readHandle = requireNotNull(read.value)
-    val writeHandle = requireNotNull(write.value)
+private suspend fun ProcessCommand.startWindowsProcess(owner: CoroutineScope): ProcessSession {
+    val pipes = mutableListOf<ProcessPipe>()
+    val streams = mutableListOf<NativeProcessStream>()
+    var process: COpaquePointer? = null
+    var thread: COpaquePointer? = null
+    var job: COpaquePointer? = null
+    var watch: NativeProcessExit? = null
     try {
-        val transfer = block(readHandle, writeHandle)
-        if (!transfer.transferRead) closeWindowsHandle(readHandle)
-        if (!transfer.transferWrite) closeWindowsHandle(writeHandle)
-        transfer.value
-    } catch (failure: Throwable) {
-        closeWindowsHandle(readHandle)
-        closeWindowsHandle(writeHandle)
-        throw failure
+        fun pipe(parentReads: Boolean): ProcessPipe = ProcessPipe(parentReads).also(pipes::add)
+        fun adopt(pipe: ProcessPipe): NativeProcessStream = pipe.adopt().also(streams::add)
+        val input = pipe(parentReads = false)
+        val output = pipe(parentReads = true)
+        val error = pipe(parentReads = true)
+        val stdin = adopt(input)
+        val stdout = adopt(output)
+        val stderr = adopt(error)
+
+        val (processHandle, threadHandle) = memScoped {
+            val processOut = alloc<COpaquePointerVar>()
+            val threadOut = alloc<COpaquePointerVar>()
+            val result = kodex_spawn_windows_process(
+                processOut.ptr, threadOut.ptr, windowsStringBuffer(windowsCommandLine()),
+                windowsStringBuffer(workingDirectory.windowsPath()), windowsEnvironmentBlock(environment),
+                input.child, output.child, error.child,
+            )
+            if (result != 0) throw ProcessException("Failed to start process: error $result.")
+            requireNotNull(processOut.value) to requireNotNull(threadOut.value)
+        }
+        process = processHandle
+        thread = threadHandle
+        pipes.forEach { it.closeChild() }
+        val jobHandle = memScoped {
+            val out = alloc<COpaquePointerVar>()
+            val result = kodex_create_process_job(processHandle, out.ptr)
+            if (result != 0u) throw ProcessException("Failed to assign process Job Object: error $result.")
+            requireNotNull(out.value)
+        }
+        job = jobHandle
+        val exitWatch = watchNativeProcessExit(processHandle.rawValue.toLong(), jobHandle.rawValue.toLong())
+        watch = exitWatch
+        if (ResumeThread(threadHandle) == UInt.MAX_VALUE) {
+            throw ProcessException("Failed to resume process: error ${GetLastError()}.")
+        }
+        thread = null
+        closeHandle(threadHandle)
+        return WindowsProcessSession(processHandle, jobHandle, exitWatch, stdin, stdout, stderr, owner)
+    } catch (primary: Throwable) {
+        withContext(NonCancellable) {
+            val cleanup = Cleanup(primary)
+            streams.forEach { it.requestClose() }
+            val terminated = cleanup.attempt {
+                val watcher = watch
+                if (watcher != null) watcher.terminate()
+                else process?.let { terminateWindowsProcessTree(it, job) }
+            }
+            for (pipe in pipes) {
+                cleanup.attempt { pipe.closeChild() }
+                cleanup.attempt { pipe.closeParent() }
+            }
+            for (stream in streams) cleanup.attempt { stream.close() }
+            if (terminated) cleanup.attempt { watch?.awaitTerminated() }
+            if (cleanup.attempt { watch?.close() }) {
+                cleanup.attempt { closeHandle(job) }
+                cleanup.attempt { closeHandle(process) }
+            }
+            cleanup.attempt { closeHandle(thread) }
+        }
+        throw primary
     }
 }
 
-@OptIn(ExperimentalAtomicApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
-private class WindowsProcessSession(
-    private val process: WindowsHandle,
-    private val job: WindowsHandle,
-    stdinHandle: WindowsHandle,
-    stdoutHandle: WindowsHandle,
-    stderrHandle: WindowsHandle,
-    ownerScope: CoroutineScope,
-) : ProcessSession {
-    private val processStdin = BlockingCoroutineRawSink(
-        WindowsRawSink(stdinHandle),
-        WindowsProcessIoDispatcher,
-    )
-    private val processStdout = BlockingCoroutineRawSource(
-        WindowsRawSource(stdoutHandle),
-        WindowsProcessIoDispatcher,
-    )
-    private val processStderr = BlockingCoroutineRawSource(
-        WindowsRawSource(stderrHandle),
-        WindowsProcessIoDispatcher,
-    )
-    override val stdin: CoroutineRawSink = processStdin
-    override val stdout: CoroutineRawSource = processStdout
-    override val stderr: CoroutineRawSource = processStderr
-    override val exitCode: Deferred<Int>
-        field = CompletableDeferred()
-    private val closed = AtomicBoolean(false)
-    private val releaseResult = CompletableDeferred<Result<Unit>>()
-    private val observerReleaseResult = CompletableDeferred<Result<Unit>>()
-    private var cancellationGuard: Job? = null
-    private val exitObserver: Job
+private class ProcessPipe(parentReads: Boolean) {
+    private var parent: COpaquePointer?
+    var child: COpaquePointer?
+        private set
 
     init {
-        cancellationGuard = ownerScope.launchProcessCancellationGuard(WindowsProcessIoDispatcher) { runCatching { close() } }
-        exitObserver = ownerScope.launch(WindowsProcessIoDispatcher, start = CoroutineStart.ATOMIC) {
-            try {
-                exitCode.complete(awaitExitCode())
-            } catch (failure: Throwable) {
-                exitCode.completeExceptionally(failure)
-            } finally {
-                var cleanup: Throwable? = null
-                try { process.close() } catch (failure: Throwable) { cleanup = failure }
-                try { job.close() } catch (failure: Throwable) {
-                    val first = cleanup
-                    if (first == null) cleanup = failure else if (first !== failure) first.addSuppressed(failure)
-                }
-                observerReleaseResult.complete(cleanup?.let { Result.failure(it) } ?: Result.success(Unit))
-            }
+        val (parentHandle, childHandle) = memScoped {
+            val parentOut = alloc<COpaquePointerVar>()
+            val childOut = alloc<COpaquePointerVar>()
+            val error = kodex_create_process_pipe(parentOut.ptr, childOut.ptr, if (parentReads) 1 else 0)
+            if (error != 0u) throw ProcessException("Failed to create process pipe: error $error.")
+            requireNotNull(parentOut.value) to requireNotNull(childOut.value)
         }
-        exitObserver.invokeOnCompletion { failure -> if (failure != null) runCatching { close() } }
+        parent = parentHandle
+        child = childHandle
     }
 
-    override fun close() {
-        if (!closed.compareAndSet(expectedValue = false, newValue = true)) return
-        cancellationGuard?.cancel()
-        var cleanup: Throwable? = null
-        fun attempt(block: () -> Unit) {
-            try { block() } catch (failure: Throwable) {
-                val first = cleanup
-                if (first == null) cleanup = failure else if (first !== failure) first.addSuppressed(failure)
-            }
-        }
-        if (!exitCode.isCompleted) {
-            attempt { TerminateJobObject(job.value, 1u) }
-        }
-        attempt { processStdin.closeImmediately() }
-        attempt { processStdout.closeImmediately() }
-        attempt { processStderr.closeImmediately() }
-        val failure = cleanup
-        releaseResult.complete(failure?.let { Result.failure(it) } ?: Result.success(Unit))
-        failure?.let { throw it }
+    fun adopt(): NativeProcessStream =
+        adoptNativeProcessStream(requireNotNull(parent).rawValue.toLong(), terminal = false).also { parent = null }
+
+    fun closeParent() {
+        val handle = parent
+        parent = null
+        closeHandle(handle)
     }
 
-    override suspend fun closeAndJoin(): Unit = withContext(NonCancellable + WindowsProcessIoDispatcher) {
+    fun closeChild() {
+        val handle = child
+        child = null
+        closeHandle(handle)
+    }
+}
+
+@OptIn(DelicateCoroutinesApi::class, ExperimentalCoroutinesApi::class)
+private class WindowsProcessSession(
+    private val process: COpaquePointer,
+    private val job: COpaquePointer,
+    private val watch: NativeProcessExit,
+    private val input: NativeProcessStream,
+    private val output: NativeProcessStream,
+    private val error: NativeProcessStream,
+    owner: CoroutineScope,
+) : ProcessSession {
+    override val stdin: CoroutineRawSink = input
+    override val stdout: CoroutineRawSource = output
+    override val stderr: CoroutineRawSource = error
+    private val streams = listOf(input, output, error)
+    private val exit = CompletableDeferred<Int>()
+    override val exitCode: Deferred<Int> = exit
+    private val released = CompletableDeferred<Result<Unit>>()
+
+    // Keep the raw streams (and the job, for descendants) until session close,
+    // but the root's exit status never waits for a pipe reader.
+    private val lifecycle = owner.launch(Dispatchers.Default, start = CoroutineStart.ATOMIC) {
         var primary: Throwable? = null
         try {
-            withTimeout(7.seconds) {
-                runCatching { close() }
-                primary = releaseResult.await().exceptionOrNull()
-                cancellationGuard?.join()
-                exitObserver.join()
-                val cleanup = observerReleaseResult.await().exceptionOrNull()
-                val first = primary
-                if (first != null) {
-                    if (cleanup != null && cleanup !== first && first.suppressedExceptions.none { it === cleanup }) {
-                        first.addSuppressed(cleanup)
-                    }
-                    throw first
+            exit.complete(watch.await())
+            awaitCancellation()
+        } catch (_: CancellationException) {
+            // Cancellation requests termination; publish its native status below.
+        } catch (failure: Throwable) {
+            primary = failure
+            exit.completeExceptionally(failure)
+        } finally {
+            withContext(NonCancellable) {
+                val cleanup = Cleanup(primary)
+                streams.forEach { it.requestClose() }
+                val terminated = cleanup.attempt { watch.terminate() }
+                if (!exit.isCompleted) {
+                    if (terminated) cleanup.attempt { exit.complete(watch.awaitTerminated()) }
+                    cleanup.failure?.let { exit.completeExceptionally(it) }
                 }
-                cleanup?.let { throw it }
+                if (cleanup.attempt { watch.close() }) {
+                    cleanup.attempt { closeHandle(job) }
+                    cleanup.attempt { closeHandle(process) }
+                }
+                for (stream in streams) cleanup.attempt { stream.close() }
+                released.complete(cleanup.failure?.let { Result.failure(it) } ?: Result.success(Unit))
             }
-        } catch (waiting: Throwable) {
-            val first = primary
-            if (first != null && first !== waiting) { first.addSuppressed(waiting); throw first }
-            throw waiting
         }
-    }
-
-    private fun awaitExitCode(): Int {
-        if (WaitForSingleObject(process.value, INFINITE) != WAIT_OBJECT_0) {
-            throw ProcessException("Failed to observe process exit: error ${GetLastError()}.")
-        }
-        return memScoped {
-            val code = alloc<UIntVar>()
-            checkWindowsSuccess(GetExitCodeProcess(process.value, code.ptr), "read process exit code")
-            code.value.toInt()
-        }
-    }
-}
-
-@OptIn(ExperimentalAtomicApi::class)
-private class WindowsHandle(
-    val value: CPointer<out CPointed>,
-) {
-    private val closed = AtomicBoolean(false)
-
-    val isOpen: Boolean
-        get() = !closed.load()
-
-    fun close() {
-        if (closed.compareAndSet(expectedValue = false, newValue = true)) {
-            closeWindowsHandle(value)
-        }
-    }
-}
-
-private class WindowsRawSource(
-    private val handle: WindowsHandle,
-) : RawSource {
-    override fun readAtMostTo(sink: Buffer, byteCount: Long): Long {
-        require(byteCount >= 0L) { "byteCount must not be negative." }
-        if (byteCount == 0L) return 0L
-        if (!handle.isOpen) throw IOException("Process output is closed.")
-
-        val bytes = ByteArray(minOf(byteCount, ProcessIoChunkSize).toInt())
-        val count = memScoped {
-            val read = alloc<UIntVar>()
-            val success = bytes.usePinned { pinned ->
-                ReadFile(handle.value, pinned.addressOf(0), bytes.size.toUInt(), read.ptr, null)
-            }
-            if (success == 0 && GetLastError() == ERROR_BROKEN_PIPE.toUInt()) return@memScoped -1
-            checkWindowsSuccess(success, "read process output")
-            read.value.toInt()
-        }
-        if (count < 0) return -1L
-        if (count == 0) return -1L
-        sink.write(bytes, startIndex = 0, endIndex = count)
-        return count.toLong()
     }
 
     override fun close() {
-        handle.close()
+        streams.forEach { it.requestClose() }
+        lifecycle.cancel()
+    }
+
+    override suspend fun closeAndJoin(): Unit = withContext(NonCancellable) {
+        close()
+        lifecycle.join()
+        released.await().getOrThrow()
     }
 }
 
-private class WindowsRawSink(
-    private val handle: WindowsHandle,
-) : RawSink {
-    override fun write(source: Buffer, byteCount: Long) {
-        require(byteCount >= 0L && source.size >= byteCount) {
-            "byteCount must be within the source buffer."
-        }
-        var remaining = byteCount
-        while (remaining > 0L) {
-            val bytes = source.readByteArray(minOf(remaining, ProcessIoChunkSize).toInt())
-            var offset = 0
-            while (offset < bytes.size) {
-                if (!handle.isOpen) throw IOException("Process input is closed.")
-                val count = memScoped {
-                    val written = alloc<UIntVar>()
-                    checkWindowsSuccess(
-                        bytes.usePinned { pinned ->
-                            WriteFile(
-                                handle.value,
-                                pinned.addressOf(offset),
-                                (bytes.size - offset).toUInt(),
-                                written.ptr,
-                                null,
-                            )
-                        },
-                        "write process input",
-                    )
-                    written.value.toInt()
-                }
-                if (count == 0) throw IOException("Process input accepted no bytes.")
-                offset += count
-            }
-            remaining -= bytes.size
-        }
+private suspend fun NativeProcessExit.awaitTerminated(): Int =
+    withTimeoutOrNull(7.seconds) { await() }
+        ?: throw ProcessException("Timed out waiting for terminated process to exit.")
+
+private class Cleanup(var failure: Throwable?) {
+    suspend fun attempt(block: suspend () -> Unit): Boolean = try {
+        block()
+        true
+    } catch (cleanup: Throwable) {
+        val primary = failure
+        if (primary == null) failure = cleanup else if (cleanup !== primary) primary.addSuppressed(cleanup)
+        false
     }
+}
 
-    override fun flush() = Unit
-
-    override fun close() {
-        handle.close()
+private fun closeHandle(handle: COpaquePointer?) {
+    if (handle != null && CloseHandle(handle) == 0) {
+        throw ProcessException("Failed to close process handle: error ${GetLastError()}.")
     }
 }
 
 private fun ProcessCommand.windowsCommandLine(): String =
-    (listOf(executable) + arguments).joinToString(" ") { argument -> argument.quoteWindowsArgument() }
+    (listOf(executable) + arguments).joinToString(" ") { it.quoteWindowsArgument() }
 
 private fun String.quoteWindowsArgument(): String =
-    if (isNotEmpty() && none { it.isWhitespace() || it == '"' }) {
-        this
-    } else {
-        buildString(length + 2) {
-            append('"')
-            var backslashCount = 0
-            this@quoteWindowsArgument.forEach { character ->
-                when (character) {
-                    '\\' -> backslashCount += 1
-                    '"' -> {
-                        repeat(backslashCount * 2 + 1) { append('\\') }
-                        append('"')
-                        backslashCount = 0
-                    }
-
-                    else -> {
-                        repeat(backslashCount) { append('\\') }
-                        append(character)
-                        backslashCount = 0
-                    }
-                }
+    if (isNotEmpty() && none { it.isWhitespace() || it == '"' }) this else buildString(length + 2) {
+        append('"')
+        var backslashes = 0
+        for (character in this@quoteWindowsArgument) {
+            if (character == '\\') {
+                backslashes++
+                continue
             }
-            repeat(backslashCount * 2) { append('\\') }
-            append('"')
+            repeat(if (character == '"') backslashes * 2 + 1 else backslashes) { append('\\') }
+            backslashes = 0
+            append(character)
         }
+        repeat(backslashes * 2) { append('\\') }
+        append('"')
     }
 
-private fun kotlinx.cinterop.MemScope.windowsStringBuffer(value: String): CPointer<UShortVar> {
+private fun MemScope.windowsStringBuffer(value: String): CPointer<UShortVar> {
     val buffer = allocArray<UShortVar>(value.length + 1)
     value.forEachIndexed { index, character -> buffer[index] = character.code.toUShort() }
     buffer[value.length] = 0u
     return buffer
 }
 
-private fun kotlinx.cinterop.MemScope.windowsEnvironmentBlock(
-    overrides: Map<String, String>,
-): CPointer<UShortVar> {
+private fun MemScope.windowsEnvironmentBlock(overrides: Map<String, String>): CPointer<UShortVar> {
     val entriesByName = currentWindowsEnvironment()
-        .associateByTo(linkedMapOf()) { entry -> entry.windowsEnvironmentName().lowercase() }
-    overrides.forEach { (name, value) ->
-        entriesByName[name.lowercase()] = "$name=$value"
-    }
+        .associateByTo(linkedMapOf()) { it.windowsEnvironmentName().lowercase() }
+    overrides.forEach { (name, value) -> entriesByName[name.lowercase()] = "$name=$value" }
     val entries = entriesByName.values.sortedWith(
-        Comparator { left, right ->
-            left.windowsEnvironmentName().compareTo(right.windowsEnvironmentName(), ignoreCase = true)
-        },
+        Comparator { left, right -> left.windowsEnvironmentName().compareTo(right.windowsEnvironmentName(), ignoreCase = true) },
     )
-    val buffer = allocArray<UShortVar>(entries.sumOf { entry -> entry.length + 1 } + 1)
+    val buffer = allocArray<UShortVar>(entries.sumOf { it.length + 1 } + if (entries.isEmpty()) 2 else 1)
     var offset = 0
-    entries.forEach { entry ->
+    for (entry in entries) {
         entry.forEach { character -> buffer[offset++] = character.code.toUShort() }
         buffer[offset++] = 0u
     }
     buffer[offset] = 0u
+    if (entries.isEmpty()) buffer[offset + 1] = 0u
     return buffer
 }
 
@@ -472,25 +314,3 @@ private fun String.windowsEnvironmentName(): String {
 }
 
 private fun Path.windowsPath(): String = toString().replace('/', '\\')
-
-private fun createWindowsProcessJob(process: CPointer<out CPointed>): WindowsHandle {
-    val job = CreateJobObjectW(null, null)
-        ?: throw ProcessException("Failed to create process Job Object: error ${GetLastError()}.")
-    if (AssignProcessToJobObject(job, process) == 0) {
-        closeWindowsHandle(job)
-        throw ProcessException("Failed to assign process Job Object: error ${GetLastError()}.")
-    }
-    return WindowsHandle(job)
-}
-
-private fun checkWindowsSuccess(success: Int, operation: String) {
-    if (success == 0) {
-        throw ProcessException("Failed to $operation: error ${GetLastError()}.")
-    }
-}
-
-private fun closeWindowsHandle(handle: CPointer<out CPointed>) {
-    CloseHandle(handle)
-}
-
-private const val ProcessIoChunkSize: Long = 8_192L

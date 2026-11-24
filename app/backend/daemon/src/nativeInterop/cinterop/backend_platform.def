@@ -1,10 +1,35 @@
 package = io.github.stream29.kodex.backend.cinterop
 ---
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <signal.h>
+#if defined(__linux__)
+#include <features.h>
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+#endif
+
+static inline void kodex_backend_configure_allocator(void) {
+#if defined(__linux__) && defined(__GLIBC__)
+    (void)mallopt(M_ARENA_MAX, 2);
+#endif
+}
+
+// Retain the separate frontend polling contract used by the web/app entrypoints.
+static volatile sig_atomic_t kodex_frontend_signal_value;
+static void kodex_frontend_signal_handler(int value) { kodex_frontend_signal_value = value; }
+static inline void kodex_frontend_install_signals(void) {
+    signal(SIGINT, kodex_frontend_signal_handler);
+    signal(SIGTERM, kodex_frontend_signal_handler);
+}
+static inline int kodex_frontend_stop_signal(void) { return kodex_frontend_signal_value != 0; }
+
 #ifdef _WIN32
 #include <windows.h>
 #include <bcrypt.h>
@@ -70,10 +95,114 @@ static inline int64_t kodex_backend_spawn(const char *home, const char *startup_
     CloseHandle(process.hThread); CloseHandle(process.hProcess);
     return pid;
 }
+
+static volatile LONG kodex_backend_signal_owner;
+static volatile LONG kodex_backend_signal_gate;
+static HANDLE kodex_backend_signal_event;
+static void (*kodex_backend_old_int)(int);
+static void (*kodex_backend_old_term)(int);
+
+static void kodex_backend_raise_stop_event(void) {
+    // A contending handler has already taken responsibility for setting the event.
+    if (InterlockedCompareExchange(&kodex_backend_signal_gate, 1, 0) != 0) return;
+    if (kodex_backend_signal_event != NULL) SetEvent(kodex_backend_signal_event);
+    InterlockedExchange(&kodex_backend_signal_gate, 0);
+}
+static void kodex_backend_signal_handler(int value) {
+    (void)value;
+    kodex_backend_raise_stop_event();
+}
+static BOOL WINAPI kodex_backend_console_handler(DWORD value) {
+    if (value != CTRL_C_EVENT && value != CTRL_BREAK_EVENT) return FALSE;
+    kodex_backend_raise_stop_event();
+    return TRUE;
+}
+static inline int kodex_backend_close_signal_event(void) {
+    // Serialize close with a console handler already dispatched by the OS.
+    while (InterlockedCompareExchange(&kodex_backend_signal_gate, 1, 0) != 0) Sleep(0);
+    HANDLE event = kodex_backend_signal_event;
+    kodex_backend_signal_event = NULL;
+    InterlockedExchange(&kodex_backend_signal_gate, 0);
+    return event == NULL || CloseHandle(event) ? 0 : -1;
+}
+static inline int kodex_backend_install_signals(void) {
+    if (InterlockedCompareExchange(&kodex_backend_signal_owner, 1, 0) != 0) return -1;
+    HANDLE event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (event == NULL) goto fail;
+    while (InterlockedCompareExchange(&kodex_backend_signal_gate, 1, 0) != 0) Sleep(0);
+    kodex_backend_signal_event = event;
+    InterlockedExchange(&kodex_backend_signal_gate, 0);
+    kodex_backend_old_int = signal(SIGINT, kodex_backend_signal_handler);
+    if (kodex_backend_old_int == SIG_ERR) goto fail;
+    kodex_backend_old_term = signal(SIGTERM, kodex_backend_signal_handler);
+    if (kodex_backend_old_term == SIG_ERR) goto restore_int;
+    if (!SetConsoleCtrlHandler(kodex_backend_console_handler, TRUE)) goto restore_term;
+    return 0;
+
+restore_term:
+    signal(SIGTERM, kodex_backend_old_term);
+restore_int:
+    signal(SIGINT, kodex_backend_old_int);
+fail:
+    kodex_backend_close_signal_event();
+    InterlockedExchange(&kodex_backend_signal_owner, 0);
+    return -1;
+}
+static inline int kodex_backend_uninstall_signals(void) {
+    int failed = !SetConsoleCtrlHandler(kodex_backend_console_handler, FALSE);
+    if (signal(SIGTERM, kodex_backend_old_term) == SIG_ERR) failed = 1;
+    if (signal(SIGINT, kodex_backend_old_int) == SIG_ERR) failed = 1;
+    if (kodex_backend_close_signal_event() != 0) failed = 1;
+    InterlockedExchange(&kodex_backend_signal_owner, 0);
+    return failed ? -1 : 0;
+}
+
+struct kodex_backend_signal_wait {
+    HANDLE handle;
+    HANDLE event;
+    void (*notify)(void *);
+    void *context;
+};
+static VOID CALLBACK kodex_backend_signal_ready(PVOID context, BOOLEAN timed_out) {
+    struct kodex_backend_signal_wait *wait = context;
+    if (!timed_out) wait->notify(wait->context);
+}
+static inline void *kodex_backend_register_signal_wait(void (*notify)(void *), void *context) {
+    struct kodex_backend_signal_wait *wait = malloc(sizeof(*wait));
+    if (wait == NULL) return NULL;
+    wait->notify = notify;
+    wait->context = context;
+    HANDLE process = GetCurrentProcess();
+    // The waiter owns its own handle so a failed unregister cannot leave it
+    // referencing the signal scope's closed handle.
+    if (!DuplicateHandle(process, kodex_backend_signal_event, process, &wait->event, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+        free(wait);
+        return NULL;
+    }
+    if (!RegisterWaitForSingleObject(&wait->handle, wait->event,
+            kodex_backend_signal_ready, wait, INFINITE, WT_EXECUTEONLYONCE)) {
+        CloseHandle(wait->event);
+        free(wait);
+        return NULL;
+    }
+    return wait;
+}
+static inline int kodex_backend_unregister_signal_wait(void *token) {
+    struct kodex_backend_signal_wait *wait = token;
+    // On failure the OS has not promised the callback is drained. Keep the token,
+    // callback target and its event handle live, and fail the owning backend.
+    if (!UnregisterWaitEx(wait->handle, INVALID_HANDLE_VALUE)) return -1;
+    int failed = !CloseHandle(wait->event);
+    free(wait);
+    return failed ? 1 : 0;
+}
 #else
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <poll.h>
+#include <sched.h>
+#include <stdatomic.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -150,11 +279,106 @@ static inline int64_t kodex_backend_spawn(const char *home, const char *startup_
     if (child > 0) { int status; while (waitpid(child, &status, 0) < 0 && errno == EINTR) {} }
     return received == sizeof(detached) ? detached : -1;
 }
+
+static atomic_flag kodex_backend_signal_owner = ATOMIC_FLAG_INIT;
+static atomic_flag kodex_backend_signal_gate = ATOMIC_FLAG_INIT;
+_Static_assert(ATOMIC_INT_LOCK_FREE == 2, "signal handler requires lock-free atomic int");
+static _Atomic int kodex_backend_signal_write = -1;
+static int kodex_backend_signal_read = -1;
+static int kodex_backend_signal_cancel[2] = {-1, -1};
+static struct sigaction kodex_backend_old_int, kodex_backend_old_term;
+
+static inline int kodex_backend_signal_pipe(int descriptors[2]) {
+#ifdef __linux__
+    return pipe2(descriptors, O_NONBLOCK | O_CLOEXEC);
+#else
+    if (pipe(descriptors) != 0) return -1;
+    for (int i = 0; i < 2; i++) {
+        if (fcntl(descriptors[i], F_SETFL, O_NONBLOCK) == -1 ||
+                fcntl(descriptors[i], F_SETFD, FD_CLOEXEC) == -1) {
+            close(descriptors[0]);
+            close(descriptors[1]);
+            descriptors[0] = descriptors[1] = -1;
+            return -1;
+        }
+    }
+    return 0;
 #endif
-static volatile sig_atomic_t kodex_backend_signal_value = 0;
-static void kodex_backend_signal_handler(int value) { kodex_backend_signal_value = value; }
-static inline void kodex_backend_install_signals(void) {
-    signal(SIGINT, kodex_backend_signal_handler);
-    signal(SIGTERM, kodex_backend_signal_handler);
 }
-static inline int kodex_backend_stop_signal(void) { return kodex_backend_signal_value != 0; }
+
+static inline int kodex_backend_wake_signal_pipe(int descriptor) {
+    ssize_t result;
+    do { result = write(descriptor, "s", 1); } while (result < 0 && errno == EINTR);
+    // A full pipe is already readable; the event stays latched until teardown.
+    return result == 1 || (result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) ? 0 : -1;
+}
+static void kodex_backend_signal_handler(int value) {
+    (void)value;
+    int saved_errno = errno;
+    // Never wait inside a signal handler. A competing handler writes to the same pipe.
+    if (!atomic_flag_test_and_set(&kodex_backend_signal_gate)) {
+        int descriptor = atomic_load(&kodex_backend_signal_write);
+        if (descriptor >= 0) kodex_backend_wake_signal_pipe(descriptor);
+        atomic_flag_clear(&kodex_backend_signal_gate);
+    }
+    errno = saved_errno;
+}
+static inline int kodex_backend_close_signal_pipes(void) {
+    // Drain a handler that already loaded the descriptor before returning it to the OS.
+    while (atomic_flag_test_and_set(&kodex_backend_signal_gate)) sched_yield();
+    int descriptor = atomic_exchange(&kodex_backend_signal_write, -1);
+    atomic_flag_clear(&kodex_backend_signal_gate);
+    int failed = descriptor >= 0 && close(descriptor) != 0;
+    if (kodex_backend_signal_read >= 0 && close(kodex_backend_signal_read) != 0) failed = 1;
+    for (int i = 0; i < 2; i++) {
+        if (kodex_backend_signal_cancel[i] >= 0 && close(kodex_backend_signal_cancel[i]) != 0) failed = 1;
+        kodex_backend_signal_cancel[i] = -1;
+    }
+    kodex_backend_signal_read = -1;
+    return failed ? -1 : 0;
+}
+static inline int kodex_backend_install_signals(void) {
+    if (atomic_flag_test_and_set(&kodex_backend_signal_owner)) return -1;
+    int descriptors[2];
+    if (kodex_backend_signal_pipe(descriptors) != 0) goto fail;
+    kodex_backend_signal_read = descriptors[0];
+    atomic_store(&kodex_backend_signal_write, descriptors[1]);
+    if (kodex_backend_signal_pipe(kodex_backend_signal_cancel) != 0) goto fail;
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = kodex_backend_signal_handler;
+    action.sa_flags = SA_RESTART;
+    sigemptyset(&action.sa_mask);
+    sigaddset(&action.sa_mask, SIGINT);
+    sigaddset(&action.sa_mask, SIGTERM);
+    if (sigaction(SIGINT, &action, &kodex_backend_old_int) != 0) goto fail;
+    if (sigaction(SIGTERM, &action, &kodex_backend_old_term) == 0) return 0;
+    sigaction(SIGINT, &kodex_backend_old_int, NULL);
+fail:
+    kodex_backend_close_signal_pipes();
+    atomic_flag_clear(&kodex_backend_signal_owner);
+    return -1;
+}
+static inline int kodex_backend_uninstall_signals(void) {
+    int failed = sigaction(SIGTERM, &kodex_backend_old_term, NULL) != 0;
+    if (sigaction(SIGINT, &kodex_backend_old_int, NULL) != 0) failed = 1;
+    if (kodex_backend_close_signal_pipes() != 0) failed = 1;
+    atomic_flag_clear(&kodex_backend_signal_owner);
+    return failed ? -1 : 0;
+}
+static inline int kodex_backend_wait_signal(void) {
+    struct pollfd fds[2] = {
+        {kodex_backend_signal_read, POLLIN, 0},
+        {kodex_backend_signal_cancel[0], POLLIN, 0},
+    };
+    int result;
+    do { result = poll(fds, 2, -1); } while (result < 0 && errno == EINTR);
+    if (result < 0) return -1;
+    if (fds[1].revents & POLLIN) return 0;
+    if (fds[0].revents & POLLIN) return 1;
+    return -1;
+}
+static inline int kodex_backend_cancel_signal_wait(void) {
+    return kodex_backend_wake_signal_pipe(kodex_backend_signal_cancel[1]);
+}
+#endif

@@ -73,14 +73,16 @@ val backendSubagentCompletionTest by testSuite(compartment = { TestCompartment.R
                 assertTrue(repo.getAgentRecord(childId)?.completed == true)
                 assertSame(parentTurn, parent.runtime.runningTurn.value)
                 assertSame(childTurn, child.runtime.runningTurn.value)
+                assertFalse(repo.getEntry(parent.sessionId).archived)
                 rpc.completeAgent(rootId)
                 assertSame(parentTurn, parent.runtime.runningTurn.value)
-                assertFalse(repo.getAgentRecord(rootId)?.completed ?: true)
-                parent.runtime.modify { storage ->
-                    val queued = storage.getSteerAt(storage.latestIndex()).filterIsInstance<StableSubagentCompletedEvent>()
-                    val committed = storage.getFirstCommitsIn(0..Int.MAX_VALUE, CompletionTypes, 2).map { it.commit }
-                    assertEquals(listOf(StableSubagentCompletedEvent(childId)), queued + committed)
-                }
+                assertSame(childTurn, child.runtime.runningTurn.value)
+                assertTrue(repo.getEntry(parent.sessionId).archived)
+                // The parent is held at releaseParent; observe without entering a state mutation.
+                val storage = parent.storage
+                val queued = storage.getSteerAt(storage.latestIndex()).filterIsInstance<StableSubagentCompletedEvent>()
+                val committed = storage.getFirstCommitsIn(0..Int.MAX_VALUE, CompletionTypes, 2).map { it.commit }
+                assertEquals(listOf(StableSubagentCompletedEvent(childId)), queued + committed)
                 assertFailsWith<AgentCompleted> { rpc.submit(childId, listOf(ContentItem.InputText("not accepted"))) }
                 assertFailsWith<AgentCompleted> { rpc.requestResume(childId) }
                 assertFailsWith<AgentCompleted> { rpc.resume(childId) }

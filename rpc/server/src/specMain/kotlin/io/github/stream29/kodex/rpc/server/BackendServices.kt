@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.io.files.Path
 import kotlinx.rpc.RpcServer
+import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -28,6 +29,7 @@ import kotlin.time.Duration.Companion.seconds
  * seams, not frontend services; their returned clients are owned here and closed after their
  * consumers. Settings, authentication, model and global-service initialization does not create
  * `kodex.db` on an empty Home.
+ * [clock] supplies wall time for backend scheduling and persisted Agent deadlines.
  *
  * @throws CancellationException if the calling coroutine is cancelled; acquired resources are
  * cleaned before cancellation escapes.
@@ -45,6 +47,7 @@ public expect suspend fun <R> withBackendServices(
     backendRenewalInterval: () -> Duration = { 20.seconds },
     checkAdmission: () -> Unit = {},
     requiresPreparedHome: Boolean = false,
+    clock: Clock = Clock.System,
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R
 

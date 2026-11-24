@@ -36,7 +36,7 @@ public data class BackendSettings(
     public val sessionTitle: SessionTitleSettings,
     public val mcpServers: Map<String, McpServerConfiguration>,
     public val hooks: List<NotificationHook> = emptyList(),
-    public val daemonTtlSeconds: Long = 300,
+    public val daemonTtlSeconds: Long = -1,
 ) {
     init {
         require(daemonTtlSeconds == -1L || daemonTtlSeconds > 0) { "Daemon TTL must be positive or -1." }
