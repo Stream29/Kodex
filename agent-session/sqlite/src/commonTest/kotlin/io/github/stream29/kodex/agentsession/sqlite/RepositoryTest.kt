@@ -142,16 +142,7 @@ val sqliteRepositoryTest by testSuite {
                     assertEquals(listOf(first, second), repository.list())
                     repository.getEntry(first).unarchive()
                     repository.closeAndJoin()
-                    assertEquals("0", fs.readString(Path(root, "sessions", "0", "settings", "latest.json")))
-                    assertEquals("2", fs.readString(Path(root, "sessions", "0", "steer", "latest.json")))
-                    assertTrue(fs.exists(Path(root, "sessions", "0", "steer", "1.json")))
-                    assertEquals("[]", fs.readString(Path(root, "sessions", "0", "steer", "2.json")))
-                    assertEquals("2", fs.readString(Path(root, "sessions", "0", "index", "latest.json")))
-                    assertTrue(fs.exists(Path(root, "sessions", "0", "index", "2.json")))
-                    assertEquals("0", fs.readString(Path(root, "sessions", "0", "llm-request-meta", "latest.json")))
-                    fs.writeString(Path(root, "sessions", "0", "settings", "latest.json"), "corrupted")
-                    fs.writeString(Path(root, "sessions", "0", "lock.json"), "corrupted")
-                    removeTree(Path(root, "sessions", "1"))
+                    assertFalse(fs.exists(Path(root, "sessions")))
                     SqliteKodexSessionRepository(root, dependencies).use { reopened ->
                         assertEquals(listOf(0, 1), reopened.list())
                         assertEquals("original", reopened.getEntry(0).name)
@@ -162,7 +153,7 @@ val sqliteRepositoryTest by testSuite {
                         assertEquals(0, reopened.create())
                         assertEquals(-1, reopened.open(0).storage.latestIndex())
                     }
-                    assertFalse(fs.exists(Path(root, "sessions", "0", "settings", "0.json")))
+                    assertFalse(fs.exists(Path(root, "sessions")))
                 }
             }
         }
@@ -202,7 +193,7 @@ val sqliteRepositoryTest by testSuite {
                         assertEquals("older", repository.getEntry(fork).name)
                         assertEquals(terminal, repository.open(fork).storage.getCommitExact(0, AgentCommitType.WorkTypes)?.commit)
                         repository.closeAndJoin()
-                        assertContains(fs.readString(Path(root, "sessions", "$fork", "work", "0.json")), "event_terminal_exited")
+                        assertFalse(fs.exists(Path(root, "sessions", "$fork")))
                     }
                 }
                 assertEquals(
@@ -211,7 +202,7 @@ val sqliteRepositoryTest by testSuite {
                 )
             }
             assertEquals(terminalJson, fs.readString(Path(oldIndex, "0.json")))
-            assertContains(fs.readString(Path(root, "sessions", "0", "work", "1.json")), "event_terminal_exited")
+            assertFalse(fs.exists(Path(root, "sessions", "0", "work")))
         }
     }
 
@@ -292,48 +283,7 @@ val sqliteRepositoryTest by testSuite {
                     }
                 }
             }
-            assertEquals("0", fs.readString(Path(root, "sessions", "0", "settings", "latest.json")))
-            assertFalse(fs.exists(Path(root, "sessions", "1")))
-            assertFalse(fs.exists(Path(root, "sessions", "0", "archive.mark")))
-        }
-    }
-    test("mirror failure is reported and later FIFO work still materializes") {
-        fixture { root ->
-            val failures = mutableListOf<Throwable>()
-            testKodexAgentDependencies().use { dependencies ->
-                val entered = CompletableDeferred<Unit>()
-                val release = CompletableDeferred<Unit>()
-                var failOnce = true
-                val failing = object : CoroutineFileSystem by fs {
-                    override suspend fun atomicMove(source: Path, destination: Path) {
-                        if (failOnce && destination.name == "latest.json") {
-                            failOnce = false
-                            entered.complete(Unit)
-                            release.await()
-                            throw IllegalStateException("injected mirror failure")
-                        }
-                        fs.atomicMove(source, destination)
-                    }
-                }
-                try {
-                    SqliteKodexSessionRepository(root, dependencies, failing, reportMirrorFailure = { failures += it }).use { repository ->
-                        val index = repository.create()
-                        entered.await()
-                        // Disk is blocked, but committed state and subsequent writes remain available.
-                        val session = repository.open(index)
-                        session.runtime.modify { it.initialize(settings("survived")) }
-                        repository.getEntry(index).archive()
-                        repository.getEntry(index).unarchive()
-                        repository.getEntry(index).archive()
-                        assertEquals("survived", repository.getEntry(index).name)
-                        assertTrue(repository.getEntry(index).archived)
-                        release.complete(Unit)
-                    }
-                    assertEquals(1, failures.size)
-                    assertTrue(fs.exists(Path(root, "sessions", "0", "archive.mark")))
-                    assertTrue(fs.exists(Path(root, "sessions", "0", "settings", "0.json")))
-                } finally { release.complete(Unit) }
-            }
+            assertFalse(fs.exists(Path(root, "sessions")))
         }
     }
     test("fork inside runtime modify and concurrent repository writes avoid nested transactions") {
@@ -364,7 +314,7 @@ val sqliteRepositoryTest by testSuite {
             }
         }
     }
-    test("scope cancellation drains committed mirrors and closes storage owners") {
+    test("scope cancellation closes storage owners without creating session mirrors") {
         fixture { root ->
             testKodexAgentDependencies().use { dependencies ->
                 val owner = SupervisorJob()
@@ -375,7 +325,7 @@ val sqliteRepositoryTest by testSuite {
                 session.runtime.modify { it.initialize(settings("closed")) }
                 owner.cancelAndJoin()
                 assertFalse(session.coroutineContext[Job]!!.isActive)
-                assertTrue(fs.exists(Path(root, "sessions", "0", "settings", "0.json")))
+                assertFalse(fs.exists(Path(root, "sessions")))
                 assertFailsWith<IllegalStateException> { session.storage.latestIndex() }
                 assertFailsWith<IllegalStateException> { repository.list() }
             }
@@ -400,63 +350,6 @@ val sqliteRepositoryTest by testSuite {
                 assertTrue(coroutineContext[Job]!!.children.none { it.isActive })
                 assertEquals("""{"model":"test","threadName":"keep"}""", fs.readString(Path(root, "sessions", "0", "settings", "0.json")))
             }
-        }
-    }
-    test("cancelled mirror owner rejects writes even before worker starts") {
-        runTest {
-            val failures = mutableListOf<Throwable>()
-            val owner = CoroutineScope(coroutineContext + SupervisorJob())
-            owner.cancel()
-            val mirror = SequentialMirrorQueue(owner, failures::add)
-            runCurrent()
-            assertFalse(mirror.enqueue { fail("cancelled worker accepted a write") })
-            assertEquals(1, failures.size)
-            assertIs<IOException>(failures.single())
-            mirror.closeAndDrain()
-        }
-    }
-    test("bounded mirror queue is sequential, asynchronous, best effort and times out hung drain") {
-        runTest {
-            val events = mutableListOf<String>()
-            val failures = mutableListOf<Throwable>()
-            val gate = CompletableDeferred<Unit>()
-            val mirror = SequentialMirrorQueue(this, failures::add)
-            try {
-                assertTrue(mirror.enqueue { events.add("start1"); gate.await(); events.add("end1") })
-                runCurrent()
-                assertEquals(listOf("start1"), events)
-                val synthetic = IllegalStateException("synthetic mirror failure")
-                assertTrue(mirror.enqueue { events.add("failed2"); throw synthetic })
-                assertTrue(mirror.enqueue { events.add("write3") })
-                gate.complete(Unit)
-                mirror.closeAndDrain()
-                assertEquals(listOf("start1", "end1", "failed2", "write3"), events)
-                assertEquals(listOf<Throwable>(synthetic), failures)
-                assertFalse(mirror.enqueue { fail("closed queue executed write") })
-            } finally { gate.complete(Unit); mirror.closeAndDrain() }
-
-            val timeoutFailures = mutableListOf<Throwable>()
-            val started = CompletableDeferred<Unit>()
-            val unblock = CompletableDeferred<Unit>()
-            val bounded = SequentialMirrorQueue(
-                scope = this,
-                reportFailure = timeoutFailures::add,
-                capacity = 1,
-                drainTimeout = 50.milliseconds,
-            )
-            try {
-                assertTrue(bounded.enqueue {
-                    started.complete(Unit)
-                    withContext(NonCancellable) { unblock.await() }
-                })
-                runCurrent()
-                assertTrue(started.isCompleted)
-                assertTrue(bounded.enqueue {})
-                assertFalse(bounded.enqueue {})
-                bounded.closeAndDrain()
-                assertEquals(2, timeoutFailures.size)
-                assertTrue(timeoutFailures.all { it is IOException })
-            } finally { unblock.complete(Unit) }
         }
     }
     test("idle TTL eviction drains session without self-deadlocking and allows clean reopen and shutdown") {

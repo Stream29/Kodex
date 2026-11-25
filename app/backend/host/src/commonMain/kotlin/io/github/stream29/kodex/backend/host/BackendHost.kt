@@ -161,7 +161,7 @@ internal suspend fun runBackendHostWithClock(
                 val work = launch {
                     try {
                         if (!ensureBundledHomeGuide(handle.home)) {
-                            logger.warn { "Preserved custom or non-regular skills/kodex-home/SKILL.md; review it before following its Home instructions." }
+                            logger.warn { "Preserved custom or non-regular skills/kodex/SKILL.md; review it before following its instructions." }
                         }
                         withBackendServices(
                             handle.home, codexHome, agentsHome,

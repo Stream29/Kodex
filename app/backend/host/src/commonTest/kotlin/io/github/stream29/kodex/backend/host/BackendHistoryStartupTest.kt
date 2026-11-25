@@ -83,7 +83,7 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
         }
     }
 
-    test("the current catalog serves SQLite history and mirrors new messages without importing mirrors") {
+    test("the current catalog serves SQLite history without reading or writing legacy mirror files") {
         val request = CompletableDeferred<ResponsesApiRequest>()
         withHost(prepareHome = { home ->
             val fs = SystemCoroutineFileSystem
@@ -148,11 +148,8 @@ val backendHistoryStartupTest by testSuite(compartment = { TestCompartment.RealT
                         listOf(next.toLong())).single().single() as String).contains("New message"))
                 }
                 val mirror = Path(home, "sessions", "0", "index", "$next.json")
-                withTimeout(10.seconds) {
-                    while (SystemCoroutineFileSystem.metadataOrNull(mirror) == null ||
-                        !SystemCoroutineFileSystem.readString(mirror).contains("New message")) delay(10)
-                    assertTrue(SystemCoroutineFileSystem.readString(mirror).contains("New message"))
-                }
+                assertNull(SystemCoroutineFileSystem.metadataOrNull(mirror))
+                assertEquals("corrupted mirror", SystemCoroutineFileSystem.readString(Path(home, "sessions", "0", "index", "0.json")))
             }
         }
     }

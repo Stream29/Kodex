@@ -92,7 +92,6 @@ public expect suspend fun CoroutineScope.SqliteKodexSessionRepository(
     timeSource: TimeSource = TimeSource.Monotonic,
     onTurnActiveRenewal: suspend () -> Unit = {},
     turnRenewalInterval: () -> Duration = { DefaultKodexSessionRenewalInterval },
-    reportMirrorFailure: (Throwable) -> Unit = {},
 ): SqliteKodexSessionRepository
 
 /**
@@ -110,7 +109,6 @@ public expect suspend fun CoroutineScope.SqliteKodexSessionRepository(
     timeSource: TimeSource = TimeSource.Monotonic,
     onTurnActiveRenewal: suspend () -> Unit = {},
     turnRenewalInterval: () -> Duration = { DefaultKodexSessionRenewalInterval },
-    reportMirrorFailure: (Throwable) -> Unit = {},
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
     onDeleteInTransaction: (sessionId: Int) -> Unit = {},
 ): SqliteKodexSessionRepository

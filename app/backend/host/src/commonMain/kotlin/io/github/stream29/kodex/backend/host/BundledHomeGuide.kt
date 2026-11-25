@@ -9,49 +9,65 @@ import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlin.uuid.Uuid
 
-private val currentGuide = """
+internal val currentKodexGuideText = """
     ---
-    name: kodex-home
-    description: Find the current Kodex Home and inspect settings, logs, attachments, and session data safely.
+    name: kodex
+    description: Operate Kodex via the kodex CLI and understand Kodex Home: sessions, child agents, read-only SQL history, terminals, ask-user prompts, schedules, web search, images, MCP tools, and backend/Home boundaries.
     ---
 
-    # Kodex Home
+    # Kodex
 
-    Use the current environment context to identify the session and its working directory. The
-    default Home is `~/.kodex`; an explicit Backend target can use a different Home. Only the
-    Backend prepares and owns the Home. Do not start a second Backend on the same Home or remove
-    lock/lease files. Normal use holds a read lease; upgrades require an exclusive write lease.
-    If an older Home is rejected, set `KODEX_HOME` to a different, empty directory. Leave the old
-    Home intact and use its previous Kodex version when you need to access it.
+    Every `kodex` tool subcommand is a thin client against an already-running Backend Daemon (it never auto-starts a daemon). Target a Backend with `--backend-home <DIR>` (defaults to `KODEX_HOME` or `~/.kodex`) or `--backend-url <URL>`. Target an Agent with `-a/--agent <ID>` (defaults to `KODEX_AGENT_ID`; note `kodex agent sql` queries the selected Home and does not filter by `KODEX_AGENT_ID` automatically). Check `kodex <command> --help` before guessing flags.
 
-    ## Session data
+    ## Sessions & Agents
 
-    - `kodex.db` is the authoritative SQLite database for sessions, Agents, commits, and schedules.
-    - `sessions/` contains asynchronous, best-effort mirrors for inspection. They can be absent or
-      behind SQLite. Numbered JSON, `latest.json`, and old `archive.mark` are not public write APIs.
-    - Use the application's session controls or supported CLI operations for session changes. Check
-      `kodex --help` and the relevant subcommand's help; do not infer a write command from the
-      database schema or edit the database or mirrors behind a running Backend.
+    - `kodex session (list | spawn | rename | archive | unarchive | delete)`: manage independent root Sessions. `session_id` and `root_agent_id` are distinct integers.
+    - `kodex agent spawn`: delegate a subtask as a child of the calling Agent. Use `kodex session spawn` only for an independent Session.
+    - `kodex agent (status | submit | resume | stop | complete | fork | compact | clear-pending)`:
+      - `status`: current UTC time, Agent state, and remaining context-window budget.
+      - `submit` / `resume`: return on admission without blocking for turn completion; `stop` cancels only the active turn; `complete` completes a child or archives a root Session.
+      - `fork --agent <ID>`: copy an Agent's effective history into a new independent Session without starting it.
 
-    ## Other files
+    ## Read-Only History (`kodex agent sql`)
 
-    - `settings.yml` holds global configuration. `auth.yml` holds private Kodex credentials; do not
-      print, copy, or include credentials in diagnostics.
-    - `log/` contains process logs; `generated_images/` holds generated image artifacts. Locate
-      attachments using their recorded paths. Keep user files, `AGENTS.md`, and other skills intact.
-    - Use `kodex backend status` for the current Backend state. Follow explicit instructions before
-      stopping, reloading, or editing any settings. `version.json` is the migration checkpoint,
-      not the last application version that used the Home.
-""".trimIndent().plus("\n").encodeToByteArray()
+    - `kodex.db` is the sole authoritative SQLite store; no `sessions/` JSON file mirror is written. Never open, query, or edit `kodex.db` or `.locks/` directly behind a running Backend.
+    - Run `kodex agent sql --schema` first to discover public relations, columns, indexes, JSON paths, and query examples.
+    - Execute one read-only SQL statement via `kodex agent sql --stdin` (limits: 64 KiB SQL, 1000 ms timeout, 1000 rows / 1 MiB JSON, 256 KiB per cell).
+    - Paginate `agent_commits` by `("index", type)` since multiple commit types can share one `"index"`. Query narrow columns or targeted `json_extract(payload_json, ...)` first; on `truncated`, `TIMEOUT`, or `VALUE_TOO_LARGE`, narrow the projection or range instead of blindly lowering `LIMIT`.
 
-/** Returns false if the current path belongs to the user and was preserved. */
+    ## Terminals, Ask User & Schedules
+
+    - `kodex terminal (list | read | write | kill)`: inspect or control background shell sessions (`read` is non-destructive; `write` supports UTF-8 text, `--stdin`, and `--eof`).
+    - `kodex ask (create | list | get | answer)`: non-blocking structured user prompts (`create` returns immediately; wait for answers via `await_event`).
+    - `kodex schedule (create | list | delete)`: persisted one-shot (`--delay-seconds` / `--at`) or recurring (`--cron`) schedules.
+
+    ## Search, Images & MCP Discovery
+
+    - `kodex search (-q <query> | --json <JSON> | --stdin)`: web search and page inspection via the Backend.
+    - `kodex image -p <prompt> [-i <path>]`: generate or edit a PNG and print its saved path (inspect with `read_media`).
+    - `kodex tool list`: print `<command>\t<summary>` for built-in CLI tools and enabled MCP tools (pipe to `grep` to discover tools).
+    - `kodex mcp (list | status | reconnect | enable | disable)` and dynamic `kodex <server> <tool> [--json <JSON> | --stdin]` (`--help` prints the tool's `inputSchema`).
+
+    ## Backend & Kodex Home
+
+    - `kodex backend (start | status | stop | reload)`: inspect status with `kodex backend status`; only start, stop, reload, or edit settings when explicitly requested. Do not start a second Backend on the same Home or remove lock/lease files.
+    - Home files (`~/.kodex`): `kodex.db` (authoritative SQLite), `settings.yml` (global settings), `auth.yml` (private credentials — never print, copy, or include in diagnostics), `log/`, `generated_images/`, `version.json` (migration checkpoint, not last application version), `AGENTS.md`, and `skills/`. Keep user files and custom skills intact.
+""".trimIndent().plus("\n")
+
+private val currentGuide = currentKodexGuideText.encodeToByteArray()
+
+/**
+ * Installs or verifies the bundled `skills/kodex/SKILL.md` guide.
+ * Returns false if `skills/kodex/SKILL.md` belongs to the user and was preserved.
+ */
 internal suspend fun ensureBundledHomeGuide(
     home: Path,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ): Boolean {
+    val resolvedHome = fileSystem.resolve(home)
     val maxKnownGuideBytes = currentGuide.size.toLong()
-    var directory = fileSystem.resolve(home)
-    for (name in listOf("skills", "kodex-home")) {
+    var directory = resolvedHome
+    for (name in listOf("skills", "kodex")) {
         val child = Path(directory, name)
         val metadata = fileSystem.metadataOrNull(child)
         when {
@@ -75,7 +91,7 @@ internal suspend fun ensureBundledHomeGuide(
     }
     if (fileSystem.list(directory).any { it.name == target.name }) return false
 
-    val temporary = Path(directory, ".kodex-home-guide-${Uuid.random()}.tmp")
+    val temporary = Path(directory, ".kodex-guide-${Uuid.random()}.tmp")
     try {
         fileSystem.writeBytes(temporary, currentGuide, mustCreate = true)
         // A user edit while preparing the temp file takes precedence.

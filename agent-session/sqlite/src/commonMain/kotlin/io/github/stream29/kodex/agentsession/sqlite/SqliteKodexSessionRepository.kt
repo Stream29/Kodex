@@ -64,7 +64,6 @@ public actual class SqliteKodexSessionRepository internal constructor(
     origin: TimeMark,
     onTurnActiveRenewal: suspend () -> Unit,
     turnRenewalInterval: () -> Duration,
-    reportMirrorFailure: (Throwable) -> Unit,
     private val onDeleteInTransaction: (sessionId: Int) -> Unit = {},
 ) : KodexSessionRepository, CoroutineCloseable, CoroutineScope by scope {
     private val lifecycleMutex = Mutex()
@@ -77,8 +76,6 @@ public actual class SqliteKodexSessionRepository internal constructor(
         onTurnActiveRenewal = onTurnActiveRenewal,
         turnRenewalInterval = turnRenewalInterval,
     )
-    private val mirrorScope = CoroutineScope(scope.coroutineContext.minusKey(Job) + SupervisorJob())
-    private val mirror = SequentialMirrorQueue(mirrorScope, reportMirrorFailure)
     private val mutableEntries = MutableStateFlow(initialEntries)
     private val mutableAwaitDeadlines = MutableStateFlow(initialDeadlines)
     private val mutableStopEvents = MutableSharedFlow<IndexedAgentStopEvent>(
@@ -135,13 +132,8 @@ public actual class SqliteKodexSessionRepository internal constructor(
 
     private suspend fun drainRepository() = lifecycleMutex.withLock {
         mutex.withLock { closed = true }
-        try {
-            for (handle in residency.detachAllLocked()) {
-                residency.drainDetached(handle)
-            }
-            mirror.closeAndDrain()
-        } finally {
-            mirrorScope.cancel()
+        for (handle in residency.detachAllLocked()) {
+            residency.drainDetached(handle)
         }
     }
 
@@ -182,21 +174,14 @@ public actual class SqliteKodexSessionRepository internal constructor(
         }
         withDbLock {
             requireOpen()
-            val child = connection.transaction { agents.createChild(parentAgentId) }
-            val target = childDirectory(child.sessionId, child.agentId)
-            mirror.enqueue { initializeMirrorDirectory(target, fileSystem, emptyList()) }
-            child
+            connection.transaction { agents.createChild(parentAgentId) }
         }
     }
 
     public actual suspend fun discardUninitializedChild(agentId: Int): Boolean = lifecycleMutex.withLock {
         val discarded = withDbLock {
             requireOpen()
-            val sessionId = connection.transaction { agents.discardUninitializedChild(agentId) }
-                ?: return@withDbLock false
-            val target = childDirectory(sessionId, agentId)
-            mirror.enqueue { deleteRecursively(fileSystem, target) }
-            true
+            connection.transaction { agents.discardUninitializedChild(agentId) } != null
         }
         if (discarded) residency.closeLocked(agentId)
         discarded
@@ -293,13 +278,6 @@ public actual class SqliteKodexSessionRepository internal constructor(
             connection.recordSessionGroupMutation(group, group)
         }
         publishGroupsCommitted(groupChanges)
-        val fs = fileSystem
-        val target = directory(index)
-        val marker = Path(target, "archive.mark")
-        mirror.enqueue {
-            fs.createDirectories(target)
-            if (value) fs.writeString(marker, "") else fs.delete(marker, mustExist = false)
-        }
     }
 
     public actual override suspend fun create(): Int = withDbLock {
@@ -354,7 +332,6 @@ public actual class SqliteKodexSessionRepository internal constructor(
         window: LongRange? = null,
         recovery: ForkContextRecovery? = null,
     ): Int {
-        var files = emptyList<Triple<String, Int, String>>()
         val (index, targetAgent, groups) = connection.transaction {
             var candidate = 0L
             inventory().forEach { if (it.toLong() == candidate) candidate++ }
@@ -373,28 +350,12 @@ public actual class SqliteKodexSessionRepository internal constructor(
                 if (window != null && window.first > 0) carryForkSnapshotsLocked(source, target, window.first)
                 connection.recomputeSessionCatalog(targetAgent)
                 if (recovery != null) forkRecovery.insert(targetAgent, recovery)
-                val snapshot = connection.query(
-                    """SELECT type, "index", payload_json FROM agent_commits WHERE agent_id = ? ORDER BY "index", type""",
-                    listOf(target),
-                )
-                files = snapshot.map { row ->
-                    val type = row[0] as String
-                    Triple(mirrorTimelineDirectory(type), (row[1] as Long).toInt(), row[2] as String)
-                }
             }
             val group = checkNotNull(connection.sessionCatalogGroup(targetAgent))
             Triple(candidate.toInt(), targetAgent, connection.recordSessionGroupMutation(null, group))
         }
         publishGroupsCommitted(groups)
-        val fs = fileSystem
-        val target = directory(index)
-        val snapshotFiles = files
         if (sourceAgent != null) refreshDeadlineLocked(targetAgent)
-        mirror.enqueue {
-            // An index can be reused after deletion; discard any stale mirror first.
-            deleteRecursively(fs, target)
-            initializeMirrorDirectory(target, fs, snapshotFiles)
-        }
         mutableEntries.value = inventory()
         return index
     }
@@ -498,7 +459,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
                     ).single().single() as Long
                 ).toInt()
                 val observable = ScopedObservableAgentStorage(storageScope, storage, initialLatestIndex)
-                FileMirrorKodexAgentStorage(storage, observable, targetDirectory, fileSystem, mirror) to forkRecovery.hasRecovery(agentId)
+                observable to forkRecovery.hasRecovery(agentId)
             }
             val state = sessionScope.KodexAgentState(
                 client = dependencies.client,
@@ -566,9 +527,6 @@ public actual class SqliteKodexSessionRepository internal constructor(
                 publishGroupsCommitted(groupChanges)
                 mutableAwaitDeadlines.value -= agentIds.toSet()
                 mutableEntries.value = inventory()
-                val fs = fileSystem
-                val target = directory(entryIndex)
-                mirror.enqueue { deleteRecursively(fs, target) }
             }
         }
     }
@@ -676,7 +634,6 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     timeSource: TimeSource,
     onTurnActiveRenewal: suspend () -> Unit,
     turnRenewalInterval: () -> Duration,
-    reportMirrorFailure: (Throwable) -> Unit,
 ): SqliteKodexSessionRepository {
     require(sessionTtl.isPositive()) { "sessionTtl must be positive: $sessionTtl" }
     return newSingleThreadContext("Kodex.SqliteMain").closeOnFailure({ it.close() }) { dispatcher ->
@@ -705,7 +662,6 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
                     origin = timeSource.markNow(),
                     onTurnActiveRenewal = onTurnActiveRenewal,
                     turnRenewalInterval = turnRenewalInterval,
-                    reportMirrorFailure = reportMirrorFailure,
                 )
             }
         }
@@ -722,7 +678,6 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     timeSource: TimeSource,
     onTurnActiveRenewal: suspend () -> Unit,
     turnRenewalInterval: () -> Duration,
-    reportMirrorFailure: (Throwable) -> Unit,
     dispatcher: CoroutineDispatcher,
     onDeleteInTransaction: (sessionId: Int) -> Unit,
 ): SqliteKodexSessionRepository {
@@ -752,7 +707,6 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
             origin = timeSource.markNow(),
             onTurnActiveRenewal = onTurnActiveRenewal,
             turnRenewalInterval = turnRenewalInterval,
-            reportMirrorFailure = reportMirrorFailure,
             onDeleteInTransaction = onDeleteInTransaction,
         )
     }
@@ -803,9 +757,3 @@ private fun decodeAwaitDeadline(agentId: Int, index: Int, payload: String): Pend
     }
 
 private val AwaitProjectionLogger = KotlinLogging.logger {}
-
-private suspend fun deleteRecursively(fileSystem: CoroutineFileSystem, path: Path) {
-    val metadata = fileSystem.metadataOrNull(path) ?: return
-    if (metadata.isDirectory) fileSystem.list(path).forEach { deleteRecursively(fileSystem, it) }
-    fileSystem.delete(path, mustExist = false)
-}

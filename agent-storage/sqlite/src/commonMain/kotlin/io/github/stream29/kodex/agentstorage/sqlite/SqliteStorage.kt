@@ -121,22 +121,16 @@ public actual class SqliteAgentStorage actual constructor(
     public actual override suspend fun commit(commits: List<AgentCommit>): Int =
         commit(commits, Clock.System.now())
 
-    public actual override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int =
-        commitWithMirrorPayloads(commits, timestamp).first
-
-    public actual suspend fun commitWithMirrorPayloads(
-        commits: List<AgentCommit>,
-        timestamp: Instant,
-    ): Pair<Int, List<Pair<String, String>>> {
+    public actual override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int {
         validateCommitBatch(commits)
         val sorted = commits.sortedBy { it.commitType.ordinal }
         val encoded = sorted.map { commit ->
-            Triple(commit.commitType.wireName, commit.commitType.legacyTimelineName, commit.encodePayloadJson(OpenAiJsonCodec))
+            commit.commitType.wireName to commit.encodePayloadJson(OpenAiJsonCodec)
         }
         val timestampStr = timestamp.toString()
-        val index = write(onHistoryChanged?.let { sorted.mapTo(mutableSetOf()) { it.commitType } }) {
+        return write(onHistoryChanged?.let { sorted.mapTo(mutableSetOf()) { it.commitType } }) {
             val nextIndex = tailUnsafe() + 1
-            for ((wireType, _, payloadJson) in encoded) {
+            for ((wireType, payloadJson) in encoded) {
                 connection.execute(
                     """INSERT INTO agent_commits (agent_id, type, "index", payload_json, created_at) VALUES (?, ?, ?, ?, ?)""",
                     listOf(sqlAgentId, wireType, nextIndex.toLong(), payloadJson, timestampStr),
@@ -145,7 +139,6 @@ public actual class SqliteAgentStorage actual constructor(
             connection.appendSessionCatalog(sqlAgentId, nextIndex, timestampStr, sorted.filterIsInstance<KodexAgentSettings>().singleOrNull())
             nextIndex to true
         }
-        return index to encoded.map { (_, timelineName, payloadJson) -> timelineName to payloadJson }
     }
 
     public actual override suspend fun revert(untilExclusive: Int) {

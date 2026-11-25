@@ -19,7 +19,7 @@ import kotlin.test.assertTrue
 private val fs = SystemCoroutineFileSystem
 
 val bundledHomeGuideTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("a new Home gets a current guide and subsequent starts do not rewrite it") {
+    test("a new Home gets the kodex skill and subsequent starts do not rewrite it") {
         withGuideHome { home, target ->
             assertTrue(ensureBundledHomeGuide(home))
             assertCurrentGuide(target)
@@ -34,9 +34,10 @@ val bundledHomeGuideTest by testSuite(compartment = { TestCompartment.RealTime }
         }
     }
 
-    test("Backend installs the current guide before Ready on a fresh Home") {
+    test("Backend installs the kodex skill before Ready on a fresh Home") {
         withHost(useCurrentCatalogFixture = false) { home, _, _ ->
-            assertCurrentGuide(Path(home, "skills", "kodex-home", "SKILL.md"))
+            assertCurrentGuide(Path(home, "skills", "kodex", "SKILL.md"))
+            assertFalse(fs.exists(Path(home, "skills", "kodex-home")))
         }
     }
 
@@ -45,7 +46,7 @@ val bundledHomeGuideTest by testSuite(compartment = { TestCompartment.RealTime }
             val directory = requireNotNull(target.parent)
             fs.createDirectories(directory)
             val sibling = Path(directory, "user-notes.md")
-            val custom = "x".repeat(3484)
+            val custom = "x".repeat(currentKodexGuideText.encodeToByteArray().size)
             fs.writeString(target, custom)
             fs.writeString(sibling, "keep me")
             assertFalse(ensureBundledHomeGuide(home))
@@ -96,17 +97,17 @@ val bundledHomeGuideTest by testSuite(compartment = { TestCompartment.RealTime }
 
 private suspend fun assertCurrentGuide(target: Path) {
     val content = fs.readString(target)
-    assertTrue("authoritative SQLite database" in content)
-    assertTrue("not public write APIs" in content)
+    assertTrue("name: kodex\n" in content)
+    assertTrue("kodex agent sql --schema" in content)
     assertTrue("kodex backend status" in content)
-    assertFalse("Create empty" in content)
+    assertTrue("no `sessions/` JSON file mirror is written" in content)
 }
 
 private suspend fun withGuideHome(block: suspend (Path, Path) -> Unit) {
     val home = Path(SystemTemporaryDirectory, "kodex-bundled-guide-${Random.nextLong()}")
     fs.createDirectories(home, mustCreate = true)
     try {
-        block(home, Path(home, "skills", "kodex-home", "SKILL.md"))
+        block(home, Path(home, "skills", "kodex", "SKILL.md"))
     } finally {
         withContext(NonCancellable) { removeGuideTree(home) }
     }

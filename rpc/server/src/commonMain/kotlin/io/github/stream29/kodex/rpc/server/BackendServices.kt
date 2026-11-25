@@ -500,9 +500,6 @@ internal class LazySqliteBackendPersistence(
                     sessionTtl = sessionTtl,
                     onTurnActiveRenewal = renewBackend,
                     turnRenewalInterval = backendRenewalInterval,
-                    reportMirrorFailure = { mirrorError ->
-                        BackendLogger.warn(mirrorError) { "Session file mirror write failed." }
-                    },
                     onDeleteInTransaction = { sessionId ->
                         schedules.deleteForSessionInTransaction(sessionId)
                     },

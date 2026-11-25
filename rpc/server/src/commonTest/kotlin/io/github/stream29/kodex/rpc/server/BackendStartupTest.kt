@@ -17,7 +17,7 @@ import kotlin.time.Duration.Companion.seconds
 
 val backendStartupTest by testSuite(compartment = { TestCompartment.RealTime }) {
     for (firstAccess in listOf("catalog", "create")) {
-        test("settings auth model and global startup leave sessions absent until $firstAccess") {
+        test("settings auth model and global startup leave kodex.db absent until $firstAccess and never create sessions directory") {
             withTimeout(30.seconds) {
                 val home = Path(SystemTemporaryDirectory, "kodex-backend-startup-${Random.nextLong()}")
                 val database = Path(home, "kodex.db")
@@ -48,10 +48,8 @@ val backendStartupTest by testSuite(compartment = { TestCompartment.RealTime }) 
                         }
                         assertTrue(SystemCoroutineFileSystem.metadataOrNull(database)?.isRegularFile == true)
                     }
-                    if (firstAccess == "catalog") {
-                        assertNull(SystemCoroutineFileSystem.metadataOrNull(sessions))
-                    } else {
-                        assertTrue(SystemCoroutineFileSystem.metadataOrNull(sessions)?.isDirectory == true)
+                    assertNull(SystemCoroutineFileSystem.metadataOrNull(sessions))
+                    if (firstAccess == "create") {
                         // Reopening the same persisted entry uses the new host's
                         // one on-demand repository, not a per-tab root.
                         withBackendServices(

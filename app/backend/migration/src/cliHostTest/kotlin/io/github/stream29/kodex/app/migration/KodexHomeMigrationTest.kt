@@ -20,7 +20,10 @@ public val kodexHomeMigrationTest by testSuite {
         val version = CurrentKodexApplicationVersion
         assertEquals(MigrationVersion(GeneratedKodexApplicationVersion), version)
         assertSame(version, CurrentKodexApplicationVersion)
-        assertEquals(listOf(MigrationVersion("0.8.1")), KodexHomeMigrations.map { it.toVersion })
+        assertEquals(
+            listOf(MigrationVersion("0.8.1"), MigrationVersion("0.9.0")),
+            KodexHomeMigrations.map { it.toVersion },
+        )
     }
 
     testFixture { newTestHome() } closeWith {

@@ -11,7 +11,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.sync.Mutex
-import kotlin.time.Clock
 import kotlin.time.Instant
 
 /**
@@ -41,9 +40,5 @@ public expect class SqliteAgentStorage(
     override suspend fun getLastCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit>
     override suspend fun commit(commits: List<AgentCommit>): Int
     override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int
-    public suspend fun commitWithMirrorPayloads(
-        commits: List<AgentCommit>,
-        timestamp: Instant = Clock.System.now(),
-    ): Pair<Int, List<Pair<String, String>>>
     override suspend fun revert(untilExclusive: Int)
 }

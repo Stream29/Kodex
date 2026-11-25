@@ -163,20 +163,12 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
                     assertTrue(repository.getEntry(12).archived)
                     assertFalse(repository.getEntry(90).archived)
                     repository.closeAndJoin()
-                    val forkIndex = Path(home, "sessions", forkId.toString(), "index")
-                    assertFalse(fs.exists(Path(forkIndex, "$spawnAt.json")))
-                    for (retained in listOf(before, packedAt, completedAt, after)) assertTrue(fs.exists(Path(forkIndex, "$retained.json")))
-                    assertTrue(fs.exists(Path(home, "sessions", "12", "index", "$completedAt.json")))
-                    assertFalse(fs.exists(Path(home, "sessions", "12", "work", "$completedAt.json")))
-                    assertFalse(fs.exists(Path(home, "sessions", forkId.toString(), "work", "$completedAt.json")))
-                    assertTrue(fs.exists(Path(home, "sessions", "12", "index", "$spawnAt.json")))
+                    assertFalse(fs.exists(Path(home, "sessions")))
                     openSqliteConnection(dbPath).use { db ->
                         assertEquals(listOf(listOf(94L)), db.query("SELECT agent_id FROM agents WHERE session_id = ?", listOf(forkId.toLong())))
                     }
                 }
-                assertTrue(fs.exists(Path(home, "sessions", "12", "archive.mark")))
-                assertTrue(fs.exists(Path(home, "sessions", "12", "agents", "91", "settings", "latest.json")))
-                assertFalse(fs.exists(Path(home, "sessions", "12", "agents", "93")))
+                assertFalse(fs.exists(Path(home, "sessions")))
                 SqliteKodexSessionRepository(home, dependencies).use { repository ->
                     assertEquals(90, repository.getEntry(12).rootAgentId)
                     assertEquals("real root", repository.getEntry(12).name)
@@ -190,7 +182,7 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
                     assertEquals(1, created)
                     assertEquals(95, repository.getRootAgentId(created))
                 }
-                assertFalse(fs.exists(Path(home, "sessions", "12")))
+                assertFalse(fs.exists(Path(home, "sessions")))
             }
         }
 
@@ -276,25 +268,20 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
                         assertEquals(emptyList(), reopened.storage.getUnstableAtOrNull(reopened.storage.latestIndex()))
                         val targetRecovery = listOf(targetId.toLong(), packedAt.toLong(), "UserMessage", 0L)
                         assertEquals(listOf(targetRecovery), recoveryRows())
-                        val mirrorDirectory = Path(home, "sessions", copy.sessionId.toString(), "index")
-                        val publishedIndex = Path(mirrorDirectory, "latest.json")
-                        withTimeout(5.seconds) { while (!fs.exists(publishedIndex)) delay(10) }
-                        assertEquals(packedAt.toString(), fs.readString(publishedIndex))
-                        val mirrorPayload = fs.readString(Path(mirrorDirectory, "$packedAt.json"))
+                        assertFalse(fs.exists(Path(home, "sessions")))
                         val (sourcePayload, targetPayload) = mutex.withLock {
                             listOf(sourceId, targetId).map { agentId ->
                                 db.query(
                                     """SELECT payload_json FROM agent_commits WHERE agent_id = ? AND type = 'context_compaction' AND "index" = ?""",
                                     listOf(agentId.toLong(), packedAt.toLong()),
-                                ).single().single()
+                                ).single().single() as String
                             }
                         }
                         assertEquals(sourcePayload, targetPayload, "The public checkpoint payload must not carry recovery state.")
-                        assertEquals(targetPayload, mirrorPayload)
-                        assertTrue(mirrorPayload.contains("private-baseline-fixture"))
-                        assertFalse(mirrorPayload.contains("starts_new_turn"))
-                        assertFalse(mirrorPayload.contains("checkpoint_index"))
-                        assertFalse(mirrorPayload.contains("\"phase\""))
+                        assertTrue(targetPayload.contains("private-baseline-fixture"))
+                        assertFalse(targetPayload.contains("starts_new_turn"))
+                        assertFalse(targetPayload.contains("checkpoint_index"))
+                        assertFalse(targetPayload.contains("\"phase\""))
 
                         mutex.withLock {
                             db.execute("""CREATE TRIGGER reject_recovery BEFORE INSERT ON fork_context_recovery
