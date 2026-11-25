@@ -12,7 +12,12 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettin
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpCatalogTool
+import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
+import io.github.stream29.kodex.mcp.contract.McpClientState
+import io.github.stream29.kodex.mcp.contract.McpManagedServerState
+import io.github.stream29.kodex.mcp.contract.McpTransportKind
 import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ModelInfo
@@ -52,10 +57,15 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Instant
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
@@ -332,7 +342,7 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
             defaultHome = Path(SystemTemporaryDirectory, "unused"),
             output = { value, error -> assertFalse(error); replies += value },
             env = { null },
-            discover = { error("fixture-only upstream details") },
+            ensure = { error("fixture-only upstream details") },
             openServices = { _, _, _ -> error("Must not open a failed discovery") },
         ) { leaf, invoke -> invoke(assertIs<KodexToolLeafCommand>(leaf)) }
         assertEquals(1, exit)
@@ -343,17 +353,38 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
         assertEquals("connect", envelope.error?.phase)
         assertEquals(7, envelope.error?.agentId)
     }
-    test("resolveToolBackend fails fast without auto-starting a backend when none is running") {
-        val home = Path(SystemTemporaryDirectory, "kodex-cli-no-backend-${Random.nextLong()}")
-        val error = assertFailsWith<IllegalStateException> {
-            resolveToolBackend(
-                target = null,
-                defaultHome = Path("/unused"),
-                env = { if (it == KodexHomeEnvironmentVariable) home.toString() else null },
-                discover = { null },
-            )
-        }
-        assertContains(error.message.orEmpty(), "No running Kodex backend found")
+    test("resolveToolBackend ensures a backend unless --backend-url is explicit") {
+        val home = Path(SystemTemporaryDirectory, "kodex-cli-ensure-backend-${Random.nextLong()}")
+        val expected = BackendEndpoint("instance-ensure", 42, 18080, "a".repeat(64), "0.6.0")
+        var ensuredHome: Path? = null
+        val (resolvedDefaultHome, resolvedDefaultEndpoint) = resolveToolBackend(
+            target = null,
+            defaultHome = Path("/unused"),
+            env = { if (it == KodexHomeEnvironmentVariable) home.toString() else null },
+            ensure = { candidate ->
+                ensuredHome = candidate
+                expected
+            },
+            connect = { _, _ -> error("Default target must ensure instead of connectBackend") },
+        )
+        assertEquals(home, resolvedDefaultHome)
+        assertEquals(home, ensuredHome)
+        assertEquals(expected, resolvedDefaultEndpoint)
+
+        var connectedTarget: Pair<Path, Int>? = null
+        val (resolvedExplicitHome, resolvedExplicitEndpoint) = resolveToolBackend(
+            target = CliBackendTarget(port = 18080, backendHome = home.toString()),
+            defaultHome = Path("/unused"),
+            env = { null },
+            ensure = { error("Explicit --backend-url must not auto-start a backend") },
+            connect = { candidate, port ->
+                connectedTarget = candidate to port
+                expected
+            },
+        )
+        assertEquals(home, resolvedExplicitHome)
+        assertEquals(home to 18080, connectedTarget)
+        assertEquals(expected, resolvedExplicitEndpoint)
     }
 
     test("dynamic MCP tool invocation reuses a single RPC connection across discovery and execution") {
@@ -413,7 +444,7 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                             arguments = listOf("github", "echo_title", "--json", """{"title":"one-connection"}"""),
                             defaultHome = root,
                             output = { msg, _ -> error("Unexpected parser output: $msg") },
-                            discover = { endpoint },
+                            ensure = { endpoint },
                             openServices = { _, _, use ->
                                 opened++
                                 try {
@@ -447,7 +478,7 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                                 assertFalse(err)
                                 helpMessages += msg
                             },
-                            discover = { endpoint },
+                            ensure = { endpoint },
                             openServices = { _, _, use ->
                                 helpOpened++
                                 try { use(mcpServices) } finally { helpClosed++ }
@@ -459,6 +490,193 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                         assertEquals(1, helpOpened)
                         assertEquals(1, helpClosed)
                         assertContains(helpMessages.single(), "echo_title")
+                    }
+                }
+            }
+        } finally {
+            suspend fun removeTree(path: Path) {
+                val meta = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
+                if (meta.isDirectory) SystemCoroutineFileSystem.list(path).forEach { removeTree(it) }
+                SystemCoroutineFileSystem.delete(path, mustExist = false)
+            }
+            removeTree(root)
+        }
+    }
+
+    test("unknown top-level commands treat target as MCP, wait through cold Connecting, and report actionable diagnostics") {
+        val endpoint = BackendEndpoint("instance-mcp-diag", 42, 18081, "b".repeat(64), "0.6.0")
+        val root = Path(SystemTemporaryDirectory, "kodex-cli-mcp-diag-${Random.nextLong()}")
+        val client = mockOpenAiClient {
+            listModels { OpenAiResult.Success(ModelsResponse(emptyList())) }
+        }
+        fun serverState(
+            name: String,
+            enabled: Boolean = true,
+            connection: McpClientState? = McpClientState.Healthy,
+            authentication: McpAuthenticationState = McpAuthenticationState.NotConfigured,
+            toolCount: Int = 0,
+        ): McpManagedServerState = McpManagedServerState(
+            serverName = name,
+            transport = McpTransportKind.Stdio,
+            enabled = enabled,
+            authentication = authentication,
+            connection = connection,
+            toolCount = toolCount,
+        )
+        try {
+            // 1. Backend ensure failure is surfaced directly rather than collapsing into extra arguments.
+            val backendErrors = mutableListOf<String>()
+            assertEquals(
+                1,
+                dispatchCliWithToolRpc(
+                    arguments = listOf("chrome-devtools", "list_pages"),
+                    defaultHome = root,
+                    output = { msg, err ->
+                        assertTrue(err)
+                        backendErrors += msg
+                    },
+                    ensure = { error("Backend startup failed in test.") },
+                    openServices = { _, _, _ -> error("Must not open RPC on ensure failure") },
+                ) { _, _ -> error("Must not execute on ensure failure") },
+            )
+            assertContains(backendErrors.single(), "Backend startup failed in test.")
+            assertFalse(backendErrors.single().contains("got unexpected extra arguments"))
+
+            withBackendServices(
+                home = root,
+                codexHome = Path(root, "codex"),
+                agentsHome = Path(root, "agents"),
+                defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
+                createClient = { client },
+            ) { backend ->
+                withInMemoryRpc(backend::register) { baseRaw ->
+                    val baseServices = RpcServices(RestoringRpcClient(baseRaw))
+                    val publishedTool = McpCatalogTool(
+                        serverName = "chrome-devtools",
+                        serverInstructions = "Chrome DevTools MCP.",
+                        toolName = "list_pages",
+                        description = "List browser pages.",
+                        inputSchema = ObjectPropertyDefinition(),
+                    )
+                    val serversFlow = MutableStateFlow(
+                        listOf(
+                            serverState("chrome-devtools", enabled = true, connection = McpClientState.Connecting),
+                            serverState("disabled-srv", enabled = false, connection = null),
+                            serverState("failed-srv", enabled = true, connection = McpClientState.Failed(McpClientFailureReason.Transport)),
+                            serverState("oauth-srv", enabled = true, connection = McpClientState.AuthenticationBlocked, authentication = McpAuthenticationState.LoginRequired),
+                            serverState("stuck-srv", enabled = true, connection = McpClientState.Connecting),
+                            serverState("empty-srv", enabled = true, connection = McpClientState.Healthy, toolCount = 0),
+                        ),
+                    )
+                    var publishedTools = emptyList<McpCatalogTool>()
+                    val customGlobal = object : GlobalRpc by baseServices.global {
+                        override suspend fun getMcpServers(): List<McpManagedServerState> = serversFlow.value
+                        override fun getMcpServersFlow(): Flow<List<McpManagedServerState>> = serversFlow
+                        override suspend fun listMcpTools(): List<McpCatalogTool> = publishedTools
+                        override suspend fun callMcpTool(
+                            serverName: String,
+                            toolName: String,
+                            arguments: JsonObject,
+                        ): CallToolResult = CallToolResult(
+                            content = listOf(
+                                kotlinx.serialization.json.buildJsonObject {
+                                    put("type", kotlinx.serialization.json.JsonPrimitive("text"))
+                                    put("text", kotlinx.serialization.json.JsonPrimitive("pages-ok"))
+                                },
+                            ),
+                        )
+                    }
+                    withInMemoryRpc(registerServices = {
+                        registerService<GlobalRpc> { customGlobal }
+                        registerService<AgentRuntimeRpc> { baseServices.runtime }
+                    }) { mcpRaw ->
+                        val mcpServices = RpcServices(RestoringRpcClient(mcpRaw))
+
+                        suspend fun runDynamic(args: List<String>): Pair<Int, List<String>> {
+                            val errors = mutableListOf<String>()
+                            val code = dispatchCliWithToolRpc(
+                                arguments = args,
+                                defaultHome = root,
+                                output = { msg, err ->
+                                    assertTrue(err, "Expected stderr for $args: $msg")
+                                    errors += msg
+                                },
+                                ensure = { endpoint },
+                                mcpConnectTimeout = 120.milliseconds,
+                                openServices = { _, _, use -> use(mcpServices) },
+                            ) { _, _ -> error("Unexpected leaf execution for $args") }
+                            return code to errors
+                        }
+
+                        // 2. Cold start: chrome-devtools starts Connecting and transitions to Healthy while CLI waits.
+                        val stdout = mutableListOf<String>()
+                        val readyCode = kotlinx.coroutines.coroutineScope {
+                            val transition = launch {
+                                delay(30.milliseconds)
+                                publishedTools = listOf(publishedTool)
+                                serversFlow.value = serversFlow.value.map {
+                                    if (it.serverName == "chrome-devtools") {
+                                        it.copy(connection = McpClientState.Healthy, toolCount = 1)
+                                    } else {
+                                        it
+                                    }
+                                }
+                            }
+                            try {
+                                dispatchCliWithToolRpc(
+                                    arguments = listOf("chrome-devtools", "list_pages"),
+                                    defaultHome = root,
+                                    output = { msg, _ -> error("Unexpected diagnostic output: $msg") },
+                                    ensure = { endpoint },
+                                    mcpConnectTimeout = 2_000.milliseconds,
+                                    openServices = { _, _, use -> use(mcpServices) },
+                                    executeTool = { toolLeaf, services ->
+                                        executeCliToolCommand(toolLeaf, services, writeStdout = stdout::add)
+                                    },
+                                ) { leaf, invokeTool ->
+                                    invokeTool(assertIs<KodexToolLeafCommand>(leaf))
+                                }
+                            } finally {
+                                transition.join()
+                            }
+                        }
+                        assertEquals(0, readyCode)
+                        assertContains(stdout.single(), "pages-ok")
+
+                        // 3. Unconfigured server lists available servers and never reports extra arguments.
+                        val (missingCode, missingErr) = runDynamic(listOf("unknown-srv", "ping"))
+                        assertEquals(1, missingCode)
+                        assertContains(missingErr.single(), "MCP server 'unknown-srv' is not configured")
+                        assertContains(missingErr.single(), "chrome-devtools")
+
+                        // 4. Disabled server hints `kodex mcp enable`.
+                        val (disabledCode, disabledErr) = runDynamic(listOf("disabled-srv", "ping"))
+                        assertEquals(1, disabledCode)
+                        assertContains(disabledErr.single(), "disabled")
+                        assertContains(disabledErr.single(), "kodex mcp enable disabled-srv")
+
+                        // 5. Failed server includes reason and hints reconnect.
+                        val (failedCode, failedErr) = runDynamic(listOf("failed-srv", "ping"))
+                        assertEquals(1, failedCode)
+                        assertContains(failedErr.single(), "failed to connect")
+                        assertContains(failedErr.single(), "Transport")
+                        assertContains(failedErr.single(), "kodex mcp reconnect failed-srv")
+
+                        // 6. Auth-blocked server explains authentication requirement.
+                        val (oauthCode, oauthErr) = runDynamic(listOf("oauth-srv", "ping"))
+                        assertEquals(1, oauthCode)
+                        assertContains(oauthErr.single(), "requires authentication")
+                        assertContains(oauthErr.single(), "login required")
+
+                        // 7. Timed-out Connecting server explains it is still connecting.
+                        val (stuckCode, stuckErr) = runDynamic(listOf("stuck-srv", "ping"))
+                        assertEquals(1, stuckCode)
+                        assertContains(stuckErr.single(), "still connecting")
+
+                        // 8. Healthy server with 0 tools explains it publishes no tools.
+                        val (emptyCode, emptyErr) = runDynamic(listOf("empty-srv", "ping"))
+                        assertEquals(1, emptyCode)
+                        assertContains(emptyErr.single(), "publishes no tools")
                     }
                 }
             }

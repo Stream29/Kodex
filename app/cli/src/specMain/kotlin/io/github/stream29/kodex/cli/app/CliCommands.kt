@@ -128,7 +128,8 @@ public abstract class KodexGroupCommand(
     vararg children: KodexCliCommand,
     public val isToolGroup: Boolean = false,
 ) : KodexCliCommand(name, summary) {
-    override val invokeWithoutSubcommand: Boolean = true
+    override val invokeWithoutSubcommand: Boolean = false
+    override val printHelpOnEmptyArgs: Boolean = true
 
     init {
         if (children.isNotEmpty()) subcommands(*children)
@@ -185,18 +186,18 @@ public class FrontendBackendOptions : OptionGroup() {
     }
 }
 
-/** Thin tool backend options (never auto-starts a daemon; allows `--backend-home` alone). */
+/** CLI tool backend options (auto-starts a backend unless `--backend-url` is explicit; allows `--backend-home` alone). */
 public class ToolBackendOptions : OptionGroup() {
     public val backendPort: Int? by option(
         "--backend-url",
         metavar = "URL",
-        help = "Connect to this running loopback HTTP backend URL.",
+        help = "Connect only to this running loopback HTTP backend URL without starting or replacing a backend.",
     ).convert { parseLocalBackendUrlPort(it) }
 
     public val backendHome: String? by option(
         "--backend-home",
         metavar = "DIR",
-        help = "Read the running backend connection record from this Kodex Home (defaults to KODEX_HOME or ~/.kodex).",
+        help = "Use this Kodex Home for the local backend (defaults to KODEX_HOME or ~/.kodex).",
     ).convert { validateBackendHomeValue(it) }
 
     public fun resolve(): CliBackendTarget? {

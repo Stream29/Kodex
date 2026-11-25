@@ -12,10 +12,12 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentComm
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.LlmRequestMeta
 import io.github.stream29.kodex.backend.BackendEndpoint
-import io.github.stream29.kodex.backend.host.discoverReadyBackend
 import io.github.stream29.kodex.backend.host.connectBackend
+import io.github.stream29.kodex.backend.host.ensureBackend
 import io.github.stream29.kodex.cli.rpc.RpcServices
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpCatalogTool
+import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.ReservedMcpServerNames
@@ -59,12 +61,15 @@ import io.github.stream29.kodex.utils.rpcexception.SessionHasRunningSubagents
 import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import kotlin.time.Clock
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.files.Path
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -126,33 +131,25 @@ internal data class CliMcpServerDetail(
 internal suspend fun resolveExistingOrCandidatePath(path: Path): Path =
     if (SystemCoroutineFileSystem.exists(path)) SystemCoroutineFileSystem.resolve(path) else path
 
-internal suspend fun resolveToolBackendOrNull(
-    target: CliBackendTarget?,
-    defaultHome: Path,
-    env: (String) -> String? = ::environmentVariable,
-    discover: suspend (Path) -> BackendEndpoint? = ::discoverReadyBackend,
-    connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
-): Pair<Path, BackendEndpoint?> {
-    val rawHome = target?.backendHome ?: env(KodexHomeEnvironmentVariable)?.takeIf { it.isNotBlank() }
-    val resolvedHome = resolveExistingOrCandidatePath(if (rawHome == null) defaultHome else Path(rawHome))
-    val port = target?.port
-    val endpoint = if (port != null) connect(resolvedHome, port) else discover(resolvedHome)
-    return resolvedHome to endpoint
-}
-
 internal suspend fun resolveToolBackend(
     target: CliBackendTarget?,
     defaultHome: Path,
     env: (String) -> String? = ::environmentVariable,
-    discover: suspend (Path) -> BackendEndpoint? = ::discoverReadyBackend,
+    ensure: suspend (Path) -> BackendEndpoint = ::ensureBackend,
     connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
 ): Pair<Path, BackendEndpoint> {
-    val (resolvedHome, endpoint) = resolveToolBackendOrNull(target, defaultHome, env, discover, connect)
-    return resolvedHome to (
-        endpoint ?: error(
-            "No running Kodex backend found in $resolvedHome. Start 'kodex backend start' or open a Kodex frontend first.",
-        )
-    )
+    val rawHome = target?.backendHome ?: env(KodexHomeEnvironmentVariable)?.takeIf { it.isNotBlank() }
+    val resolvedHome = resolveExistingOrCandidatePath(if (rawHome == null) defaultHome else Path(rawHome))
+    val port = target?.port
+    val endpoint = if (port != null) connect(resolvedHome, port) else ensure(resolvedHome)
+    return resolvedHome to endpoint
+}
+
+internal val DefaultCliMcpConnectTimeout: Duration = 30.seconds
+
+private sealed interface DynamicMcpResolution {
+    data class Available(val domains: List<McpServerDomainCommand>) : DynamicMcpResolution
+    data class Unavailable(val diagnostic: String) : DynamicMcpResolution
 }
 
 /**
@@ -164,8 +161,9 @@ internal suspend fun dispatchCliWithToolRpc(
     defaultHome: Path,
     output: (message: String, error: Boolean) -> Unit,
     env: (String) -> String? = ::environmentVariable,
-    discover: suspend (Path) -> BackendEndpoint? = ::discoverReadyBackend,
+    ensure: suspend (Path) -> BackendEndpoint = ::ensureBackend,
     connect: suspend (Path, Int) -> BackendEndpoint = ::connectBackend,
+    mcpConnectTimeout: Duration = DefaultCliMcpConnectTimeout,
     openServices: suspend (Path, BackendEndpoint, suspend (RpcServices) -> Int) -> Int =
         { home, endpoint, use ->
             withLocalRpcClient(home, endpoint) { connection ->
@@ -185,38 +183,36 @@ internal suspend fun dispatchCliWithToolRpc(
         arguments = arguments,
         output = output,
         withMcpDomains = { target, block ->
-            val resolved = try {
-                resolveToolBackendOrNull(target, defaultHome, env, discover, connect)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                null
+            val serverName = checkNotNull(arguments.firstOrNull()) {
+                "Dynamic MCP dispatch requires a target server name."
             }
-            val (resolvedHome, endpoint) = resolved ?: return@dispatchCli block(emptyList())
-            if (endpoint == null) return@dispatchCli block(emptyList())
             var enteredBlock = false
             try {
+                val (resolvedHome, endpoint) = resolveToolBackend(target, defaultHome, env, ensure, connect)
                 openServices(resolvedHome, endpoint) { services ->
-                    val domains = try {
-                        loadDynamicMcpDomains(services)
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        emptyList()
-                    }
-                    enteredBlock = true
-                    preopened = target to services
-                    try {
-                        block(domains)
-                    } finally {
-                        preopened = null
+                    when (val resolution = resolveDynamicMcpDomains(services, serverName, mcpConnectTimeout)) {
+                        is DynamicMcpResolution.Available -> {
+                            enteredBlock = true
+                            preopened = target to services
+                            try {
+                                block(resolution.domains)
+                            } finally {
+                                preopened = null
+                            }
+                        }
+                        is DynamicMcpResolution.Unavailable -> {
+                            output("Unable to run Kodex: ${resolution.diagnostic}", true)
+                            1
+                        }
                     }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (failure: Exception) {
-                if (enteredBlock) throw failure
-                block(emptyList())
+            } catch (failure: Throwable) {
+                if (failure is Error || enteredBlock) throw failure
+                currentCoroutineContext().ensureActive()
+                output("Unable to run Kodex: ${failure.message ?: "operation failed"}", true)
+                1
             }
         },
         execute = { leaf ->
@@ -229,7 +225,7 @@ internal suspend fun dispatchCliWithToolRpc(
                     var entered = false
                     var exitCode: Int? = null
                     try {
-                        val (resolvedHome, endpoint) = resolveToolBackend(target, defaultHome, env, discover, connect)
+                        val (resolvedHome, endpoint) = resolveToolBackend(target, defaultHome, env, ensure, connect)
                         openServices(resolvedHome, endpoint) { services ->
                             entered = true
                             executeTool(toolLeaf, services).also { exitCode = it }
@@ -256,6 +252,108 @@ internal suspend fun dispatchCliWithToolRpc(
             }
         },
     )
+}
+
+private suspend fun resolveDynamicMcpDomains(
+    services: RpcServices,
+    serverName: String,
+    mcpConnectTimeout: Duration,
+): DynamicMcpResolution {
+    val initialDomains = loadDynamicMcpDomains(services)
+    if (initialDomains.any { it.serverName == serverName }) {
+        return DynamicMcpResolution.Available(initialDomains)
+    }
+
+    var servers = services.global.getMcpServers()
+    var state = servers.firstOrNull { it.serverName == serverName }
+    val configuredInSettings = if (state == null) {
+        try {
+            services.global.getSettings().mcpServers[serverName]
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    } else {
+        null
+    }
+
+    val shouldWait = when {
+        state != null -> state.enabled && (state.connection == null || state.connection == McpClientState.Connecting)
+        configuredInSettings != null -> true
+        else -> false
+    }
+    if (shouldWait) {
+        val sawInManager = state != null
+        val awaited = withTimeoutOrNull(mcpConnectTimeout) {
+            services.global.getMcpServersFlow().first { list ->
+                val candidate = list.firstOrNull { it.serverName == serverName }
+                if (candidate == null) {
+                    sawInManager
+                } else {
+                    !candidate.enabled ||
+                        (candidate.connection != null && candidate.connection != McpClientState.Connecting)
+                }
+            }
+        }
+        servers = awaited ?: services.global.getMcpServers()
+        state = servers.firstOrNull { it.serverName == serverName }
+        val refreshedDomains = loadDynamicMcpDomains(services)
+        if (refreshedDomains.any { it.serverName == serverName }) {
+            return DynamicMcpResolution.Available(refreshedDomains)
+        }
+    }
+
+    return DynamicMcpResolution.Unavailable(
+        formatUnavailableMcpServerDiagnostic(serverName, state, servers, mcpConnectTimeout),
+    )
+}
+
+private fun formatUnavailableMcpServerDiagnostic(
+    serverName: String,
+    state: McpManagedServerState?,
+    allServers: List<McpManagedServerState>,
+    mcpConnectTimeout: Duration,
+): String {
+    if (state == null) {
+        val available = allServers.map { it.serverName }.filter { it !in ReservedMcpServerNames }.sorted()
+        return if (available.isNotEmpty()) {
+            "MCP server '$serverName' is not configured. Configured MCP servers: ${available.joinToString(", ")}. " +
+                "Run 'kodex mcp list' or 'kodex --help' for available commands."
+        } else {
+            "MCP server '$serverName' is not configured (no MCP servers are configured). " +
+                "Run 'kodex --help' for built-in commands."
+        }
+    }
+    if (!state.enabled) {
+        return "MCP server '$serverName' is disabled. Run 'kodex mcp enable $serverName' to enable it."
+    }
+    return when (val connection = state.connection) {
+        McpClientState.AuthenticationBlocked ->
+            "MCP server '$serverName' requires authentication (${state.authentication.describeForCli()}). " +
+                "Run 'kodex mcp status $serverName' to inspect it."
+        null, McpClientState.Connecting ->
+            "MCP server '$serverName' is still connecting and did not become ready within $mcpConnectTimeout. " +
+                "Run 'kodex mcp status $serverName' to inspect it."
+        is McpClientState.Failed ->
+            "MCP server '$serverName' failed to connect (${connection.reason}). " +
+                "Run 'kodex mcp status $serverName' or 'kodex mcp reconnect $serverName'."
+        McpClientState.Closed ->
+            "MCP server '$serverName' is closed and unavailable. " +
+                "Run 'kodex mcp status $serverName' or 'kodex mcp reconnect $serverName'."
+        McpClientState.Healthy ->
+            "MCP server '$serverName' is connected but publishes no tools."
+    }
+}
+
+private fun McpAuthenticationState.describeForCli(): String = when (this) {
+    McpAuthenticationState.NotConfigured -> "not configured"
+    McpAuthenticationState.LoginRequired -> "login required"
+    McpAuthenticationState.ReauthorizationRequired -> "reauthorization required"
+    McpAuthenticationState.Authorizing -> "authorizing"
+    McpAuthenticationState.Authorized -> "authorized"
+    McpAuthenticationState.Refreshing -> "refreshing"
+    is McpAuthenticationState.Failed -> "failed: $message"
 }
 
 internal fun resolveTargetAgentId(

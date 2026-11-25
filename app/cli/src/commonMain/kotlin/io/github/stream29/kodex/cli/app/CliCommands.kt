@@ -88,10 +88,16 @@ private suspend fun parseAndExecuteCli(
             }
         }
     } catch (failure: CliktError) {
+        val isGroupEmptyHelp = failure is PrintHelpMessage && failure.context?.command is KodexGroupCommand
         command.getFormattedHelp(failure)?.let { message ->
-            output(message, if (failure is PrintHelpMessage) failure.error else failure.printError)
+            val isError = when {
+                isGroupEmptyHelp -> false
+                failure is PrintHelpMessage -> failure.error
+                else -> failure.printError
+            }
+            output(message, isError)
         }
-        return failure.statusCode
+        return if (isGroupEmptyHelp) 0 else failure.statusCode
     }
 
     val leaf = checkNotNull(selected) { "No CLI leaf command selected." }

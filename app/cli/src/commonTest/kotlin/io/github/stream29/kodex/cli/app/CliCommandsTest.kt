@@ -231,6 +231,21 @@ val cliCommandsTest by testSuite {
             assertContains(messages.single(), "Usage: kodex")
             assertContains(messages.single(), "Error:")
         }
+
+        for (unknownSubcommand in listOf(
+            listOf("unknown"),
+            listOf("backend", "unknown"),
+            listOf("session", "fork"),
+        )) {
+            val messages = mutableListOf<String>()
+            val code = dispatchCli(unknownSubcommand, { message, error ->
+                assertTrue(error, unknownSubcommand.toString())
+                messages += message
+            }) { fail("Unknown subcommand must not enter runtime: $unknownSubcommand") }
+            assertNotEquals(0, code, unknownSubcommand.toString())
+            assertContains(messages.single(), "no such subcommand", ignoreCase = true)
+            assertFalse(messages.single().contains("got unexpected extra arguments"), messages.single())
+        }
     }
 
     test("dynamic MCP server domains mount at top level and print inputSchema in tool --help while reserved names win") {
@@ -294,7 +309,23 @@ val cliCommandsTest by testSuite {
         assertEquals("github", assertNotNull(invokedTool).tool.serverName)
         assertEquals("create_issue", assertNotNull(invokedTool).tool.toolName)
 
-        // 4. Built-in `kodex search -q test` wins over conflicting MCP server name `search`
+        // 4. Unknown tool under mounted MCP domain reports no such subcommand instead of extra arguments
+        val unknownToolErrors = mutableListOf<String>()
+        assertNotEquals(
+            0,
+            dispatchCli(
+                listOf("github", "nonexistent_tool"),
+                { msg, err ->
+                    assertTrue(err)
+                    unknownToolErrors += msg
+                },
+                withMcpDomains = withMcp,
+            ) { fail("Unknown MCP tool must not execute") },
+        )
+        assertContains(unknownToolErrors.single(), "no such subcommand", ignoreCase = true)
+        assertFalse(unknownToolErrors.single().contains("got unexpected extra arguments"), unknownToolErrors.single())
+
+        // 5. Built-in `kodex search -q test` wins over conflicting MCP server name `search`
         var invokedSearch: SearchCommand? = null
         assertEquals(0, dispatchCli(
             listOf("search", "-q", "kotlin"),
