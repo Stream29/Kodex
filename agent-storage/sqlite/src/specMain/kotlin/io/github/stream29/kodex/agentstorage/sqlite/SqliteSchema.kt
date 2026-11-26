@@ -3,7 +3,7 @@ package io.github.stream29.kodex.agentstorage.sqlite
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 
 /** Physical schema required by current repositories and the independent SQL reader. */
-public const val SqliteSchemaVersion: Int = 3
+public const val SqliteSchemaVersion: Int = 4
 
 /** SQLite header signature for databases prepared by the current Kodex Home format. */
 public const val KodexHomeDatabaseApplicationId: Int = 0x4B445830
@@ -103,17 +103,6 @@ CREATE INDEX idx_schedules_trigger_at
 
 CREATE INDEX idx_schedules_agent_id
     ON schedules(agent_id, trigger_at_epoch_seconds, trigger_at_nanoseconds, schedule_id);
-
-CREATE TABLE fork_context_recovery (
-    agent_id INTEGER NOT NULL,
-    checkpoint_index INTEGER NOT NULL,
-    commit_type TEXT NOT NULL DEFAULT 'context_compaction' CHECK (commit_type = 'context_compaction'),
-    phase TEXT NOT NULL CHECK (phase IN ('Empty', 'UserMessage', 'AssistantMessage', 'ToolCompleted')),
-    starts_new_turn INTEGER NOT NULL CHECK (starts_new_turn IN (0, 1)),
-    PRIMARY KEY (agent_id, checkpoint_index),
-    FOREIGN KEY (agent_id, commit_type, checkpoint_index)
-        REFERENCES agent_commits(agent_id, type, "index") ON DELETE CASCADE
-) STRICT, WITHOUT ROWID;
 """
 
 /**

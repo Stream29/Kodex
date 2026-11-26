@@ -13,12 +13,18 @@ public actual fun KLogger.global(): KLogger {
     )
 }
 
-public actual fun KLogger.session(uri: String): KLogger {
+public actual fun KLogger.session(agentId: Int?): KLogger {
     return scoped(
-        mapOf(
-            ScopeField to SessionScope,
-            UriField to uri
-        )
+        if (agentId != null) {
+            mapOf(
+                ScopeField to SessionScope,
+                AgentIdField to agentId,
+            )
+        } else {
+            mapOf(
+                ScopeField to SessionScope,
+            )
+        }
     )
 }
 
@@ -81,6 +87,6 @@ private const val SessionScope: String = "session"
 private const val AgentScope: String = "agent"
 private const val ToolScope: String = "tool"
 private const val ScopeField: String = "scope"
-private const val UriField: String = "uri"
+private const val AgentIdField: String = "agent_id"
 private const val ToolNameField: String = "tool_name"
 private const val CallIdField: String = "call_id"

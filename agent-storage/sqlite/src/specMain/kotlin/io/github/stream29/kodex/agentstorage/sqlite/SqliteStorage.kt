@@ -24,7 +24,6 @@ import kotlin.time.Instant
 public expect class SqliteAgentStorage(
     connection: SqliteConnection,
     agentId: Int,
-    uri: String = "db:agent/$agentId",
     mutex: Mutex = Mutex(),
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
     requireAccess: () -> Unit = {},
@@ -32,7 +31,6 @@ public expect class SqliteAgentStorage(
     onSessionGroupsChanged: ((Map<String?, Boolean>) -> Unit)? = null,
 ) : MutableKodexAgentStorage {
     override val agentId: Int
-    override val uri: String
 
     override suspend fun latestIndex(): Int
     override suspend fun countCommitsIn(range: IntRange, types: Set<AgentCommitType>): Int

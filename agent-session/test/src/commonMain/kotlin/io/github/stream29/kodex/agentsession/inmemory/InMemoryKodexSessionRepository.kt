@@ -17,10 +17,6 @@ import io.github.stream29.kodex.agentsession.contract.SessionResidencyTable
 import io.github.stream29.kodex.agentsession.contract.StoredAgent
 import io.github.stream29.kodex.agentsession.contract.pendingDeadline
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
-import io.github.stream29.kodex.agentstate.impl.ForkContextRecovery
-import io.github.stream29.kodex.agentstate.impl.StablePhaseTransitionTypes
-import io.github.stream29.kodex.agentstate.impl.stablePhaseAt
-import io.github.stream29.kodex.agentstate.impl.startsNewTurnAt
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
@@ -163,7 +159,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         val source = requireSession(sourceEntryIndex).storage
         val index = nextSessionIndex()
         val commits = source.getCommitsIn(0..source.latestIndex())
-        sessions[index] = SessionNode(forkStorage(index, commits, source.forkRecoveryAt(Int.MAX_VALUE)))
+        sessions[index] = SessionNode(forkStorage(index, commits))
         mutableEntries.value = (entries.value + index).sorted()
         index
     }
@@ -185,7 +181,6 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         val settings = checkNotNull(source.getSettingsAtOrNull(last))
         val point = source.getCommitAtOrBefore(last, setOf(AgentCommitType.ContextCompaction))
         val from = point?.index ?: 0
-        val recovery = point?.takeIf { from > 0 }?.let { source.captureForkRecovery(from) }
         val commits = buildList {
             if (from > 0) addAll(source.getCommitsIn(0..0))
             addAll(source.getCommitsIn(from..last))
@@ -199,7 +194,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
             }
         }
         val index = nextSessionIndex()
-        sessions[index] = SessionNode(forkStorage(index, commits, recovery))
+        sessions[index] = SessionNode(forkStorage(index, commits))
         mutableEntries.value = (entries.value + index).sorted()
         AgentForkCopy(index, settings)
     }
@@ -237,7 +232,6 @@ public actual class InMemoryKodexSessionRepository internal constructor(
                 storage = storage,
                 contextSettings = dependencies.contextSettings,
                 clock = dependencies.clock,
-                readForkContextRecovery = root.storage::forkRecoveryAt,
             ).buildMasterAgentRuntime(dependencies)
             sessionScope.launch(start = CoroutineStart.UNDISPATCHED) {
                 runtime.stopEvents.collect { event ->
@@ -305,7 +299,6 @@ public actual class InMemoryKodexSessionRepository internal constructor(
     private fun forkStorage(
         agentId: Int,
         commits: List<IndexedAgentCommit>,
-        recovery: ForkContextRecovery?,
     ): DeadlineTrackingStorage {
         val filtered = commits.mapNotNull { row ->
             val commit = when (val original = row.commit) {
@@ -318,7 +311,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
             commit?.let { row.copy(commit = it) }
         }
         val source = InMemoryKodexAgentStorage.importCommits(agentId, filtered)
-        return DeadlineTrackingStorage(agentId, source, recovery) { deadline ->
+        return DeadlineTrackingStorage(agentId, source) { deadline ->
             mutableAwaitDeadlines.update { if (deadline == null) it - agentId else it + (agentId to deadline) }
         }
     }
@@ -359,7 +352,6 @@ private class SessionNode(
 private class DeadlineTrackingStorage(
     override val agentId: Int,
     private val source: InMemoryKodexAgentStorage,
-    private var forkRecovery: ForkContextRecovery? = null,
     private val publish: (PendingAwaitDeadline?) -> Unit,
 ) : MutableKodexAgentStorage by source {
     private val writeMutex = Mutex()
@@ -379,7 +371,6 @@ private class DeadlineTrackingStorage(
     override suspend fun revert(untilExclusive: Int): Unit = writeMutex.withLock {
         check(!detached) { "Agent storage was deleted." }
         source.revert(untilExclusive)
-        if (forkRecovery?.checkpointIndex?.let { it >= untilExclusive } == true) forkRecovery = null
         val index = source.getCommitAtOrBefore(source.latestIndex(), AgentCommitType.UnstableTypes)
         publish(index?.let { (it.commit as UnstableSnapshot).pendingDeadline(agentId, it.index) })
     }
@@ -387,23 +378,6 @@ private class DeadlineTrackingStorage(
     suspend fun detach(): Unit = writeMutex.withLock {
         detached = true
         publish(null)
-    }
-
-    suspend fun forkRecoveryAt(upToIndex: Int): ForkContextRecovery? = writeMutex.withLock {
-        forkRecovery?.takeIf { it.checkpointIndex <= upToIndex }
-    }
-
-    suspend fun captureForkRecovery(checkpoint: Int): ForkContextRecovery {
-        val old = forkRecoveryAt(checkpoint)
-        if (old?.checkpointIndex == checkpoint) return old
-        val before = checkpoint - 1
-        val lastTransition = source.getCommitAtOrBefore(before, StablePhaseTransitionTypes)
-        val lastBoundary = source.getCommitAtOrBefore(before, AgentCommitType.TurnStartBoundaryTypes)
-        return ForkContextRecovery(
-            checkpoint,
-            stablePhaseAt(lastTransition?.let { it.index to it.commit.commitType }, old),
-            startsNewTurnAt(lastBoundary?.let { it.index to it.commit.commitType }, old),
-        )
     }
 }
 

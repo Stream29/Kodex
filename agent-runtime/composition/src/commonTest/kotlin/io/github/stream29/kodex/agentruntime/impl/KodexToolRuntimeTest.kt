@@ -714,7 +714,7 @@ private class ToolRuntimeTestContext(
             tools = tools,
             logger = baseLogger
                 .global()
-                .session(storage.uri)
+                .session(storage.agentId)
                 .agent(),
         )
     }

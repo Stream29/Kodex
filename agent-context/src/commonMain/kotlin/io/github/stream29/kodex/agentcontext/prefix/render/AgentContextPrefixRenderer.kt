@@ -170,7 +170,9 @@ private fun PromptXmlBuilder.render(timeZone: TimeZone) {
 
 private fun PromptXmlBuilder.render(sessionMeta: AgentSessionMeta) {
     tag("current_session") {
-        tag("storage_uri") { text(sessionMeta.uri) }
+        sessionMeta.agentId?.let { id ->
+            tag("agent_id") { text(id.toString()) }
+        }
         tag("name") { text(sessionMeta.name) }
     }
 }

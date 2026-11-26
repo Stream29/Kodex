@@ -131,7 +131,6 @@ private class RpcCachedAgentStorage(
     valueCacheSize: Int,
     timeSource: TimeSource,
 ) : ObservableKodexAgentStorage {
-    override val uri: String = "rpc://session/$sessionIndex"
     override val agentId: Int = sessionIndex
     private val mutex = Mutex()
     private var valuesNonce: Long? = null

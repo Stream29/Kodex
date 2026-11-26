@@ -31,7 +31,6 @@ public actual class InMemoryKodexAgentStorage private constructor(
     initialRows: MutableList<InMemoryRow>,
     public actual override val agentId: Int?,
 ) : MutableKodexAgentStorage {
-    private val identity: Any = Any()
     private val mutex = Mutex()
     private val rowsByIndex: MutableList<InMemoryRow> = initialRows
 
@@ -42,8 +41,6 @@ public actual class InMemoryKodexAgentStorage private constructor(
         initialRows(initialSettings),
         agentId,
     )
-
-    public actual override val uri: String = "memory:${identity.hashCode().toUInt().toString(16)}"
 
     public actual override suspend fun latestIndex(): Int = mutex.withLock { tailIndex() }
 
@@ -175,10 +172,12 @@ public actual class InMemoryKodexAgentStorage private constructor(
 
 @OptIn(ExperimentalUuidApi::class)
 private fun initialRows(initialSettings: KodexAgentSettings): MutableList<InMemoryRow> {
+    val threadId = initialSettings.threadId.ifEmpty { Uuid.generateV7().toString() }
     val windowId = Uuid.generateV7().toString()
     val turnId = initialSettings.turnId.ifEmpty { Uuid.generateV7().toString() }
     val timestamp = Clock.System.now()
     val settings = initialSettings.copy(
+        threadId = threadId,
         turnId = turnId,
         windowNumber = 0,
         firstWindowId = windowId,

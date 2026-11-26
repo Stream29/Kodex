@@ -79,7 +79,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
     } closeWith {
         cancelAndJoin()
     } asContextForEach {
-        test("sparse fork recovery follows the retained checkpoint across reopen and is discarded on revert") {
+        test("sparse fork keeps only the retained checkpoint window and reverts cleanly") {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val sourceId = repository.createInitialized(settings("source"))
             val source = repository.open(sourceId)
@@ -96,16 +96,14 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             assertNull(target.storage.getCommitExact(old))
             assertEquals(checkpoint, target.storage.getCommitExact(packedAt, AgentCommitType.IndexTypes)?.commit)
             assertEquals(emptyList(), target.storage.getUnstableAtOrNull(packedAt))
-            assertEquals(KodexAgentStateValue.AssistantMessage, target.runtime.state.value)
-            val initialTurn = target.storage.getSettingsAt(packedAt).turnId
+            assertEquals(KodexAgentStateValue.Empty, target.runtime.state.value)
             val next = target.runtime.appendUserMessage(listOf(ContentItem.InputText("fork reply")))
             assertEquals(packedAt + 1, next)
-            assertNotEquals(initialTurn, target.storage.getSettingsAt(next).turnId)
             assertEquals(KodexAgentStateValue.UserMessage, target.runtime.state.value)
             target.runtime.modify { it.revert(packedAt + 1) }
             repository.closeSession(fork.sessionId)
             val reopened = repository.open(fork.sessionId)
-            assertEquals(KodexAgentStateValue.AssistantMessage, reopened.runtime.state.value)
+            assertEquals(KodexAgentStateValue.Empty, reopened.runtime.state.value)
             reopened.runtime.modify { it.revert(packedAt) }
             assertEquals(KodexAgentStateValue.Empty, reopened.runtime.state.value)
             assertEquals(0, reopened.storage.latestIndex())

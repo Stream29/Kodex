@@ -1,10 +1,20 @@
 package io.github.stream29.kodex.app.migration.v0_9_0
 
+import io.github.stream29.kodex.app.migration.HomeDatabaseFile
+import io.github.stream29.kodex.app.migration.incompatibleHome
 import io.github.stream29.kodex.app.migration.isDirectEntry
 import io.github.stream29.kodex.app.migration.requireHomeDatabaseHeader
 import io.github.stream29.kodex.app.migration.requireHomeDatabaseSchema
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
+import io.github.stream29.kodex.utils.sqlite.openExistingSqliteConnection
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
+import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
+
+private const val FrozenApplicationId = 0x4B445830L
+private const val SourceSchemaVersion = 3L
+private const val TargetSchemaVersion = 4L
 
 private const val SessionsDirectoryName = "sessions"
 private const val AgentsDirectoryName = "agents"
@@ -36,8 +46,36 @@ private val MirrorTimelineNames = setOf(
  * (including legacy `subagents/`), and symbolic links are preserved untouched.
  */
 internal suspend fun migrateToV0_9_0(home: Path, fileSystem: CoroutineFileSystem) {
+    dropForkContextRecoveryTable(home, fileSystem)
     retireSessionFileMirrors(home, fileSystem)
     retireLegacyKodexHomeSkill(home, fileSystem)
+}
+
+internal suspend fun dropForkContextRecoveryTable(home: Path, fileSystem: CoroutineFileSystem) {
+    requireHomeDatabaseHeader(home, fileSystem)
+    val database = Path(home, HomeDatabaseFile)
+    withContext(Dispatchers.IO) {
+        openExistingSqliteConnection(database).use { db ->
+            if (db.query("PRAGMA main.application_id") != listOf(listOf(FrozenApplicationId))) {
+                throw incompatibleHome(home, "Unrecognized Kodex SQLite database signature during 0.9.0 migration.")
+            }
+            val userVersion = db.query("PRAGMA main.user_version").singleOrNull()?.singleOrNull() as? Long
+            when (userVersion) {
+                TargetSchemaVersion -> Unit
+                SourceSchemaVersion -> {
+                    db.transaction {
+                        db.execute("DROP TABLE IF EXISTS fork_context_recovery")
+                        db.execute("PRAGMA main.user_version=$TargetSchemaVersion")
+                    }
+                }
+                else -> throw incompatibleHome(
+                    home,
+                    "Unexpected Kodex SQLite database schema version during 0.9.0 migration (user_version=$userVersion).",
+                )
+            }
+        }
+    }
+    requireHomeDatabaseSchema(home)
 }
 
 internal suspend fun retireLegacyKodexHomeSkill(home: Path, fileSystem: CoroutineFileSystem) {

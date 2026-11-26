@@ -76,7 +76,9 @@ public val migrateToV0_9_0Test by testSuite {
             }
 
             openExistingSqliteConnection(Path(home, HomeDatabaseFile)).use { db ->
+                assertEquals(4L, db.query("PRAGMA main.user_version").single().single())
                 assertEquals(listOf(listOf(0L)), db.query("SELECT session_id FROM sessions"))
+                assertTrue(db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'fork_context_recovery'").isEmpty())
             }
         }
 
@@ -171,8 +173,15 @@ public val migrateToV0_9_0Test by testSuite {
             assertTrue(fs.exists(record))
         }
 
-        test("stays inactive while application version is still 0.8.1") { home ->
-            createValidV081Home(home)
+        test("stays inactive while application version is still 0.8.1 on a current-schema Home") { home ->
+            openSqliteConnection(Path(home, HomeDatabaseFile)).use { db ->
+                db.execute("PRAGMA journal_mode=DELETE")
+                initializeKodexHomeDatabase(db)
+                db.execute("INSERT INTO sessions(session_id) VALUES (0)")
+                db.execute("INSERT INTO agents(agent_id, session_id) VALUES (0, 0)")
+                db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES (0)")
+            }
+            writeFixtureCheckpoint(home, "0.8.1")
             writeMirrorTree(Path(home, "sessions", "0"), includeArchiveMark = true)
 
             prepareKodexHome(
@@ -192,6 +201,19 @@ private suspend fun createValidV081Home(home: Path) {
     openSqliteConnection(Path(home, HomeDatabaseFile)).use { db ->
         db.execute("PRAGMA journal_mode=DELETE")
         initializeKodexHomeDatabase(db)
+        db.execute(
+            """CREATE TABLE fork_context_recovery (
+                agent_id INTEGER NOT NULL,
+                checkpoint_index INTEGER NOT NULL,
+                commit_type TEXT NOT NULL DEFAULT 'context_compaction' CHECK (commit_type = 'context_compaction'),
+                phase TEXT NOT NULL CHECK (phase IN ('Empty', 'UserMessage', 'AssistantMessage', 'ToolCompleted')),
+                starts_new_turn INTEGER NOT NULL CHECK (starts_new_turn IN (0, 1)),
+                PRIMARY KEY (agent_id, checkpoint_index),
+                FOREIGN KEY (agent_id, commit_type, checkpoint_index)
+                    REFERENCES agent_commits(agent_id, type, "index") ON DELETE CASCADE
+            ) STRICT, WITHOUT ROWID""",
+        )
+        db.execute("PRAGMA main.user_version=3")
         db.execute("INSERT INTO sessions(session_id) VALUES (0)")
         db.execute("INSERT INTO agents(agent_id, session_id) VALUES (0, 0)")
         db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES (0)")

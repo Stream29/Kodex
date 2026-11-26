@@ -9,7 +9,6 @@ import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
 import io.github.stream29.kodex.agentsession.contract.*
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
-import io.github.stream29.kodex.agentstate.impl.ForkContextRecovery
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
@@ -67,7 +66,6 @@ public actual class SqliteKodexSessionRepository internal constructor(
     private val onDeleteInTransaction: (sessionId: Int) -> Unit = {},
 ) : KodexSessionRepository, CoroutineCloseable, CoroutineScope by scope {
     private val lifecycleMutex = Mutex()
-    private val forkRecovery = SqliteForkContextRecovery(connection)
     private val residency = SessionResidencyTable(
         scope = this,
         mutex = lifecycleMutex,
@@ -152,11 +150,6 @@ public actual class SqliteKodexSessionRepository internal constructor(
                 connection.query("SELECT 1 FROM sessions WHERE session_id = ?", listOf(index.toLong())).isNotEmpty(),
         ) { "Session does not exist" }
     }
-
-    private fun directory(index: Int): Path = Path(root, "sessions", index.toString())
-
-    private fun childDirectory(sessionId: Int, agentId: Int): Path =
-        Path(directory(sessionId), "agents", agentId.toString())
 
     public actual override suspend fun getRootAgentId(entryIndex: Int): Int = withDbLock {
         requireOpen()
@@ -288,7 +281,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
     public actual override suspend fun createFork(sourceEntryIndex: Int): Int = withDbLock {
         requireOpen()
         val agentId = agents.rootId(sourceEntryIndex)
-        createCopyLocked(agentId, recovery = forkRecovery.read(agentId, Int.MAX_VALUE))
+        createCopyLocked(agentId)
     }
 
     public actual override suspend fun createAgentFork(
@@ -323,14 +316,12 @@ public actual class SqliteKodexSessionRepository internal constructor(
             """SELECT max("index") FROM agent_commits WHERE agent_id = ? AND type = ? AND "index" <= ?""",
             listOf(source, AgentCommitType.ContextCompaction.wireName, last),
         ).single().single() as Long? ?: 0L
-        val recovery = if (checkpoint > 0L) forkRecovery.capture(sourceAgentId, checkpoint.toInt()) else null
-        AgentForkCopy(createCopyLocked(sourceAgentId, checkpoint..last, recovery), settings)
+        AgentForkCopy(createCopyLocked(sourceAgentId, checkpoint..last), settings)
     }
 
     private fun createCopyLocked(
         sourceAgent: Int?,
         window: LongRange? = null,
-        recovery: ForkContextRecovery? = null,
     ): Int {
         val (index, targetAgent, groups) = connection.transaction {
             var candidate = 0L
@@ -349,7 +340,6 @@ public actual class SqliteKodexSessionRepository internal constructor(
                 )
                 if (window != null && window.first > 0) carryForkSnapshotsLocked(source, target, window.first)
                 connection.recomputeSessionCatalog(targetAgent)
-                if (recovery != null) forkRecovery.insert(targetAgent, recovery)
             }
             val group = checkNotNull(connection.sessionCatalogGroup(targetAgent))
             Triple(candidate.toInt(), targetAgent, connection.recordSessionGroupMutation(null, group))
@@ -434,14 +424,11 @@ public actual class SqliteKodexSessionRepository internal constructor(
         val storageScope = CoroutineScope(coroutineContext.minusKey(Job) + SupervisorJob())
         val sessionScope = supervisorChildScope()
         return try {
-            val (cache, canHaveForkRecovery) = withDbLock {
+            val cache = withDbLock {
                 requireOpen()
-                val targetDirectory = if (record.parentAgentId == null) directory(record.sessionId)
-                else childDirectory(record.sessionId, agentId)
                 val storage = SqliteAgentStorage(
                     connection = connection,
                     agentId = agentId,
-                    uri = targetDirectory.toStorageUri(),
                     mutex = mutex,
                     dispatcher = dispatcher,
                     requireAccess = { check(storageScope.isActive) { "Session storage is closed" } },
@@ -458,17 +445,13 @@ public actual class SqliteKodexSessionRepository internal constructor(
                         listOf(agentId.toLong()),
                     ).single().single() as Long
                 ).toInt()
-                val observable = ScopedObservableAgentStorage(storageScope, storage, initialLatestIndex)
-                observable to forkRecovery.hasRecovery(agentId)
+                ScopedObservableAgentStorage(storageScope, storage, initialLatestIndex)
             }
             val state = sessionScope.KodexAgentState(
                 client = dependencies.client,
                 storage = cache,
                 contextSettings = dependencies.contextSettings,
                 clock = dependencies.clock,
-                readForkContextRecovery = { index ->
-                    if (!canHaveForkRecovery) null else withDbLock { forkRecovery.read(agentId, index) }
-                },
             )
             val runtime = state.buildMasterAgentRuntime(dependencies) { claim ->
                 lifecycleMutex.withLock {

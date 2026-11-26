@@ -109,7 +109,6 @@ public val recentHomeSqliteTest by testSuite {
                     listOf(listOf("", null, 1L), listOf(".", ".", 1L), listOf("/shared", "/shared", 1L)),
                     db.query("SELECT * FROM session_groups ORDER BY cwd_key"),
                 )
-                assertEquals(emptyList(), db.query("SELECT * FROM fork_context_recovery"))
                 assertEquals(schedules, db.query("SELECT * FROM schedules ORDER BY schedule_id"))
                 assertEquals(sequences, db.sequences())
                 assertEquals(listOf(listOf(801L)), db.query("INSERT INTO agents (session_id, parent_agent_id) VALUES (10, 91) RETURNING agent_id"))

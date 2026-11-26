@@ -25,12 +25,13 @@ import kotlin.test.assertTrue
 
 private val fs = homeTestFileSystem
 private val v081 = MigrationVersion("0.8.1")
+private val v090 = MigrationVersion("0.9.0")
 
 public val migrateToV0_8_1Test by testSuite {
     testFixture { newTestHome() } closeWith {
         deleteTestHome(this)
     } asParameterForEach {
-        test("migrates generation-1 schema v2 WAL database to 16 KiB ROWID schema v3 preserving all data and user files") { home ->
+        test("migrates generation-1 schema v2 WAL database through 0.8.1 to current schema preserving all data and user files") { home ->
             createFrozenV2Fixture(home, enableWal = true)
             fs.writeString(Path(home, "AGENTS.md"), "# User Instructions\n")
             fs.writeString(Path(home, "settings.yml"), "model: synthetic\n")
@@ -38,15 +39,15 @@ public val migrateToV0_8_1Test by testSuite {
             val started = mutableListOf<Pair<MigrationVersion, MigrationVersion>>()
             val handle = prepareKodexHome(
                 home = home,
-                currentVersion = v081,
+                currentVersion = v090,
                 migrations = KodexHomeMigrations,
                 fileSystem = fs,
                 onMigrationStarted = { from, to -> started += from to to },
             )
             try {
-                assertEquals(listOf(MigrationVersion("0.8.0") to v081), started)
-                assertEquals(v081, handle.version)
-                assertEquals(readyMarker("0.8.1"), fs.readString(Path(home, HomeVersionFile)))
+                assertEquals(listOf(MigrationVersion("0.8.0") to v081, v081 to v090), started)
+                assertEquals(v090, handle.version)
+                assertEquals(readyMarker("0.9.0"), fs.readString(Path(home, HomeVersionFile)))
                 assertEquals("# User Instructions\n", fs.readString(Path(home, "AGENTS.md")))
                 assertEquals("model: synthetic\n", fs.readString(Path(home, "settings.yml")))
                 assertFalse(fs.exists(Path(home, ".kodex.db.migrating-0.8.1")))
@@ -61,10 +62,10 @@ public val migrateToV0_8_1Test by testSuite {
                 assertEquals(KodexHomeDatabaseApplicationId.toLong(), db.query("PRAGMA main.application_id").single().single())
                 assertEquals(KodexHomeDatabasePageSize.toLong(), db.query("PRAGMA main.page_size").single().single())
                 assertEquals(listOf(listOf(0L, 1L)), db.query("SELECT wr, strict FROM pragma_table_list WHERE schema = 'main' AND name = 'agent_commits'"))
-                assertEquals(listOf(listOf(1L, 1L)), db.query("SELECT wr, strict FROM pragma_table_list WHERE schema = 'main' AND name = 'fork_context_recovery'"))
+                assertTrue(db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'fork_context_recovery'").isEmpty())
                 assertTrue(db.query("PRAGMA main.foreign_key_check").isEmpty())
                 assertEquals(listOf(listOf("ok")), db.query("PRAGMA main.integrity_check"))
-                assertFixtureDataIntact(db)
+                assertFixtureDataIntact(db, expectForkRecovery = false)
             }
         }
 
@@ -75,17 +76,17 @@ public val migrateToV0_8_1Test by testSuite {
 
             prepareKodexHome(
                 home = home,
-                currentVersion = v081,
+                currentVersion = v090,
                 migrations = KodexHomeMigrations,
                 fileSystem = fs,
             ).closeAndJoin()
 
-            assertEquals(readyMarker("0.8.1"), fs.readString(Path(home, HomeVersionFile)))
+            assertEquals(readyMarker("0.9.0"), fs.readString(Path(home, HomeVersionFile)))
             assertFalse(fs.exists(Path(home, ".kodex.db.migrating-0.8.1")))
             assertFalse(fs.exists(Path(home, ".kodex.db.migrating-0.8.1-journal")))
             openExistingSqliteConnection(Path(home, HomeDatabaseFile)).use { db ->
                 assertEquals(KodexHomeDatabasePageSize.toLong(), db.query("PRAGMA main.page_size").single().single())
-                assertFixtureDataIntact(db)
+                assertFixtureDataIntact(db, expectForkRecovery = false)
             }
         }
 
@@ -94,18 +95,22 @@ public val migrateToV0_8_1Test by testSuite {
             migrateToV0_8_1(home, fs)
             // Simulate crash right before version.json checkpoint update: DB is v3, marker still 0.8.0.
             assertEquals(readyMarker("0.8.0"), fs.readString(Path(home, HomeVersionFile)))
+            openExistingSqliteConnection(Path(home, HomeDatabaseFile)).use { db ->
+                assertEquals(3L, db.query("PRAGMA main.user_version").single().single())
+                assertFixtureDataIntact(db, expectForkRecovery = true)
+            }
 
             prepareKodexHome(
                 home = home,
-                currentVersion = v081,
+                currentVersion = v090,
                 migrations = KodexHomeMigrations,
                 fileSystem = fs,
             ).closeAndJoin()
 
-            assertEquals(readyMarker("0.8.1"), fs.readString(Path(home, HomeVersionFile)))
+            assertEquals(readyMarker("0.9.0"), fs.readString(Path(home, HomeVersionFile)))
             openExistingSqliteConnection(Path(home, HomeDatabaseFile)).use { db ->
                 assertEquals(SqliteSchemaVersion.toLong(), db.query("PRAGMA main.user_version").single().single())
-                assertFixtureDataIntact(db)
+                assertFixtureDataIntact(db, expectForkRecovery = false)
             }
         }
 
@@ -177,7 +182,7 @@ private suspend fun createFrozenV2Fixture(home: Path, enableWal: Boolean) {
     writeFixtureCheckpoint(home, "0.8.0")
 }
 
-private fun assertFixtureDataIntact(db: SqliteConnection) {
+private fun assertFixtureDataIntact(db: SqliteConnection, expectForkRecovery: Boolean = true) {
     assertEquals(listOf(listOf(0L)), db.query("SELECT session_id FROM sessions"))
     assertEquals(
         listOf(listOf(1L, 0L, null, 0L), listOf(2L, 0L, 1L, 1L)),
@@ -203,10 +208,12 @@ private fun assertFixtureDataIntact(db: SqliteConnection) {
         listOf(listOf(3L, 1L, 1800000000L, 123L, "0 * * * *", "hourly", "2026-11-24T00:00:00Z")),
         db.query("SELECT schedule_id, agent_id, trigger_at_epoch_seconds, trigger_at_nanoseconds, cron, description, created_at FROM schedules"),
     )
-    assertEquals(
-        listOf(listOf(1L, 1L, "context_compaction", "ToolCompleted", 1L)),
-        db.query("SELECT agent_id, checkpoint_index, commit_type, phase, starts_new_turn FROM fork_context_recovery"),
-    )
+    if (expectForkRecovery) {
+        assertEquals(
+            listOf(listOf(1L, 1L, "context_compaction", "ToolCompleted", 1L)),
+            db.query("SELECT agent_id, checkpoint_index, commit_type, phase, starts_new_turn FROM fork_context_recovery"),
+        )
+    }
     assertEquals(
         listOf(listOf("agents", 5L), listOf("schedules", 3L)),
         db.query("SELECT name, seq FROM sqlite_sequence ORDER BY name"),

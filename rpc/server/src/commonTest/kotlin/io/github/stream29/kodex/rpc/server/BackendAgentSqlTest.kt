@@ -73,7 +73,7 @@ val backendAgentSqlTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertNull(result.error, "${example.title}: ${result.error}")
                 assertEquals(1, result.rows?.size)
             }
-            assertEquals(AgentSqlError.DENIED, service.query("SELECT phase FROM fork_context_recovery").error?.code)
+            assertEquals(AgentSqlError.DENIED, service.query("SELECT cwd_key FROM session_groups").error?.code)
             val reply = service.query("SELECT count(*) AS same, NULL AS same FROM sessions; /* trailing */")
             assertNull(reply.error)
             assertEquals(listOf("same", "same"), reply.columns)

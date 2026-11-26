@@ -24,7 +24,7 @@ val backendLoggingCompositionTest by testSuite {
         initializeLogging(home)
         KotlinLogging.logger("mcp.client")
             .global()
-            .session("session-1")
+            .session(42)
             .agent()
             .tool("mcp__local.echo", "call-3")
             .info { "scoped-event" }
@@ -40,6 +40,6 @@ val backendLoggingCompositionTest by testSuite {
             }
         }
         assertTrue(text.contains("mcp.client"))
-        assertTrue(text.contains("scoped-event {scope=tool, uri=session-1, tool_name=mcp__local.echo, call_id=call-3}"))
+        assertTrue(text.contains("scoped-event {scope=tool, agent_id=42, tool_name=mcp__local.echo, call_id=call-3}"))
     }
 }

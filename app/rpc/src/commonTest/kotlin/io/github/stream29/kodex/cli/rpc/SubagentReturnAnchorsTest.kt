@@ -99,7 +99,6 @@ private fun completed(index: Int, child: Int) =
     IndexedAgentCommit(index, StableSubagentCompletedEvent(child), Instant.DISTANT_PAST)
 
 private class ParentHistoryFixture : ObservableKodexAgentStorage {
-    override val uri = "fixture:parent"
     override val cacheNonce = MutableStateFlow(41L)
     override val latestIndexFlow = MutableStateFlow(-1)
     var rows = emptyList<IndexedAgentCommit>()

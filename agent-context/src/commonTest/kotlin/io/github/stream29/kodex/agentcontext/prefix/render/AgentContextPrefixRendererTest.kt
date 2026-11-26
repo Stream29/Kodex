@@ -189,7 +189,7 @@ private fun contextPrefix(
     availableSkills: List<AvailableSkill> = emptyList(),
     requestUserInputMode: RequestUserInputMode = RequestUserInputMode.AskUser,
     sessionMeta: AgentSessionMeta = AgentSessionMeta(
-        uri = "memory:test",
+        agentId = 7,
         name = "Test session",
     ),
 ): AgentContextPrefix = AgentContextPrefix(
@@ -233,7 +233,7 @@ private fun environmentContext(): String {
       <current_date>$currentDate</current_date>
       <timezone>$timeZone</timezone>
       <current_session>
-        <storage_uri>memory:test</storage_uri>
+        <agent_id>7</agent_id>
         <name>Test session</name>
       </current_session>
     </environment_context>

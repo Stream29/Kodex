@@ -21,7 +21,7 @@ public actual class AgentContextPrefixResolver actual constructor(
 ) {
     private val skillsResolver = FileSystemSkillsResolver()
 
-    public actual suspend fun resolve(settings: KodexAgentSettings, uri: String): AgentContextPrefix {
+    public actual suspend fun resolve(settings: KodexAgentSettings, agentId: Int?): AgentContextPrefix {
         val context = contextSettings.value
         val cwd = settings.cwd
         val plan = resolveSourcePlan(context, cwd)
@@ -32,7 +32,7 @@ public actual class AgentContextPrefixResolver actual constructor(
             shell = context.shell,
             agentMd = agentsMd.instructions,
             availableSkills = skills.skills,
-            sessionMeta = AgentSessionMeta(uri = uri, name = settings.name),
+            sessionMeta = AgentSessionMeta(agentId = agentId, name = settings.name),
             requestUserInputMode = settings.requestUserInputMode,
         )
     }

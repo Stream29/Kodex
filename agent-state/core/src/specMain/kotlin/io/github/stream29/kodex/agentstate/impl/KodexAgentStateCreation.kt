@@ -22,8 +22,6 @@ import kotlin.time.Clock
  * Client and storage are borrowed. Suspending operations execute in the
  * caller's coroutine; cancelling the created child scope does not close these
  * resources or promise cancellation/rollback of unrelated caller jobs.
- * [readForkContextRecovery] supplies backend-private recovery metadata at or before
- * the requested index, when the original transition was outside a retained fork window.
  *
  * @throws kotlinx.coroutines.CancellationException when loading is cancelled.
  * Storage read failures propagate after cancelling the newly created scope.
@@ -33,5 +31,4 @@ public expect suspend fun CoroutineScope.KodexAgentState(
     storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,
     clock: Clock = Clock.System,
-    readForkContextRecovery: suspend (upToIndex: Int) -> ForkContextRecovery? = { null },
 ): KodexAgentState

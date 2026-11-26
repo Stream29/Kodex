@@ -323,10 +323,11 @@ internal class BackendAgentRuntimeRpc(
     ): SearchResponse =
         command(sessionIndex) {
             val openAi = checkNotNull(client) { "OpenAiClient is not configured on BackendAgentRuntimeRpc." }
+            val currentSettings = runtime.storage.getSettingsAt(runtime.storage.latestIndex())
             WebRunToolClient(
                 client = openAi,
-                sessionId = runtime.storage.uri,
-                modelProvider = { runtime.storage.getSettingsAt(runtime.storage.latestIndex()).model },
+                sessionId = currentSettings.threadId.ifEmpty { currentSettings.firstWindowId.ifEmpty { "agent:${session.sessionId}" } },
+                modelProvider = { currentSettings.model },
             ).run(commands).getOrThrow().copy(encryptedOutput = null)
         }
 

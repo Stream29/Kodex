@@ -26,7 +26,6 @@ import kotlin.time.Instant
 public actual class SqliteAgentStorage actual constructor(
     internal val connection: SqliteConnection,
     public actual override val agentId: Int,
-    public actual override val uri: String,
     private val mutex: Mutex,
     private val dispatcher: CoroutineDispatcher,
     private val requireAccess: () -> Unit,

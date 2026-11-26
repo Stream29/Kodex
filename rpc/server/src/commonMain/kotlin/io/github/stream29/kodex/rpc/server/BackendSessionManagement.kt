@@ -183,6 +183,7 @@ internal class BackendSessionManagement(
                     target.runtime.modify { storage ->
                         storage.commit(
                             settings.copy(
+                                threadId = Uuid.generateV7().toString(),
                                 turnId = Uuid.generateV7().toString(),
                                 turnState = null,
                                 name = "[fork] ${settings.name.trim().ifEmpty { "Session $targetIndex" }}",

@@ -17,7 +17,6 @@ public expect class InMemoryKodexAgentStorage(
     agentId: Int? = null,
 ) : MutableKodexAgentStorage {
     override val agentId: Int?
-    override val uri: String
 
     override suspend fun latestIndex(): Int
     override suspend fun countCommitsIn(range: IntRange, types: Set<AgentCommitType>): Int

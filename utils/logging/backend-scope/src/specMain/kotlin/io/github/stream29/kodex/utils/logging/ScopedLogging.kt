@@ -10,9 +10,9 @@ public expect fun KLogger.global(): KLogger
 
 /**
  * Returns a Session-scoped logger. Any previous scope is replaced by this
- * Session identity.
+ * Agent identity when present.
  */
-public expect fun KLogger.session(uri: String): KLogger
+public expect fun KLogger.session(agentId: Int?): KLogger
 
 /**
  * Returns an Agent-scoped logger, inheriting the Session identity already

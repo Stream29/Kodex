@@ -38,9 +38,6 @@ public interface KodexAgentStorage {
     public val agentId: Int?
         get() = null
 
-    /** Stable identity locator for this storage backend. */
-    public val uri: String
-
     /** Returns the greatest state index stored in this storage, or `-1` when empty. */
     public suspend fun latestIndex(): Int
 

@@ -6,9 +6,9 @@ import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.utils.shellclient.Shell
 import kotlinx.io.files.Path
 
-/** Stable identity metadata for the Session that owns one context prefix. */
+/** Stable identity metadata for the Agent that owns one context prefix. */
 public data class AgentSessionMeta(
-    public val uri: String,
+    public val agentId: Int?,
     public val name: String,
 )
 

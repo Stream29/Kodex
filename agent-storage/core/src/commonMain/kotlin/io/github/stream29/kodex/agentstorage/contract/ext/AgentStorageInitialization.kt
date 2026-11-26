@@ -11,12 +11,14 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 public actual suspend fun MutableKodexAgentStorage.initialize(initialSettings: KodexAgentSettings) {
     require(latestIndex() < 0) { "AgentStorage is already initialized." }
+    val threadId = Uuid.generateV7().toString()
     val windowId = Uuid.generateV7().toString()
     val turnId = Uuid.generateV7().toString()
     val initialTimestamp = Clock.System.now()
     val committedIndex = commit(
         listOf(
             initialSettings.copy(
+                threadId = threadId,
                 turnId = turnId,
                 windowNumber = 0,
                 firstWindowId = windowId,

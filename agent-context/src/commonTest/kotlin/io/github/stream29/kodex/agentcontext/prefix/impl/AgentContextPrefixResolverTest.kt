@@ -47,7 +47,7 @@ val agentContextPrefixResolverTest by testSuite {
                 contextSettings = MutableStateFlow(testContextSettings(agentsHome, kodexHome, testShell)),
             )
             val settings = settings(cwd)
-            val prefix = resolver.resolve(settings, "memory:test")
+            val prefix = resolver.resolve(settings, 1)
 
             assertEquals(
                 listOf("user rules", "Kodex rules"),
@@ -83,7 +83,7 @@ val agentContextPrefixResolverTest by testSuite {
             SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.md"), "updated module rules")
             assertEquals(
                 "updated module rules",
-                resolver.resolve(settings, "memory:test").agentMd.projectInstructions.last().text,
+                resolver.resolve(settings, 1).agentMd.projectInstructions.last().text,
             )
         } finally {
             deleteRecursively(root)
@@ -102,7 +102,7 @@ val agentContextPrefixResolverTest by testSuite {
                     testContextSettings(Path(home, ".agents"), Path(home, ".kodex"), testShell),
                 ),
             )
-            val prefix = resolver.resolve(settings(cwd), "memory:test")
+            val prefix = resolver.resolve(settings(cwd), 1)
 
             assertTrue(prefix.agentMd.globalInstructions.isEmpty())
             assertTrue(prefix.agentMd.projectInstructions.isEmpty())
@@ -112,7 +112,7 @@ val agentContextPrefixResolverTest by testSuite {
 
             val noQuestionPrefix = resolver.resolve(
                 settings(cwd).copy(requestUserInputMode = RequestUserInputMode.NoQuestion),
-                "memory:test",
+                1,
             )
             assertEquals(RequestUserInputMode.NoQuestion, noQuestionPrefix.requestUserInputMode)
         } finally {
@@ -160,7 +160,7 @@ val agentContextPrefixResolverTest by testSuite {
                 contextSettings = contextSettings,
             )
 
-            val initial = resolver.resolve(settings(first), "memory:first")
+            val initial = resolver.resolve(settings(first), 1)
             assertEquals(
                 listOf("first Agents rules", "first Kodex rules"),
                 initial.agentMd.globalInstructions.map(AgentsMdInstruction::text),
@@ -181,7 +181,7 @@ val agentContextPrefixResolverTest by testSuite {
             assertEquals(testShell, initial.shell)
 
             contextSettings.value = testContextSettings(secondAgentsHome, secondKodexHome, testZsh)
-            val updated = resolver.resolve(settings(second), "memory:second")
+            val updated = resolver.resolve(settings(second), 2)
 
             assertEquals(
                 listOf("second Agents rules", "second Kodex rules"),

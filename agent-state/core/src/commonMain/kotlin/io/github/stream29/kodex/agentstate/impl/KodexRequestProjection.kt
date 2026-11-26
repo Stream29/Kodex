@@ -45,7 +45,7 @@ internal fun CodexResponsesMetadata.toCodexClientMetadata(): CodexResponsesClien
         ),
     )
 
-/** Projects an arbitrary local storage identity into a stable UUID-shaped provider identity. */
+/** Projects an arbitrary local identity into a stable UUID-shaped provider identity. */
 internal fun String.toCodexThreadId(): String {
     val input = (CodexThreadIdentityNamespace + this).encodeToByteArray()
     val high = (input.stableHash(CodexThreadIdentityHighSeed) and 0xffffffffffff0fffUL) or 0x8000UL

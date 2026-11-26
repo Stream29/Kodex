@@ -70,7 +70,7 @@ public actual fun KodexAgentState.buildMasterAgentRuntime(
     dependencies: KodexAgentDependencies,
     admitTurn: suspend (() -> Unit) -> Unit,
 ): AgentRuntime {
-    val sessionLogger = RuntimeLogger.session(storage.uri)
+    val sessionLogger = RuntimeLogger.session(storage.agentId)
     return try {
         val logger = sessionLogger.agent()
         val runtime = try {

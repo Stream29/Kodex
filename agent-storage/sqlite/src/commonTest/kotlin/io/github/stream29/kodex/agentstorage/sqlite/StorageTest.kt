@@ -118,7 +118,7 @@ val sqliteStorageTest by testSuite {
     test("all commit families retain change point semantics and fine-grained commit types") {
         seeded().use { db ->
             val storage = SqliteAgentStorage(db, 0)
-            assertEquals("db:agent/0", storage.uri)
+            assertEquals(0, storage.agentId)
             val askSpacer = AskUserSnapshot(emptyList())
             checkSparseFamily(
                 storage,

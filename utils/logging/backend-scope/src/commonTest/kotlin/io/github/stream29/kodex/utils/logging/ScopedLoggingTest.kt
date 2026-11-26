@@ -14,7 +14,7 @@ val scopedLoggingTest by testSuite {
     test("derives inherited context payload for every scope") {
         val factory = RecordingLoggerFactory()
         val global = factory.logger("runtime").global()
-        val session = global.session("session-1")
+        val session = global.session(42)
         val agent = session.agent()
         val tool = agent.tool("unified_exec", "call-3")
 
@@ -35,7 +35,7 @@ val scopedLoggingTest by testSuite {
                     message = "session event",
                     payload = mapOf(
                         "scope" to "session",
-                        "uri" to "session-1",
+                        "agent_id" to 42,
                     ),
                 ),
                 RecordedEvent(
@@ -43,7 +43,7 @@ val scopedLoggingTest by testSuite {
                     message = "agent event",
                     payload = mapOf(
                         "scope" to "agent",
-                        "uri" to "session-1",
+                        "agent_id" to 42,
                     ),
                 ),
                 RecordedEvent(
@@ -51,7 +51,7 @@ val scopedLoggingTest by testSuite {
                     message = "tool event",
                     payload = mapOf(
                         "scope" to "tool",
-                        "uri" to "session-1",
+                        "agent_id" to 42,
                         "tool_name" to "unified_exec",
                         "call_id" to "call-3",
                     ),
@@ -65,7 +65,7 @@ val scopedLoggingTest by testSuite {
         val factory = RecordingLoggerFactory()
         val tool = factory.logger("runtime")
             .global()
-            .session("session-1")
+            .session(42)
             .agent()
             .tool("apply_patch", "call-3")
 

@@ -156,7 +156,6 @@ val historyItemHeaderFactoryTest by testSuite {
                 error("A materialized command must not read storage")
             }
             val storage = object : KodexAgentStorage {
-                override val uri = "test://unreadable"
                 override suspend fun latestIndex() = unexpectedRead()
                 override suspend fun countCommitsIn(range: IntRange, types: Set<AgentCommitType>) = unexpectedRead()
                 override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int) =

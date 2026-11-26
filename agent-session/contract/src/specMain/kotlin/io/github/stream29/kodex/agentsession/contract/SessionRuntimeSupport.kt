@@ -24,7 +24,6 @@ public expect class ScopedObservableAgentStorage(
     closedMessage: String = "Session storage is closed",
 ) : MutableObservableKodexAgentStorage {
     override val agentId: Int?
-    override val uri: String
     override val cacheNonce: StateFlow<Long>
     override val latestIndexFlow: StateFlow<Int>
     override suspend fun latestIndex(): Int

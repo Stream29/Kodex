@@ -70,12 +70,8 @@ private fun pendingTool(callId: String): PendingToolCall =
 val inMemoryKodexAgentStorageTest by testSuite {
     test("construction publishes an initial snapshot without a compaction point") {
         val first = storage()
-        val second = storage()
 
-        assertTrue(first.uri.startsWith("memory:"))
-        assertTrue(second.uri.startsWith("memory:"))
-        assertEquals(first.uri, first.uri)
-        assertNotEquals(first.uri, second.uri)
+        assertNull(first.agentId)
         assertEquals(0, first.latestIndex())
         assertEquals(OpenAiModelId("initial-model"), first.getSettingsAt(0).model)
         assertTrue(first.getSettingsAt(0).turnId.isNotEmpty())

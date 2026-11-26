@@ -27,6 +27,13 @@ import kotlinx.serialization.Serializable
 public data class KodexAgentSettings(
     public val model: OpenAiModelId,
     /**
+     * OpenAI thread identity used by requests built from this settings snapshot.
+     *
+     * An empty value is accepted only for legacy/uninitialized payloads; new
+     * storage initialization and forks supply a generated identity.
+     */
+    public val threadId: String = "",
+    /**
      * OpenAI turn identity used by requests built from this settings snapshot.
      *
      * An empty value is accepted only for legacy/uninitialized payloads; new

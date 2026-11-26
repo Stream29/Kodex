@@ -43,7 +43,6 @@ public actual class ScopedObservableAgentStorage actual constructor(
     private val tail = MutableStateFlow(initialLatestIndex)
 
     public actual override val agentId: Int? get() = source.agentId
-    public actual override val uri: String get() = source.uri
     public actual override val cacheNonce: StateFlow<Long> = nonce.asStateFlow()
     public actual override val latestIndexFlow: StateFlow<Int> = tail.asStateFlow()
 

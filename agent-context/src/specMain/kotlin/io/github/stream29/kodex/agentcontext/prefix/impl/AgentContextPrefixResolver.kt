@@ -18,5 +18,5 @@ public expect class AgentContextPrefixResolver(
     contextSettings: StateFlow<AgentContextSettings>,
 ) {
     /** Captures global state and resolves Agent-specific context for [settings]. */
-    public suspend fun resolve(settings: KodexAgentSettings, uri: String): AgentContextPrefix
+    public suspend fun resolve(settings: KodexAgentSettings, agentId: Int?): AgentContextPrefix
 }

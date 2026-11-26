@@ -129,13 +129,15 @@ val kodexAgentStateImplTest by testSuite {
                     agent.forcedCompact()
                     agent.requestResponseApi()
                     assertEquals(4, requests.size)
+                    val sharedThreadId = requireNotNull(requests.first().clientMetadata?.threadId)
                     for (request in requests) {
                         val metadata = OpenAiJsonCodec.decodeFromString(
                             CodexResponsesMetadata.serializer(), requireNotNull(request.clientMetadata).turnMetadata,
                         )
                         assertEquals("user", metadata.threadSource)
                         assertEquals("user", metadata.turnTrigger)
-                        val expected = override ?: storage.uri.toCodexThreadId()
+                        assertEquals(sharedThreadId, request.clientMetadata?.threadId)
+                        val expected = override ?: sharedThreadId
                         assertEquals(expected, request.promptCacheKey)
                         val json = OpenAiJsonCodec.encodeToJsonElement(ResponsesApiRequest.serializer(), request).jsonObject
                         assertEquals(JsonPrimitive(expected), json["prompt_cache_key"])
@@ -831,8 +833,9 @@ val kodexAgentStateImplTest by testSuite {
                 client = mockOpenAiClient {
                     createRemoteCompactionV2Response { request ->
                         compactRequests += request
+                        val threadId = requireNotNull(request.clientMetadata?.threadId)
                         assertEquals(
-                            storage.getSettingsAt(0).codexRequestWindowId(storage.uri.toCodexThreadId()),
+                            storage.getSettingsAt(0).codexRequestWindowId(threadId),
                             request.clientMetadata?.windowId,
                         )
                         RemoteCompactionV2Response(
