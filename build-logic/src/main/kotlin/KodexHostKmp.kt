@@ -8,7 +8,7 @@ import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
 
 internal fun Project.configureCoordinates() {
     group = "io.github.stream29"
-    version = "0.8.1"
+    version = "0.9.0"
 }
 
 internal fun KotlinMultiplatformExtension.configureCompiler() {
