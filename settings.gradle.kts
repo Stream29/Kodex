@@ -284,6 +284,7 @@ moduleTree("utils") {
         module("backend-file")
         module("backend-scope")
     }
+    module("mq")
     module("os-environment")
     module("oauth-loopback")
     module("patch")
@@ -293,5 +294,6 @@ moduleTree("utils") {
     moduleTree("shell-client") {
         module("system")
     }
+    module("stream")
     module("terminal-text")
 }
