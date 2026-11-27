@@ -39,6 +39,7 @@ public sealed interface AgentStopEvent {
     /** The assistant message produced at the end of this turn. */
     public data class AssistantMessage(
         public val message: StableAssistantMessage,
+        public val commitIndex: Int,
     ) : AgentStopEvent
 
     /** Non-cancellation failure that terminated an accepted [AgentRuntime.resume] turn. */

@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.app.migration
 
-import io.github.stream29.kodex.agentstorage.sqlite.requireKodexHomeDatabase
 import io.github.stream29.kodex.app.migration.v0_8_0.requireRecentHomeSourceSchema
 import io.github.stream29.kodex.app.migration.v0_8_0.upgradeRecentHomeDatabase
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
@@ -57,7 +56,7 @@ internal suspend fun prepareRecentHomeDatabase(
             openExistingSqliteConnection(staged).use { connection ->
                 makeStandalone(connection)
                 upgradeRecentHomeDatabase(connection, backup)
-                requireKodexHomeDatabase(connection)
+                connection.requireFrozenHomeSchema(RecentUpgradeSchemaVersion)
             }
         }
         requireNoSidecars(staged, fileSystem)
@@ -115,12 +114,14 @@ internal suspend fun migrateRecentHomeDatabase(
     if (!requireUpgradeFile(home, staged, fileSystem, required = false)) {
         requireNoSidecars(staged, fileSystem)
         requireRecentUpgradeTargetHeader(home, fileSystem)
-        requireHomeDatabaseSchema(home)
+        withContext(Dispatchers.IO) {
+            openExistingSqliteConnection(live).use { it.requireFrozenHomeSchema(RecentUpgradeSchemaVersion) }
+        }
         return@inspectHomeRead
     }
     requireNoSidecars(staged, fileSystem)
     withContext(Dispatchers.IO) {
-        openExistingSqliteConnection(staged).use(::requireKodexHomeDatabase)
+        openExistingSqliteConnection(staged).use { it.requireFrozenHomeSchema(RecentUpgradeSchemaVersion) }
         // Checkpoint the old live database through SQLite and leave DELETE
         // mode before replacing it. Never delete a live WAL directly.
         openExistingSqliteConnection(live).use { connection ->

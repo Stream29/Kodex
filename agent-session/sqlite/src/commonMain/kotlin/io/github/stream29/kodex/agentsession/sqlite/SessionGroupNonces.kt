@@ -9,22 +9,24 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 
 /** One repository's process-local invalidations, independent of durable group nonces. */
-internal class SessionGroupNonces {
+internal class SessionGroupNonces(initialNonces: Map<String?, Long>) {
     private data class Snapshot(
         val epoch: Long = 0,
         val groupsEpoch: Long = 0,
         val pages: Map<String?, PageToken> = emptyMap(),
-        val running: Map<Int, String?> = emptyMap(),
+        val nonces: Map<String?, Long>,
+        val runningRows: Map<Int, String?> = emptyMap(),
+        val runningGroups: Set<String?> = emptySet(),
     )
 
-    private data class PageToken(val epoch: Long, val observers: Int, val exists: Boolean)
+    private data class PageToken(val epoch: Long, val observers: Int)
 
-    private val state = MutableStateFlow(Snapshot())
+    private val state = MutableStateFlow(Snapshot(nonces = initialNonces))
     val groups: Flow<Long> = state.map { it.groupsEpoch }.distinctUntilChanged()
 
     fun group(cwd: String?): Flow<Long> = flow {
         state.update { snapshot ->
-            val old = snapshot.pages[cwd] ?: PageToken(0, 0, false)
+            val old = snapshot.pages[cwd] ?: PageToken(0, 0)
             snapshot.copy(pages = snapshot.pages + (cwd to old.copy(observers = old.observers + 1)))
         }
         try {
@@ -32,7 +34,7 @@ internal class SessionGroupNonces {
         } finally {
             state.update { snapshot ->
                 val old = snapshot.pages.getValue(cwd)
-                val pages = if (old.observers == 1 && !old.exists) snapshot.pages - cwd
+                val pages = if (old.observers == 1 && cwd !in snapshot.nonces) snapshot.pages - cwd
                     else snapshot.pages + (cwd to old.copy(observers = old.observers - 1))
                 snapshot.copy(pages = pages)
             }
@@ -40,8 +42,14 @@ internal class SessionGroupNonces {
     }
 
     /** Called after commit while the new inventory and root-to-cwd mapping are still locked. */
-    fun committed(affected: Map<String?, Boolean>, running: Map<Int, String?>) {
-        publish(affected, running)
+    fun committed(affected: Map<String?, Long?>, running: Map<Int, String?>) {
+        state.update { before ->
+            val nonces = before.nonces.toMutableMap()
+            for ((cwd, nonce) in affected) {
+                if (nonce == null) nonces.remove(cwd) else nonces[cwd] = nonce
+            }
+            before.advance(nonces, affected.keys, running, invalidateRows = true)
+        }
     }
 
     /**
@@ -49,38 +57,49 @@ internal class SessionGroupNonces {
      * group's aggregate running state changed. Neither action touches durable nonces.
      */
     fun runningChanged(running: Map<Int, String?>) {
-        publish(emptyMap(), running)
+        state.update { it.advance(it.nonces, emptySet(), running, invalidateRows = true) }
     }
 
-    private fun publish(durableChanges: Map<String?, Boolean>, running: Map<Int, String?>) {
+    /** A remote signal is a hint, not a mutation. Invalidate only differences found in SQLite or the running projection. */
+    fun reconcile(nonces: Map<String?, Long>, running: Map<Int, String?>) {
         state.update { before ->
-            val previous = before.running
-            val affected = buildMap {
-                if (previous != running) for (root in previous.keys + running.keys) {
-                    val previouslyRunning = root in previous
-                    val currentlyRunning = root in running
-                    if (previouslyRunning == currentlyRunning && previous[root] == running[root]) continue
-                    if (previouslyRunning) put(previous[root], true)
-                    if (currentlyRunning) put(running[root], true)
-                }
-                // A move or deletion may remove the previous group's last member.
-                putAll(durableChanges)
-            }
-            if (affected.isEmpty()) return@update before
-            val headsChanged = durableChanges.isNotEmpty() || previous.values.toSet() != running.values.toSet()
-            val next = before.epoch + 1
-            Snapshot(
-                epoch = next,
-                groupsEpoch = if (headsChanged) next else before.groupsEpoch,
-                pages = before.pages.toMutableMap().apply {
-                    affected.forEach { (cwd, exists) ->
-                        val observers = get(cwd)?.observers ?: 0
-                        if (exists || observers > 0) put(cwd, PageToken(next, observers, exists))
-                        else remove(cwd)
-                    }
-                },
-                running = running,
-            )
+            val candidates = before.nonces.keys + nonces.keys
+            before.advance(nonces, candidates, running, invalidateRows = false)
         }
+    }
+
+    private fun Snapshot.advance(
+        durable: Map<String?, Long>,
+        candidates: Set<String?>,
+        running: Map<Int, String?>,
+        invalidateRows: Boolean,
+    ): Snapshot {
+        val nextRunningGroups = running.values.toSet()
+        val changedHeads = (candidates.filter { nonces[it] != durable[it] } +
+            runningGroups.filterNot { it in nextRunningGroups } +
+            nextRunningGroups.filterNot { it in runningGroups }).toSet()
+        val affected = buildSet {
+            addAll(changedHeads)
+            if (invalidateRows && runningRows != running) for (root in runningRows.keys + running.keys) {
+                if ((root in runningRows) == (root in running) && runningRows[root] == running[root]) continue
+                if (root in runningRows) add(runningRows[root])
+                if (root in running) add(running[root])
+            }
+        }
+        if (affected.isEmpty()) return this
+        val next = epoch + 1
+        return copy(
+            epoch = next,
+            groupsEpoch = if (changedHeads.isNotEmpty()) next else groupsEpoch,
+            pages = pages.toMutableMap().apply {
+                for (cwd in affected) {
+                    val observers = get(cwd)?.observers ?: 0
+                    if (cwd in durable || observers > 0) put(cwd, PageToken(next, observers)) else remove(cwd)
+                }
+            },
+            nonces = durable,
+            runningRows = if (invalidateRows) running else runningRows,
+            runningGroups = nextRunningGroups,
+        )
     }
 }

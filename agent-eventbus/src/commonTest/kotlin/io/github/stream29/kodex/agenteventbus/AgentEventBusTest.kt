@@ -39,6 +39,7 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecMinimumYieldTimeMillis
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -117,7 +118,7 @@ val agentEventBusTest by testSuite(
                 timeSource = testScheduler.timeSource,
             )
             try {
-                val bus = AgentEventBus(repository)
+                val bus = AgentEventBus(repository, InMemoryMqBroker())
                 val stopEvents = mutableListOf<AgentStopEvent>()
                 val collector = backgroundScope.async {
                     repository.stopEvents.collect { stopEvents += it.event }
@@ -238,7 +239,7 @@ val agentEventBusTest by testSuite(
                 timeSource = testScheduler.timeSource,
             )
             try {
-                val bus = AgentEventBus(repository)
+                val bus = AgentEventBus(repository, InMemoryMqBroker())
                 val agentId = repository.create()
                 val session = repository.open(agentId)
                 session.runtime.modify { storage ->
@@ -298,7 +299,7 @@ val agentEventBusRealTerminalTest by testSuite(
                     }
                 }
                 val repository = scope.InMemoryKodexSessionRepository(testKodexAgentDependencies(client))
-                AgentEventBus(repository)
+                AgentEventBus(repository, InMemoryMqBroker())
                 val session = repository.open(repository.create())
                 val runtime = session.runtime
                 runtime.modify { it.initialize(KodexAgentSettings(OpenAiModelId("test-model"))) }
@@ -369,7 +370,7 @@ val agentEventBusRealTerminalTest by testSuite(
             }
 
             val repository = scope.InMemoryKodexSessionRepository(testKodexAgentDependencies(client))
-            val bus = AgentEventBus(repository)
+            val bus = AgentEventBus(repository, InMemoryMqBroker())
             val agentId = repository.create()
             val session = repository.open(agentId)
             session.runtime.modify { storage ->

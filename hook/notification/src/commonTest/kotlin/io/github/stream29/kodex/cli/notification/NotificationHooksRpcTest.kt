@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.notification
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
@@ -169,6 +172,8 @@ private suspend fun withNotificationRpc(
                 newSession = KodexNewSessionSettings(model = OpenAiModelId("test-model")),
             ),
             createClient = { api }, createLoginClient = { NoNetworkLogin },
+            broker = InMemoryMqBroker(),
+            streamService = InMemoryStreamService(),
         ) { backend ->
             withInMemoryRpc(backend::register) { raw ->
                 val client = RestoringRpcClient(raw)

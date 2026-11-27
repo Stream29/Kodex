@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
@@ -40,6 +43,8 @@ val cliAgentTargetingTest by testSuite(compartment = { TestCompartment.RealTime 
                 root, Path(root, "codex"), Path(root, "agents"),
                 defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
                 createClient = { mockOpenAiClient { createResponse { flow { awaitCancellation() } } } },
+                broker = InMemoryMqBroker(),
+                streamService = InMemoryStreamService(),
             ) { backend ->
                 suspend fun newSession() = assertIs<SessionSpawnResult.Created>(
                     backend.global.spawnSession(SessionSpawnRequest(root.toString())),

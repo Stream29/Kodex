@@ -9,6 +9,8 @@ import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthLoginEvent
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.utils.oauthloopback.OAuthLoopbackListener
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+import io.github.stream29.kodex.utils.stream.StreamService
 import io.ktor.http.URLBuilder
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -100,10 +102,14 @@ val backendOwnedOAuthTest by testSuite(testConfig = TestConfig.testScope(isEnabl
     } }
 
     test("pending release closes the listener and does not submit a callback") { runTest {
-        val fixture = OwnedOAuthFixture(backgroundScope)
+        val streams = InMemoryStreamService()
+        val fixture = OwnedOAuthFixture(backgroundScope, streamService = streams)
         try {
             val observation = observeOAuth(fixture.oauth.start(OAuthTarget.Mcp("fake")))
+            val key = "oauth:${observation.authorization.attemptId}"
+            assertTrue(streams.exists(key))
             observation.result.cancelAndJoin()
+            assertFalse(streams.exists(key))
             runCurrent()
             assertEquals(listOf(41L), fixture.releaseIds)
             assertTrue(fixture.completedIds.isEmpty())
@@ -224,6 +230,7 @@ private class OwnedOAuthFixture(
     private val blockPreparation: Boolean = false,
     private val invalidBinding: Boolean = false,
     private val failExchange: Boolean = false,
+    streamService: StreamService = InMemoryStreamService(),
 ) {
     val listener = FakeOwnedListener()
     val preparationStarted = CompletableDeferred<Unit>()
@@ -257,6 +264,7 @@ private class OwnedOAuthFixture(
         releaseInner = { releaseIds += it },
         openListener = { _, _ -> listener },
         callbackDeadline = 1.seconds,
+        streamService = streamService,
     )
 }
 

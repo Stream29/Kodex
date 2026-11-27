@@ -115,6 +115,73 @@ private suspend fun checkSparseFamily(
 }
 
 val sqliteStorageTest by testSuite {
+    test("timeline metadata refreshes from durable state; only destructive reverts increment the nonce") {
+        val path = Path(SystemTemporaryDirectory, "kodex-storage-nonce-${Random.nextLong().toULong()}.db")
+        try {
+            openSqliteConnection(path).use { db ->
+                initializeKodexHomeDatabase(db)
+                db.execute("INSERT INTO sessions(session_id) VALUES (0)")
+                db.execute("INSERT INTO agents(agent_id, session_id) VALUES (0, 0)")
+                openExistingSqliteConnection(path).use { reader ->
+                    val observer = SqliteAgentStorage(reader, 0)
+                    val seen = mutableListOf<Triple<Int, Boolean, Long>>()
+                    lateinit var store: SqliteAgentStorage
+                    store = SqliteAgentStorage(db, 0, onHistoryChanged = { types ->
+                        val nonce = reader.query("SELECT cache_nonce FROM agents WHERE agent_id=0").single().single() as Long
+                        seen += Triple(store.latestIndexFlow.value, types == null, nonce)
+                    })
+                    assertEquals(1L, store.cacheNonce())
+                    assertEquals(-1, store.latestIndexFlow.value)
+                    store.commit(SteerSnapshot(listOf(StableUserMessage(listOf(ContentItem.InputText("queued"))))))
+                    store.commit(SteerSnapshot(emptyList()))
+                    assertEquals(1L, store.cacheNonce())
+
+                    store.revert(2) // Clears the older non-empty snapshot without deleting a row.
+                    assertEquals(2L, store.cacheNonce.value)
+                    assertEquals(1, store.latestIndexFlow.value)
+                    assertTrue(store.getSteerAt(0).isEmpty())
+                    store.revert(2) // Both remaining snapshots are already empty.
+                    assertEquals(2L, observer.cacheNonce()) // Direct read sees the database, not the old snapshot.
+                    assertEquals(1L, observer.cacheNonce.value)
+                    observer.refreshObservableState()
+                    assertEquals(2L, observer.cacheNonce.value)
+                    assertEquals(1, observer.latestIndexFlow.value)
+
+                    store.revert(1)
+                    assertEquals(3L, store.cacheNonce())
+                    assertEquals(0, store.latestIndexFlow.value)
+                    assertEquals(
+                        listOf(Triple(0, false, 1L), Triple(1, false, 1L), Triple(1, true, 2L), Triple(0, true, 3L)),
+                        seen,
+                    )
+                }
+            }
+            openExistingSqliteConnection(path).use { db ->
+                val reopened = SqliteAgentStorage(db, 0)
+                assertEquals(3L, reopened.cacheNonce.value)
+                assertEquals(0, reopened.latestIndexFlow.value)
+            }
+        } finally {
+            for (candidate in listOf(path, Path("$path-wal"), Path("$path-shm"))) {
+                SystemFileSystem.delete(candidate, mustExist = false)
+            }
+        }
+    }
+
+    test("a failed nonce increment rolls back the timeline and emits no revert callback") {
+        seeded().use { db ->
+            db.execute("UPDATE agents SET cache_nonce=? WHERE agent_id=0", listOf(Long.MAX_VALUE))
+            var callbacks = 0
+            val store = SqliteAgentStorage(db, 0, onHistoryChanged = { callbacks++ })
+            store.commit(SteerSnapshot(emptyList()))
+            assertFailsWith<SqliteFailure> { store.revert(0) }
+            assertEquals(1, callbacks)
+            assertEquals(0, store.latestIndex())
+            assertEquals(0, store.latestIndexFlow.value)
+            assertEquals(Long.MAX_VALUE, store.cacheNonce())
+        }
+    }
+
     test("all commit families retain change point semantics and fine-grained commit types") {
         seeded().use { db ->
             val storage = SqliteAgentStorage(db, 0)

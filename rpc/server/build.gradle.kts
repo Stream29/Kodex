@@ -13,6 +13,8 @@ kotlin {
             api(project(":rpc-client"))
             api(project(":openai-client"))
             api(project(":app-backend-settings"))
+            api(project(":utils-mq"))
+            api(project(":utils-stream"))
             api(libs.kotlinx.rpc.core)
             api(libs.kotlinx.coroutines.core)
         }

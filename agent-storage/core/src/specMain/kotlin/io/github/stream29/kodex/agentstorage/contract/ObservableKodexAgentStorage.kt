@@ -10,9 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
  */
 public interface ObservableKodexAgentStorage : KodexAgentStorage {
     /**
-     * Backend-issued in-memory cache identity, replaced on backend owner reconstruction
-     * or destructive changes (`revert`). Appends and value eviction preserve it.
-     * Compare for equality, not ordering.
+     * Published snapshot of the storage cache identity. Opening a new handle on the same
+     * storage, appends, and value eviction preserve it. Compare for equality, not ordering.
      */
     public val cacheNonce: StateFlow<Long>
 

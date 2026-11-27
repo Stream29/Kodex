@@ -30,6 +30,7 @@ import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
 import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.utils.coroutines.use
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
 import io.github.stream29.kodex.utils.sqlite.SqliteFailure
 import kotlinx.coroutines.CompletableDeferred
@@ -69,7 +70,7 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
                 createResponse { flow { running.complete(Unit); awaitCancellation() } }
             }
             testKodexAgentDependencies(client).use { dependencies ->
-                SqliteKodexSessionRepository(home, dependencies).use { repository ->
+                SqliteKodexSessionRepository(home, dependencies, InMemoryMqBroker()).use { repository ->
                     val sessionId = repository.create()
                     val root = repository.open(sessionId)
                     val rootId = checkNotNull(root.runtime.agentId)
@@ -108,7 +109,7 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
                 }
             }
             testKodexAgentDependencies().use { dependencies ->
-                SqliteKodexSessionRepository(home, dependencies).use { repository ->
+                SqliteKodexSessionRepository(home, dependencies, InMemoryMqBroker()).use { repository ->
                     assertEquals(90, repository.getRootAgentId(12))
                     assertEquals(12, repository.getRootAgentId(90))
                     assertTrue(repository.openSessions.value.isEmpty())
@@ -169,7 +170,7 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
                     }
                 }
                 assertFalse(fs.exists(Path(home, "sessions")))
-                SqliteKodexSessionRepository(home, dependencies).use { repository ->
+                SqliteKodexSessionRepository(home, dependencies, InMemoryMqBroker()).use { repository ->
                     assertEquals(90, repository.getEntry(12).rootAgentId)
                     assertEquals("real root", repository.getEntry(12).name)
                     assertEquals("unrelated root", repository.getEntry(90).name)
@@ -188,7 +189,7 @@ val agentIdStorageTest by testSuite(compartment = { TestCompartment.RealTime }) 
 
         test("fork copy accepts a sparse exclusive boundary and rejects a replaced owner") { home ->
             testKodexAgentDependencies().use { dependencies ->
-                SqliteKodexSessionRepository(home, dependencies).use { repository ->
+                SqliteKodexSessionRepository(home, dependencies, InMemoryMqBroker()).use { repository ->
                     val sessionId = repository.create()
                     val source = repository.open(sessionId)
                     val agentId = repository.getRootAgentId(sessionId)

@@ -27,6 +27,7 @@ import io.github.stream29.kodex.rpc.client.rpcCachedAgentStorage
 import io.github.stream29.kodex.rpc.contract.*
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.models.AgentStateValue
+import io.github.stream29.kodex.rpc.models.ShellSessionState
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
@@ -38,6 +39,9 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import io.github.stream29.kodex.utils.rpcexception.*
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
 import io.github.stream29.kodex.utils.shellclient.renderedBytes
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+import io.github.stream29.kodex.utils.stream.StreamService
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
@@ -195,6 +199,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
         val added = ResponsesStreamEvent.OutputItemAdded(0, item)
         val release = CompletableDeferred<Unit>()
         val done = ResponsesStreamEvent.OutputItemDone(0, item.copy(content = listOf(ContentItem.OutputText("answer"))))
+        val streams = InMemoryStreamService()
         val client = mockOpenAiClient {
             createResponse {
                 flow {
@@ -205,12 +210,15 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 }
             }
         }
-        runtimeFixture(client) { repository, index, backend ->
+        runtimeFixture(client, streamService = streams) { repository, index, backend ->
             withInMemoryRpc(registerServices = { registerService(AgentRuntimeRpc::class) { backend } }) { raw ->
                 val rpc = RestoringRpcClient(raw).withService<AgentRuntimeRpc>()
                 repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText("question")))
                 val waiter = async { rpc.resume(index) }
                 val active = rpc.getStateFlow(index).filterIsInstance<AgentStateValue.RequestResponse.Message>().first()
+                val key = "agent:$index:output:${active.nonce}"
+                assertEquals(active, streams.latest("agent:$index:state")?.decode<AgentStateValue>())
+                assertEquals(added, streams.readValues<ResponsesStreamEvent>(key).first())
                 val replay = rpc.currentFlow(index, active.nonce).first()
                 assertEquals(added, replay)
                 assertEquals(active, rpc.getState(index))
@@ -220,7 +228,6 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 val values = async(start = CoroutineStart.UNDISPATCHED) {
                     rpc.currentFlow(index, active.nonce)
                         .onEach { liveSubscribed.complete(Unit) }
-                        .take(2)
                         .toList()
                 }
                 liveSubscribed.await()
@@ -228,9 +235,13 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 assertTrue(repository.openSessions.value.getValue(index).runtime.runningTurn.value != null)
                 release.complete(Unit)
                 assertEquals(listOf(added, done), values.await())
+                assertEquals(listOf(added, done), streams.readValues<ResponsesStreamEvent>(key).toList())
                 rpc.getRunningTurnFlow(index).first { !it }
                 assertFailsWith<NoMatchException> { rpc.currentFlow(index, active.nonce).first() }
                 assertEquals(AgentStateValue.AssistantMessage, rpc.getState(index))
+                repository.closeSession(index)
+                assertFalse(streams.exists(key))
+                assertFalse(streams.exists("agent:$index:state"))
             }
         }
     }
@@ -396,7 +407,8 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
     }
 
     test("shell completion output cursor and stdin write work over RPC") {
-        runtimeFixture { repository, index, backend ->
+        val streams = InMemoryStreamService()
+        runtimeFixture(streamService = streams) { repository, index, backend ->
             withInMemoryRpc(registerServices = { registerService(AgentRuntimeRpc::class) { backend } }) { raw ->
                 val rpc = RestoringRpcClient(raw).withService<AgentRuntimeRpc>()
                 val shell = repository.openSessions.value.getValue(index).runtime.unifiedExecToolClient
@@ -427,6 +439,8 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 rpc.writeShellSessionStdin(index, id, "hello\n", closeInput = true)
                 val finalMap = rpc.getShellSessionsFlow(index).first { it[id]?.completed == true }
                 val finalState = finalMap.getValue(id)
+                val key = "agent:$index:shells"
+                assertEquals(finalMap, streams.latest(key)?.decode<Map<Int, ShellSessionState>>())
                 assertEquals(0, finalState.exitCode)
                 assertTrue(finalState.completed)
                 assertEquals(initialState.registrationNonce, finalState.registrationNonce)
@@ -442,6 +456,16 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 assertFailsWith<ShellSessionNotRegistered> { rpc.readShellSessionOutput(index, -1) }
                 val writeError = assertFails { rpc.writeShellSessionStdin(index, -1, "hi") }
                 assertTrue(writeError.message.orEmpty().contains("Shell session is no longer registered"))
+                val watching = CompletableDeferred<Unit>()
+                val subscriber = async {
+                    assertFailsWith<AgentNotActive> {
+                        rpc.getShellSessionsFlow(index).collect { watching.complete(Unit) }
+                    }
+                }
+                watching.await()
+                repository.closeSession(index)
+                subscriber.await()
+                assertFalse(streams.exists(key))
             }
         }
     }
@@ -550,20 +574,50 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
         }
     }
 
-    test("projection changes nonce only for stream identity and never offers compaction output") {
-        val projection = RuntimeOutputProjection()
-        val first = MutableSharedFlow<ResponsesStreamEvent>(replay = 4)
-        val second = MutableSharedFlow<ResponsesStreamEvent>(replay = 4)
-        val a = projection.snapshot { KodexAgentStateValue.RequestResponse.Message(first) }
-        val b = projection.snapshot { KodexAgentStateValue.RequestResponse.Message(first) }
-        assertEquals(a.nonce, b.nonce)
-        assertSame(first, a.events)
-        val c = projection.snapshot { KodexAgentStateValue.RequestResponse.Reasoning(second) }
-        assertNotEquals(a.nonce, c.nonce)
-        val compact = projection.snapshot { KodexAgentStateValue.Compacting }
-        assertEquals(AgentStateValue.Compacting, compact.value)
-        assertNull(compact.events)
-        assertNull(projection.snapshot { KodexAgentStateValue.RequestResponse.Started }.events)
+    test("switching outputs deletes the old stream and preserves the new nonce until Session close") {
+        val first = ResponseItem.Message(
+            id = ResponseItemId("first"), role = MessageRole.Assistant, content = emptyList(),
+        )
+        val second = first.copy(id = ResponseItemId("second"))
+        val next = CompletableDeferred<Unit>()
+        val streams = InMemoryStreamService()
+        val client = mockOpenAiClient {
+            createResponse {
+                flow {
+                    emit(ResponsesStreamEvent.OutputItemAdded(0, first))
+                    next.await()
+                    emit(ResponsesStreamEvent.OutputItemDone(0, first))
+                    emit(ResponsesStreamEvent.OutputItemAdded(1, second))
+                    awaitCancellation()
+                }
+            }
+        }
+        runtimeFixture(client, streamService = streams) { repository, index, rpc ->
+            repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText("question")))
+            assertTrue(rpc.requestResume(index))
+            val states = rpc.getStateFlow(index).filterIsInstance<AgentStateValue.RequestResponse.Message>()
+            val before = states.first()
+            assertEquals(before, rpc.getState(index))
+            next.complete(Unit)
+            val after = states.first { it != before }
+            val newKey = "agent:$index:output:${after.nonce}"
+            assertFalse(streams.exists("agent:$index:output:${before.nonce}"))
+            assertFailsWith<NoMatchException> { rpc.currentFlow(index, before.nonce).first() }
+            val observed = CompletableDeferred<Unit>()
+            val output = async {
+                assertFailsWith<AgentNotActive> {
+                    rpc.currentFlow(index, after.nonce).collect {
+                        assertEquals(ResponsesStreamEvent.OutputItemAdded(1, second), it)
+                        observed.complete(Unit)
+                    }
+                }
+            }
+            observed.await()
+            assertTrue(streams.exists(newKey))
+            repository.closeSession(index)
+            output.await()
+            assertFalse(streams.exists(newKey))
+        }
     }
 
     test("automatic title preserves a winning manual name without repeating the model") {
@@ -724,6 +778,7 @@ internal suspend fun runtimeFixture(
     client: OpenAiClient = mockOpenAiClient(),
     generator: SessionTitleGenerator = SessionTitleGenerator { _, _, _ -> error("Titles disabled in fixture") },
     settings: SessionTitleSettings = SessionTitleSettings(enabled = false),
+    streamService: StreamService = InMemoryStreamService(),
     block: suspend CoroutineScope.(KodexSessionRepository, Int, BackendAgentRuntimeRpc) -> Unit,
 ) = withTimeout(30.seconds) {
     val root = Path(SystemTemporaryDirectory, "kodex-rpc-runtime-${Random.nextLong()}")
@@ -738,9 +793,10 @@ internal suspend fun runtimeFixture(
             db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES(0)")
             db.recomputeSessionCatalog(0)
         }
-        val repository = repoOwner.SqliteKodexSessionRepository(root, testKodexAgentDependencies(client))
+        val broker = InMemoryMqBroker()
+        val repository = repoOwner.SqliteKodexSessionRepository(root, testKodexAgentDependencies(client), broker)
         try {
-            val eventBus = AgentEventBus(repository)
+            val eventBus = AgentEventBus(repository, broker)
             val index = 0
             val session = repository.open(index)
             session.runtime.modify {
@@ -761,6 +817,7 @@ internal suspend fun runtimeFixture(
                         eventBus = eventBus,
                         client = client,
                         home = root,
+                        streamService = streamService,
                     ),
                 )
             }

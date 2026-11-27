@@ -2,6 +2,7 @@
 
 package io.github.stream29.kodex.agenteventbus
 
+import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentruntime.contract.submitUserMessage
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
@@ -13,6 +14,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecProcessSession
+import io.github.stream29.kodex.utils.mq.MqBroker
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -24,20 +26,31 @@ import kotlinx.coroutines.launch
 
 public actual fun AgentEventBus(
     repository: KodexSessionRepository,
+    broker: MqBroker,
 ): AgentEventBus =
-    RepositoryAgentEventBus(repository).also { bus ->
+    RepositoryAgentEventBus(repository, broker).also { bus ->
+        bus.attachInboxConsumer()
         bus.attachWatchedTerminalExitObserver()
     }
 
 private class RepositoryAgentEventBus(
     private val repository: KodexSessionRepository,
+    override val broker: MqBroker,
 ) : AgentEventBus {
+    private val inbox = AgentInbox(broker)
+
+    fun attachInboxConsumer() {
+        repository.launch(start = CoroutineStart.UNDISPATCHED) {
+            inbox.consume(::handleInboxMessage)
+        }
+    }
+
     override suspend fun submitUserMessage(
         agentId: Int,
         content: List<ContentItem>,
     ) {
         if (content.isEmpty()) return
-        submitUserMessage(requireAgent(agentId), content)
+        inbox.submit(AgentInboxMessage.UserMessage(agentId, content))
     }
 
     override suspend fun submitUserMessage(session: KodexAgentSession, content: List<ContentItem>) {
@@ -49,7 +62,7 @@ private class RepositoryAgentEventBus(
     }
 
     override suspend fun submitSubagentCompletion(parentAgentId: Int, childAgentId: Int) {
-        requireAgent(parentAgentId).runtime.submit(listOf(StableSubagentCompletedEvent(childAgentId)))
+        inbox.submit(AgentInboxMessage.SubagentCompletion(parentAgentId, childAgentId))
     }
 
     override suspend fun submitAskUserAnswer(
@@ -57,7 +70,7 @@ private class RepositoryAgentEventBus(
         askId: Int,
         response: RequestUserInputResponse,
     ) {
-        requireAgent(agentId).runtime.submitAskUserAnswer(askId, response)
+        inbox.submit(AgentInboxMessage.AskUserAnswer(agentId, askId, response))
     }
 
     override suspend fun submitScheduleTrigger(
@@ -65,14 +78,32 @@ private class RepositoryAgentEventBus(
         scheduleId: Long,
         description: String,
     ) {
-        requireAgent(agentId).runtime.submit(
-            listOf(
-                StableScheduleEvent(
-                    scheduleId = scheduleId,
-                    description = description,
-                ),
-            ),
-        )
+        inbox.submit(AgentInboxMessage.ScheduleTrigger(agentId, scheduleId, description))
+    }
+
+    override suspend fun submitAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline) {
+        inbox.submit(AgentInboxMessage.AwaitDeadlineTrigger(
+            agentId, expected.snapshotIndex, expected.callId, expected.timeoutAt,
+        ))
+    }
+
+    private suspend fun handleInboxMessage(message: AgentInboxMessage) {
+        val agentId = message.targetAgentId
+        when (message) {
+            is AgentInboxMessage.UserMessage -> {
+                if (message.content.isNotEmpty()) submitUserMessage(requireAgent(agentId), message.content)
+            }
+            is AgentInboxMessage.AskUserAnswer ->
+                requireAgent(agentId).runtime.submitAskUserAnswer(message.askId, message.response)
+            is AgentInboxMessage.ScheduleTrigger ->
+                requireAgent(agentId).runtime.submit(listOf(StableScheduleEvent(message.scheduleId, message.description)))
+            is AgentInboxMessage.SubagentCompletion ->
+                requireAgent(agentId).runtime.submit(listOf(StableSubagentCompletedEvent(message.childAgentId)))
+            is AgentInboxMessage.AwaitDeadlineTrigger -> {
+                val expected = PendingAwaitDeadline(message.snapshotIndex, message.callId, message.timeoutAt)
+                repository.openForAwaitDeadline(agentId, expected)?.runtime?.requestAwaitDeadlineCheck(expected)?.join()
+            }
+        }
     }
 
     private suspend fun requireAgent(agentId: Int): KodexAgentSession =

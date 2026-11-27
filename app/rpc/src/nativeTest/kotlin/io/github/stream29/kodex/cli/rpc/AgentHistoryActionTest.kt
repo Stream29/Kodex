@@ -8,15 +8,14 @@ import kotlinx.coroutines.flow.first
 import kotlin.test.*
 
 val agentHistoryActionTest by testSuite {
-    test("history fork is bound to the source Agent and rejects another Agent's nonce") {
+    test("history fork targets the source Agent even when multiple Agents have the same cache nonce") {
         frontend {
             val first = create("first")
             val second = create("second")
             val agent = requireNotNull(first.rootAgent.value)
-            assertFailsWith<CacheNonceMismatch> {
-                agent.forkHistory(1, second.current().storage.cacheNonce.value)
-            }
-            val fork = agent.forkHistory(first.current().latestIndex.value + 1, first.current().storage.cacheNonce.value)
+            val nonce = first.current().storage.cacheNonce()
+            assertEquals(nonce, second.current().storage.cacheNonce())
+            val fork = agent.forkHistory(first.current().latestIndex.value + 1, nonce)
             assertEquals("[fork] first", views.open(fork).settings.value.name)
         }
     }

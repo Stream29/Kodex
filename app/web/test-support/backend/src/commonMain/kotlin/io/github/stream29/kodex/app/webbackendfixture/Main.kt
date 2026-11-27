@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.app.webbackendfixture
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
@@ -77,6 +80,8 @@ public actual fun main(): Unit = runBlocking {
                 },
                 createLoginClient = { NoFixtureCredentials },
                 requiresPreparedHome = true,
+                broker = InMemoryMqBroker(),
+                streamService = InMemoryStreamService(),
             ) { backend ->
                 val engine = embeddedServer(CIO, host = "127.0.0.1", port = 18796) {
                     install(WebSockets) { maxFrameSize = 4 * 1024 * 1024L }

@@ -10,6 +10,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolCall
@@ -68,6 +69,33 @@ private fun pendingTool(callId: String): PendingToolCall =
     )
 
 val inMemoryKodexAgentStorageTest by testSuite {
+    test("guarded handles share the tail and nonce across opening and destructive reverts") {
+        val root = InMemoryKodexAgentStorage.empty()
+        var active = true
+        val first = root.withAccess(requireAccess = { check(active) })
+        assertEquals(1L, first.cacheNonce())
+        assertEquals(-1, first.latestIndexFlow.value)
+        first.commit(SteerSnapshot(listOf(StableUserMessage(listOf(ContentItem.InputText("queued"))))))
+        assertEquals(0, first.latestIndexFlow.value)
+        assertEquals(1L, first.cacheNonce())
+
+        first.revert(1)
+        assertEquals(2L, first.cacheNonce.value)
+        assertEquals(0, first.latestIndexFlow.value)
+        first.revert(1)
+        assertEquals(2L, first.cacheNonce())
+        active = false
+        assertFailsWith<IllegalStateException> { first.cacheNonce() }
+        assertFailsWith<IllegalStateException> { first.revert(0) }
+
+        val reopened = root.withAccess(requireAccess = {})
+        assertEquals(2L, reopened.cacheNonce())
+        assertEquals(0, reopened.latestIndex())
+        reopened.revert(0)
+        assertEquals(3L, reopened.cacheNonce.value)
+        assertEquals(-1, reopened.latestIndexFlow.value)
+    }
+
     test("construction publishes an initial snapshot without a compaction point") {
         val first = storage()
 

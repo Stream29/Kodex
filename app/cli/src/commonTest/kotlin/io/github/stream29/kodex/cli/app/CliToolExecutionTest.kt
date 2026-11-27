@@ -2,6 +2,9 @@
 
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
@@ -88,6 +91,8 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                 root, Path(root, "codex"), Path(root, "agents"),
                 defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
                 createClient = { mockOpenAiClient { createResponse { flow { awaitCancellation() } } } },
+                broker = InMemoryMqBroker(),
+                streamService = InMemoryStreamService(),
             ) { backend ->
                 val response = backend.global.spawnSession(SessionSpawnRequest(root.toString()))
                 val created = assertIs<SessionSpawnResult.Created>(response, response.toString())
@@ -151,6 +156,8 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                 root, Path(root, "codex"), Path(root, "agents"),
                 defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
                 createClient = { mockOpenAiClient() },
+                broker = InMemoryMqBroker(),
+                streamService = InMemoryStreamService(),
             ) { backend ->
                 suspend fun newSession() = assertIs<SessionSpawnResult.Created>(
                     backend.global.spawnSession(SessionSpawnRequest(root.toString())),
@@ -207,6 +214,8 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
             withBackendServices(root, Path(root, "codex"), Path(root, "agents"),
                 defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
                 createClient = { mockOpenAiClient { createResponse { flow { awaitCancellation() } } } },
+                broker = InMemoryMqBroker(),
+                streamService = InMemoryStreamService(),
             ) { backend ->
                 fs.createDirectories(unrelatedDirectory)
                 val runtime = object : AgentRuntimeRpc by backend.runtime {
@@ -400,6 +409,8 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                 agentsHome = Path(root, "agents"),
                 defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
                 createClient = { client },
+                broker = InMemoryMqBroker(),
+                streamService = InMemoryStreamService(),
             ) { backend ->
                 var opened = 0
                 var closed = 0
@@ -548,6 +559,8 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                 agentsHome = Path(root, "agents"),
                 defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
                 createClient = { client },
+                broker = InMemoryMqBroker(),
+                streamService = InMemoryStreamService(),
             ) { backend ->
                 withInMemoryRpc(backend::register) { baseRaw ->
                     val baseServices = RpcServices(RestoringRpcClient(baseRaw))
@@ -728,6 +741,8 @@ val cliToolExecutionTest by testSuite(compartment = { TestCompartment.RealTime }
                     )
                 },
                 createClient = { client },
+                broker = InMemoryMqBroker(),
+                streamService = InMemoryStreamService(),
             ) { backend ->
                 withInMemoryRpc(backend::register) { raw ->
                     val services = RpcServices(RestoringRpcClient(raw))

@@ -26,6 +26,7 @@ import kotlin.test.assertTrue
 private val fs = homeTestFileSystem
 private val v081 = MigrationVersion("0.8.1")
 private val v090 = MigrationVersion("0.9.0")
+private val v091 = MigrationVersion("0.9.1")
 
 public val migrateToV0_8_1Test by testSuite {
     testFixture { newTestHome() } closeWith {
@@ -39,15 +40,15 @@ public val migrateToV0_8_1Test by testSuite {
             val started = mutableListOf<Pair<MigrationVersion, MigrationVersion>>()
             val handle = prepareKodexHome(
                 home = home,
-                currentVersion = v090,
+                currentVersion = v091,
                 migrations = KodexHomeMigrations,
                 fileSystem = fs,
                 onMigrationStarted = { from, to -> started += from to to },
             )
             try {
-                assertEquals(listOf(MigrationVersion("0.8.0") to v081, v081 to v090), started)
-                assertEquals(v090, handle.version)
-                assertEquals(readyMarker("0.9.0"), fs.readString(Path(home, HomeVersionFile)))
+                assertEquals(listOf(MigrationVersion("0.8.0") to v081, v081 to v090, v090 to v091), started)
+                assertEquals(v091, handle.version)
+                assertEquals(readyMarker("0.9.1"), fs.readString(Path(home, HomeVersionFile)))
                 assertEquals("# User Instructions\n", fs.readString(Path(home, "AGENTS.md")))
                 assertEquals("model: synthetic\n", fs.readString(Path(home, "settings.yml")))
                 assertFalse(fs.exists(Path(home, ".kodex.db.migrating-0.8.1")))
@@ -76,12 +77,12 @@ public val migrateToV0_8_1Test by testSuite {
 
             prepareKodexHome(
                 home = home,
-                currentVersion = v090,
+                currentVersion = v091,
                 migrations = KodexHomeMigrations,
                 fileSystem = fs,
             ).closeAndJoin()
 
-            assertEquals(readyMarker("0.9.0"), fs.readString(Path(home, HomeVersionFile)))
+            assertEquals(readyMarker("0.9.1"), fs.readString(Path(home, HomeVersionFile)))
             assertFalse(fs.exists(Path(home, ".kodex.db.migrating-0.8.1")))
             assertFalse(fs.exists(Path(home, ".kodex.db.migrating-0.8.1-journal")))
             openExistingSqliteConnection(Path(home, HomeDatabaseFile)).use { db ->
@@ -102,12 +103,12 @@ public val migrateToV0_8_1Test by testSuite {
 
             prepareKodexHome(
                 home = home,
-                currentVersion = v090,
+                currentVersion = v091,
                 migrations = KodexHomeMigrations,
                 fileSystem = fs,
             ).closeAndJoin()
 
-            assertEquals(readyMarker("0.9.0"), fs.readString(Path(home, HomeVersionFile)))
+            assertEquals(readyMarker("0.9.1"), fs.readString(Path(home, HomeVersionFile)))
             openExistingSqliteConnection(Path(home, HomeDatabaseFile)).use { db ->
                 assertEquals(SqliteSchemaVersion.toLong(), db.query("PRAGMA main.user_version").single().single())
                 assertFixtureDataIntact(db, expectForkRecovery = false)

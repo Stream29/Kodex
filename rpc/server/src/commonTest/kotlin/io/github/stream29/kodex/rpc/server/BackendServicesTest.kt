@@ -5,6 +5,11 @@ package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agenteventbus.AgentNotificationSignal
+import io.github.stream29.kodex.agenteventbus.BackendMqExchanges
+import io.github.stream29.kodex.agenteventbus.BackendSignalKeys
+import io.github.stream29.kodex.agenteventbus.publishNotification
+import io.github.stream29.kodex.agenteventbus.publishSignal
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
@@ -13,7 +18,9 @@ import io.github.stream29.kodex.agentstorage.sqlite.recomputeSessionCatalog
 import io.github.stream29.kodex.agentcontext.contract.ContextPathEvaluation
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
+import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
+import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
 import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
@@ -27,10 +34,17 @@ import io.github.stream29.kodex.rpc.models.*
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.mq.DefaultMqTopicBufferCapacity
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.mq.MqBroker
+import io.github.stream29.kodex.utils.mq.MqTopicSignal
 import io.github.stream29.kodex.utils.rpcexception.*
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+import io.github.stream29.kodex.utils.stream.StreamService
 import io.ktor.http.URLBuilder
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
@@ -42,6 +56,97 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("injected broker carries committed settings, groups and notifications between backend graphs") {
+        val broker = InMemoryMqBroker()
+        withServices(broker = broker) { writer, _ ->
+            val home = writer.settings.contextSettings.value.kodexHome
+            withBackendServices(
+                home, Path(home, "peer-codex"), Path(home, "agents"),
+                defaults = writer.global.getSettings(),
+                createLoginClient = { ServicesTestLogin() },
+                createClient = { mockOpenAiClient() },
+                broker = broker,
+                streamService = InMemoryStreamService(),
+            ) { reader ->
+                val observed = Channel<MqTopicSignal.Message>(Channel.UNLIMITED)
+                val subscription = launch(start = CoroutineStart.UNDISPATCHED) {
+                    broker.subscribeTopic(BackendMqExchanges.Broadcast, setOf(BackendSignalKeys.AllGlobalSettings), DefaultMqTopicBufferCapacity)
+                        .filterIsInstance<MqTopicSignal.Message>().collect { observed.send(it) }
+                }
+                try {
+                    suspend fun expectSignal(key: String) {
+                        val message = observed.receive().message
+                        assertEquals(key, message.routingKey)
+                        assertTrue(message.body.isEmpty())
+                    }
+                    val old = writer.global.getSettings()
+                    val updated = old.copy(daemonTtlSeconds = 120)
+                    assertTrue(writer.global.compareAndSetSettings(old, old))
+                    assertTrue(writer.global.compareAndSetSettings(old, updated))
+                    assertFalse(writer.global.compareAndSetSettings(old, old))
+                    expectSignal(BackendSignalKeys.GlobalSettingsBackend)
+                    reader.global.getSettingsFlow().first { it == updated }
+                    val frontend = writer.global.getFrontendSettings()
+                    val nextFrontend = frontend.copy(newLineKey = NewLineKey.Enter)
+                    assertTrue(writer.global.compareAndSetFrontendSettings(frontend, nextFrontend))
+                    expectSignal(BackendSignalKeys.GlobalSettingsFrontend)
+                    reader.global.getFrontendSettingsFlow().first { it == nextFrontend }
+                    assertTrue(observed.tryReceive().isFailure)
+
+                    val mcpChanged = async(start = CoroutineStart.UNDISPATCHED) {
+                        broker.subscribeTopic(BackendMqExchanges.Broadcast, setOf(BackendSignalKeys.GlobalMcpServers), DefaultMqTopicBufferCapacity)
+                            .filterIsInstance<MqTopicSignal.Message>().first()
+                    }
+                    writer.settings.mcpConfigurations.update {
+                        mapOf("fixture" to McpServerConfiguration.StreamableHttp("https://example.invalid/mcp", enabled = false))
+                    }
+                    expectSignal(BackendSignalKeys.GlobalSettingsBackend)
+                    assertTrue(mcpChanged.await().message.body.isEmpty())
+                    reader.global.getMcpServersFlow().first { servers -> servers.any { it.serverName == "fixture" } }
+
+                    val disk = UnifiedSettingsStore.open(home, old)
+                    val reloaded = disk.backendStore.update { it.copy(daemonTtlSeconds = 180) }
+                    assertTrue(disk.compareAndSetFrontend(nextFrontend, frontend))
+                    writer.settings.reloadSettings()
+                    expectSignal(BackendSignalKeys.GlobalSettingsBackend)
+                    expectSignal(BackendSignalKeys.GlobalSettingsFrontend)
+                    reader.global.getSettingsFlow().first { it == reloaded }
+                    reader.global.getFrontendSettingsFlow().first { it == frontend }
+
+                    assertTrue(disk.compareAndSetFrontend(frontend, nextFrontend))
+                    broker.publishSignal(BackendSignalKeys.GlobalSettingsFrontend)
+                    expectSignal(BackendSignalKeys.GlobalSettingsFrontend)
+                    writer.global.getFrontendSettingsFlow().first { it == nextFrontend }
+                    reader.global.getFrontendSettingsFlow().first { it == nextFrontend }
+
+                    val groupNonce = reader.global.getSessionGroupsNonceFlow().first()
+                    val groupChanged = async(start = CoroutineStart.UNDISPATCHED) {
+                        reader.global.getSessionGroupsNonceFlow().first { it != groupNonce }
+                    }
+                    val sessionId = writer.global.createSession(home)
+                    val agentId = writer.global.getRootAgentId(sessionId)
+                    groupChanged.await()
+                    assertEquals(sessionId, reader.global.getSessionCatalog(false).single().sessionIndex)
+
+                    val stop = async(start = CoroutineStart.UNDISPATCHED) {
+                        reader.notifications.filterIsInstance<Notification.Stop.AssistantMessage>().first()
+                    }
+                    assertEquals(1, reader.notificationSubscriptionCount.value)
+                    writer.runtime.submit(agentId, listOf(ContentItem.InputText("question")))
+                    assertEquals(agentId, stop.await().agentId)
+                    assertEquals(0, reader.notificationSubscriptionCount.value)
+                    assertFailsWith<AgentNotActive> { reader.runtime.getState(agentId) }
+
+                    val error = async(start = CoroutineStart.UNDISPATCHED) { reader.notifications.first() }
+                    broker.publishNotification(AgentNotificationSignal.StopUnhandledError(sessionId, agentId, "fixture"))
+                    assertEquals(Notification.Stop.UnhandledError(sessionId, "fixture", agentId), error.await())
+                } finally {
+                    subscription.cancelAndJoin()
+                }
+            }
+        }
+    }
+
     test("AgentId RPC resolves actual owners and preserves unrelated same-numbered Sessions") {
         withServices { services, _ ->
             val home = services.settings.contextSettings.value.kodexHome
@@ -527,6 +632,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
 internal suspend fun withServices(
     titleGenerator: SessionTitleGenerator? = null,
     checkAdmission: () -> Unit = {},
+    broker: MqBroker = InMemoryMqBroker(),
+    streamService: StreamService = InMemoryStreamService(),
     block: suspend CoroutineScope.(BackendServices, ServicesTestLogin) -> Unit,
 ) = withTimeout(30.seconds) {
     val tempDir = if (SystemTemporaryDirectory.isAbsolute) {
@@ -570,6 +677,8 @@ internal suspend fun withServices(
             createLoginClient = { login }, createClient = { client },
             createTitleGenerator = { titleGenerator ?: OpenAiSessionTitleGenerator(it) },
             checkAdmission = checkAdmission,
+            broker = broker,
+            streamService = streamService,
         ) { services ->
             block(services, login)
         }

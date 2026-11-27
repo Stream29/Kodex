@@ -2,42 +2,11 @@
 
 package io.github.stream29.kodex.agentsession.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
-import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlin.time.Duration
-import kotlin.time.Instant
 import kotlin.time.TimeMark
-
-/**
- * Observable wrapper over a [MutableKodexAgentStorage] guarded by [owner]'s lifecycle.
- */
-public expect class ScopedObservableAgentStorage(
-    owner: CoroutineScope,
-    source: MutableKodexAgentStorage,
-    initialLatestIndex: Int,
-    closedMessage: String = "Session storage is closed",
-) : MutableObservableKodexAgentStorage {
-    override val agentId: Int?
-    override val cacheNonce: StateFlow<Long>
-    override val latestIndexFlow: StateFlow<Int>
-    override suspend fun latestIndex(): Int
-    override suspend fun countCommitsIn(range: IntRange, types: Set<AgentCommitType>): Int
-    override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit>
-    override suspend fun getLastCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit>
-    override suspend fun commit(commit: AgentCommit): Int
-    override suspend fun commit(commit: AgentCommit, timestamp: Instant): Int
-    override suspend fun commit(commits: List<AgentCommit>): Int
-    override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int
-    override suspend fun revert(untilExclusive: Int)
-    public fun checkOpen()
-    public fun publishCommittedIndex(index: Int)
-}
 
 /**
  * Coordinates open [KodexAgentSession] handles, active-turn TTL renewal, idle TTL eviction,

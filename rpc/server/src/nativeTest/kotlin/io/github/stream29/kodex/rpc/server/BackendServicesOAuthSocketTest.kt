@@ -2,6 +2,8 @@ package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agenteventbus.BackendMqExchanges
+import io.github.stream29.kodex.agenteventbus.BackendSignalKeys
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
@@ -11,29 +13,53 @@ import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.models.OAuthTarget
+import io.github.stream29.kodex.rpc.models.OAuthLoginEvent
+import io.github.stream29.kodex.utils.mq.DefaultMqTopicBufferCapacity
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.mq.MqTopicSignal
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.request.get
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.URLBuilder
 import io.ktor.http.Url
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.rpc.withService
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 val backendServicesOAuthSocketTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("real RPC and backend loopback persist credentials and retain usage behavior") {
-        withServices { services, login ->
+        val streams = InMemoryStreamService()
+        val broker = InMemoryMqBroker()
+        withServices(broker = broker, streamService = streams) { services, login ->
             withInMemoryRpc(services::register) { raw ->
                 val global = RestoringRpcClient(raw).withService<GlobalRpc>()
+                val pendingKeys = mutableSetOf(
+                    BackendSignalKeys.GlobalAuthentication, BackendSignalKeys.GlobalModels, BackendSignalKeys.GlobalAccountUsage,
+                )
+                val invalidations = async(start = CoroutineStart.UNDISPATCHED) {
+                    broker.subscribeTopic(BackendMqExchanges.Broadcast, pendingKeys.toSet(), DefaultMqTopicBufferCapacity)
+                        .filterIsInstance<MqTopicSignal.Message>()
+                        .onEach {
+                            assertTrue(it.message.body.isEmpty())
+                            pendingKeys.remove(it.message.routingKey)
+                        }.first { pendingKeys.isEmpty() }
+                }
                 assertIs<SettingsAuthenticationState.Unavailable>(global.getAuthentication())
                 val old = global.getSettings()
                 assertTrue(global.compareAndSetSettings(old, old.copy(authSource = KodexAuthSource.Kodex)))
                 val observation = observeOAuth(global.startOAuthLogin(OAuthTarget.OpenAi(KodexAuthSource.Kodex)))
                 val authorization = observation.authorization
+                val key = "oauth:${authorization.attemptId}"
+                assertEquals(OAuthLoginEvent.Authorization(authorization), streams.latest(key)?.decode<OAuthLoginEvent>())
                 val url = Url(authorization.url)
                 val redirect = requireNotNull(url.parameters["redirect_uri"])
                 val callback = URLBuilder(redirect).apply {
@@ -42,11 +68,13 @@ val backendServicesOAuthSocketTest by testSuite(compartment = { TestCompartment.
                 }.buildString()
                 HttpClient(CIO).use { client -> assertEquals(HttpStatusCode.OK, client.get(callback).status) }
                 observation.awaitCommitted()
+                assertFalse(streams.exists(key))
                 val summary = global.getAuthenticationFlow().filterIsInstance<SettingsAuthenticationState.Authenticated>().first()
                 assertEquals("account", summary.accountId)
                 assertEquals(1, login.exchanges)
                 global.getModelsFlow().first { models -> models.any { it.slug == OpenAiModelId("test-model") } }
                 global.getAccountUsageFlow().filterIsInstance<SettingsAccountUsageState.Available>().first()
+                invalidations.await()
                 global.refreshAccountUsage()
                 assertEquals(CodexRateLimitResetOutcome.NoCredit, global.consumeUsageReset("specific"))
                 global.cancelOAuthLogin(authorization.attemptId)

@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
@@ -26,8 +29,8 @@ val backendSubagentSpawnerTest by testSuite(compartment = { TestCompartment.Real
         val client = mockOpenAiClient { createResponse { flow { awaitCancellation() } } }
         runtimeFixture(client) { repository, rootId, _ ->
             val repo = repository as SqliteKodexSessionRepository
-            val bus = AgentEventBus(repo)
-            val rpc = BackendAgentRuntimeRpc(repo, subagentSpawner = BackendSubagentSpawner(
+            val bus = AgentEventBus(repo, InMemoryMqBroker())
+            val rpc = BackendAgentRuntimeRpc(repo, bus, InMemoryStreamService(), subagentSpawner = BackendSubagentSpawner(
                 repo, { emptyList() }, repo::createChild, repo::discardUninitializedChild,
                 bus::recordSubagentCreation, bus::submitUserMessage,
             ))
@@ -85,12 +88,12 @@ val backendSubagentSpawnerTest by testSuite(compartment = { TestCompartment.Real
     test("spawn retains the known child on either partial failure") {
         runtimeFixture { repository, rootId, _ ->
             val repo = repository as SqliteKodexSessionRepository
-            val bus = AgentEventBus(repo)
+            val bus = AgentEventBus(repo, InMemoryMqBroker())
             val root = checkNotNull(repo.openAgent(rootId))
             val request = SubagentSpawnRequest(SessionSpawnSource(rootId, root.runtime.invocationId), "task", "Partial")
             for (stage in SubagentSpawnStage.entries) {
                 var submitCalled = false
-                val rpc = BackendAgentRuntimeRpc(repo, subagentSpawner = BackendSubagentSpawner(
+                val rpc = BackendAgentRuntimeRpc(repo, bus, InMemoryStreamService(), subagentSpawner = BackendSubagentSpawner(
                     repo, { emptyList() }, repo::createChild, repo::discardUninitializedChild,
                     { parent, event ->
                         if (stage == SubagentSpawnStage.Record) error("Fixture record failure")

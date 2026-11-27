@@ -107,7 +107,7 @@ internal class BackendGlobalRpc(
     override suspend fun compareAndSetFrontendSettings(
         expect: CliFrontendSettings,
         update: CliFrontendSettings,
-    ): Boolean = inBackend { settings.unified.compareAndSetFrontend(expect, update) }
+    ): Boolean = inBackend { settings.compareAndSetFrontendSettings(expect, update) }
 
     override fun getSettingsFlow(): Flow<BackendSettings> = observation { settings.settings }
     override suspend fun compareAndSetSettings(expect: BackendSettings, update: BackendSettings): Boolean =

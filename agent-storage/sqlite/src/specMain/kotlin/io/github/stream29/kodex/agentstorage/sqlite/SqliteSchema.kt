@@ -3,7 +3,7 @@ package io.github.stream29.kodex.agentstorage.sqlite
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 
 /** Physical schema required by current repositories and the independent SQL reader. */
-public const val SqliteSchemaVersion: Int = 4
+public const val SqliteSchemaVersion: Int = 5
 
 /** SQLite header signature for databases prepared by the current Kodex Home format. */
 public const val KodexHomeDatabaseApplicationId: Int = 0x4B445830
@@ -12,6 +12,7 @@ public const val KodexHomeDatabaseApplicationId: Int = 0x4B445830
 public const val KodexHomeDatabasePageSize: Int = 16384
 
 // language=SQL
+// The agents DDL uses SQLite's exact ADD COLUMN spelling so existing databases can migrate in place.
 private const val AgentHistorySchema: String = """
 
 CREATE TABLE agents (
@@ -19,7 +20,7 @@ CREATE TABLE agents (
     session_id INTEGER NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     parent_agent_id INTEGER REFERENCES agents(agent_id) ON DELETE CASCADE,
     completed INTEGER NOT NULL DEFAULT 0 CHECK (completed IN (0, 1))
-) STRICT;
+, cache_nonce INTEGER NOT NULL DEFAULT 1 CHECK (cache_nonce >= 1)) STRICT;
 
 CREATE UNIQUE INDEX idx_agents_root_session ON agents(session_id) WHERE parent_agent_id IS NULL;
 

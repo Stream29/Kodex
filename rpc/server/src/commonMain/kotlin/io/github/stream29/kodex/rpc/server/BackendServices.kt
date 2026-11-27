@@ -6,6 +6,9 @@ package io.github.stream29.kodex.rpc.server
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
+import io.github.stream29.kodex.agenteventbus.AgentNotificationSignal
+import io.github.stream29.kodex.agenteventbus.NotificationDelivery
+import io.github.stream29.kodex.agenteventbus.subscribeNotifications
 import io.github.stream29.kodex.agentruntime.contract.AgentStopEvent
 import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
@@ -15,6 +18,10 @@ import io.github.stream29.kodex.agentschedule.sqlite.SqliteScheduleRepository
 import io.github.stream29.kodex.agentsession.contract.*
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.sqlite.openVerifiedKodexDatabase
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AskUserSnapshot
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.decodePayloadJson
 import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
 import io.github.stream29.kodex.cli.notification.notifyUnhandledErrorHooks
 import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
@@ -34,11 +41,13 @@ import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.mq.DefaultMqTopicBufferCapacity
+import io.github.stream29.kodex.utils.mq.MqBroker
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.default
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
+import io.github.stream29.kodex.utils.stream.StreamService
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -66,6 +75,8 @@ public actual suspend fun <R> withBackendServices(
     checkAdmission: () -> Unit,
     requiresPreparedHome: Boolean,
     clock: Clock,
+    broker: MqBroker,
+    streamService: StreamService,
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R = withBackendServicesWithTitleGenerator(
     home = home,
@@ -80,6 +91,8 @@ public actual suspend fun <R> withBackendServices(
     checkAdmission = checkAdmission,
     requiresPreparedHome = requiresPreparedHome,
     clock = clock,
+    broker = broker,
+    streamService = streamService,
     block = block,
 )
 
@@ -96,6 +109,8 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
     checkAdmission: () -> Unit = {},
     requiresPreparedHome: Boolean = false,
     clock: Clock = Clock.System,
+    broker: MqBroker,
+    streamService: StreamService,
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R = coroutineScope {
     val owner = supervisorChildScope()
@@ -122,8 +137,10 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
             auth,
             mcpOAuth,
             mcpOAuth,
+            broker = broker,
         ) { global ->
             val account = BackendAccountState(owner, auth, api)
+            global.observeAccountChanges(owner, account)
             val oauth = BackendOAuth(owner, auth, loginClient, global.mcpManager)
             val owned = BackendOwnedOAuth(
                 scope = owner,
@@ -148,6 +165,7 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                 cancelInner = oauth::cancel,
                 releaseInner = oauth::abandonPending,
                 reportCleanupFailure = { BackendLogger.warn { "OAuth resource cleanup failed." } },
+                streamService = streamService,
             )
             val errors = FrontendErrorQueue(owner, { unified.current.frontend.hooks }) { hooks, message ->
                 notifyUnhandledErrorHooks(message, hooks, home)
@@ -168,6 +186,7 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                 backendRenewalInterval = backendRenewalInterval,
                 checkAdmission = checkAdmission,
                 requiresPreparedHome = requiresPreparedHome,
+                broker = broker,
             )
             var operationFailure: Throwable? = null
             try {
@@ -175,9 +194,9 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                 if (requiresPreparedHome || existingDbMeta != null && existingDbMeta.isRegularFile && existingDbMeta.size > 0L) {
                     persistence.acquire(requireExternalAdmission = false)
                 }
-                val eventBus = AgentEventBus(persistence.sessionRepository)
+                val eventBus = AgentEventBus(persistence.sessionRepository, broker)
                 persistence.startScheduleRunner(eventBus)
-                persistence.startAwaitDeadlineRunner()
+                persistence.startAwaitDeadlineRunner(eventBus)
                 val management = BackendSessionManagement(
                     repository = persistence.sessionRepository,
                     newSessionDefaults = { store.settings.value.newSession },
@@ -190,7 +209,7 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                     eventBus = eventBus,
                     client = api,
                     home = home,
-                    onAskUserCreated = persistence::emitNotification,
+                    streamService = streamService,
                     checkAdmission = persistence::ensureAdmission,
                     subagentSpawner = BackendSubagentSpawner(
                         repository = persistence.sessionRepository,
@@ -220,7 +239,7 @@ internal suspend fun <R> withBackendServicesWithTitleGenerator(
                     eventBus = eventBus,
                     schedules = persistence.scheduleRepository,
                     settings = global,
-                    notifications = persistence.notifications,
+                    broker = broker,
                     persistence = persistence,
                 )
                 coroutineScope {
@@ -269,11 +288,24 @@ public actual class BackendServices internal constructor(
     internal val eventBus: AgentEventBus,
     internal val schedules: ScheduleRepository,
     public actual val settings: BackendGlobalState,
-    public actual val notifications: Flow<Notification>,
+    broker: MqBroker,
     private val persistence: LazySqliteBackendPersistence,
 ) {
-    internal val notificationSubscriptionCount: StateFlow<Int>
-        get() = persistence.notificationSubscriptionCount
+    private val subscriptions = MutableStateFlow(0)
+    internal val notificationSubscriptionCount: StateFlow<Int> = subscriptions.asStateFlow()
+
+    public actual val notifications: Flow<Notification> = flow {
+        subscriptions.update { it + 1 }
+        try {
+            broker.subscribeNotifications(DefaultMqTopicBufferCapacity).collect { delivery ->
+                if (delivery is NotificationDelivery.Signal) {
+                    persistence.projectNotification(delivery.signal)?.let { emit(it) }
+                }
+            }
+        } finally {
+            subscriptions.update { it - 1 }
+        }
+    }
 
     public actual suspend fun shutdownSessions(): Unit = persistence.shutdownSessions()
 
@@ -316,6 +348,7 @@ internal class LazySqliteBackendPersistence(
     private val checkAdmission: () -> Unit,
     private val requiresPreparedHome: Boolean = false,
     private val sessionTtl: Duration = DefaultKodexSessionTtl,
+    private val broker: MqBroker,
 ) {
     private val persistenceScope: CoroutineScope =
         CoroutineScope(owner.coroutineContext.minusKey(Job) + SupervisorJob())
@@ -336,18 +369,60 @@ internal class LazySqliteBackendPersistence(
     private val lazyEntries = MutableStateFlow<List<Int>>(emptyList())
     private val lazyOpenSessions = MutableStateFlow<Map<Int, KodexAgentSession>>(emptyMap())
     private val lazyAwaitDeadlines = MutableStateFlow<Map<Int, PendingAwaitDeadline>>(emptyMap())
-    private val notificationsShared = MutableSharedFlow<Notification>(
-        replay = 0,
-        extraBufferCapacity = 64,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
     private val lazyNextTriggerAt = MutableStateFlow<Instant?>(null)
 
-    val notifications: Flow<Notification> = notificationsShared.asSharedFlow()
-    val notificationSubscriptionCount: StateFlow<Int> get() = notificationsShared.subscriptionCount
+    suspend fun projectNotification(signal: AgentNotificationSignal): Notification? = when (signal) {
+        is AgentNotificationSignal.AskUserCreated ->
+            readNotificationDb { connection ->
+                val payload = connection.query(
+                    """SELECT c.payload_json FROM agent_commits AS c
+                        JOIN agents AS a ON a.agent_id = c.agent_id
+                        WHERE a.agent_id = ? AND a.session_id = ? AND c.type = ?
+                        ORDER BY c."index" DESC LIMIT 1""",
+                    listOf(signal.agentId.toLong(), signal.sessionIndex.toLong(), AgentCommitType.AskUser.wireName),
+                ).singleOrNull()?.single() as? String ?: return@readNotificationDb null
+                val snapshot = AgentCommitType.AskUser.decodePayloadJson(payload) as AskUserSnapshot
+                snapshot.entries.firstOrNull { it.askId == signal.askId }
+                    ?.let { Notification.AskUserCreated(signal.sessionIndex, it, signal.agentId) }
+            }
+        is AgentNotificationSignal.StopAssistantMessage ->
+            if (signal.commitIndex < 0) null
+            else readNotificationDb { connection ->
+                val row = connection.query(
+                    """SELECT c.type, c.payload_json FROM agent_commits AS c
+                        JOIN agents AS a ON a.agent_id = c.agent_id
+                        WHERE a.agent_id = ? AND a.session_id = ? AND c."index" = ? AND c.type IN (?, ?, ?)
+                        LIMIT 1""",
+                    listOf(
+                        signal.agentId.toLong(),
+                        signal.sessionIndex.toLong(),
+                        signal.commitIndex.toLong(),
+                        AgentCommitType.AssistantMessage.wireName,
+                        AgentCommitType.AssistantMessageCommentary.wireName,
+                        AgentCommitType.AssistantMessageFinal.wireName,
+                    ),
+                ).singleOrNull() ?: return@readNotificationDb null
+                val message = AgentCommitType.fromWireName(row[0] as String).decodePayloadJson(row[1] as String)
+                    as? StableAssistantMessage
+                message?.let { Notification.Stop.AssistantMessage(signal.sessionIndex, it, signal.agentId) }
+            }
+        is AgentNotificationSignal.StopUnhandledError ->
+            Notification.Stop.UnhandledError(signal.sessionIndex, signal.message, signal.agentId)
+    }
 
-    fun emitNotification(notification: Notification) {
-        notificationsShared.tryEmit(notification)
+    /** Look up durable payloads directly in one DB critical section without activating or renewing an Agent. */
+    private suspend fun <T> readNotificationDb(read: (SqliteConnection) -> T?): T? {
+        if (acquisitionMutex.withLock { acquiredDatabase == null && !stopping }) {
+            try {
+                acquire(requireExternalAdmission = false)
+            } catch (error: IllegalStateException) {
+                if (!stopping) throw error
+            }
+        }
+        return acquisitionMutex.withLock {
+            val (connection, dispatcher) = acquiredDatabase ?: return@withLock null
+            dbMutex.withLock { withContext(dispatcher) { read(connection) } }
+        }
     }
 
     val sessionRepository: KodexSessionRepository = object : KodexSessionRepository {
@@ -372,6 +447,11 @@ internal class LazySqliteBackendPersistence(
         override suspend fun openAgent(agentId: Int): KodexAgentSession? {
             val sessions = acquire().first
             return sessions.openAgent(agentId).also { lazyOpenSessions.value = sessions.openSessions.value }
+        }
+
+        override suspend fun openForAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline): KodexAgentSession? {
+            val sessions = acquire().first
+            return sessions.openForAwaitDeadline(agentId, expected).also { lazyOpenSessions.value = sessions.openSessions.value }
         }
 
         override suspend fun create(): Int {
@@ -503,11 +583,13 @@ internal class LazySqliteBackendPersistence(
                     onDeleteInTransaction = { sessionId ->
                         schedules.deleteForSessionInTransaction(sessionId)
                     },
+                    broker = broker,
                 )
                 try {
-                    schedules = SqliteScheduleRepository(
+                    schedules = persistenceScope.SqliteScheduleRepository(
                         connection = connection,
                         mutex = dbMutex,
+                        broker = broker,
                         dispatcher = dispatcher,
                         requireAccess = { persistenceScope.ensureActive() },
                     )
@@ -528,11 +610,6 @@ internal class LazySqliteBackendPersistence(
                     }
                     persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
                         schedules.nextTriggerAt.collect { lazyNextTriggerAt.value = it }
-                    }
-                    persistenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
-                        sessions.stopEvents.toNotifications().collect { notification ->
-                            notificationsShared.tryEmit(notification)
-                        }
                     }
                     acquiredDatabase = connection to dispatcher
                     acquiredSessions = sessions
@@ -667,7 +744,7 @@ internal class LazySqliteBackendPersistence(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun startAwaitDeadlineRunner() {
+    fun startAwaitDeadlineRunner(eventBus: AgentEventBus) {
         awaitDeadlineRunnerJob = persistenceScope.launchBackendRunner("await_event", { stopping }, runnerFailure) {
             val runnerScope = this
             val inFlight = MutableStateFlow(emptySet<Int>())
@@ -689,9 +766,7 @@ internal class LazySqliteBackendPersistence(
                     runnerScope.launch {
                         try {
                             ensureAdmission()
-                            val repository = acquisitionMutex.withLock { acquiredSessions }
-                            repository?.openForAwaitDeadline(agentId, expected)
-                                ?.runtime?.requestAwaitDeadlineCheck(expected)?.join()
+                            eventBus.submitAwaitDeadline(agentId, expected)
                         } catch (cancellation: CancellationException) {
                             throw cancellation
                         } catch (error: Exception) {

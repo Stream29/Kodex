@@ -100,6 +100,7 @@ private fun completed(index: Int, child: Int) =
 
 private class ParentHistoryFixture : ObservableKodexAgentStorage {
     override val cacheNonce = MutableStateFlow(41L)
+    override suspend fun cacheNonce(): Long = cacheNonce.value
     override val latestIndexFlow = MutableStateFlow(-1)
     var rows = emptyList<IndexedAgentCommit>()
     var active = true

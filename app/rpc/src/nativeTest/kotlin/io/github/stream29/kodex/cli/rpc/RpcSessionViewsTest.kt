@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.rpc
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -1106,6 +1109,8 @@ internal suspend fun frontend(
             },
             createClient = { client },
             createLoginClient = { login },
+            broker = InMemoryMqBroker(),
+            streamService = InMemoryStreamService(),
         ) { backend ->
             withInMemoryRpc(backend::register) { raw ->
                 val services = RpcServices(decorate(RestoringRpcClient(raw)))

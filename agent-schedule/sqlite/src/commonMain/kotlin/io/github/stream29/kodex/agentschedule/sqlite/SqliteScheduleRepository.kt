@@ -1,23 +1,35 @@
-@file:OptIn(kotlin.time.ExperimentalTime::class)
+@file:OptIn(kotlin.time.ExperimentalTime::class, kotlin.uuid.ExperimentalUuidApi::class)
 @file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
 
 package io.github.stream29.kodex.agentschedule.sqlite
 
+import io.github.stream29.kodex.agenteventbus.BackendMqExchanges
+import io.github.stream29.kodex.agenteventbus.BackendSignalKeys
+import io.github.stream29.kodex.agenteventbus.SignalDelivery
+import io.github.stream29.kodex.agenteventbus.publishAfterCommit
+import io.github.stream29.kodex.agenteventbus.subscribeSignals
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRecord
 import io.github.stream29.kodex.agentschedule.contract.ScheduleRepository
 import io.github.stream29.kodex.agentschedule.contract.nextCronTriggerAt
+import io.github.stream29.kodex.utils.mq.DefaultMqTopicBufferCapacity
+import io.github.stream29.kodex.utils.mq.MqBroker
+import io.github.stream29.kodex.utils.mq.MqHeaders
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.time.Instant
+import kotlin.uuid.Uuid
 
 public actual class SqliteScheduleRepository internal constructor(
     private val connection: SqliteConnection,
@@ -25,11 +37,24 @@ public actual class SqliteScheduleRepository internal constructor(
     private val dispatcher: CoroutineDispatcher,
     private val requireAccess: () -> Unit,
     initialNextTriggerAt: Instant?,
+    private val broker: MqBroker,
+    scope: CoroutineScope,
 ) : ScheduleRepository {
+    private val originId = Uuid.random().toString()
+    private val originHeaders = mapOf(MqHeaders.OriginId to originId)
     private val mutableNextTriggerAt: MutableStateFlow<Instant?> = MutableStateFlow(initialNextTriggerAt)
 
     public actual override val nextTriggerAt: StateFlow<Instant?> =
         mutableNextTriggerAt.asStateFlow()
+
+    init {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            broker.subscribeSignals(setOf(BackendSignalKeys.Schedules), DefaultMqTopicBufferCapacity).collect { delivery ->
+                if (delivery is SignalDelivery.Signal && delivery.headers[MqHeaders.OriginId] == originId) return@collect
+                read { mutableNextTriggerAt.value = queryEarliestTriggerUnsafe(connection) }
+            }
+        }
+    }
 
     private suspend fun <T> read(block: () -> T): T {
         currentCoroutineContext().ensureActive()
@@ -41,14 +66,21 @@ public actual class SqliteScheduleRepository internal constructor(
         }
     }
 
-    private suspend fun <T> write(block: () -> T): T {
+    private suspend fun <T : Any> write(block: () -> T?): T? {
         currentCoroutineContext().ensureActive()
         return mutex.withLock {
             withContext(NonCancellable) {
                 withContext(dispatcher) {
                     requireAccess()
-                    connection.transaction {
-                        block()
+                    broker.publishAfterCommit(originHeaders) { signals ->
+                        val update = connection.transaction {
+                            block()?.let { it to queryEarliestTriggerUnsafe(connection) }
+                        }
+                        update?.let { (result, earliest) ->
+                            mutableNextTriggerAt.value = earliest
+                            signals.add(BackendSignalKeys.Schedules)
+                            result
+                        }
                     }
                 }
             }
@@ -66,7 +98,7 @@ public actual class SqliteScheduleRepository internal constructor(
         val normalizedCron = cron?.trim()?.also { expr ->
             nextCronTriggerAt(expr, createdAt)
         }
-        return write {
+        return checkNotNull(write {
             connection.execute(
                 """
                 INSERT INTO schedules (
@@ -88,7 +120,6 @@ public actual class SqliteScheduleRepository internal constructor(
                 ),
             )
             val nextId = connection.query("SELECT last_insert_rowid()").single().single() as Long
-            mutableNextTriggerAt.value = queryEarliestTriggerUnsafe(connection)
             ScheduleRecord(
                 scheduleId = nextId,
                 agentId = agentId,
@@ -97,7 +128,7 @@ public actual class SqliteScheduleRepository internal constructor(
                 description = description,
                 createdAt = createdAt,
             )
-        }
+        })
     }
 
     public actual override suspend fun list(agentId: Int): List<ScheduleRecord> = read {
@@ -144,52 +175,57 @@ public actual class SqliteScheduleRepository internal constructor(
                 scheduleId,
             ),
         )
-        if (connection.changes() == 0) return@write false
-        mutableNextTriggerAt.value = queryEarliestTriggerUnsafe(connection)
-        true
-    }
+        Unit.takeIf { connection.changes() != 0 }
+    } != null
 
     public actual override suspend fun delete(scheduleId: Long): Boolean = write {
         connection.execute(
             "DELETE FROM schedules WHERE schedule_id = ?",
             listOf(scheduleId),
         )
-        if (connection.changes() == 0) return@write false
-        mutableNextTriggerAt.value = queryEarliestTriggerUnsafe(connection)
-        true
-    }
+        Unit.takeIf { connection.changes() != 0 }
+    } != null
 
-    public actual fun deleteForSessionInTransaction(sessionId: Int) {
+    public actual fun deleteForSessionInTransaction(sessionId: Int): () -> Unit {
         connection.execute(
             "DELETE FROM schedules WHERE agent_id IN (SELECT agent_id FROM agents WHERE session_id = ?)",
             listOf(sessionId.toLong()),
         )
-        if (connection.changes() > 0) {
-            mutableNextTriggerAt.value = queryEarliestTriggerUnsafe(connection)
+        if (connection.changes() == 0) return {}
+        val earliest = queryEarliestTriggerUnsafe(connection)
+        return {
+            mutableNextTriggerAt.value = earliest
+            try {
+                broker.tryPublish(BackendMqExchanges.Broadcast, BackendSignalKeys.Schedules, byteArrayOf(), originHeaders)
+            } catch (_: Exception) {
+                // The transaction has already committed; invalidation is best effort.
+            }
         }
     }
 }
 
-public actual suspend fun SqliteScheduleRepository(
+public actual suspend fun CoroutineScope.SqliteScheduleRepository(
     connection: SqliteConnection,
     mutex: Mutex,
+    broker: MqBroker,
     dispatcher: CoroutineDispatcher,
     requireAccess: () -> Unit,
 ): SqliteScheduleRepository {
     currentCoroutineContext().ensureActive()
-    val earliest = mutex.withLock {
+    return mutex.withLock {
         withContext(dispatcher) {
             requireAccess()
-            queryEarliestTriggerUnsafe(connection)
+            SqliteScheduleRepository(
+                connection = connection,
+                mutex = mutex,
+                dispatcher = dispatcher,
+                requireAccess = requireAccess,
+                initialNextTriggerAt = queryEarliestTriggerUnsafe(connection),
+                broker = broker,
+                scope = this@SqliteScheduleRepository,
+            )
         }
     }
-    return SqliteScheduleRepository(
-        connection = connection,
-        mutex = mutex,
-        dispatcher = dispatcher,
-        requireAccess = requireAccess,
-        initialNextTriggerAt = earliest,
-    )
 }
 
 private fun queryEarliestTriggerUnsafe(connection: SqliteConnection): Instant? =

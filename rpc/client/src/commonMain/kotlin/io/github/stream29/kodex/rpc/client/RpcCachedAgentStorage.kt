@@ -157,6 +157,8 @@ private class RpcCachedAgentStorage(
 
     override suspend fun latestIndex(): Int = cached { latestIndexFlow.value }
 
+    override suspend fun cacheNonce(): Long = cached { it }
+
     override suspend fun countCommitsIn(
         range: IntRange,
         types: Set<AgentCommitType>,

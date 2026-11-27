@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.backend.host
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.addPermits
@@ -107,7 +109,7 @@ private suspend fun seed(root: Path, smoke: Boolean, defaultRun: Boolean) = coro
     // No daemon is running during seed; the repository is closed before starting either binary.
     run {
         testKodexAgentDependencies().use { dependencies ->
-            SqliteKodexSessionRepository(home, dependencies).use { repository ->
+            SqliteKodexSessionRepository(home, dependencies, InMemoryMqBroker()).use { repository ->
                 val model = OpenAiModelId("offline-residency-fixture")
                 suspend fun next(name: String) = repository.create().let { sessionId ->
                     val session = repository.open(sessionId)
@@ -268,7 +270,7 @@ private suspend fun seedPtyCloseDiagnostic(root: Path) = coroutineScope {
     val work = Path(root, "work")
     prepareKodexHome(home).closeAndJoin()
     testKodexAgentDependencies().use { dependencies ->
-        SqliteKodexSessionRepository(home, dependencies).use { repository ->
+        SqliteKodexSessionRepository(home, dependencies, InMemoryMqBroker()).use { repository ->
             val terminals = List(PtyCloseSlots) { slot ->
                 val id = repository.create()
                 val session = repository.open(id)

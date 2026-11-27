@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -467,6 +470,8 @@ private suspend fun composerHost(
             },
             createClient = { client },
             createLoginClient = { ComposerHostLoginClient },
+            broker = InMemoryMqBroker(),
+            streamService = InMemoryStreamService(),
         ) { backend ->
             withInMemoryRpc(backend::register) { raw ->
                 val services = RpcServices(decorate(RestoringRpcClient(raw)))

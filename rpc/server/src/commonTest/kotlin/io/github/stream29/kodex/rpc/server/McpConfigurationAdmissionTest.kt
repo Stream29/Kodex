@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
@@ -49,6 +52,8 @@ val mcpConfigurationAdmissionTest by testSuite(compartment = { TestCompartment.R
                 Path(home, "agents"),
                 createLoginClient = { ServicesTestLogin() },
                 createClient = { io.github.stream29.kodex.openai.client.test.mockOpenAiClient {} },
+                broker = InMemoryMqBroker(),
+                streamService = InMemoryStreamService(),
             ) { services ->
                 val loaded = services.global.getSettings()
                 assertEquals(setOf("terminal"), loaded.mcpServers.keys)
@@ -72,6 +77,8 @@ val mcpConfigurationAdmissionTest by testSuite(compartment = { TestCompartment.R
                     Path(home, "agents"),
                     createLoginClient = { ServicesTestLogin() },
                     createClient = { io.github.stream29.kodex.openai.client.test.mockOpenAiClient {} },
+                    broker = InMemoryMqBroker(),
+                    streamService = InMemoryStreamService(),
                 ) { error("blank MCP server name must not admit a backend") }
             }
             val after = SystemCoroutineFileSystem.readBytes(settingsPath)

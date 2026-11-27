@@ -9,7 +9,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettin
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.decodePayloadJson
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
-import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.validateCommitBatch
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
@@ -17,11 +17,17 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.time.Clock
 import kotlin.time.Instant
+
+private data class TimelineState(val latestIndex: Int, val nonce: Long)
+private data class HistoryChange(val timeline: Boolean, val catalog: Boolean)
 
 public actual class SqliteAgentStorage actual constructor(
     internal val connection: SqliteConnection,
@@ -31,31 +37,56 @@ public actual class SqliteAgentStorage actual constructor(
     private val requireAccess: () -> Unit,
     private val onHistoryChanged: ((Set<AgentCommitType>?) -> Unit)?,
     private val onSessionGroupsChanged: ((Map<String?, Boolean>) -> Unit)?,
-) : MutableKodexAgentStorage {
+) : MutableObservableKodexAgentStorage {
     internal val sqlAgentId: Long = agentId.also { require(it >= 0) { "Invalid agent id: $it" } }.toLong()
+    private val initialState = readTimelineState()
+    private val observableTail = MutableStateFlow(initialState.latestIndex)
+    private val observableNonce = MutableStateFlow(initialState.nonce)
+    public actual override val latestIndexFlow: StateFlow<Int> = observableTail.asStateFlow()
+    public actual override val cacheNonce: StateFlow<Long> = observableNonce.asStateFlow()
+
+    private fun readTimelineState(): TimelineState {
+        val (index, nonce) = connection.query(
+            """SELECT (SELECT coalesce(max("index"), -1) FROM agent_commits WHERE agent_id = agents.agent_id), cache_nonce
+                FROM agents WHERE agent_id = ?""",
+            listOf(sqlAgentId),
+        ).single()
+        return TimelineState((index as Long).toInt(), nonce as Long)
+    }
+
+    private fun publishTimelineState(state: TimelineState) {
+        observableNonce.value = state.nonce
+        observableTail.value = state.latestIndex
+    }
+
+    public actual suspend fun refreshObservableState(): Unit = read { publishTimelineState(readTimelineState()) }
 
     internal suspend fun <T> read(block: () -> T): T {
         currentCoroutineContext().ensureActive()
         return mutex.withLock { withContext(dispatcher) { requireAccess(); block() } }
     }
 
-    private suspend fun <T> write(changedTypes: Set<AgentCommitType>?, block: () -> Pair<T, Boolean>): T {
+    private suspend fun write(
+        changedTypes: Set<AgentCommitType>?,
+        block: () -> HistoryChange,
+    ): Int {
         currentCoroutineContext().ensureActive()
         return mutex.withLock {
             withContext(NonCancellable) {
                 withContext(dispatcher) {
                     requireAccess()
-                    val (result, groups) = connection.transaction {
+                    val (timeline, groups, changed) = connection.transaction {
                         val before = connection.sessionCatalogGroup(agentId)
-                        val (result, changedCatalog) = block()
+                        val (changed, changedCatalog) = block()
                         val groups = if (changedCatalog && before != null) {
                             connection.recordSessionGroupMutation(before, connection.sessionCatalogGroup(agentId))
                         } else emptyMap()
-                        result to groups
+                        Triple(readTimelineState(), groups, changed)
                     }
+                    publishTimelineState(timeline)
                     if (groups.isNotEmpty()) onSessionGroupsChanged?.invoke(groups)
-                    onHistoryChanged?.invoke(changedTypes)
-                    result
+                    if (changed) onHistoryChanged?.invoke(changedTypes)
+                    timeline.latestIndex
                 }
             }
         }
@@ -68,6 +99,10 @@ public actual class SqliteAgentStorage actual constructor(
         ).firstOrNull()?.let { (it[0] as Long).toInt() } ?: -1
 
     public actual override suspend fun latestIndex(): Int = read { tailUnsafe() }
+
+    public actual override suspend fun cacheNonce(): Long = read {
+        connection.query("SELECT cache_nonce FROM agents WHERE agent_id = ?", listOf(sqlAgentId)).single().single() as Long
+    }
 
     public actual override suspend fun countCommitsIn(
         range: IntRange,
@@ -136,7 +171,7 @@ public actual class SqliteAgentStorage actual constructor(
                 )
             }
             connection.appendSessionCatalog(sqlAgentId, nextIndex, timestampStr, sorted.filterIsInstance<KodexAgentSettings>().singleOrNull())
-            nextIndex to true
+            HistoryChange(timeline = true, catalog = true)
         }
     }
 
@@ -150,11 +185,16 @@ public actual class SqliteAgentStorage actual constructor(
             )
             val changed = connection.changes() != 0
             connection.execute(
-                """UPDATE agent_commits SET payload_json = ? WHERE agent_id = ? AND type = ?""",
+                """UPDATE agent_commits SET payload_json = ?
+                    WHERE agent_id = ? AND type = ? AND json_array_length(payload_json) > 0""",
                 listOf(emptySteerJson, sqlAgentId, AgentCommitType.Steer.wireName),
             )
+            val clearedSteer = connection.changes() != 0
+            if (changed || clearedSteer) {
+                connection.execute("UPDATE agents SET cache_nonce = cache_nonce + 1 WHERE agent_id = ?", listOf(sqlAgentId))
+            }
             if (changed) connection.recomputeSessionCatalog(agentId)
-            Unit to changed
+            HistoryChange(timeline = changed || clearedSteer, catalog = changed)
         }
     }
 }

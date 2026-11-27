@@ -11,6 +11,13 @@ internal data class SqliteSessionGroupPage(
     val hiddenCount: Int,
 )
 
+internal fun SqliteConnection.readSessionGroupNonces(): Map<String?, Long> =
+    query("SELECT cwd, group_nonce FROM session_groups").associate { (cwd, nonce) -> cwd as String? to nonce as Long }
+
+internal fun SqliteConnection.readSessionGroupNonce(cwd: String?): Long? =
+    query("SELECT group_nonce FROM session_groups WHERE cwd_key = ?", listOf(cwd.orEmpty()))
+        .singleOrNull()?.single() as Long?
+
 internal fun SqliteConnection.readSessionGroupHeads(): List<SqliteSessionGroupHead> =
     query(
         """
@@ -28,8 +35,7 @@ internal fun SqliteConnection.readSessionGroupPage(
 ): SqliteSessionGroupPage {
     require(limit == null || limit >= 0) { "Session group limit must not be negative." }
     require(cwd == null || cwd.isNotEmpty()) { "An empty cwd is reserved for the unset-directory key." }
-    val nonce = query("SELECT group_nonce FROM session_groups WHERE cwd_key = ?", listOf(cwd.orEmpty()))
-        .singleOrNull()?.single() as Long?
+    val nonce = readSessionGroupNonce(cwd)
         ?: return SqliteSessionGroupPage(0, emptyList(), 0)
     val filter = if (includeArchived) "c.cwd IS ?" else "c.cwd IS ? AND root.completed = 0"
     val from = "FROM session_catalog_view AS c JOIN agents AS root ON root.agent_id = c.root_agent_id"

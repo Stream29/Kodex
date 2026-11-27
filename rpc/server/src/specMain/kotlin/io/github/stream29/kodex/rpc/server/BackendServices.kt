@@ -11,6 +11,8 @@ import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.rpc.models.Notification
+import io.github.stream29.kodex.utils.mq.MqBroker
+import io.github.stream29.kodex.utils.stream.StreamService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -30,6 +32,7 @@ import kotlin.time.Duration.Companion.seconds
  * consumers. Settings, authentication, model and global-service initialization does not create
  * `kodex.db` on an empty Home.
  * [clock] supplies wall time for backend scheduling and persisted Agent deadlines.
+ * [broker] and [streamService] are borrowed for the graph's broadcasts, inbox and transient RPC streams.
  *
  * @throws CancellationException if the calling coroutine is cancelled; acquired resources are
  * cleaned before cancellation escapes.
@@ -48,6 +51,8 @@ public expect suspend fun <R> withBackendServices(
     checkAdmission: () -> Unit = {},
     requiresPreparedHome: Boolean = false,
     clock: Clock = Clock.System,
+    broker: MqBroker,
+    streamService: StreamService,
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R
 

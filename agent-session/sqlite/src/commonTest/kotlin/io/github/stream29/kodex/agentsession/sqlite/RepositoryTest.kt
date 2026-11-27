@@ -13,6 +13,7 @@ import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.sqlite.*
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.*
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
 import io.github.stream29.kodex.utils.sqlite.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -42,7 +43,7 @@ val sqliteRepositoryTest by testSuite {
     test("catalog writes explicitly invalidate only affected groups after commit") {
         fixture { root ->
             testKodexAgentDependencies().use { dependencies ->
-                SqliteKodexSessionRepository(root, dependencies).use { repo ->
+                SqliteKodexSessionRepository(root, dependencies, InMemoryMqBroker()).use { repo ->
                     assertEquals(0L, repo.sessionGroupsNonce.first())
                     val session = repo.create()
                     val id = repo.getRootAgentId(session)
@@ -96,7 +97,7 @@ val sqliteRepositoryTest by testSuite {
     test("SQLite catalog, fork, revert, archive and persistence ignore corrupted and deleted mirrors") {
         fixture { root ->
             testKodexAgentDependencies().use { dependencies ->
-                SqliteKodexSessionRepository(root, dependencies).use { repository ->
+                SqliteKodexSessionRepository(root, dependencies, InMemoryMqBroker()).use { repository ->
                     assertTrue(repository.entries.value.isEmpty())
                     val first = repository.create()
                     assertEquals(0, first)
@@ -142,7 +143,7 @@ val sqliteRepositoryTest by testSuite {
                     repository.getEntry(first).unarchive()
                     repository.closeAndJoin()
                     assertFalse(fs.exists(Path(root, "sessions")))
-                    SqliteKodexSessionRepository(root, dependencies).use { reopened ->
+                    SqliteKodexSessionRepository(root, dependencies, InMemoryMqBroker()).use { reopened ->
                         assertEquals(listOf(0, 1), reopened.list())
                         assertEquals("original", reopened.getEntry(0).name)
                         assertEquals(created, reopened.getEntry(1).createdAt)
@@ -180,7 +181,7 @@ val sqliteRepositoryTest by testSuite {
                 )
                 db.recomputeSessionCatalog(0)
                 testKodexAgentDependencies().use { dependencies ->
-                    SqliteKodexSessionRepository(root, dependencies).use { repository ->
+                    SqliteKodexSessionRepository(root, dependencies, InMemoryMqBroker()).use { repository ->
                         val storage = repository.open(0).storage
                         assertEquals(OpenAiModelId("test"), storage.getSettingsAt(0).model)
                         assertEquals("older", storage.getSettingsAt(0).name)
@@ -214,7 +215,7 @@ val sqliteRepositoryTest by testSuite {
                 db.execute("INSERT INTO agents(agent_id, session_id) VALUES(0,0)")
                 db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES(0)")
                 testKodexAgentDependencies().use { dependencies ->
-                    SqliteKodexSessionRepository(root, dependencies).use { repository ->
+                    SqliteKodexSessionRepository(root, dependencies, InMemoryMqBroker()).use { repository ->
                         val session = repository.open(0)
                         val observable = session.storage
                         val nonce = observable.cacheNonce.value
@@ -288,7 +289,7 @@ val sqliteRepositoryTest by testSuite {
     test("fork inside runtime modify and concurrent repository writes avoid nested transactions") {
         fixture { root ->
             testKodexAgentDependencies().use { dependencies ->
-                SqliteKodexSessionRepository(root, dependencies).use { repository ->
+                SqliteKodexSessionRepository(root, dependencies, InMemoryMqBroker()).use { repository ->
                     val sourceIndex = repository.create()
                     val source = repository.open(sourceIndex)
                     source.runtime.modify { it.initialize(settings("source")) }
@@ -318,7 +319,7 @@ val sqliteRepositoryTest by testSuite {
             testKodexAgentDependencies().use { dependencies ->
                 val owner = SupervisorJob()
                 val scope = CoroutineScope(coroutineContext + owner)
-                val repository = scope.SqliteKodexSessionRepository(root, dependencies)
+                val repository = scope.SqliteKodexSessionRepository(root, dependencies, InMemoryMqBroker())
                 val index = repository.create()
                 val session = repository.open(index)
                 session.runtime.modify { it.initialize(settings("closed")) }
@@ -336,7 +337,7 @@ val sqliteRepositoryTest by testSuite {
                 fs.createDirectories(Path(root, "sessions", "0", "settings"))
                 fs.writeString(Path(root, "sessions", "0", "settings", "0.json"), """{"model":"test","threadName":"keep"}""")
                 fs.writeString(Path(root, "version.json"), "\"0.6.3\"")
-                assertFailsWith<IOException> { SqliteKodexSessionRepository(root, dependencies) }
+                assertFailsWith<IOException> { SqliteKodexSessionRepository(root, dependencies, InMemoryMqBroker()) }
                 assertTrue(coroutineContext[Job]!!.children.none { it.isActive })
                 assertFalse(fs.exists(Path(root, "kodex.db")))
                 assertEquals("""{"model":"test","threadName":"keep"}""", fs.readString(Path(root, "sessions", "0", "settings", "0.json")))
@@ -345,7 +346,7 @@ val sqliteRepositoryTest by testSuite {
                 openSqliteConnection(Path(root, "kodex.db")).use { rawDb ->
                     rawDb.execute("CREATE TABLE dummy(x INTEGER)")
                 }
-                assertFailsWith<IOException> { SqliteKodexSessionRepository(root, dependencies) }
+                assertFailsWith<IOException> { SqliteKodexSessionRepository(root, dependencies, InMemoryMqBroker()) }
                 assertTrue(coroutineContext[Job]!!.children.none { it.isActive })
                 assertEquals("""{"model":"test","threadName":"keep"}""", fs.readString(Path(root, "sessions", "0", "settings", "0.json")))
             }
@@ -358,6 +359,7 @@ val sqliteRepositoryTest by testSuite {
                     val repository = SqliteKodexSessionRepository(
                         root = root,
                         dependencies = dependencies,
+                        broker = InMemoryMqBroker(),
                         sessionTtl = 40.milliseconds,
                     )
                     try {

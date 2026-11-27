@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
@@ -34,6 +37,8 @@ val backendStartupTest by testSuite(compartment = { TestCompartment.RealTime }) 
                                 listModels { OpenAiResult.Success(ModelsResponse(emptyList())) }
                             }
                         },
+                        broker = InMemoryMqBroker(),
+                        streamService = InMemoryStreamService(),
                     ) { services ->
                         services.global.getSettings()
                         services.global.getAuthentication()
@@ -60,6 +65,8 @@ val backendStartupTest by testSuite(compartment = { TestCompartment.RealTime }) 
                                     listModels { OpenAiResult.Success(ModelsResponse(emptyList())) }
                                 }
                             },
+                            broker = InMemoryMqBroker(),
+                            streamService = InMemoryStreamService(),
                         ) { services ->
                             val agentId = services.global.getRootAgentId(0)
                             services.runtime.keepAgentAlive(agentId)

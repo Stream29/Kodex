@@ -10,6 +10,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.sqlite.initializeKodexHomeDatabase
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 import io.github.stream29.kodex.utils.sqlite.openInMemorySqliteConnection
 import kotlinx.coroutines.CancellationException
@@ -103,7 +104,7 @@ val sqliteDispatcherTest by testSuite {
                     coroutineScope {
                         testKodexAgentDependencies().use { dependencies ->
                             val repository = SqliteKodexSessionRepository(
-                                root, connection, Mutex(), dependencies, dispatcher = dispatcher,
+                                root, connection, Mutex(), dependencies, InMemoryMqBroker(), dispatcher = dispatcher,
                             )
                             try {
                                 val session = repository.open(repository.create())

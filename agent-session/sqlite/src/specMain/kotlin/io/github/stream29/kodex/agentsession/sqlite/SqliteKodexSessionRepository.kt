@@ -7,6 +7,7 @@ import io.github.stream29.kodex.agentsession.contract.*
 import io.github.stream29.kodex.utils.coroutines.CoroutineCloseable
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.mq.MqBroker
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -36,7 +37,7 @@ public data class StoredSessionGroupPage(
 
 public expect class SqliteKodexSessionRepository : KodexSessionRepository, CoroutineCloseable {
     /** Opens an existing Agent only if it still has the expected armed deadline. */
-    public suspend fun openForAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline): KodexAgentSession?
+    override suspend fun openForAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline): KodexAgentSession?
     /** Exact persisted Agent lookup; does not start or renew an owner. */
     override suspend fun getAgentRecord(agentId: Int): StoredAgent?
     override suspend fun openAgent(agentId: Int): KodexAgentSession?
@@ -87,6 +88,7 @@ public expect suspend fun openVerifiedKodexDatabase(
 public expect suspend fun CoroutineScope.SqliteKodexSessionRepository(
     root: Path,
     dependencies: KodexAgentDependencies,
+    broker: MqBroker,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     sessionTtl: Duration = DefaultKodexSessionTtl,
     timeSource: TimeSource = TimeSource.Monotonic,
@@ -104,11 +106,12 @@ public expect suspend fun CoroutineScope.SqliteKodexSessionRepository(
     connection: SqliteConnection,
     mutex: Mutex,
     dependencies: KodexAgentDependencies,
+    broker: MqBroker,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     sessionTtl: Duration = DefaultKodexSessionTtl,
     timeSource: TimeSource = TimeSource.Monotonic,
     onTurnActiveRenewal: suspend () -> Unit = {},
     turnRenewalInterval: () -> Duration = { DefaultKodexSessionRenewalInterval },
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
-    onDeleteInTransaction: (sessionId: Int) -> Unit = {},
+    onDeleteInTransaction: (sessionId: Int) -> () -> Unit = { {} },
 ): SqliteKodexSessionRepository

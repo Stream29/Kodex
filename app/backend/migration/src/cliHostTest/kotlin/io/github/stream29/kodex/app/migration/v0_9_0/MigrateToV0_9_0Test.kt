@@ -9,9 +9,11 @@ import io.github.stream29.kodex.app.migration.KodexHomeVersionException
 import io.github.stream29.kodex.app.migration.MigrationVersion
 import io.github.stream29.kodex.app.migration.deleteTestHome
 import io.github.stream29.kodex.app.migration.homeTestFileSystem
+import io.github.stream29.kodex.app.migration.initializeFrozenHomeSchema
 import io.github.stream29.kodex.app.migration.newTestHome
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.migration.readyMarker
+import io.github.stream29.kodex.app.migration.requireFrozenHomeSchema
 import io.github.stream29.kodex.app.migration.writeFixtureCheckpoint
 import io.github.stream29.kodex.utils.sqlite.openExistingSqliteConnection
 import io.github.stream29.kodex.utils.sqlite.openSqliteConnection
@@ -24,6 +26,7 @@ import kotlin.test.assertTrue
 private val fs = homeTestFileSystem
 private val v081 = MigrationVersion("0.8.1")
 private val v090 = MigrationVersion("0.9.0")
+private val v091 = MigrationVersion("0.9.1")
 
 private val allMirrorTimelines = listOf(
     "index",
@@ -56,15 +59,20 @@ public val migrateToV0_9_0Test by testSuite {
             val started = mutableListOf<Pair<MigrationVersion, MigrationVersion>>()
             val handle = prepareKodexHome(
                 home = home,
-                currentVersion = v090,
+                currentVersion = v091,
                 migrations = KodexHomeMigrations,
                 fileSystem = fs,
-                onMigrationStarted = { from, to -> started += from to to },
+                onMigrationStarted = { from, to ->
+                    started += from to to
+                    if (to == v091) {
+                        openExistingSqliteConnection(Path(home, HomeDatabaseFile)).use { it.requireFrozenHomeSchema(4) }
+                    }
+                },
             )
             try {
-                assertEquals(listOf(v081 to v090), started)
-                assertEquals(v090, handle.version)
-                assertEquals(readyMarker("0.9.0"), fs.readString(Path(home, HomeVersionFile)))
+                assertEquals(listOf(v081 to v090, v090 to v091), started)
+                assertEquals(v091, handle.version)
+                assertEquals(readyMarker("0.9.1"), fs.readString(Path(home, HomeVersionFile)))
                 assertFalse(fs.exists(Path(home, "sessions")))
                 assertFalse(fs.exists(Path(home, "skills", "kodex-home")))
                 assertEquals("# keep custom skill\n", fs.readString(Path(home, "skills", "my-custom", "SKILL.md")))
@@ -76,7 +84,7 @@ public val migrateToV0_9_0Test by testSuite {
             }
 
             openExistingSqliteConnection(Path(home, HomeDatabaseFile)).use { db ->
-                assertEquals(4L, db.query("PRAGMA main.user_version").single().single())
+                assertEquals(5L, db.query("PRAGMA main.user_version").single().single())
                 assertEquals(listOf(listOf(0L)), db.query("SELECT session_id FROM sessions"))
                 assertTrue(db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'fork_context_recovery'").isEmpty())
             }
@@ -107,12 +115,12 @@ public val migrateToV0_9_0Test by testSuite {
 
             prepareKodexHome(
                 home = home,
-                currentVersion = v090,
+                currentVersion = v091,
                 migrations = KodexHomeMigrations,
                 fileSystem = fs,
             ).closeAndJoin()
 
-            assertEquals(readyMarker("0.9.0"), fs.readString(Path(home, HomeVersionFile)))
+            assertEquals(readyMarker("0.9.1"), fs.readString(Path(home, HomeVersionFile)))
             // Known mirror files must be deleted.
             assertFalse(fs.exists(Path(root0, "archive.mark")))
             assertFalse(fs.exists(Path(root0, "index", "0.json")))
@@ -140,12 +148,12 @@ public val migrateToV0_9_0Test by testSuite {
             // Second run with sessions/ already absent still succeeds via prepareKodexHome.
             prepareKodexHome(
                 home = home,
-                currentVersion = v090,
+                currentVersion = v091,
                 migrations = KodexHomeMigrations,
                 fileSystem = fs,
             ).closeAndJoin()
 
-            assertEquals(readyMarker("0.9.0"), fs.readString(Path(home, HomeVersionFile)))
+            assertEquals(readyMarker("0.9.1"), fs.readString(Path(home, HomeVersionFile)))
             assertFalse(fs.exists(Path(home, "sessions")))
         }
 
@@ -200,20 +208,7 @@ public val migrateToV0_9_0Test by testSuite {
 private suspend fun createValidV081Home(home: Path) {
     openSqliteConnection(Path(home, HomeDatabaseFile)).use { db ->
         db.execute("PRAGMA journal_mode=DELETE")
-        initializeKodexHomeDatabase(db)
-        db.execute(
-            """CREATE TABLE fork_context_recovery (
-                agent_id INTEGER NOT NULL,
-                checkpoint_index INTEGER NOT NULL,
-                commit_type TEXT NOT NULL DEFAULT 'context_compaction' CHECK (commit_type = 'context_compaction'),
-                phase TEXT NOT NULL CHECK (phase IN ('Empty', 'UserMessage', 'AssistantMessage', 'ToolCompleted')),
-                starts_new_turn INTEGER NOT NULL CHECK (starts_new_turn IN (0, 1)),
-                PRIMARY KEY (agent_id, checkpoint_index),
-                FOREIGN KEY (agent_id, commit_type, checkpoint_index)
-                    REFERENCES agent_commits(agent_id, type, "index") ON DELETE CASCADE
-            ) STRICT, WITHOUT ROWID""",
-        )
-        db.execute("PRAGMA main.user_version=3")
+        db.initializeFrozenHomeSchema(3)
         db.execute("INSERT INTO sessions(session_id) VALUES (0)")
         db.execute("INSERT INTO agents(agent_id, session_id) VALUES (0, 0)")
         db.execute("INSERT INTO session_catalog_view(root_agent_id) VALUES (0)")

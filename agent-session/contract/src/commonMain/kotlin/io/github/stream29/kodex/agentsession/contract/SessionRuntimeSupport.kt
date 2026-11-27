@@ -2,12 +2,6 @@
 
 package io.github.stream29.kodex.agentsession.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
-import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.getSteerAt
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -15,105 +9,18 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin as cancelJobAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.random.Random
-import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Instant
 import kotlin.time.TimeMark
-
-public actual class ScopedObservableAgentStorage actual constructor(
-    private val owner: CoroutineScope,
-    private val source: MutableKodexAgentStorage,
-    initialLatestIndex: Int,
-    private val closedMessage: String,
-) : MutableObservableKodexAgentStorage {
-    private val nonce = MutableStateFlow(Random.nextLong())
-    private val tail = MutableStateFlow(initialLatestIndex)
-
-    public actual override val agentId: Int? get() = source.agentId
-    public actual override val cacheNonce: StateFlow<Long> = nonce.asStateFlow()
-    public actual override val latestIndexFlow: StateFlow<Int> = tail.asStateFlow()
-
-    public actual fun checkOpen() {
-        check(owner.isActive) { closedMessage }
-    }
-
-    public actual fun publishCommittedIndex(index: Int) {
-        tail.value = index
-    }
-
-    private fun backing(): MutableKodexAgentStorage {
-        checkOpen()
-        return source
-    }
-
-    public actual override suspend fun latestIndex(): Int = backing().latestIndex()
-
-    public actual override suspend fun countCommitsIn(
-        range: IntRange,
-        types: Set<AgentCommitType>,
-    ): Int = backing().countCommitsIn(range, types)
-
-    public actual override suspend fun getFirstCommitsIn(
-        range: IntRange,
-        types: Set<AgentCommitType>,
-        limit: Int,
-    ): List<IndexedAgentCommit> = backing().getFirstCommitsIn(range, types, limit)
-
-    public actual override suspend fun getLastCommitsIn(
-        range: IntRange,
-        types: Set<AgentCommitType>,
-        limit: Int,
-    ): List<IndexedAgentCommit> = backing().getLastCommitsIn(range, types, limit)
-
-    public actual override suspend fun commit(commit: AgentCommit): Int =
-        commit(listOf(commit), Clock.System.now())
-
-    public actual override suspend fun commit(commit: AgentCommit, timestamp: Instant): Int =
-        commit(listOf(commit), timestamp)
-
-    public actual override suspend fun commit(commits: List<AgentCommit>): Int =
-        commit(commits, Clock.System.now())
-
-    public actual override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int {
-        currentCoroutineContext().ensureActive()
-        val target = backing()
-        return withContext(NonCancellable) {
-            val index = target.commit(commits, timestamp)
-            tail.value = index
-            index
-        }
-    }
-
-    public actual override suspend fun revert(untilExclusive: Int) {
-        currentCoroutineContext().ensureActive()
-        val target = backing()
-        withContext(NonCancellable) {
-            val previous = tail.value
-            val hadSteer = previous >= 0 && target.getSteerAt(previous).isNotEmpty()
-            target.revert(untilExclusive)
-            val latest = if (previous < untilExclusive) previous else target.latestIndex()
-            if (latest != previous || hadSteer) {
-                tail.value = latest
-                var nextNonce = Random.nextLong()
-                while (nextNonce == nonce.value) nextNonce = Random.nextLong()
-                nonce.value = nextNonce
-            }
-        }
-    }
-}
 
 public actual class DetachedSessionHandle internal constructor(
     internal val session: KodexAgentSession,

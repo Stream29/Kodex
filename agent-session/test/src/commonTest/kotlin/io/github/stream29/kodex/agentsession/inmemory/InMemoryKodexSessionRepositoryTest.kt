@@ -13,6 +13,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCom
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
@@ -26,6 +27,8 @@ import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventArguments
+import io.github.stream29.kodex.tool.awaitevent.AwaitEventInput
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
@@ -79,6 +82,32 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
     } closeWith {
         cancelAndJoin()
     } asContextForEach {
+        test("a nonresident Agent opens only for the same armed await deadline") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val id = repository.createInitialized(settings())
+            val original = repository.open(id)
+            val await = PendingAwait(
+                callId = "deadline",
+                arguments = AwaitEventArguments(listOf(AwaitEventInput.Timeout(1000)), "Wait for deadline"),
+                timeoutAt = Instant.fromEpochSeconds(10),
+                armedForAgentId = id,
+            )
+            val index = original.storage.commit(UnstableSnapshot(listOf(await)))
+            val expected = repository.pendingAwaitDeadlines.value.getValue(id)
+            assertEquals(index, expected.snapshotIndex)
+            repository.closeSession(id)
+            assertFailsWith<IllegalStateException> { original.storage.cacheNonce() }
+            assertNull(repository.openForAwaitDeadline(id, expected.copy(callId = "stale")))
+            assertTrue(repository.openSessions.value.isEmpty())
+
+            val reopened = assertNotNull(repository.openForAwaitDeadline(id, expected))
+            assertEquals(1L, reopened.storage.cacheNonce())
+            reopened.storage.revert(index)
+            repository.closeSession(id)
+            assertNull(repository.openForAwaitDeadline(id, expected))
+            assertTrue(repository.openSessions.value.isEmpty())
+        }
+
         test("sparse fork keeps only the retained checkpoint window and reverts cleanly") {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val sourceId = repository.createInitialized(settings("source"))

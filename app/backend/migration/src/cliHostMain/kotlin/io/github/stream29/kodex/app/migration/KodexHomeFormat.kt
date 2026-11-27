@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.app.migration
 
 import io.github.stream29.kodex.agentstorage.sqlite.KodexHomeDatabaseApplicationId
-import io.github.stream29.kodex.agentstorage.sqlite.SqliteSchemaVersion
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -375,7 +374,6 @@ internal const val HomeVersionFile: String = "version.json"
 internal val RecentHomeUpgradeTarget: MigrationVersion = MigrationVersion("0.8.0")
 private const val HomeGeneration: Int = 1
 private const val LegacyHomeSchemaVersion: Int = 1
-private const val RecentUpgradeSchemaVersion: Int = SqliteSchemaVersion
 private const val RecentSqliteHeaderSize: Long = 100
 private val RecentSqliteHeaderMagic = "SQLite format 3\u0000".encodeToByteArray()
 private const val MarkerTemporaryFile: String = ".kodex-version.json.tmp"

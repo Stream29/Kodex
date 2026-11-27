@@ -1,8 +1,17 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.utils.mq.DefaultMqTopicBufferCapacity
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
+import io.github.stream29.kodex.agenteventbus.AgentNotificationSignal
+import io.github.stream29.kodex.agenteventbus.NotificationDelivery
+import io.github.stream29.kodex.agenteventbus.subscribeNotifications
+import io.github.stream29.kodex.agentruntime.contract.AgentStopEvent
+import io.github.stream29.kodex.agentstorage.contract.getCommitExact
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.OpenAiModerationBlockedException
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
@@ -33,7 +42,11 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
         }
         runtimeFixture(client) { repository, index, rpc ->
             val session = repository.openSessions.value.getValue(index)
-            val notifications = repository.stopEvents.toNotifications()
+            val notifications = repository.stopEvents.onEach {
+                val stop = assertIs<AgentStopEvent.AssistantMessage>(it.event)
+                val commit = session.storage.getCommitExact(stop.commitIndex, setOf(stop.message.commitType))
+                assertEquals(stop.message, commit?.commit)
+            }.toNotifications()
             session.runtime.appendUserMessage(listOf(ContentItem.InputText("unobserved")))
             rpc.resume(index)
 
@@ -74,12 +87,20 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
             }
         }
         runtimeFixture(client) { repository, index, _ ->
-            val createdEvents = mutableListOf<Notification.AskUserCreated>()
+            val eventBus = AgentEventBus(repository, InMemoryMqBroker())
+            val createdSignals = async(start = CoroutineStart.UNDISPATCHED) {
+                eventBus.broker.subscribeNotifications(DefaultMqTopicBufferCapacity)
+                    .filterIsInstance<NotificationDelivery.Signal>()
+                    .map { it.signal }
+                    .filterIsInstance<AgentNotificationSignal.AskUserCreated>()
+                    .take(2)
+                    .toList()
+            }
             val rpc = BackendAgentRuntimeRpc(
                 repository = repository,
-                eventBus = AgentEventBus(repository),
+                eventBus = eventBus,
+                streamService = InMemoryStreamService(),
                 client = client,
-                onAskUserCreated = { createdEvents += it },
             )
             repository.openSessions.value.getValue(index).runtime.appendUserMessage(listOf(ContentItem.InputText("start turn")))
             val running = async { rpc.resume(index) }
@@ -91,8 +112,13 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
             )
             val entry1 = rpc.createAskUser(index, args)
             val entry2 = rpc.createAskUser(index, args)
-            assertEquals(listOf(entry1, entry2), createdEvents.map { it.entry })
-            assertTrue(createdEvents.all { it.sessionIndex == index })
+            assertEquals(
+                listOf(
+                    AgentNotificationSignal.AskUserCreated(index, index, entry1.askId),
+                    AgentNotificationSignal.AskUserCreated(index, index, entry2.askId),
+                ),
+                createdSignals.await(),
+            )
 
             releaseTurn.complete(Unit)
             running.await()

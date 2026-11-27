@@ -37,7 +37,7 @@ private fun SqliteConnection.catalog(id: Int): List<Any?> =
 
 val sqliteSchemaTest by testSuite {
     test("live DDL and constraints exclude global settings and retired commit types") { withSchema { db ->
-        assertEquals(4L, db.query("PRAGMA user_version").single().single())
+        assertEquals(5L, db.query("PRAGMA user_version").single().single())
         assertEquals(KodexHomeDatabaseApplicationId.toLong(), db.query("PRAGMA application_id").single().single())
         assertEquals(KodexHomeDatabasePageSize.toLong(), db.query("PRAGMA page_size").single().single())
         assertEquals(listOf(listOf(0L, 1L)), db.query("SELECT wr, strict FROM pragma_table_list WHERE schema = 'main' AND name = 'agent_commits'"))
@@ -46,6 +46,8 @@ val sqliteSchemaTest by testSuite {
             db.query("SELECT name FROM sqlite_master WHERE type = 'table'").map { it[0] }.toSet())
         assertTrue(db.query("SELECT name FROM sqlite_master WHERE type = 'view'").isEmpty())
         db.session(0)
+        assertEquals(listOf(listOf(1L)), db.query("SELECT cache_nonce FROM agents WHERE agent_id=0"))
+        assertFailsWith<SqliteFailure> { db.execute("UPDATE agents SET cache_nonce=0 WHERE agent_id=0") }
         assertFailsWith<SqliteFailure> { db.session(-1) }
         assertFailsWith<SqliteFailure> { db.put(999, "user_message", 0, "{}") }
         assertFailsWith<SqliteFailure> { db.put(0, "missing", 0, "{}") }

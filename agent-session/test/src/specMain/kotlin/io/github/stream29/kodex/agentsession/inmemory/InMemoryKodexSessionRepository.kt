@@ -2,6 +2,7 @@
 
 package io.github.stream29.kodex.agentsession.inmemory
 
+import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentsession.contract.AgentForkCopy
 import io.github.stream29.kodex.agentsession.contract.DefaultKodexSessionRenewalInterval
 import io.github.stream29.kodex.agentsession.contract.DefaultKodexSessionTtl
@@ -23,6 +24,7 @@ public expect class InMemoryKodexSessionRepository : KodexSessionRepository {
     override val coroutineContext: CoroutineContext
     override val entries: StateFlow<List<Int>>
     override val openSessions: StateFlow<Map<Int, KodexAgentSession>>
+    override val pendingAwaitDeadlines: StateFlow<Map<Int, PendingAwaitDeadline>>
     override val stopEvents: Flow<IndexedAgentStopEvent>
     override suspend fun list(): List<Int>
     override suspend fun listEntries(includeArchived: Boolean): List<KodexSessionEntry>
@@ -32,6 +34,7 @@ public expect class InMemoryKodexSessionRepository : KodexSessionRepository {
     override suspend fun createAgentFork(sourceAgentId: Int, expectedOwner: KodexAgentSession?, untilExclusive: Int?): AgentForkCopy?
     override suspend fun open(entryIndex: Int): KodexAgentSession
     override suspend fun openAgent(agentId: Int): KodexAgentSession?
+    override suspend fun openForAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline): KodexAgentSession?
     override suspend fun getAgentRecord(agentId: Int): StoredAgent?
     override suspend fun closeSession(entryIndex: Int)
     override suspend fun closeAllSessions()

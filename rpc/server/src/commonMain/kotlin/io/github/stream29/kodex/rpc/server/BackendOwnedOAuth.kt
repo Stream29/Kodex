@@ -5,6 +5,7 @@ import io.github.stream29.kodex.rpc.models.OAuthLoginEvent
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.utils.oauthloopback.OAuthLoopbackListener
 import io.github.stream29.kodex.utils.oauthloopback.openOAuthLoopbackListener
+import io.github.stream29.kodex.utils.stream.StreamService
 import io.ktor.http.Url
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -17,9 +18,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
@@ -46,6 +49,7 @@ internal class BackendOwnedOAuth(
     capacity: Int = 128,
     private val timeSource: TimeSource = TimeSource.Monotonic,
     private val reportCleanupFailure: () -> Unit = {},
+    private val streamService: StreamService,
 ) {
     private val owner = CoroutineScope(scope.coroutineContext + SupervisorJob(requireNotNull(scope.coroutineContext[Job])))
     private val attempts = BackendOAuthAttemptRegistry(owner, capacity)
@@ -54,6 +58,7 @@ internal class BackendOwnedOAuth(
 
     fun start(target: OAuthTarget): Flow<OAuthLoginEvent> = flow {
         val slot = attempts.reserve(target)
+        val key = "oauth:${slot.id}"
         val reservedAt = timeSource.markNow()
         val ready = CompletableDeferred<OAuthAuthorization>()
         val worker = owner.launch(start = CoroutineStart.LAZY) {
@@ -63,25 +68,51 @@ internal class BackendOwnedOAuth(
             ready.completeExceptionally(IllegalStateException("Authorization could not be prepared."))
         }
         var attached = false
+        var failure: Throwable? = null
         try {
+            streamService.create(key)
             attached = attempts.attachWorker(slot, worker)
             check(attached) { "Authorization could not be prepared." }
             worker.start()
-            emit(OAuthLoginEvent.Authorization(ready.await()))
-            when (slot.result.await()) {
-                OAuthAttemptOutcome.Committed -> emit(OAuthLoginEvent.Committed)
-                OAuthAttemptOutcome.Failed -> error("Authorization failed.")
-                OAuthAttemptOutcome.TimedOut -> error("Authorization timed out.")
-                OAuthAttemptOutcome.Cancelled -> error("Authorization was cancelled.")
-                OAuthAttemptOutcome.Released -> error("Authorization was released.")
-                OAuthAttemptOutcome.BackendStopped -> error("Authorization backend stopped.")
+            coroutineScope {
+                val producer = async(start = CoroutineStart.UNDISPATCHED) {
+                    val result = runCatching {
+                        streamService.appendValue<OAuthLoginEvent>(key, OAuthLoginEvent.Authorization(ready.await()))
+                        when (slot.result.await()) {
+                            OAuthAttemptOutcome.Committed ->
+                                streamService.appendValue<OAuthLoginEvent>(key, OAuthLoginEvent.Committed)
+                            OAuthAttemptOutcome.Failed -> error("Authorization failed.")
+                            OAuthAttemptOutcome.TimedOut -> error("Authorization timed out.")
+                            OAuthAttemptOutcome.Cancelled -> error("Authorization was cancelled.")
+                            OAuthAttemptOutcome.Released -> error("Authorization was released.")
+                            OAuthAttemptOutcome.BackendStopped -> error("Authorization backend stopped.")
+                        }
+                    }
+                    // A completion failure must stop the reader instead of stranding it.
+                    withContext(NonCancellable) { streamService.complete(key) }
+                    result
+                }
+                try {
+                    emitAll(streamService.readValues<OAuthLoginEvent>(key))
+                    // Preserve the existing error path, after any authorization event has drained.
+                    producer.await().getOrThrow()
+                } finally {
+                    producer.cancel()
+                }
             }
+        } catch (error: Throwable) {
+            failure = error
+            throw error
         } finally {
-            withContext(NonCancellable) {
-                if (attempts.releasePending(slot) || !attached) worker.cancelAndJoin()
-                // A lazy worker cancelled before its first instruction has no worker finally.
-                if (worker.isCompleted) attempts.retire(slot)
-            }
+            closeBackendResources(
+                failure,
+                {
+                    if (attempts.releasePending(slot) || !attached) worker.cancelAndJoin()
+                    // A lazy worker cancelled before its first instruction has no worker finally.
+                    if (worker.isCompleted) attempts.retire(slot)
+                },
+                { streamService.delete(key) },
+            )
         }
     }
 

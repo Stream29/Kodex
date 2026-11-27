@@ -2,6 +2,8 @@ package io.github.stream29.kodex.rpc.server
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
+import io.github.stream29.kodex.agenteventbus.AgentNotificationSignal
+import io.github.stream29.kodex.agenteventbus.publishNotification
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.kodex.agentruntime.contract.AgentResumeNotAdmittedException
@@ -29,7 +31,6 @@ import io.github.stream29.kodex.rpc.contract.AgentRuntimeRpc
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.GeneratedImageArtifact
 import io.github.stream29.kodex.rpc.models.ImageGenToolArguments
-import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.ShellSessionState
 import io.github.stream29.kodex.rpc.models.SubagentSpawnRejection
 import io.github.stream29.kodex.rpc.models.SubagentSpawnRequest
@@ -53,15 +54,15 @@ import io.github.stream29.kodex.utils.rpcexception.AgentCompleted
 import io.github.stream29.kodex.utils.rpcexception.ShellSessionNotRegistered
 import io.github.stream29.kodex.utils.rpcexception.SubagentCompletionNoticeFailed
 import io.github.stream29.kodex.utils.shellclient.StdoutSlice
+import io.github.stream29.kodex.utils.stream.StreamNotFoundException
+import io.github.stream29.kodex.utils.stream.StreamService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
@@ -71,14 +72,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
-import kotlin.random.Random
 
 internal class BackendAgentRuntimeRpc(
     private val repository: KodexSessionRepository,
-    private val eventBus: AgentEventBus = AgentEventBus(repository),
+    private val eventBus: AgentEventBus,
+    private val streamService: StreamService,
     private val client: OpenAiClient? = null,
     private val home: Path? = null,
-    private val onAskUserCreated: (Notification.AskUserCreated) -> Unit = {},
     private val checkAdmission: () -> Unit = {},
     private val subagentSpawner: BackendSubagentSpawner? = null,
     private val archiveSession: suspend (Int) -> Unit = { repository.getEntry(it).archive() },
@@ -86,6 +86,14 @@ internal class BackendAgentRuntimeRpc(
 ) : AgentRuntimeRpc {
     private val viewsMutex = Mutex()
     private val views = mutableMapOf<KodexAgentSession, RuntimeView>()
+
+    init {
+        repository.launch(start = CoroutineStart.UNDISPATCHED) {
+            repository.openSessions.collect { sessions ->
+                for ((index, session) in sessions) getOrCreateView(index, session)
+            }
+        }
+    }
 
     override suspend fun spawnSubagent(request: SubagentSpawnRequest): SubagentSpawnResult = try {
         command(request.source.agentId) {
@@ -142,19 +150,25 @@ internal class BackendAgentRuntimeRpc(
 
     private suspend fun view(index: Int): RuntimeView {
         val session = openSession(index)
-        return viewsMutex.withLock {
-            if (!session.coroutineContext.job.isActive) throw AgentNotActive()
+        return getOrCreateView(index, session) ?: throw AgentNotActive()
+    }
+
+    private suspend fun getOrCreateView(index: Int, session: KodexAgentSession): RuntimeView? =
+        viewsMutex.withLock {
+            if (repository.openSessions.value[index] !== session || !session.coroutineContext.job.isActive) {
+                return@withLock null
+            }
             views.getOrPut(session) {
-                RuntimeView(session).also { created ->
-                    session.launch {
+                RuntimeView(session, index, streamService).also { created ->
+                    session.launch(start = CoroutineStart.UNDISPATCHED) {
                         try {
-                            awaitCancellation()
+                            created.streams.observeRuntime()
                         } finally {
                             withContext(NonCancellable) {
-                                viewsMutex.withLock {
-                                    if (views[session] === created) {
-                                        views.remove(session)
-                                    }
+                                try {
+                                    created.streams.close()
+                                } finally {
+                                    viewsMutex.withLock { views.remove(session) }
                                 }
                             }
                         }
@@ -162,7 +176,6 @@ internal class BackendAgentRuntimeRpc(
                 }
             }
         }
-    }
 
     private suspend fun <T> command(index: Int, block: suspend RuntimeView.() -> T): T =
         startCommand(index, block = block).await()
@@ -256,23 +269,21 @@ internal class BackendAgentRuntimeRpc(
         }
 
     override suspend fun getState(sessionIndex: Int): AgentStateValue =
-        view(sessionIndex).snapshot().value
+        view(sessionIndex).streams.getState()
 
     override fun getStateFlow(sessionIndex: Int): Flow<AgentStateValue> = flow {
         val view = view(sessionIndex)
-        emitAll(
-            view.session.observeActive(
-                checkAdmission = checkAdmission,
-                source = view.runtime.state.map { view.snapshot().value },
-            ).distinctUntilChanged(),
-        )
+        emitAll(view.session.observeActive(checkAdmission, view.streams.stateFlow()))
     }
 
     override fun currentFlow(sessionIndex: Int, nonce: Long): Flow<ResponsesStreamEvent> = flow {
         val view = view(sessionIndex)
-        val snapshot = view.snapshot()
-        val source = snapshot.events
-        if (source == null || snapshot.nonce != nonce) throw NoMatchException()
+        if (view.streams.currentOutput() != nonce) throw NoMatchException()
+        val source = view.streams.outputFlow(nonce).catch { failure ->
+            if (failure !is StreamNotFoundException) throw failure
+            if (!view.session.coroutineContext.job.isActive) throw AgentNotActive()
+            throw NoMatchException()
+        }
         emitAll(view.session.observeActive(checkAdmission, source))
     }
 
@@ -295,7 +306,7 @@ internal class BackendAgentRuntimeRpc(
     ): Unit =
         command(sessionIndex) {
             try {
-                runtime.submitAskUserAnswer(askId, response)
+                eventBus.submitAskUserAnswer(sessionIndex, askId, response)
             } catch (_: AskUserEntryNotFound) {
                 throw AskAnswerRejected(alreadyAnswered = false)
             } catch (_: AskUserAlreadyAnswered) {
@@ -313,7 +324,15 @@ internal class BackendAgentRuntimeRpc(
                 "Asking the user is disabled when RequestUserInputMode is NoQuestion."
             }
             val entry = runtime.createAskUser(arguments)
-            onAskUserCreated(Notification.AskUserCreated(session.sessionId, entry, sessionIndex))
+            try {
+                eventBus.broker.publishNotification(
+                    AgentNotificationSignal.AskUserCreated(session.sessionId, sessionIndex, entry.askId),
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                RuntimeRpcLogger.warn(error) { "Cannot publish AskUser notification for Agent $sessionIndex." }
+            }
             entry
         }
 
@@ -445,27 +464,12 @@ internal class BackendAgentRuntimeRpc(
     }
 
     override suspend fun getShellSessions(sessionIndex: Int): Map<Int, ShellSessionState> =
-        openSession(sessionIndex).runtime.unifiedExecToolClient.activeSessions.value.mapValues { (_, shellSession) ->
-            shellSession.toShellSessionState()
-        }
+        view(sessionIndex).streams.getShells()
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    override fun getShellSessionsFlow(sessionIndex: Int): Flow<Map<Int, ShellSessionState>> =
-        observe(sessionIndex) {
-            unifiedExecToolClient.activeSessions.flatMapLatest { sessions ->
-                if (sessions.isEmpty()) {
-                    flowOf(emptyMap())
-                } else {
-                    combine(
-                        sessions.map { (id, shellSession) ->
-                            shellSession.exitCode.map { exitCode ->
-                                id to shellSession.toShellSessionState(exitCode)
-                            }
-                        },
-                    ) { entries -> entries.toMap() }
-                }
-            }
-        }
+    override fun getShellSessionsFlow(sessionIndex: Int): Flow<Map<Int, ShellSessionState>> = flow {
+        val view = view(sessionIndex)
+        emitAll(view.session.observeActive(checkAdmission, view.streams.shellsFlow()))
+    }
 
     override suspend fun readShellSessionOutput(
         sessionIndex: Int,
@@ -543,6 +547,10 @@ internal fun <T> KodexAgentSession.observeActive(
     try {
         if (!sessionJob.isActive) throw AgentNotActive()
         source.collect { send(it) }
+        if (!sessionJob.isActive) throw AgentNotActive()
+    } catch (error: StreamNotFoundException) {
+        if (!sessionJob.isActive) throw AgentNotActive()
+        throw error
     } finally {
         completionHandle.dispose()
         watcher.cancel()
@@ -560,23 +568,15 @@ internal fun Map<Int, UnifiedExecProcessSession>.registeredShell(
     return shell
 }
 
-private fun UnifiedExecProcessSession.toShellSessionState(code: Int? = exitCode.value): ShellSessionState =
-    ShellSessionState(
-        arguments = arguments,
-        registrationNonce = registrationNonce,
-        exitCode = code,
-    )
-
 private val CompletionLogger = KotlinLogging.logger("SubagentCompletion")
+private val RuntimeRpcLogger = KotlinLogging.logger {}
 
-private class RuntimeView(val session: KodexAgentSession) {
+private class RuntimeView(val session: KodexAgentSession, agentId: Int, streamService: StreamService) {
     val operations: CoroutineScope = session.supervisorChildScope()
     val runtime: AgentRuntime get() = session.runtime
     val newWorkAdmission = Mutex()
     private val admission = Mutex()
-    private val output = RuntimeOutputProjection()
-
-    suspend fun snapshot(): OutputSnapshot = output.snapshot { runtime.state.value }
+    val streams = RuntimeStreams(session, agentId, streamService, operations)
 
     suspend fun <T> exclusive(block: suspend () -> T): T {
         check(admission.tryLock()) { "This Agent already has a running or history operation." }
@@ -607,51 +607,3 @@ private suspend fun AgentRuntime.isAcceptedResumeStart(beforeIndex: Int): Boolea
 
         else -> true
     }
-
-/** Holds only the current stream identity; snapshots carry the captured source. */
-internal class RuntimeOutputProjection {
-    private val mutex = Mutex()
-    private var source: SharedFlow<ResponsesStreamEvent>? = null
-    private var nonce = Random.nextLong()
-
-    suspend fun snapshot(read: () -> KodexAgentStateValue): OutputSnapshot = mutex.withLock {
-        val value = read()
-        val next = when (value) {
-            is KodexAgentStateValue.RequestResponse.Message -> value.events
-            is KodexAgentStateValue.RequestResponse.AgentMessage -> value.events
-            is KodexAgentStateValue.RequestResponse.Reasoning -> value.events
-            is KodexAgentStateValue.RequestResponse.ToolCall -> value.events
-            is KodexAgentStateValue.RequestResponse.Unknown -> value.events
-            else -> null
-        }
-        if (source !== next) {
-            source = next
-            val old = nonce
-            do {
-                nonce = Random.nextLong()
-            } while (nonce == old)
-        }
-        val projected = when (value) {
-            KodexAgentStateValue.Empty -> AgentStateValue.Empty
-            KodexAgentStateValue.UserMessage -> AgentStateValue.UserMessage
-            KodexAgentStateValue.AssistantMessage -> AgentStateValue.AssistantMessage
-            KodexAgentStateValue.ToolCompleted -> AgentStateValue.ToolCompleted
-            KodexAgentStateValue.ExternalWrite -> AgentStateValue.ExternalWrite
-            KodexAgentStateValue.Compacting -> AgentStateValue.Compacting
-            is KodexAgentStateValue.ToolPending -> AgentStateValue.ToolPending(value.events)
-            KodexAgentStateValue.RequestResponse.Started -> AgentStateValue.RequestResponse.Started
-            is KodexAgentStateValue.RequestResponse.Message -> AgentStateValue.RequestResponse.Message(nonce)
-            is KodexAgentStateValue.RequestResponse.AgentMessage -> AgentStateValue.RequestResponse.AgentMessage(nonce)
-            is KodexAgentStateValue.RequestResponse.Reasoning -> AgentStateValue.RequestResponse.Reasoning(nonce)
-            is KodexAgentStateValue.RequestResponse.ToolCall -> AgentStateValue.RequestResponse.ToolCall(nonce)
-            is KodexAgentStateValue.RequestResponse.Unknown -> AgentStateValue.RequestResponse.Unknown(nonce)
-        }
-        OutputSnapshot(projected, nonce, next)
-    }
-}
-
-internal data class OutputSnapshot(
-    val value: AgentStateValue,
-    val nonce: Long,
-    val events: SharedFlow<ResponsesStreamEvent>?,
-)

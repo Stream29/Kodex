@@ -2,6 +2,9 @@
 
 package io.github.stream29.kodex.app.test
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
@@ -91,6 +94,8 @@ public actual suspend fun startRpcFrontendFixture(
                     },
                     createClient = { client }, createLoginClient = { TestLoginClient },
                     requiresPreparedHome = true,
+                    broker = InMemoryMqBroker(),
+                    streamService = InMemoryStreamService(),
                 ) { backend ->
                     withInMemoryRpc(backend::register) { raw ->
                         val services = RpcServices(RestoringRpcClient(raw))
@@ -160,7 +165,7 @@ public actual suspend fun deleteTestDirectory(path: Path) {
 public actual suspend fun CoroutineScope.seedTestHistory(
     home: Path, name: String, events: Map<Int, IndexCommit>,
 ): Int {
-    val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies())
+    val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies(), InMemoryMqBroker())
     try {
         val index = repository.create()
         repository.open(index).runtime.modify { storage ->

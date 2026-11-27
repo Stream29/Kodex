@@ -1,10 +1,19 @@
+@file:OptIn(kotlin.uuid.ExperimentalUuidApi::class)
 @file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
 
 package io.github.stream29.kodex.agentsession.sqlite
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.github.stream29.kodex.agenteventbus.AgentNotificationSignal
+import io.github.stream29.kodex.agenteventbus.BackendMqExchanges
+import io.github.stream29.kodex.agenteventbus.BackendSignalKeys
+import io.github.stream29.kodex.agenteventbus.SignalDelivery
+import io.github.stream29.kodex.agenteventbus.publishAfterCommit
+import io.github.stream29.kodex.agenteventbus.publishNotification
+import io.github.stream29.kodex.agenteventbus.subscribeSignals
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.AgentResumeNotAdmittedException
+import io.github.stream29.kodex.agentruntime.contract.AgentStopEvent
 import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
 import io.github.stream29.kodex.agentsession.contract.*
@@ -15,13 +24,15 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.decodePayloadJson
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.encodePayloadJson
-import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.sqlite.*
 import io.github.stream29.kodex.utils.coroutines.CoroutineCloseable
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.closeOnFailure
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
+import io.github.stream29.kodex.utils.mq.DefaultMqTopicBufferCapacity
+import io.github.stream29.kodex.utils.mq.MqBroker
+import io.github.stream29.kodex.utils.mq.MqHeaders
 import io.github.stream29.kodex.utils.sqlite.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.cancelAndJoin as cancelJobAndJoin
@@ -33,7 +44,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -46,6 +56,7 @@ import kotlin.time.Duration
 import kotlin.time.Instant
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
+import kotlin.uuid.Uuid
 
 public actual class SqliteKodexSessionRepository internal constructor(
     scope: CoroutineScope,
@@ -53,18 +64,20 @@ public actual class SqliteKodexSessionRepository internal constructor(
     private val dependencies: KodexAgentDependencies,
     private val fileSystem: CoroutineFileSystem,
     private val connection: SqliteConnection,
-    private val agents: SqliteAgentRecords,
     private val mutex: Mutex,
     private val dispatcher: CoroutineDispatcher,
     private val ownedDispatcher: CloseableCoroutineDispatcher? = null,
-    initialEntries: List<Int>,
-    initialDeadlines: Map<Int, PendingAwaitDeadline>,
+    initialInventory: RepositoryInventory,
     sessionTtl: Duration,
     origin: TimeMark,
     onTurnActiveRenewal: suspend () -> Unit,
     turnRenewalInterval: () -> Duration,
-    private val onDeleteInTransaction: (sessionId: Int) -> Unit = {},
+    private val onDeleteInTransaction: (sessionId: Int) -> () -> Unit = { {} },
+    private val broker: MqBroker,
 ) : KodexSessionRepository, CoroutineCloseable, CoroutineScope by scope {
+    private val agents = SqliteAgentRecords(connection)
+    private val originId = Uuid.random().toString()
+    private val originHeaders = mapOf(MqHeaders.OriginId to originId)
     private val lifecycleMutex = Mutex()
     private val residency = SessionResidencyTable(
         scope = this,
@@ -74,8 +87,8 @@ public actual class SqliteKodexSessionRepository internal constructor(
         onTurnActiveRenewal = onTurnActiveRenewal,
         turnRenewalInterval = turnRenewalInterval,
     )
-    private val mutableEntries = MutableStateFlow(initialEntries)
-    private val mutableAwaitDeadlines = MutableStateFlow(initialDeadlines)
+    private val mutableEntries = MutableStateFlow(initialInventory.entries)
+    private val mutableAwaitDeadlines = MutableStateFlow(initialInventory.deadlines)
     private val mutableStopEvents = MutableSharedFlow<IndexedAgentStopEvent>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -88,20 +101,37 @@ public actual class SqliteKodexSessionRepository internal constructor(
     public actual override val stopEvents: Flow<IndexedAgentStopEvent> = mutableStopEvents.asSharedFlow()
 
     private var closed = false
-    private val groupNonces = SessionGroupNonces()
+    private val groupNonces = SessionGroupNonces(initialInventory.groupNonces)
     public actual val sessionGroupsNonce: Flow<Long> = groupNonces.groups
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val runningGroupObservation = scope.launch {
+        var previouslyRunning = emptySet<Int>()
         openSessions.flatMapLatest { sessions ->
             if (sessions.isEmpty()) flowOf(emptySet())
             else combine(sessions.map { (id, session) ->
                 session.runtime.runningTurn.map { if (it != null) id else null }.distinctUntilChanged()
             }) { running -> running.filterNotNull().toSet() }
-        }.distinctUntilChanged().conflate().collect {
+        }.distinctUntilChanged().collect { observedRunning ->
             // Sample the authoritative handles and directory after acquiring the same lock
             // as cwd changes and deletes. A scheduled old wake-up cannot reinsert an old group.
-            withDbLock { if (!closed) groupNonces.runningChanged(runningGroupsLocked()) }
+            withDbLock {
+                if (closed) return@withDbLock
+                groupNonces.runningChanged(runningGroupsLocked())
+                val changed = (observedRunning - previouslyRunning) + (previouslyRunning - observedRunning)
+                previouslyRunning = observedRunning
+                changed.forEach { tryPublishSignal(BackendSignalKeys.agentRunning(it)) }
+            }
+        }
+    }
+    private val signalObservation = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        broker.subscribeSignals(RepositoryBindings, DefaultMqTopicBufferCapacity).collect { delivery ->
+            when (delivery) {
+                is SignalDelivery.Signal -> if (delivery.headers[MqHeaders.OriginId] != originId) {
+                    handleExternalSignal(delivery.routingKey)
+                }
+                is SignalDelivery.ResyncRequired -> resync()
+            }
         }
     }
     private val cleanupResult = CompletableDeferred<Result<Unit>>()
@@ -167,14 +197,26 @@ public actual class SqliteKodexSessionRepository internal constructor(
         }
         withDbLock {
             requireOpen()
-            connection.transaction { agents.createChild(parentAgentId) }
+            broker.publishAfterCommit(originHeaders) { signals ->
+                connection.transaction {
+                    agents.createChild(parentAgentId).also { signals.add(BackendSignalKeys.agentTimeline(it.agentId)) }
+                }
+            }
         }
     }
 
     public actual suspend fun discardUninitializedChild(agentId: Int): Boolean = lifecycleMutex.withLock {
         val discarded = withDbLock {
             requireOpen()
-            connection.transaction { agents.discardUninitializedChild(agentId) } != null
+            val discarded = broker.publishAfterCommit(originHeaders) { signals ->
+                connection.transaction {
+                    (agents.discardUninitializedChild(agentId) != null).also {
+                        if (it) signals.add(BackendSignalKeys.agentDeleted(agentId))
+                    }
+                }
+            }
+            if (discarded) mutableAwaitDeadlines.value -= agentId
+            discarded
         }
         if (discarded) residency.closeLocked(agentId)
         discarded
@@ -226,7 +268,61 @@ public actual class SqliteKodexSessionRepository internal constructor(
     }
 
     private fun publishGroupsCommitted(changes: Map<String?, Boolean>) {
-        if (changes.isNotEmpty()) groupNonces.committed(changes, runningGroupsLocked())
+        if (changes.isNotEmpty()) {
+            groupNonces.committed(changes.mapValues { (cwd, exists) ->
+                if (exists) connection.readSessionGroupNonce(cwd) else null
+            }, runningGroupsLocked())
+        }
+    }
+
+    private fun refreshGroupsLocked() {
+        mutableEntries.value = inventory()
+        groupNonces.reconcile(connection.readSessionGroupNonces(), runningGroupsLocked())
+    }
+
+    private suspend fun handleExternalSignal(key: String) {
+        if (key == BackendSignalKeys.SessionGroups) {
+            withDbLock { if (!closed) refreshGroupsLocked() }
+            return
+        }
+        val parts = key.split('.')
+        if (parts.size != 3 || parts[0] != "agent") return
+        val agentId = parts[1].toIntOrNull()?.takeIf { it >= 0 } ?: return
+        when (key) {
+            BackendSignalKeys.agentRunning(agentId) -> withDbLock { if (!closed) refreshGroupsLocked() }
+            BackendSignalKeys.agentTimeline(agentId) -> lifecycleMutex.withLock { refreshTimelineLocked(agentId) }
+            BackendSignalKeys.agentAwaitDeadline(agentId) -> withDbLock { if (!closed) refreshDeadlineLocked(agentId) }
+            BackendSignalKeys.agentDeleted(agentId) -> lifecycleMutex.withLock { evictDeletedLocked(agentId) }
+        }
+    }
+
+    private suspend fun resync() {
+        lifecycleMutex.withLock {
+            for (agentId in openSessions.value.keys) refreshTimelineLocked(agentId)
+            withDbLock {
+                if (!closed) {
+                    mutableAwaitDeadlines.value = queryAwaitDeadlines(connection)
+                    refreshGroupsLocked()
+                }
+            }
+        }
+    }
+
+    // Storage takes the DB mutex itself. Hold the lifecycle lock to keep the handle alive.
+    private suspend fun refreshTimelineLocked(agentId: Int) {
+        val session = residency.activeSessionOrNullLocked(agentId) as? SqliteSession ?: return
+        try {
+            session.storage.refreshObservableState()
+        } catch (error: NoSuchElementException) {
+            if (withDbLock { agents.get(agentId) != null }) throw error
+            // A delete can overtake a timeline hint, or its signal can be lost in an overflow.
+            evictDeletedLocked(agentId)
+        }
+    }
+
+    private suspend fun evictDeletedLocked(agentId: Int) {
+        residency.closeLocked(agentId)
+        withDbLock { mutableAwaitDeadlines.value -= agentId }
     }
 
     public actual override suspend fun getEntry(entryIndex: Int): KodexSessionEntry = withDbLock {
@@ -265,10 +361,13 @@ public actual class SqliteKodexSessionRepository internal constructor(
     private suspend fun archive(index: Int, value: Boolean): Unit = withDbLock {
         requireOpen()
         requireEntry(index)
-        val groupChanges = connection.transaction {
-            if (!agents.archiveRoot(index, value)) return@transaction emptyMap()
-            val group = checkNotNull(connection.sessionCatalogGroup(agents.rootId(index)))
-            connection.recordSessionGroupMutation(group, group)
+        val groupChanges = broker.publishAfterCommit(originHeaders) { signals ->
+            connection.transaction {
+                if (!agents.archiveRoot(index, value)) return@transaction emptyMap()
+                val group = checkNotNull(connection.sessionCatalogGroup(agents.rootId(index)))
+                signals.add(BackendSignalKeys.SessionGroups)
+                connection.recordSessionGroupMutation(group, group)
+            }
         }
         publishGroupsCommitted(groupChanges)
     }
@@ -323,26 +422,30 @@ public actual class SqliteKodexSessionRepository internal constructor(
         sourceAgent: Int?,
         window: LongRange? = null,
     ): Int {
-        val (index, targetAgent, groups) = connection.transaction {
-            var candidate = 0L
-            inventory().forEach { if (it.toLong() == candidate) candidate++ }
-            check(candidate <= Int.MAX_VALUE)
-            connection.execute("INSERT INTO sessions(session_id) VALUES (?)", listOf(candidate))
-            val targetAgent = agents.createRoot(candidate.toInt())
-            if (sourceAgent != null) {
-                val source = sourceAgent.toLong()
-                val target = targetAgent.toLong()
-                val rangeFilter = if (window == null) "" else """ AND ("index" = 0 OR "index" BETWEEN ? AND ?)"""
-                copyForkRowsLocked(
-                    target,
-                    """SELECT type, "index", payload_json, created_at FROM agent_commits WHERE agent_id = ?$rangeFilter""",
-                    listOf(source) + if (window == null) emptyList() else listOf(window.first, window.last),
-                )
-                if (window != null && window.first > 0) carryForkSnapshotsLocked(source, target, window.first)
-                connection.recomputeSessionCatalog(targetAgent)
+        val (index, targetAgent, groups) = broker.publishAfterCommit(originHeaders) { signals ->
+            connection.transaction {
+                var candidate = 0L
+                inventory().forEach { if (it.toLong() == candidate) candidate++ }
+                check(candidate <= Int.MAX_VALUE)
+                connection.execute("INSERT INTO sessions(session_id) VALUES (?)", listOf(candidate))
+                val targetAgent = agents.createRoot(candidate.toInt())
+                if (sourceAgent != null) {
+                    val source = sourceAgent.toLong()
+                    val target = targetAgent.toLong()
+                    val rangeFilter = if (window == null) "" else """ AND ("index" = 0 OR "index" BETWEEN ? AND ?)"""
+                    copyForkRowsLocked(
+                        target,
+                        """SELECT type, "index", payload_json, created_at FROM agent_commits WHERE agent_id = ?$rangeFilter""",
+                        listOf(source) + if (window == null) emptyList() else listOf(window.first, window.last),
+                    )
+                    if (window != null && window.first > 0) carryForkSnapshotsLocked(source, target, window.first)
+                    connection.recomputeSessionCatalog(targetAgent)
+                    signals.add(BackendSignalKeys.agentAwaitDeadline(targetAgent))
+                }
+                signals.add(BackendSignalKeys.SessionGroups)
+                val group = checkNotNull(connection.sessionCatalogGroup(targetAgent))
+                Triple(candidate.toInt(), targetAgent, connection.recordSessionGroupMutation(null, group))
             }
-            val group = checkNotNull(connection.sessionCatalogGroup(targetAgent))
-            Triple(candidate.toInt(), targetAgent, connection.recordSessionGroupMutation(null, group))
         }
         publishGroupsCommitted(groups)
         if (sourceAgent != null) refreshDeadlineLocked(targetAgent)
@@ -406,7 +509,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
         openLocked(record)
     }
 
-    public actual suspend fun openForAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline): KodexAgentSession? =
+    public actual override suspend fun openForAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline): KodexAgentSession? =
         lifecycleMutex.withLock {
             if (mutableAwaitDeadlines.value[agentId] != expected) return@withLock null
             val record = withDbLock {
@@ -424,32 +527,30 @@ public actual class SqliteKodexSessionRepository internal constructor(
         val storageScope = CoroutineScope(coroutineContext.minusKey(Job) + SupervisorJob())
         val sessionScope = supervisorChildScope()
         return try {
-            val cache = withDbLock {
+            val storage = withDbLock {
                 requireOpen()
-                val storage = SqliteAgentStorage(
+                SqliteAgentStorage(
                     connection = connection,
                     agentId = agentId,
                     mutex = mutex,
                     dispatcher = dispatcher,
                     requireAccess = { check(storageScope.isActive) { "Session storage is closed" } },
                     onHistoryChanged = { changedTypes ->
+                        tryPublishSignal(BackendSignalKeys.agentTimeline(agentId))
                         if (changedTypes == null || AgentCommitType.Unstable in changedTypes) {
                             refreshDeadlineLocked(agentId)
+                            tryPublishSignal(BackendSignalKeys.agentAwaitDeadline(agentId))
                         }
                     },
-                    onSessionGroupsChanged = ::publishGroupsCommitted,
+                    onSessionGroupsChanged = { changes ->
+                        publishGroupsCommitted(changes)
+                        tryPublishSignal(BackendSignalKeys.SessionGroups)
+                    },
                 )
-                val initialLatestIndex = (
-                    connection.query(
-                        """SELECT coalesce(max("index"), -1) FROM agent_commits WHERE agent_id = ?""",
-                        listOf(agentId.toLong()),
-                    ).single().single() as Long
-                ).toInt()
-                ScopedObservableAgentStorage(storageScope, storage, initialLatestIndex)
             }
             val state = sessionScope.KodexAgentState(
                 client = dependencies.client,
-                storage = cache,
+                storage = storage,
                 contextSettings = dependencies.contextSettings,
                 clock = dependencies.clock,
             )
@@ -465,9 +566,10 @@ public actual class SqliteKodexSessionRepository internal constructor(
             sessionScope.launch(start = CoroutineStart.UNDISPATCHED) {
                 runtime.stopEvents.collect { stopEvent ->
                     mutableStopEvents.tryEmit(IndexedAgentStopEvent(record.sessionId, stopEvent, agentId))
+                    publishStopNotification(record, stopEvent)
                 }
             }
-            val session = SqliteSession(sessionScope, record.sessionId, cache, runtime)
+            val session = SqliteSession(sessionScope, record.sessionId, storage, runtime)
             withDbLock { requireOpen() }
             residency.installLocked(agentId, session, storageScope)
         } catch (failure: Throwable) {
@@ -476,6 +578,30 @@ public actual class SqliteKodexSessionRepository internal constructor(
                 storageScope.cancelAndJoin()
             }
             throw failure
+        }
+    }
+
+    private fun tryPublishSignal(routingKey: String) {
+        try {
+            broker.tryPublish(BackendMqExchanges.Broadcast, routingKey, byteArrayOf(), originHeaders)
+        } catch (_: Exception) {
+            // The mutation has already committed or completed; invalidation is best effort.
+        }
+    }
+
+    private suspend fun publishStopNotification(record: StoredAgent, event: AgentStopEvent) {
+        try {
+            val notification = when (event) {
+                is AgentStopEvent.AssistantMessage ->
+                    AgentNotificationSignal.StopAssistantMessage(record.sessionId, record.agentId, event.commitIndex)
+                is AgentStopEvent.UnhandledError ->
+                    AgentNotificationSignal.StopUnhandledError(record.sessionId, record.agentId, event.message)
+            }
+            broker.publishNotification(notification, originHeaders)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            RepositoryLogger.warn(error) { "Cannot publish stop notification for Agent ${record.agentId}." }
         }
     }
 
@@ -501,14 +627,23 @@ public actual class SqliteKodexSessionRepository internal constructor(
             handles.forEach { residency.drainDetached(it) }
             withDbLock {
                 requireOpen()
-                val groupChanges = connection.transaction {
-                    val group = checkNotNull(connection.sessionCatalogGroup(rootId))
-                    onDeleteInTransaction(entryIndex)
-                    connection.execute("DELETE FROM sessions WHERE session_id = ?", listOf(entryIndex.toLong()))
-                    connection.recordSessionGroupMutation(group, null)
+                val (groupChanges, deletedIds, onSchedulesDeleted) = broker.publishAfterCommit(originHeaders) { signals ->
+                    connection.transaction {
+                        val group = checkNotNull(connection.sessionCatalogGroup(rootId))
+                        val deletedIds = agents.idsInSession(entryIndex)
+                        val onSchedulesDeleted = onDeleteInTransaction(entryIndex)
+                        connection.execute("DELETE FROM sessions WHERE session_id = ?", listOf(entryIndex.toLong()))
+                        signals.add(BackendSignalKeys.SessionGroups)
+                        for (id in deletedIds) {
+                            signals.add(BackendSignalKeys.agentDeleted(id))
+                            signals.add(BackendSignalKeys.agentAwaitDeadline(id))
+                        }
+                        Triple(connection.recordSessionGroupMutation(group, null), deletedIds, onSchedulesDeleted)
+                    }
                 }
+                onSchedulesDeleted()
                 publishGroupsCommitted(groupChanges)
-                mutableAwaitDeadlines.value -= agentIds.toSet()
+                mutableAwaitDeadlines.value -= deletedIds.toSet()
                 mutableEntries.value = inventory()
             }
         }
@@ -546,7 +681,7 @@ public actual class SqliteKodexSessionRepository internal constructor(
 private class SqliteSession(
     scope: CoroutineScope,
     override val sessionId: Int,
-    override val storage: MutableObservableKodexAgentStorage,
+    override val storage: SqliteAgentStorage,
     override val runtime: AgentRuntime,
 ) : KodexAgentSession, CoroutineScope by scope
 
@@ -612,6 +747,7 @@ internal suspend fun acquireDatabaseConnection(
 public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     root: Path,
     dependencies: KodexAgentDependencies,
+    broker: MqBroker,
     fileSystem: CoroutineFileSystem,
     sessionTtl: Duration,
     timeSource: TimeSource,
@@ -624,9 +760,7 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
             openVerifiedKodexDatabase(root, fileSystem, allowFresh = true, dispatcher = dispatcher)
         openedConnection.closeOnFailure({ withContext(dispatcher) { it.close() } }) { connection ->
             supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
-                val (initialEntries, initialDeadlines, agents) = withContext(dispatcher) {
-                    Triple(querySessionInventory(connection), queryAwaitDeadlines(connection), SqliteAgentRecords(connection))
-                }
+                val initialInventory = withContext(dispatcher) { readInventory(connection) }
                 currentCoroutineContext().ensureActive()
                 scope.coroutineContext.ensureActive()
                 SqliteKodexSessionRepository(
@@ -635,16 +769,15 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
                     dependencies = dependencies,
                     fileSystem = fileSystem,
                     connection = connection,
-                    agents = agents,
                     mutex = Mutex(),
                     dispatcher = dispatcher,
                     ownedDispatcher = dispatcher,
-                    initialEntries = initialEntries,
-                    initialDeadlines = initialDeadlines,
+                    initialInventory = initialInventory,
                     sessionTtl = sessionTtl,
                     origin = timeSource.markNow(),
                     onTurnActiveRenewal = onTurnActiveRenewal,
                     turnRenewalInterval = turnRenewalInterval,
+                    broker = broker,
                 )
             }
         }
@@ -656,44 +789,62 @@ public actual suspend fun CoroutineScope.SqliteKodexSessionRepository(
     connection: SqliteConnection,
     mutex: Mutex,
     dependencies: KodexAgentDependencies,
+    broker: MqBroker,
     fileSystem: CoroutineFileSystem,
     sessionTtl: Duration,
     timeSource: TimeSource,
     onTurnActiveRenewal: suspend () -> Unit,
     turnRenewalInterval: () -> Duration,
     dispatcher: CoroutineDispatcher,
-    onDeleteInTransaction: (sessionId: Int) -> Unit,
+    onDeleteInTransaction: (sessionId: Int) -> () -> Unit,
 ): SqliteKodexSessionRepository {
     require(sessionTtl.isPositive()) { "sessionTtl must be positive: $sessionTtl" }
     val resolvedRoot = fileSystem.resolve(root)
     return supervisorChildScope().closeOnFailure(CoroutineScope::cancelAndJoin) { scope ->
-        val (initialEntries, initialDeadlines, agents) = mutex.withLock {
+        mutex.withLock {
             withContext(dispatcher) {
                 requireKodexHomeDatabase(connection)
-                Triple(querySessionInventory(connection), queryAwaitDeadlines(connection), SqliteAgentRecords(connection))
+                val initialInventory = readInventory(connection)
+                currentCoroutineContext().ensureActive()
+                scope.coroutineContext.ensureActive()
+                SqliteKodexSessionRepository(
+                    scope = scope,
+                    root = resolvedRoot,
+                    dependencies = dependencies,
+                    fileSystem = fileSystem,
+                    connection = connection,
+                    mutex = mutex,
+                    dispatcher = dispatcher,
+                    initialInventory = initialInventory,
+                    sessionTtl = sessionTtl,
+                    origin = timeSource.markNow(),
+                    onTurnActiveRenewal = onTurnActiveRenewal,
+                    turnRenewalInterval = turnRenewalInterval,
+                    onDeleteInTransaction = onDeleteInTransaction,
+                    broker = broker,
+                )
             }
         }
-        currentCoroutineContext().ensureActive()
-        scope.coroutineContext.ensureActive()
-        SqliteKodexSessionRepository(
-            scope = scope,
-            root = resolvedRoot,
-            dependencies = dependencies,
-            fileSystem = fileSystem,
-            connection = connection,
-            agents = agents,
-            mutex = mutex,
-            dispatcher = dispatcher,
-            initialEntries = initialEntries,
-            initialDeadlines = initialDeadlines,
-            sessionTtl = sessionTtl,
-            origin = timeSource.markNow(),
-            onTurnActiveRenewal = onTurnActiveRenewal,
-            turnRenewalInterval = turnRenewalInterval,
-            onDeleteInTransaction = onDeleteInTransaction,
-        )
     }
 }
+
+private val RepositoryBindings = setOf(
+    BackendSignalKeys.SessionGroups,
+    BackendSignalKeys.AllAgentRunning,
+    BackendSignalKeys.AllAgentTimelines,
+    BackendSignalKeys.AllAgentAwaitDeadlines,
+    BackendSignalKeys.AllAgentDeleted,
+)
+
+internal data class RepositoryInventory(
+    val entries: List<Int>,
+    val deadlines: Map<Int, PendingAwaitDeadline>,
+    val groupNonces: Map<String?, Long>,
+)
+
+private fun readInventory(connection: SqliteConnection): RepositoryInventory = RepositoryInventory(
+    querySessionInventory(connection), queryAwaitDeadlines(connection), connection.readSessionGroupNonces(),
+)
 
 private const val RootCatalog = """
     SELECT root.session_id, root.completed, c.name, c.cwd, c.created_at, c.updated_at, c.root_agent_id
@@ -740,3 +891,4 @@ private fun decodeAwaitDeadline(agentId: Int, index: Int, payload: String): Pend
     }
 
 private val AwaitProjectionLogger = KotlinLogging.logger {}
+private val RepositoryLogger = KotlinLogging.logger {}

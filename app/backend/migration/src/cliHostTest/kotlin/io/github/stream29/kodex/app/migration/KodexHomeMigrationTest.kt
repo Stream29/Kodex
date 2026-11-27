@@ -21,7 +21,7 @@ public val kodexHomeMigrationTest by testSuite {
         assertEquals(MigrationVersion(GeneratedKodexApplicationVersion), version)
         assertSame(version, CurrentKodexApplicationVersion)
         assertEquals(
-            listOf(MigrationVersion("0.8.1"), MigrationVersion("0.9.0")),
+            listOf(MigrationVersion("0.8.1"), MigrationVersion("0.9.0"), MigrationVersion("0.9.1")),
             KodexHomeMigrations.map { it.toVersion },
         )
     }

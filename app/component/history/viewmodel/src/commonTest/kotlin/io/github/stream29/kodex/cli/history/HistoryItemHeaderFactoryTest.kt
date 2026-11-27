@@ -157,6 +157,7 @@ val historyItemHeaderFactoryTest by testSuite {
             }
             val storage = object : KodexAgentStorage {
                 override suspend fun latestIndex() = unexpectedRead()
+                override suspend fun cacheNonce() = unexpectedRead()
                 override suspend fun countCommitsIn(range: IntRange, types: Set<AgentCommitType>) = unexpectedRead()
                 override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int) =
                     unexpectedRead()

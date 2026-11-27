@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
@@ -468,6 +471,7 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
                     unified, root, root, Path(root, "codex"),
                     mockOpenAiClient { listModels { awaitCancellation() } }, credentials, preparer,
                     serviceFactory = { _, _ -> OAuthTestMcpService() },
+                    broker = InMemoryMqBroker(),
                 ) { global ->
                     val oauth = BackendOAuth(this, credentials, login, global.mcpManager) { duration ->
                         assertEquals(10.minutes, duration)
@@ -509,6 +513,7 @@ private class OAuthFixture(
         cancelInner = oauth::cancel,
         releaseInner = oauth::abandonPending,
         openListener = { _, _ -> listener },
+        streamService = InMemoryStreamService(),
     )
     suspend fun startAfterCleanup(target: OAuthTarget, redirect: String): OAuthAuthorization = withTimeout(5.seconds) {
         while (true) {

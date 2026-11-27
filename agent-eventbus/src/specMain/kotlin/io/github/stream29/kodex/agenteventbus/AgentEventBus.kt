@@ -1,28 +1,32 @@
 package io.github.stream29.kodex.agenteventbus
 
-import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
+import io.github.stream29.kodex.agentruntime.contract.PendingAwaitDeadline
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
+import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSubagentCreatedEvent
+import io.github.stream29.kodex.agentstorage.contract.ext.AskUserAlreadyAnswered
+import io.github.stream29.kodex.agentstorage.contract.ext.AskUserEntryNotFound
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
+import io.github.stream29.kodex.utils.mq.MqBroker
 
 /**
  * Backend-global event delivery bus enumerating all external wakeup paths into an Agent.
  *
- * Implementations hold [KodexSessionRepository], watch active Sessions for `PendingAwait`
- * background terminal completions, and route every submitted event through
- * [KodexSessionRepository.openAgent] (activating unloaded Agents and renewing residency TTL) into
- * `AgentRuntime.submit*`:
- * - [submitUserMessage] -> `StableUserMessage`
- * - [submitAskUserAnswer] -> atomic `AskUserSnapshot` + `StableAskUserEvent`
- * - [submitScheduleTrigger] -> `StableScheduleEvent`
- * - [submitSubagentCompletion] -> `StableSubagentCompletedEvent`
- * - watched terminal exits -> `StableTerminalExitedEvent`
+ * ID-addressed submissions go through [BackendMqQueues.AgentInbox] and await a Direct Reply-To
+ * confirmation. Consumers compete for deliveries and ordinarily resolve the target with
+ * [KodexSessionRepository.openAgent], activating unloaded Agents and renewing residency TTL.
+ * Deadline submissions open only a matching await. Captured-session operations and watched
+ * terminal exits stay local.
  *
- * Turn state inspection, background turn startup, and `stopEvents` emission remain owned by
- * `AgentRuntime` itself rather than duplicated in [AgentEventBus].
+ * Cancelling a submission stops waiting for its confirmation, not processing an already queued
+ * message. Consumer cancellation can cause redelivery of unsettled work. Turn execution and stop
+ * events remain owned by `AgentRuntime`.
  */
 public interface AgentEventBus {
+    /** Broker shared by the inbox and backend broadcast publishers and subscribers. */
+    public val broker: MqBroker
+
     /**
      * Delivers a user message (`StableUserMessage`) to [agentId].
      *
@@ -47,8 +51,8 @@ public interface AgentEventBus {
      * atomically queues the corresponding `StableAskUserEvent` into `SteerSnapshot`, waking
      * [agentId] when `runningTurn == null`.
      *
-     * @throws IllegalArgumentException if [askId] does not exist in [agentId]'s current `AskUserSnapshot`.
-     * @throws IllegalStateException if [askId] has already been answered.
+     * @throws AskUserEntryNotFound if [askId] does not exist in [agentId]'s current `AskUserSnapshot`.
+     * @throws AskUserAlreadyAnswered if [askId] has already been answered.
      */
     public suspend fun submitAskUserAnswer(
         agentId: Int,
@@ -64,12 +68,19 @@ public interface AgentEventBus {
         scheduleId: Long,
         description: String,
     )
+
+    /**
+     * Waits for the runtime's check of [expected] to finish. A stale deadline is acknowledged
+     * without waking the runtime or reopening an evicted Agent.
+     */
+    public suspend fun submitAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline)
 }
 
 /**
- * Creates an [AgentEventBus] backed by [repository] and attaches watched background terminal
- * exit observation onto [KodexSessionRepository.openSessions] in [repository]'s scope.
+ * Creates an [AgentEventBus] using [broker] and starts inbox consumption and watched terminal
+ * exit observation in [repository]'s scope.
  */
 public expect fun AgentEventBus(
     repository: KodexSessionRepository,
+    broker: MqBroker,
 ): AgentEventBus

@@ -424,7 +424,7 @@ private class AgentRuntimeImpl(
                 KodexAgentStateValue.AssistantMessage -> {
                     val latest = delegate.latestIndex.value
                     if (latest > before) {
-                        val message = delegate.storage.getLastCommitsIn(
+                        val indexed = delegate.storage.getLastCommitsIn(
                             (before + 1)..latest,
                             setOf(
                                 AgentCommitType.AssistantMessage,
@@ -432,9 +432,10 @@ private class AgentRuntimeImpl(
                                 AgentCommitType.AssistantMessageFinal,
                             ),
                             limit = 1,
-                        ).lastOrNull()?.commit as? StableAssistantMessage
-                        if (message != null) {
-                            mutableStopEvents.tryEmit(AgentStopEvent.AssistantMessage(message))
+                        ).lastOrNull()
+                        val message = indexed?.commit as? StableAssistantMessage
+                        if (indexed != null && message != null) {
+                            mutableStopEvents.tryEmit(AgentStopEvent.AssistantMessage(message, commitIndex = indexed.index))
                         }
                     }
                 }

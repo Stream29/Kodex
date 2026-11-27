@@ -12,19 +12,15 @@ import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
-import io.github.stream29.kodex.agentsession.contract.ScopedObservableAgentStorage
 import io.github.stream29.kodex.agentsession.contract.SessionResidencyTable
 import io.github.stream29.kodex.agentsession.contract.StoredAgent
 import io.github.stream29.kodex.agentsession.contract.pendingDeadline
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.SteerSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.UnstableSnapshot
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingAwait
-import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.getCommitAtOrBefore
 import io.github.stream29.kodex.agentstorage.contract.getCommitExact
@@ -47,12 +43,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration
-import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
@@ -88,7 +84,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
 
     actual override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
     actual override val openSessions: StateFlow<Map<Int, KodexAgentSession>> = residency.openSessions
-    override val pendingAwaitDeadlines: StateFlow<Map<Int, PendingAwaitDeadline>> = mutableAwaitDeadlines.asStateFlow()
+    actual override val pendingAwaitDeadlines: StateFlow<Map<Int, PendingAwaitDeadline>> = mutableAwaitDeadlines.asStateFlow()
     actual override val stopEvents: Flow<IndexedAgentStopEvent> = mutableStopEvents.asSharedFlow()
 
     init {
@@ -149,7 +145,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
     actual override suspend fun create(): Int = entriesMutex.withLock {
         requireOpen()
         val index = nextSessionIndex()
-        check(sessions.put(index, SessionNode(trackedStorage(index))) == null)
+        check(sessions.put(index, SessionNode(InMemoryKodexAgentStorage.empty(index))) == null)
         mutableEntries.value = (entries.value + index).sorted()
         index
     }
@@ -209,6 +205,14 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         if (agentId in sessions) openRootLocked(agentId) else null
     }
 
+    actual override suspend fun openForAwaitDeadline(
+        agentId: Int,
+        expected: PendingAwaitDeadline,
+    ): KodexAgentSession? = entriesMutex.withLock {
+        if (mutableAwaitDeadlines.value[agentId] != expected || agentId !in sessions) return@withLock null
+        openRootLocked(agentId)
+    }
+
     actual override suspend fun open(entryIndex: Int): KodexAgentSession = entriesMutex.withLock {
         openRootLocked(entryIndex)
     }
@@ -220,11 +224,14 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         residency.reuseOrCleanupLocked(entryIndex)?.let { return it }
         val storageScope = CoroutineScope(coroutineContext.minusKey(Job) + SupervisorJob())
         val sessionScope = supervisorChildScope()
-        val storage = ScopedObservableAgentStorage(
-            owner = storageScope,
-            source = root.storage,
-            initialLatestIndex = root.storage.latestIndex(),
-            closedMessage = "AgentSession timeline is closed.",
+        val storage = root.storage.withAccess(
+            requireAccess = {
+                check(storageScope.isActive && !root.deleted.value) { "AgentSession timeline is closed." }
+            },
+            onUnstableChanged = { snapshot ->
+                val deadline = snapshot?.let { (it.commit as UnstableSnapshot).pendingDeadline(entryIndex, it.index) }
+                mutableAwaitDeadlines.update { if (deadline == null) it - entryIndex else it + (entryIndex to deadline) }
+            },
         )
         return try {
             val runtime = sessionScope.KodexAgentState(
@@ -266,7 +273,11 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         val handle = entriesMutex.withLock {
             requireOpen()
             require(entryIndex >= 0) { "Session entry index must be non-negative." }
-            requireSession(entryIndex).storage.detach()
+            val root = requireSession(entryIndex)
+            root.deleted.value = true
+            // Wait for writes that already passed the access guard before removing the deadline.
+            withContext(NonCancellable) { root.storage.latestIndex() }
+            mutableAwaitDeadlines.update { it - entryIndex }
             sessions.remove(entryIndex)
             mutableEntries.value = entries.value - entryIndex
             residency.detachLocked(entryIndex)
@@ -291,15 +302,10 @@ public actual class InMemoryKodexSessionRepository internal constructor(
         check(coroutineContext[Job]?.isActive == true) { "Session repository is closed." }
     }
 
-    private fun trackedStorage(agentId: Int): DeadlineTrackingStorage =
-        DeadlineTrackingStorage(agentId, InMemoryKodexAgentStorage.empty(agentId)) { deadline ->
-            mutableAwaitDeadlines.update { if (deadline == null) it - agentId else it + (agentId to deadline) }
-        }
-
     private fun forkStorage(
         agentId: Int,
         commits: List<IndexedAgentCommit>,
-    ): DeadlineTrackingStorage {
+    ): InMemoryKodexAgentStorage {
         val filtered = commits.mapNotNull { row ->
             val commit = when (val original = row.commit) {
                 is SteerSnapshot -> SteerSnapshot(emptyList())
@@ -310,10 +316,7 @@ public actual class InMemoryKodexSessionRepository internal constructor(
             }
             commit?.let { row.copy(commit = it) }
         }
-        val source = InMemoryKodexAgentStorage.importCommits(agentId, filtered)
-        return DeadlineTrackingStorage(agentId, source) { deadline ->
-            mutableAwaitDeadlines.update { if (deadline == null) it - agentId else it + (agentId to deadline) }
-        }
+        return InMemoryKodexAgentStorage.importCommits(agentId, filtered)
     }
 }
 
@@ -344,41 +347,10 @@ public actual fun CoroutineScope.InMemoryKodexSessionRepository(
 }
 
 private class SessionNode(
-    val storage: DeadlineTrackingStorage,
+    val storage: InMemoryKodexAgentStorage,
 ) {
+    val deleted = MutableStateFlow(false)
     var archived: Boolean = false
-}
-
-private class DeadlineTrackingStorage(
-    override val agentId: Int,
-    private val source: InMemoryKodexAgentStorage,
-    private val publish: (PendingAwaitDeadline?) -> Unit,
-) : MutableKodexAgentStorage by source {
-    private val writeMutex = Mutex()
-    private var detached = false
-
-    override suspend fun commit(commit: AgentCommit): Int = commit(listOf(commit))
-    override suspend fun commit(commit: AgentCommit, timestamp: Instant): Int = commit(listOf(commit), timestamp)
-    override suspend fun commit(commits: List<AgentCommit>): Int = commit(commits, Clock.System.now())
-
-    override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int = writeMutex.withLock {
-        check(!detached) { "Agent storage was deleted." }
-        val index = source.commit(commits, timestamp)
-        commits.firstNotNullOfOrNull { it as? UnstableSnapshot }?.let { publish(it.pendingDeadline(agentId, index)) }
-        index
-    }
-
-    override suspend fun revert(untilExclusive: Int): Unit = writeMutex.withLock {
-        check(!detached) { "Agent storage was deleted." }
-        source.revert(untilExclusive)
-        val index = source.getCommitAtOrBefore(source.latestIndex(), AgentCommitType.UnstableTypes)
-        publish(index?.let { (it.commit as UnstableSnapshot).pendingDeadline(agentId, it.index) })
-    }
-
-    suspend fun detach(): Unit = writeMutex.withLock {
-        detached = true
-        publish(null)
-    }
 }
 
 private suspend fun SessionNode.toEntry(

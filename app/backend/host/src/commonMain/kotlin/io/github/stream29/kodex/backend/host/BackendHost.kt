@@ -2,6 +2,9 @@
 
 package io.github.stream29.kodex.backend.host
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import io.github.stream29.kodex.app.migration.CurrentKodexApplicationVersion
 import io.github.stream29.kodex.app.migration.KodexHomeHandle
 import io.github.stream29.kodex.app.migration.preflightKodexHome
@@ -176,6 +179,8 @@ internal suspend fun runBackendHostWithClock(
                                 check(lifecycle.state.value == BackendPhase.Ready) { "Backend business admission is closed." }
                             },
                             clock = clock,
+                            broker = InMemoryMqBroker(),
+                            streamService = InMemoryStreamService(),
                         ) { backend ->
                             try {
                                 services = backend

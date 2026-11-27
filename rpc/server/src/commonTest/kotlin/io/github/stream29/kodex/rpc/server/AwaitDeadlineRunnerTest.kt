@@ -1,9 +1,12 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agenteventbus.AgentEventBus
 import io.github.stream29.kodex.agentruntime.contract.submitUserMessage
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -86,12 +89,12 @@ val awaitDeadlineRunnerTest by testSuite(
                     }
                 }, clock).use { dependencies ->
                     fun persistence() = LazySqliteBackendPersistence(
-                        this, home, dependencies, {}, { 20.seconds }, {}, sessionTtl = 1200.milliseconds,
+                        this, home, dependencies, {}, { 20.seconds }, {}, sessionTtl = 1200.milliseconds, broker = InMemoryMqBroker(),
                     )
                     val first = persistence()
                     val agentId = try {
                         val repository = first.acquire().first
-                        first.startAwaitDeadlineRunner()
+                        first.startAwaitDeadlineRunner(AgentEventBus(first.sessionRepository, InMemoryMqBroker()))
                         val sessionId = repository.create()
                         val rootId = repository.getRootAgentId(sessionId)
                         val id = repository.createChild(rootId).agentId
@@ -119,7 +122,7 @@ val awaitDeadlineRunnerTest by testSuite(
                         assertTrue(repository.openSessions.value.isEmpty())
                         assertEquals(origin + 90.seconds, repository.pendingAwaitDeadlines.value.getValue(agentId).timeoutAt)
                         failNext.value = true
-                        second.startAwaitDeadlineRunner()
+                        second.startAwaitDeadlineRunner(AgentEventBus(second.sessionRepository, InMemoryMqBroker()))
                         transientSeen.await()
                         val session = repository.openSessions.first { agentId in it }.getValue(agentId)
                         session.runtime.state.first { it == KodexAgentStateValue.AssistantMessage }
@@ -170,11 +173,11 @@ val awaitDeadlineRunnerTest by testSuite(
                     }
                 }, clock).use { dependencies ->
                     val backend = LazySqliteBackendPersistence(
-                        this, home, dependencies, {}, { 20.seconds }, {},
+                        this, home, dependencies, {}, { 20.seconds }, {}, broker = InMemoryMqBroker(),
                     )
                     try {
                         val (repository) = backend.acquire()
-                        backend.startAwaitDeadlineRunner()
+                        backend.startAwaitDeadlineRunner(AgentEventBus(backend.sessionRepository, InMemoryMqBroker()))
                         val sessionIds = List(2) { repository.create() }
                         val ids = sessionIds.map { repository.getRootAgentId(it) }
                         val sessions = sessionIds.map { id ->

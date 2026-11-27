@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
@@ -61,7 +63,8 @@ internal val scheduleRunnerRepositoryTest by testSuite(compartment = { TestCompa
                     }
                 }
                 testKodexAgentDependencies(client, clock).use { dependencies ->
-                    val backend = LazySqliteBackendPersistence(this, home, dependencies, {}, { 20.seconds }, {})
+                    val broker = InMemoryMqBroker()
+                    val backend = LazySqliteBackendPersistence(this, home, dependencies, {}, { 20.seconds }, {}, broker = broker)
                     try {
                         val (sessions, schedules) = backend.acquire()
                         val sessionId = sessions.create()
@@ -78,7 +81,7 @@ internal val scheduleRunnerRepositoryTest by testSuite(compartment = { TestCompa
                         }
                         setCreatedAt("malformed fixture timestamp")
                         observeAttempts.value = true
-                        backend.startScheduleRunner(AgentEventBus(backend.sessionRepository))
+                        backend.startScheduleRunner(AgentEventBus(backend.sessionRepository, broker))
                         // Each attempt reads the clock to wake and select due rows.
                         // The third read is already a second attempt, before we repair the row.
                         dueReads.first { it >= 3 }

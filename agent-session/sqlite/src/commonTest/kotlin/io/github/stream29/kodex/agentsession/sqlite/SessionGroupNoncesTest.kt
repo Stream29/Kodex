@@ -13,7 +13,7 @@ import kotlin.test.assertEquals
 val sessionGroupNoncesTest by testSuite {
     test("only affected group watchers change; removing a pre-existing untouched group is still observable") {
         runTest {
-            val notifier = SessionGroupNonces()
+            val notifier = SessionGroupNonces(mapOf(null to 7L))
             val groups = mutableListOf<Long>()
             val unset = mutableListOf<Long>()
             val folder = mutableListOf<Long>()
@@ -21,12 +21,12 @@ val sessionGroupNoncesTest by testSuite {
             val unsetWatch = launch { notifier.group(null).collect { unset += it } }
             val folderWatch = launch { notifier.group("/a").collect { folder += it } }
             runCurrent()
-            notifier.committed(mapOf("/a" to true), emptyMap())
+            notifier.committed(mapOf("/a" to 8L), emptyMap())
             runCurrent()
             assertEquals(listOf(0L, 1L), groups)
             assertEquals(listOf(0L, 1L), folder)
             assertEquals(listOf(0L), unset)
-            notifier.committed(mapOf(null to false), emptyMap())
+            notifier.committed(mapOf(null to null), emptyMap())
             runCurrent()
             assertEquals(listOf(0L, 1L, 2L), groups)
             assertEquals(listOf(0L, 2L), unset)
@@ -40,7 +40,7 @@ val sessionGroupNoncesTest by testSuite {
 
     test("running rows always update; a second running root in the same group leaves the heads alone") {
         runTest {
-            val notifier = SessionGroupNonces()
+            val notifier = SessionGroupNonces(emptyMap())
             val groups = mutableListOf<Long>()
             val page = mutableListOf<Long>()
             val listWatch = launch { notifier.groups.collect { groups += it } }
@@ -58,6 +58,26 @@ val sessionGroupNoncesTest by testSuite {
             assertEquals(listOf(0L, 1L, 2L, 3L, 4L), page)
             pageWatch.cancelAndJoin()
             listWatch.cancelAndJoin()
+        }
+    }
+
+    test("remote reconciliation invalidates only groups with a changed nonce or aggregate running state") {
+        runTest {
+            val notifier = SessionGroupNonces(mapOf(null to 1L, "/a" to 2L, "/b" to 3L))
+            notifier.reconcile(mapOf(null to 1L, "/a" to 4L, "/b" to 3L), mapOf(1 to "/b"))
+            assertEquals(1L, notifier.groups.first())
+            assertEquals(0L, notifier.group(null).first())
+            assertEquals(1L, notifier.group("/a").first())
+            assertEquals(1L, notifier.group("/b").first())
+
+            notifier.reconcile(mapOf(null to 1L, "/a" to 4L, "/b" to 3L), mapOf(2 to "/b"))
+            assertEquals(1L, notifier.groups.first())
+            assertEquals(1L, notifier.group("/b").first())
+
+            notifier.reconcile(mapOf(null to 1L, "/a" to 4L, "/b" to 3L), emptyMap())
+            assertEquals(2L, notifier.groups.first())
+            assertEquals(1L, notifier.group("/a").first())
+            assertEquals(2L, notifier.group("/b").first())
         }
     }
 }

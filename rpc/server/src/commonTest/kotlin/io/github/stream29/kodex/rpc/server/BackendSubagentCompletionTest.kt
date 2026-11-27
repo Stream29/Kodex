@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agenteventbus.AgentEventBus
@@ -58,7 +61,7 @@ val backendSubagentCompletionTest by testSuite(compartment = { TestCompartment.R
             val repo = repository as SqliteKodexSessionRepository
             val parent = checkNotNull(repo.openAgent(rootId))
             val (childId, child) = repo.initializedChild(rootId)
-            val backend = BackendAgentRuntimeRpc(repo, markChildCompleted = repo::markChildCompleted)
+            val backend = BackendAgentRuntimeRpc(repo, AgentEventBus(repo, InMemoryMqBroker()), InMemoryStreamService(), markChildCompleted = repo::markChildCompleted)
             withInMemoryRpc(registerServices = { registerService(AgentRuntimeRpc::class) { backend } }) { raw ->
                 val rpc = RestoringRpcClient(raw).withService<AgentRuntimeRpc>()
                 rpc.submit(rootId, listOf(ContentItem.InputText("parent task")))
@@ -128,7 +131,7 @@ val backendSubagentCompletionTest by testSuite(compartment = { TestCompartment.R
                 val repo = repository as SqliteKodexSessionRepository
                 val (parentId, parent) = repo.initializedChild(rootId)
                 val (childId, _) = repo.initializedChild(parentId)
-                val rpc = BackendAgentRuntimeRpc(repo, markChildCompleted = repo::markChildCompleted)
+                val rpc = BackendAgentRuntimeRpc(repo, AgentEventBus(repo, InMemoryMqBroker()), InMemoryStreamService(), markChildCompleted = repo::markChildCompleted)
                 parent.runtime.appendUserMessage(listOf(ContentItem.InputText("initial work")))
                 rpc.resume(parentId)
                 assertFalse(rpc.getRunningTurn(parentId))
@@ -149,7 +152,7 @@ val backendSubagentCompletionTest by testSuite(compartment = { TestCompartment.R
             val repo = repository as SqliteKodexSessionRepository
             val (childId, _) = repo.initializedChild(rootId)
             var attempts = 0
-            val eventBus = object : AgentEventBus by AgentEventBus(repo) {
+            val eventBus = object : AgentEventBus by AgentEventBus(repo, InMemoryMqBroker()) {
                 override suspend fun submitSubagentCompletion(parentAgentId: Int, childAgentId: Int) {
                     assertEquals(rootId, parentAgentId)
                     assertEquals(childId, childAgentId)
@@ -157,7 +160,7 @@ val backendSubagentCompletionTest by testSuite(compartment = { TestCompartment.R
                     error("Fixture parent write failure")
                 }
             }
-            val backend = BackendAgentRuntimeRpc(repo, eventBus, markChildCompleted = repo::markChildCompleted)
+            val backend = BackendAgentRuntimeRpc(repo, eventBus, InMemoryStreamService(), markChildCompleted = repo::markChildCompleted)
             withInMemoryRpc(registerServices = { registerService(AgentRuntimeRpc::class) { backend } }) { raw ->
                 val rpc = RestoringRpcClient(raw).withService<AgentRuntimeRpc>()
                 assertFailsWith<SubagentCompletionNoticeFailed> { rpc.completeAgent(childId) }

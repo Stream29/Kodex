@@ -7,6 +7,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.concurrent.atomics.AtomicLong
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 /** Sanitized terminal outcome; it never retains a callback, authorization URL or credential. */
 internal enum class OAuthAttemptOutcome { Committed, Failed, TimedOut, Cancelled, Released, BackendStopped }
@@ -29,7 +31,6 @@ internal class BackendOAuthAttemptRegistry(
     internal enum class Phase { Preparing, Waiting, Accepted, Cleaning }
     private val mutex = Mutex()
     private val entries = mutableMapOf<Long, Attempt>()
-    private var nextId = 1L
     private var closed = false
 
     init {
@@ -43,8 +44,7 @@ internal class BackendOAuthAttemptRegistry(
         check(entries.values.none { it.target == target }) {
             "This target is already authorizing."
         }
-        check(nextId < Long.MAX_VALUE) { "OAuth attempt identities are exhausted." }
-        Attempt(nextId++, target).also { entries[it.id] = it }
+        Attempt(allocateOAuthAttemptId(), target).also { entries[it.id] = it }
     }
 
     suspend fun waiting(attempt: Attempt): Boolean = mutex.withLock {
@@ -125,5 +125,18 @@ internal class BackendOAuthAttemptRegistry(
         attempt.phase = Phase.Cleaning
         attempt.terminal = outcome
         attempt.result.complete(outcome)
+    }
+}
+
+// Separate backend graphs may borrow the same process-local StreamService.
+@OptIn(ExperimentalAtomicApi::class)
+private val lastOAuthAttemptId = AtomicLong(0)
+
+@OptIn(ExperimentalAtomicApi::class)
+private fun allocateOAuthAttemptId(): Long {
+    while (true) {
+        val previous = lastOAuthAttemptId.load()
+        check(previous < Long.MAX_VALUE) { "OAuth attempt identities are exhausted." }
+        if (lastOAuthAttemptId.compareAndSet(previous, previous + 1)) return previous + 1
     }
 }

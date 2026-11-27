@@ -6,7 +6,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.AgentCommitType
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.IndexedAgentCommit
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.MutableObservableKodexAgentStorage
+import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Instant
 
 /**
@@ -15,16 +16,29 @@ import kotlin.time.Instant
 public expect class InMemoryKodexAgentStorage(
     initialSettings: KodexAgentSettings,
     agentId: Int? = null,
-) : MutableKodexAgentStorage {
+) : MutableObservableKodexAgentStorage {
     override val agentId: Int?
+    override val cacheNonce: StateFlow<Long>
+    override val latestIndexFlow: StateFlow<Int>
 
     override suspend fun latestIndex(): Int
+    override suspend fun cacheNonce(): Long
     override suspend fun countCommitsIn(range: IntRange, types: Set<AgentCommitType>): Int
     override suspend fun getFirstCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit>
     override suspend fun getLastCommitsIn(range: IntRange, types: Set<AgentCommitType>, limit: Int): List<IndexedAgentCommit>
     override suspend fun commit(commits: List<AgentCommit>): Int
     override suspend fun commit(commits: List<AgentCommit>, timestamp: Instant): Int
     override suspend fun revert(untilExclusive: Int)
+
+    /**
+     * Opens a handle sharing this timeline, nonce and tail, with an additional access guard.
+     * [onUnstableChanged] runs under the storage lock after a write affecting the visible
+     * unstable snapshot. It must not throw or reenter storage.
+     */
+    public fun withAccess(
+        requireAccess: () -> Unit,
+        onUnstableChanged: (IndexedAgentCommit?) -> Unit = {},
+    ): InMemoryKodexAgentStorage
 
     public companion object {
         /** Creates the uninitialized storage backing a freshly spawned AgentSession. */

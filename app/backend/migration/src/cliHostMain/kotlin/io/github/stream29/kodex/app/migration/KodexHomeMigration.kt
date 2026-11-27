@@ -189,7 +189,6 @@ internal suspend fun CoroutineScope.prepareKodexHome(
                 writeLease.coroutineContext.ensureActive()
                 migrateRecentHomeDatabase(home, source, attempt, fileSystem)
                 requireRecentUpgradeTargetHeader(home, fileSystem)
-                requireHomeDatabaseSchema(home)
                 writeLease.coroutineContext.ensureActive()
                 writeHomeMarker(home, RecentHomeUpgradeTarget, fileSystem)
                 applyHomeMigrations(home, RecentHomeUpgradeTarget, currentVersion, migrations, fileSystem, onMigrationStarted)

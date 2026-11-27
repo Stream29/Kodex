@@ -4,7 +4,8 @@ import io.github.stream29.kodex.app.migration.HomeDatabaseFile
 import io.github.stream29.kodex.app.migration.incompatibleHome
 import io.github.stream29.kodex.app.migration.isDirectEntry
 import io.github.stream29.kodex.app.migration.requireHomeDatabaseHeader
-import io.github.stream29.kodex.app.migration.requireHomeDatabaseSchema
+import io.github.stream29.kodex.app.migration.inspectHomeRead
+import io.github.stream29.kodex.app.migration.requireFrozenHomeSchema
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.sqlite.openExistingSqliteConnection
 import kotlinx.coroutines.Dispatchers
@@ -75,7 +76,7 @@ internal suspend fun dropForkContextRecoveryTable(home: Path, fileSystem: Corout
             }
         }
     }
-    requireHomeDatabaseSchema(home)
+    requireV4Database(home)
 }
 
 internal suspend fun retireLegacyKodexHomeSkill(home: Path, fileSystem: CoroutineFileSystem) {
@@ -95,7 +96,7 @@ internal suspend fun retireLegacyKodexHomeSkill(home: Path, fileSystem: Coroutin
 internal suspend fun retireSessionFileMirrors(home: Path, fileSystem: CoroutineFileSystem) {
     // Verify the SQLite source of truth before touching or enumerating sessions/.
     requireHomeDatabaseHeader(home, fileSystem)
-    requireHomeDatabaseSchema(home)
+    requireV4Database(home)
 
     val sessionsDir = Path(home, SessionsDirectoryName)
     if (!isDirectDirectory(sessionsDir, fileSystem)) return
@@ -108,6 +109,16 @@ internal suspend fun retireSessionFileMirrors(home: Path, fileSystem: CoroutineF
     }
 
     deleteDirectoryIfEmpty(sessionsDir, fileSystem)
+}
+
+private suspend fun requireV4Database(home: Path) {
+    inspectHomeRead(home, "Unable to validate the Kodex Home database") {
+        withContext(Dispatchers.IO) {
+            openExistingSqliteConnection(Path(home, HomeDatabaseFile)).use {
+                it.requireFrozenHomeSchema(TargetSchemaVersion.toInt())
+            }
+        }
+    }
 }
 
 private suspend fun cleanRootSessionDirectory(sessionDir: Path, fileSystem: CoroutineFileSystem) {

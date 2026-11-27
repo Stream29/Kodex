@@ -120,6 +120,9 @@ public interface KodexSessionRepository : CoroutineScope {
     /** Opens or renews an exact Agent; returns null if it does not exist. */
     public suspend fun openAgent(agentId: Int): KodexAgentSession?
 
+    /** Opens or renews the Agent only if [expected] is still its armed await deadline. */
+    public suspend fun openForAwaitDeadline(agentId: Int, expected: PendingAwaitDeadline): KodexAgentSession?
+
     /**
      * Lists root Session catalog metadata.
      *

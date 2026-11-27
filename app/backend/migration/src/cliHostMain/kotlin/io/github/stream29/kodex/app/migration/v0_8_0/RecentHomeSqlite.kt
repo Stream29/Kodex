@@ -1,8 +1,9 @@
 package io.github.stream29.kodex.app.migration.v0_8_0
 
-import io.github.stream29.kodex.agentstorage.sqlite.initializeKodexHomeDatabase
 import io.github.stream29.kodex.agentstorage.sqlite.recomputeSessionCatalog
-import io.github.stream29.kodex.agentstorage.sqlite.requireKodexHomeDatabase
+import io.github.stream29.kodex.app.migration.RecentUpgradeSchemaVersion
+import io.github.stream29.kodex.app.migration.initializeFrozenHomeSchema
+import io.github.stream29.kodex.app.migration.requireFrozenHomeSchema
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 import kotlinx.io.files.Path
 
@@ -20,7 +21,8 @@ internal fun upgradeRecentHomeDatabase(target: SqliteConnection, sourceSnapshot:
     check(target.query("PRAGMA foreign_keys") == listOf(listOf(1L))) {
         "Recent Home migration requires SQLite foreign-key enforcement."
     }
-    initializeKodexHomeDatabase(target)
+    // The marker is 0.8.0, so the candidate must be a valid input for the 0.8.1 step.
+    target.initializeFrozenHomeSchema(RecentUpgradeSchemaVersion)
     target.execute("ATTACH DATABASE ? AS recent_source", listOf(sourceSnapshot.toString()))
     var primary: Throwable? = null
     try {
@@ -38,7 +40,7 @@ internal fun upgradeRecentHomeDatabase(target: SqliteConnection, sourceSnapshot:
                     "Unexpected row count after copying recent Home $table."
                 }
             }
-            requireKodexHomeDatabase(target)
+            target.requireFrozenHomeSchema(RecentUpgradeSchemaVersion)
             target.requireRecentHomeIntegrity("main")
         }
     } catch (failure: Throwable) {

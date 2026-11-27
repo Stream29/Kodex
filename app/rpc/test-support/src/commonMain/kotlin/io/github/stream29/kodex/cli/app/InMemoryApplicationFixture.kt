@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import io.github.stream29.kodex.app.migration.KodexHomeHandle
 import io.github.stream29.kodex.cli.notification.collectNotificationHooks
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
@@ -44,6 +47,8 @@ public actual suspend fun <R> withKodexApplication(
             homeHandle.home, resolveAllowingMissing(codexDirectory), resolveAllowingMissing(agentsDirectory),
             createClient = createClient, createLoginClient = createLoginClient,
             requiresPreparedHome = true,
+            broker = InMemoryMqBroker(),
+            streamService = InMemoryStreamService(),
         ) { backend ->
             onPhase(ApplicationStartupPhase.BackendReady)
             val hooksOwner = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[Job]))

@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.app.webbackendfixture
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.*
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentsession.sqlite.SqliteKodexSessionRepository
@@ -17,7 +19,7 @@ import kotlin.time.Instant
 /** Seed one persisted root and child. No fixture-only renderer, RPC method, or UI actions. */
 internal suspend fun CoroutineScope.seedSidebarHistoryIndexFixture(home: Path) {
     prepareKodexHome(home).closeAndJoin()
-    val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies())
+    val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies(), InMemoryMqBroker())
     try {
         val sessionId = repository.create()
         val rootId = repository.getRootAgentId(sessionId)

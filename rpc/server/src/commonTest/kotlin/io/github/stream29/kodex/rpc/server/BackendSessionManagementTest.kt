@@ -360,8 +360,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             assertFailsWith<AgentNotActive> { management.forkAgentHistory(agentId, 1, nonce) }
             assertFailsWith<AgentNotFound> { management.forkAgent(agentId + 999) }
             assertFailsWith<AgentNotFound> { management.forkAgentHistory(agentId + 999, 1, nonce) }
-            repository.open(index)
-            assertFailsWith<CacheNonceMismatch> { management.forkAgentHistory(agentId, 1, nonce) }
+            assertEquals(nonce, repository.open(index).storage.cacheNonce())
             assertEquals(listOf(index), repository.entries.value)
         }
     }

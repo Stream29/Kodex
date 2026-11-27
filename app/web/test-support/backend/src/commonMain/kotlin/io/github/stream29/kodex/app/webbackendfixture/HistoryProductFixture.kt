@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.app.webbackendfixture
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.test.seedTestHistory
 import io.github.stream29.kodex.app.test.testSettings
@@ -45,7 +47,7 @@ internal suspend fun CoroutineScope.seedHistoryProductFixture(home: Path) {
     )
     events[1269] = StableAssistantMessage(listOf(ContentItem.OutputText("HISTORY_MANY_LATEST")))
     seedTestHistory(home, "History many fixture", events)
-    val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies())
+    val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies(), InMemoryMqBroker())
     try {
         val session = repository.create()
         repository.open(session).runtime.modify { storage ->
@@ -70,7 +72,7 @@ internal fun historyProductStreamParts(): List<String> =
 /** Record current command intents before a browser reopens the Session. */
 internal suspend fun CoroutineScope.seedCommandIntentReopenFixture(home: Path) {
     prepareKodexHome(home).closeAndJoin()
-    val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies())
+    val repository = SqliteKodexSessionRepository(home, testKodexAgentDependencies(), InMemoryMqBroker())
     try {
         val session = repository.create()
         repository.open(session).runtime.modify { storage ->

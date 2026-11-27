@@ -9,6 +9,7 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
+                api(project(":agent-eventbus"))
                 api(project(":agent-schedule-contract"))
                 api(project(":utils-sqlite"))
                 api(libs.kotlinx.coroutines.core)

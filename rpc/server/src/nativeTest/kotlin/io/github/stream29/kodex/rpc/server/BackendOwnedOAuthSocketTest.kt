@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.utils.stream.InMemoryStreamService
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
@@ -38,6 +40,7 @@ val backendOwnedOAuthSocketTest by testSuite(compartment = { TestCompartment.Rea
                     complete = { _, callback -> callbacks += callback },
                     cancelInner = {},
                     releaseInner = {},
+                    streamService = InMemoryStreamService(),
                 )
                 val client = HttpClient(CIO) { expectSuccess = false }
                 try {

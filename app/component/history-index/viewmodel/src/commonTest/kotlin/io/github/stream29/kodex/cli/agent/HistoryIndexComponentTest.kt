@@ -240,6 +240,7 @@ private class IndexPorts(production: Boolean = true) : HistoryIndexDependencies 
     val timestamp = FakeTimeline<Instant>()
     override val storage: KodexAgentStorage = object : KodexAgentStorage {
         override suspend fun latestIndex(): Int = latestIndex.value
+        override suspend fun cacheNonce(): Long = 1L
         override suspend fun countCommitsIn(range: IntRange, types: Set<AgentCommitType>): Int = 0
         override suspend fun getFirstCommitsIn(
             range: IntRange,

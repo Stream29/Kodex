@@ -41,6 +41,9 @@ public interface KodexAgentStorage {
     /** Returns the greatest state index stored in this storage, or `-1` when empty. */
     public suspend fun latestIndex(): Int
 
+    /** Returns the current cache identity; appends preserve it and destructive reverts change it. */
+    public suspend fun cacheNonce(): Long
+
     /**
      * Returns the number of commits stored in [range] whose type is in [types],
      * without decoding commit payloads.

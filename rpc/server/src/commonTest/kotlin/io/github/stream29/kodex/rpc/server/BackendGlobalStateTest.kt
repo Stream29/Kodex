@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.utils.mq.InMemoryMqBroker
+
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
@@ -236,6 +238,7 @@ val backendGlobalStateTest by testSuite(testConfig = TestConfig.testScope(isEnab
                 InMemoryOpenAiAuthStore(OpenAiSubscriptionAuthState("test-token")),
                 tokenRefresher = { error("No initialized credentials in this test.") },
                 loginPreparer = { error("No login in this test.") },
+                broker = InMemoryMqBroker(),
             ) { global ->
                 global.mcpServers.first { it.singleOrNull()?.enabled == false }
                 assertTrue(global.mcpService.clients.value.isEmpty())
@@ -274,6 +277,7 @@ private suspend fun withGlobalFixture(
             InMemoryOpenAiAuthStore(OpenAiSubscriptionAuthState("test-token")),
             loginPreparer = { error("No browser login in this fixture.") },
             serviceFactory = { _, _ -> service },
+            broker = InMemoryMqBroker(),
         ) { global -> block(global, service, fs, root) }
         assertTrue(service.closed)
     } finally {

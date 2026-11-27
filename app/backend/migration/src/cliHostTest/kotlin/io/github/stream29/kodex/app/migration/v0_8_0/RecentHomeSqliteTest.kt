@@ -3,10 +3,11 @@ package io.github.stream29.kodex.app.migration.v0_8_0
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.sqlite.initializeKodexHomeDatabase
 import io.github.stream29.kodex.agentstorage.sqlite.requireEmptyKodexHomeDatabase
-import io.github.stream29.kodex.agentstorage.sqlite.requireKodexHomeDatabase
+import io.github.stream29.kodex.app.migration.RecentUpgradeSchemaVersion
 import io.github.stream29.kodex.app.migration.deleteTestHome
 import io.github.stream29.kodex.app.migration.homeTestFileSystem
 import io.github.stream29.kodex.app.migration.newTestHome
+import io.github.stream29.kodex.app.migration.requireFrozenHomeSchema
 import io.github.stream29.kodex.utils.sqlite.SqliteConnection
 import io.github.stream29.kodex.utils.sqlite.openExistingSqliteConnection
 import io.github.stream29.kodex.utils.sqlite.openInMemorySqliteConnection
@@ -48,7 +49,7 @@ public val recentHomeSqliteTest by testSuite {
     }
 
     testFixture { newTestHome() } closeWith { deleteTestHome(this) } asParameterForEach {
-        test("copies identities, history keys, schedules, and high-water marks into the exact current schema") { directory ->
+        test("copies identities, history keys, schedules, and high-water marks into the frozen 0.8.0 schema") { directory ->
             val source = Path(directory, "private ' snapshot.db")
             val target = Path(directory, "staging.db")
             source.newStandaloneDatabase { old ->
@@ -76,11 +77,7 @@ public val recentHomeSqliteTest by testSuite {
             }
             target.newStandaloneDatabase { db ->
                 upgradeRecentHomeDatabase(db, source)
-                requireKodexHomeDatabase(db)
-                openInMemorySqliteConnection().use { fresh ->
-                    initializeKodexHomeDatabase(fresh)
-                    assertEquals(fresh.schemaDump(), db.schemaDump())
-                }
+                db.requireFrozenHomeSchema(RecentUpgradeSchemaVersion)
                 assertEquals(listOf(listOf(1L)), db.query("PRAGMA foreign_keys"))
                 assertEquals(emptyList(), db.query("PRAGMA foreign_key_check"))
                 assertEquals(listOf(listOf("ok")), db.query("PRAGMA integrity_check"))
@@ -132,7 +129,7 @@ public val recentHomeSqliteTest by testSuite {
             Path(directory, "staging.db").newStandaloneDatabase { db ->
                 val failure = assertFailsWith<IllegalStateException> { upgradeRecentHomeDatabase(db, source) }
                 assertContains(failure.message.orEmpty(), "Cannot backfill recent response TPS")
-                requireEmptyKodexHomeDatabase(db)
+                db.requireEmptyRecentTarget()
                 assertEquals(listOf(listOf("main")), db.query("SELECT name FROM pragma_database_list"))
             }
             assertContentEquals(before, homeTestFileSystem.readBytes(source))
@@ -148,7 +145,7 @@ public val recentHomeSqliteTest by testSuite {
             Path(directory, "rootless-staging.db").newStandaloneDatabase { db ->
                 val failure = assertFailsWith<IllegalStateException> { upgradeRecentHomeDatabase(db, source) }
                 assertContains(failure.message.orEmpty(), "no root agent")
-                requireEmptyKodexHomeDatabase(db)
+                db.requireEmptyRecentTarget()
             }
             openExistingSqliteConnection(source).use { old ->
                 old.execute("INSERT INTO agents VALUES (26, 3, NULL, 0)")
@@ -158,9 +155,17 @@ public val recentHomeSqliteTest by testSuite {
             Path(directory, "disconnected-staging.db").newStandaloneDatabase { db ->
                 val failure = assertFailsWith<IllegalStateException> { upgradeRecentHomeDatabase(db, source) }
                 assertContains(failure.message.orEmpty(), "disconnected from the root")
-                requireEmptyKodexHomeDatabase(db)
+                db.requireEmptyRecentTarget()
             }
         }
+    }
+}
+
+private fun SqliteConnection.requireEmptyRecentTarget() {
+    requireFrozenHomeSchema(RecentUpgradeSchemaVersion)
+    for (table in listOf("sessions", "agents", "agent_commits", "session_catalog_view",
+        "schedules", "session_groups", "fork_context_recovery", "sqlite_sequence")) {
+        assertEquals(emptyList(), query("SELECT 1 FROM main.$table LIMIT 1"), table)
     }
 }
 

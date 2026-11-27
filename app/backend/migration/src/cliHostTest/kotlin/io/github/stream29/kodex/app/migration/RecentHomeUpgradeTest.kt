@@ -23,7 +23,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 private val upgradeFs = homeTestFileSystem
-private val targetVersion = MigrationVersion("0.8.0")
+private val targetVersion = MigrationVersion("0.9.1")
 
 public val recentHomeUpgradeTest by testSuite {
     testFixture { newTestHome() } closeWith { deleteTestHome(this) } asParameterForEach {
@@ -71,7 +71,7 @@ public val recentHomeUpgradeTest by testSuite {
                 assertEquals("WAL data", settings.name)
                 assertEquals(instructions, settings.instructions)
             }
-            assertEquals(readyMarker("0.8.0"), upgradeFs.readString(marker))
+            assertEquals(readyMarker("0.9.1"), upgradeFs.readString(marker))
             assertEquals("preserve", upgradeFs.readString(userFile))
             assertFalse(upgradeFs.exists(Path(home, "$HomeDatabaseFile-wal")))
             assertFalse(upgradeFs.exists(Path(home, "$HomeDatabaseFile-shm")))
@@ -106,7 +106,7 @@ public val recentHomeUpgradeTest by testSuite {
                     assertTrue(upgradeFs.list(home).none { it.name.startsWith(".kodex-upgrade-0.8.0-") })
                 }
                 prepareRecentFixture(home)
-                assertEquals(readyMarker("0.8.0"), upgradeFs.readString(marker))
+                assertEquals(readyMarker("0.9.1"), upgradeFs.readString(marker))
             }
         }
 
@@ -139,7 +139,7 @@ public val recentHomeUpgradeTest by testSuite {
 
                 prepareRecentFixture(home)
 
-                assertEquals(readyMarker("0.8.0"), upgradeFs.readString(marker))
+                assertEquals(readyMarker("0.9.1"), upgradeFs.readString(marker))
                 assertEquals(backupDirectory, upgradeAttempt(home))
                 assertFalse(upgradeFs.exists(staging))
             }
@@ -184,7 +184,7 @@ private fun SqliteConnection.seedRecentSchema() {
 }
 
 private suspend fun prepareRecentFixture(home: Path, fileSystem: CoroutineFileSystem = upgradeFs) =
-    coroutineScope { prepareKodexHome(home, targetVersion, emptyList(), fileSystem).closeAndJoin() }
+    coroutineScope { prepareKodexHome(home, targetVersion, KodexHomeMigrations, fileSystem).closeAndJoin() }
 
 private suspend fun upgradeAttempt(home: Path) =
     upgradeFs.list(home).single { it.name.startsWith(".kodex-upgrade-0.8.0-") }
